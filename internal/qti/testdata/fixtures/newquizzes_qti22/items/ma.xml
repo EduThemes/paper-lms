@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<assessmentItem xmlns="http://www.imsglobal.org/xsd/imsqti_v2p2" identifier="ma-item" title="Multi Answer" adaptive="false" timeDependent="false">
+  <responseDeclaration identifier="RESPONSE" cardinality="multiple" baseType="identifier">
+    <correctResponse>
+      <value>p2</value>
+      <value>p3</value>
+    </correctResponse>
+  </responseDeclaration>
+  <itemBody>
+    <p>Select all primes.</p>
+    <choiceInteraction responseIdentifier="RESPONSE" shuffle="false" maxChoices="0">
+      <simpleChoice identifier="p2">2</simpleChoice>
+      <simpleChoice identifier="p3">3</simpleChoice>
+      <simpleChoice identifier="p4">4</simpleChoice>
+    </choiceInteraction>
+  </itemBody>
+</assessmentItem>

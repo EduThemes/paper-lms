@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<assessmentItem xmlns="http://www.imsglobal.org/xsd/imsqti_v2p2" identifier="gap-item" title="Categorize" adaptive="false" timeDependent="false">
+  <responseDeclaration identifier="RESPONSE" cardinality="multiple" baseType="directedPair">
+    <correctResponse>
+      <value>apple fruit</value>
+      <value>carrot veg</value>
+    </correctResponse>
+  </responseDeclaration>
+  <itemBody>
+    <p>Sort each into a bucket.</p>
+    <gapMatchInteraction responseIdentifier="RESPONSE" shuffle="false">
+      <gapText identifier="apple" matchMax="1">Apple</gapText>
+      <gapText identifier="carrot" matchMax="1">Carrot</gapText>
+      <p>Fruits: <gap identifier="fruit"/>
+         Veggies: <gap identifier="veg"/></p>
+    </gapMatchInteraction>
+  </itemBody>
+</assessmentItem>

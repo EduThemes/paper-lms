@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest identifier="paper-lms-test-classic" xmlns="http://www.imsglobal.org/xsd/imsccv1p1/imscp_v1p1">
+  <metadata>
+    <schema>IMS Common Cartridge</schema>
+    <schemaversion>1.1.0</schemaversion>
+  </metadata>
+  <resources>
+    <resource identifier="quiz-1" type="imsqti_xmlv1p2/imscc_xmlv1p1/assessment" href="non_cc_assessments/quiz-1.xml.qti">
+      <file href="non_cc_assessments/quiz-1.xml.qti"/>
+    </resource>
+    <resource identifier="bank-1" type="associatedcontent/imscc_xmlv1p1/learning-application-resource" href="non_cc_assessments/assessment_question_banks/bank-1.xml">
+      <file href="non_cc_assessments/assessment_question_banks/bank-1.xml"/>
+    </resource>
+  </resources>
+</manifest>

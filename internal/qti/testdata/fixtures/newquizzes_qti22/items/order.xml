@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<assessmentItem xmlns="http://www.imsglobal.org/xsd/imsqti_v2p2" identifier="order-item" title="Order" adaptive="false" timeDependent="false">
+  <responseDeclaration identifier="RESPONSE" cardinality="ordered" baseType="identifier">
+    <correctResponse>
+      <value>step1</value>
+      <value>step2</value>
+      <value>step3</value>
+    </correctResponse>
+  </responseDeclaration>
+  <itemBody>
+    <p>Order the steps.</p>
+    <orderInteraction responseIdentifier="RESPONSE" shuffle="false">
+      <simpleChoice identifier="step1">First</simpleChoice>
+      <simpleChoice identifier="step2">Second</simpleChoice>
+      <simpleChoice identifier="step3">Third</simpleChoice>
+    </orderInteraction>
+  </itemBody>
+</assessmentItem>
