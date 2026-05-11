@@ -2269,6 +2269,61 @@ export const api = {
     return data;
   },
 
+  // ==========================================================================
+  // Wave A: Unified Quiz Engine — Item banks, stimuli, item analysis
+  // ==========================================================================
+  // Add a single bank item to a quiz (Wave A endpoint).
+  addBankItemToQuiz: async (courseId, quizId, bankItemId) => {
+    const { data } = await request(`/courses/${courseId}/quizzes/${quizId}/questions/from-bank-item`, {
+      method: 'POST', body: JSON.stringify({ bank_item_id: bankItemId }),
+    });
+    return data;
+  },
+  // Random draw: copy N random items from a bank into a quiz.
+  randomDrawFromBank: async (courseId, quizId, bankId, count) => {
+    const { data } = await request(`/courses/${courseId}/quizzes/${quizId}/questions/from-bank-item/random`, {
+      method: 'POST', body: JSON.stringify({ bank_id: bankId, count }),
+    });
+    return data;
+  },
+
+  // Stimulus passages
+  listStimuli: async (courseId) => {
+    const { data } = await request(`/courses/${courseId}/stimuli`);
+    return data || [];
+  },
+  getStimulus: async (courseId, stimulusId) => {
+    const { data } = await request(`/courses/${courseId}/stimuli/${stimulusId}`);
+    return data;
+  },
+  createStimulus: async (courseId, payload) => {
+    const { data } = await request(`/courses/${courseId}/stimuli`, {
+      method: 'POST', body: JSON.stringify(payload),
+    });
+    return data;
+  },
+  updateStimulus: async (courseId, stimulusId, payload) => {
+    const { data } = await request(`/courses/${courseId}/stimuli/${stimulusId}`, {
+      method: 'PUT', body: JSON.stringify(payload),
+    });
+    return data;
+  },
+  deleteStimulus: async (courseId, stimulusId) => {
+    const { data } = await request(`/courses/${courseId}/stimuli/${stimulusId}`, { method: 'DELETE' });
+    return data;
+  },
+  getStimulusQuestions: async (courseId, stimulusId) => {
+    const { data } = await request(`/courses/${courseId}/stimuli/${stimulusId}/questions`);
+    return data || [];
+  },
+
+  // Item analysis (Wave A endpoint, with client-side fallback used by the UI
+  // when the endpoint isn't yet available).
+  getQuizItemAnalysis: async (courseId, quizId) => {
+    const { data } = await request(`/courses/${courseId}/quizzes/${quizId}/item-analysis`);
+    return data;
+  },
+
   // Module Prerequisites
   getModulePrerequisites: async (courseId, moduleId) => {
     const { data } = await request(`/courses/${courseId}/modules/${moduleId}/prerequisites`);
