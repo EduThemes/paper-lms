@@ -12,11 +12,11 @@ vi.mock('../../hooks/useIsTeacher', () => ({ default: () => true }));
 
 const { mockApi } = vi.hoisted(() => ({
   mockApi: {
-    listQuestionBanks: vi.fn(),
-    createQuestionBank: vi.fn(),
-    updateQuestionBank: vi.fn(),
-    deleteQuestionBank: vi.fn(),
-    listBankQuestions: vi.fn(),
+    listQuizItemBanks: vi.fn(),
+    createQuizItemBank: vi.fn(),
+    updateQuizItemBank: vi.fn(),
+    deleteQuizItemBank: vi.fn(),
+    listQuizItemBankItems: vi.fn(),
     getQuizzes: vi.fn(),
     addBankItemToQuiz: vi.fn(),
     pullBankQuestionsToQuiz: vi.fn(),
@@ -40,11 +40,11 @@ function renderPage(courseId = '1') {
 describe('ItemBankManagerPage', () => {
   beforeEach(() => {
     Object.values(mockApi).forEach(fn => fn.mockReset());
-    mockApi.listQuestionBanks.mockResolvedValue([
-      { id: 1, title: 'Alpha bank', question_count: 5, updated_at: '2026-01-01' },
-      { id: 2, title: 'Beta bank', question_count: 0, updated_at: null },
+    mockApi.listQuizItemBanks.mockResolvedValue([
+      { id: 1, title: 'Alpha bank', item_count: 5, updated_at: '2026-01-01' },
+      { id: 2, title: 'Beta bank', item_count: 0, updated_at: null },
     ]);
-    mockApi.listBankQuestions.mockResolvedValue([
+    mockApi.listQuizItemBankItems.mockResolvedValue([
       { id: 10, question_type: 'multiple_choice', question_text: 'Q1?', points_possible: 1 },
     ]);
     mockApi.getQuizzes.mockResolvedValue({ data: [{ id: 99, title: 'Target Quiz' }] });
@@ -57,21 +57,21 @@ describe('ItemBankManagerPage', () => {
   });
 
   it('creates a new bank', async () => {
-    mockApi.createQuestionBank.mockResolvedValue({ id: 3, title: 'Gamma' });
+    mockApi.createQuizItemBank.mockResolvedValue({ id: 3, title: 'Gamma' });
     renderPage();
     await screen.findByText('Alpha bank');
     fireEvent.click(screen.getByText(/New Bank/));
     const input = screen.getByPlaceholderText(/Bank title/);
     await userEvent.type(input, 'Gamma');
     fireEvent.click(screen.getByText(/Create/));
-    await waitFor(() => expect(mockApi.createQuestionBank).toHaveBeenCalledWith('1', 'Gamma'));
+    await waitFor(() => expect(mockApi.createQuizItemBank).toHaveBeenCalledWith('1', 'Gamma'));
   });
 
   it('shows the bank items when a bank is clicked', async () => {
     renderPage();
     const row = await screen.findByText('Alpha bank');
     fireEvent.click(row);
-    await waitFor(() => expect(mockApi.listBankQuestions).toHaveBeenCalledWith('1', 1));
+    await waitFor(() => expect(mockApi.listQuizItemBankItems).toHaveBeenCalledWith(1));
     expect(await screen.findByText(/Q1\?/)).toBeInTheDocument();
   });
 

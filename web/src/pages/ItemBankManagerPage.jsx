@@ -38,7 +38,7 @@ const ItemBankManagerPage = () => {
     setError(null);
     setLoading(true);
     try {
-      const data = await api.listQuestionBanks(courseId);
+      const data = await api.listQuizItemBanks(courseId);
       setBanks(data || []);
     } catch (err) {
       setError(err.message);
@@ -52,7 +52,7 @@ const ItemBankManagerPage = () => {
   useEffect(() => {
     if (!selectedBank) { setItems([]); return; }
     let cancelled = false;
-    api.listBankQuestions(courseId, selectedBank.id)
+    api.listQuizItemBankItems(selectedBank.id)
       .then(data => { if (!cancelled) setItems(data || []); })
       .catch(err => { if (!cancelled) setError(err.message); });
     return () => { cancelled = true; };
@@ -69,7 +69,7 @@ const ItemBankManagerPage = () => {
   const handleCreate = async () => {
     if (!newBankTitle.trim()) return;
     try {
-      const created = await api.createQuestionBank(courseId, newBankTitle.trim());
+      const created = await api.createQuizItemBank(courseId, newBankTitle.trim());
       setBanks(prev => [created, ...prev]);
       setNewBankTitle('');
       setShowCreate(false);
@@ -82,7 +82,7 @@ const ItemBankManagerPage = () => {
   const handleRename = async (bank) => {
     if (!editBankTitle.trim()) return;
     try {
-      const updated = await api.updateQuestionBank(courseId, bank.id, editBankTitle.trim());
+      const updated = await api.updateQuizItemBank(courseId, bank.id, { title: editBankTitle.trim() });
       setBanks(prev => prev.map(b => b.id === bank.id ? (updated || { ...b, title: editBankTitle.trim() }) : b));
       setEditingBankId(null);
       setEditBankTitle('');
@@ -95,7 +95,7 @@ const ItemBankManagerPage = () => {
   const handleDelete = async (bank) => {
     if (!window.confirm(`Delete bank "${bank.title}"? This cannot be undone.`)) return;
     try {
-      await api.deleteQuestionBank(courseId, bank.id);
+      await api.deleteQuizItemBank(courseId, bank.id);
       setBanks(prev => prev.filter(b => b.id !== bank.id));
       if (selectedBank?.id === bank.id) setSelectedBank(null);
       setMessage('Bank deleted.');
@@ -256,7 +256,7 @@ const ItemBankManagerPage = () => {
                         <span className="font-medium text-text-primary">{bank.title}</span>
                       )}
                     </td>
-                    <td className="px-4 py-2 text-right text-text-secondary">{bank.question_count ?? bank.item_count ?? '—'}</td>
+                    <td className="px-4 py-2 text-right text-text-secondary">{bank.item_count ?? bank.question_count ?? '—'}</td>
                     <td className="px-4 py-2 text-right text-text-tertiary text-xs">
                       {bank.updated_at ? new Date(bank.updated_at).toLocaleDateString() : '—'}
                     </td>

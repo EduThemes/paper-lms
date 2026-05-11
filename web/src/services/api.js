@@ -2272,6 +2272,37 @@ export const api = {
   // ==========================================================================
   // Wave A: Unified Quiz Engine — Item banks, stimuli, item analysis
   // ==========================================================================
+  // QuizItemBank CRUD — the unified-engine bank system (distinct from the
+  // legacy /question_banks routes above, which target a separate older table).
+  listQuizItemBanks: async (courseId) => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks`);
+    return data || [];
+  },
+  getQuizItemBank: async (courseId, bankId) => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks/${bankId}`);
+    return data;
+  },
+  createQuizItemBank: async (courseId, title, description = '') => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks`, {
+      method: 'POST', body: JSON.stringify({ bank: { title, description } }),
+    });
+    return data;
+  },
+  updateQuizItemBank: async (courseId, bankId, fields) => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks/${bankId}`, {
+      method: 'PUT', body: JSON.stringify({ bank: fields }),
+    });
+    return data;
+  },
+  deleteQuizItemBank: async (courseId, bankId) => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks/${bankId}`, { method: 'DELETE' });
+    return data;
+  },
+  listQuizItemBankItems: async (bankId) => {
+    const { data } = await request(`/quiz_item_banks/${bankId}/items`);
+    return data || [];
+  },
+
   // Add a single bank item to a quiz.
   addBankItemToQuiz: async (bankId, itemId, quizId) => {
     const { data } = await request(`/quiz_item_banks/${bankId}/items/${itemId}/add_to_quiz/${quizId}`, {
