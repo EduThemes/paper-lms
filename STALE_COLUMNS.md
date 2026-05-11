@@ -13,7 +13,10 @@ Total: **345** stale columns across **97** tables.
 | `SOFT_DELETE_LEFTOVER` | 97 | `deleted_at` column whose model dropped the `gorm.DeletedAt` field. Safe to drop if no soft-deleted rows. |
 | `RENAME_CANDIDATE` | 3 | AM has a near-identical name on the same table — copy data forward, then drop. |
 | `POLYMORPHIC_REFACTOR` | 13 | AM table has a `(*_type, *_id)` polymorphic pair; this is the old typed FK. Needs semantic data migration. |
-| `UNKNOWN` | 232 | No matching AM column. Could be removed feature, model bug, or string-SQL reference. Investigate before dropping. |
+| `BOOL_TO_TIMESTAMP_REFACTOR` | 4 | Bool flag replaced by `<name>_at` timestamp. Data migration must choose a seed timestamp for true rows. |
+| `UNKNOWN` | 228 | No matching AM column. See **References** for Go-source occurrences before dropping. |
+
+**References:** 139 columns are referenced by name in Go source (likely live use); 206 have no references found (likely dead, but verify per-domain).
 
 ## How to read this file
 
@@ -23,837 +26,839 @@ Suggested workflow:
 
 1. For each table, confirm each row's category. Edit this file in place.
 2. Group rows by domain (assignments, outcomes, accommodations, etc.) for Wave 2b data migrations — one migration per domain.
-3. Before any drop in Wave 2c, grep the Go codebase for the column name (string SQL queries can reference columns that GORM models don't).
+3. **References** is a pre-run grep of the Go codebase for the column name as a word-bounded token. A non-empty References cell on an UNKNOWN row means hand-written SQL or a model bug — investigate before any Wave 2c drop.
+4. References are matched **by column name only**, not by (table, column). Common names like `updated_at`, `created_at`, `name`, `description` will show inflated reference lists that include matches against other tables' columns of the same name. Use the file paths to judge relevance.
+5. The scan excludes `web/`, `vendor/`, `node_modules/`, `internal/db/migrations/`, `.claude/`, and the schema tooling under `cmd/`. Test files are included intentionally — tests that hardcode column names are also signal.
 
 ## By table
 
 ### `access_tokens` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `code` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `code_expires_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `code` | `text` | yes | — | `UNKNOWN` | — | `cmd/server/main.go:636`<br>`internal/api/v1/handlers/canvas_aliases.go:7`<br>`internal/api/v1/handlers/graphql.go:52`<br>(+21 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `code_expires_at` | `timestamptz` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `accommodation_applications` (8)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `applied` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `assignment_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `resource_id` | Pre-polymorphic-refactor FK. Data migration must populate resource_id with a semantic value derived from the old assignment_id. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `extended_due_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `extended_time_limit` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `quiz_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `resource_id` | Pre-polymorphic-refactor FK. Data migration must populate resource_id with a semantic value derived from the old quiz_id. |
-| `student_accommodation_id` | `bigint` | no | — | `POLYMORPHIC_REFACTOR` | `resource_id` | Pre-polymorphic-refactor FK. Data migration must populate resource_id with a semantic value derived from the old student_accommodation_id. |
-| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `applied` | `boolean` | yes | `false` | `BOOL_TO_TIMESTAMP_REFACTOR` | `applied_at` | `cmd/migrate/main.go:52`<br>`internal/api/v1/handlers/accommodations.go:270`<br>`internal/api/v1/handlers/custom_gradebook_columns.go:11`<br>(+6 more) | Bool→timestamp refactor: presence of applied_at implies true. Data migration needs a chosen seed timestamp for true rows (created_at? updated_at? NOW()?). |
+| `assignment_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `resource_id` | `internal/api/v1/handlers/accommodations.go:305`<br>`internal/api/v1/handlers/assignment_overrides.go:23`<br>`internal/api/v1/handlers/audit.go:46`<br>(+31 more) | Pre-polymorphic-refactor FK. Data migration must populate resource_id with a semantic value derived from the old assignment_id. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `extended_due_at` | `timestamptz` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `extended_time_limit` | `bigint` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `quiz_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `resource_id` | `internal/api/v1/handlers/qti_import.go:56`<br>`internal/api/v1/handlers/question_banks.go:179`<br>`internal/api/v1/handlers/quiz_item_banks.go:296`<br>(+14 more) | Pre-polymorphic-refactor FK. Data migration must populate resource_id with a semantic value derived from the old quiz_id. |
+| `student_accommodation_id` | `bigint` | no | — | `POLYMORPHIC_REFACTOR` | `resource_id` | — | Pre-polymorphic-refactor FK. Data migration must populate resource_id with a semantic value derived from the old student_accommodation_id. |
+| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:46`<br>`internal/api/v1/handlers/announcements.go:44`<br>`internal/api/v1/handlers/appointment_groups.go:40`<br>(+158 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `age_verifications` (5)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `ip_address` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `is_under_13` | `boolean` | yes | `false` | `RENAME_CANDIDATE` | `is_under13` | Likely renamed. Wave 2b should copy data forward; drop happens in Wave 2c. |
-| `verification_method` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `verified_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `ip_address` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/audit.go:36`<br>`internal/api/v1/handlers/ferpa.go:67`<br>`internal/domain/models/audit_log.go:16`<br>(+1 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `is_under_13` | `boolean` | yes | `false` | `RENAME_CANDIDATE` | `is_under13` | `internal/domain/models/parental_consent.go:48` | Likely renamed. Wave 2b should copy data forward; drop happens in Wave 2c. |
+| `verification_method` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `verified_at` | `timestamptz` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `announcement_read_receipts` (4)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `created_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `read` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `created_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/access_tokens.go:32`<br>`internal/api/v1/handlers/accommodations.go:45`<br>`internal/api/v1/handlers/analytics.go:29`<br>(+202 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `read` | `boolean` | yes | `false` | `BOOL_TO_TIMESTAMP_REFACTOR` | `read_at` | `internal/api/v1/handlers/announcements.go:65`<br>`internal/api/v1/handlers/commons.go:60`<br>`internal/api/v1/handlers/conversations.go:263`<br>(+27 more) | Bool→timestamp refactor: presence of read_at implies true. Data migration needs a chosen seed timestamp for true rows (created_at? updated_at? NOW()?). |
+| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:46`<br>`internal/api/v1/handlers/announcements.go:44`<br>`internal/api/v1/handlers/appointment_groups.go:40`<br>(+158 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `announcements` (7)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `context_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `context_type` | `text` | yes | `'Course'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `is_section_specific` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `locked` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `position` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `require_acknowledgement` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `context_id` | `bigint` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/analytics.go:24`<br>`internal/api/v1/handlers/audit.go:33`<br>`internal/api/v1/handlers/calendar_events.go:26`<br>(+53 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `context_type` | `text` | yes | `'Course'::text` | `UNKNOWN` | — | `internal/api/v1/handlers/analytics.go:23`<br>`internal/api/v1/handlers/audit.go:32`<br>`internal/api/v1/handlers/calendar_events.go:25`<br>(+54 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `is_section_specific` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `locked` | `boolean` | yes | `false` | `UNKNOWN` | — | `internal/api/v1/handlers/custom_roles.go:45`<br>`internal/api/v1/handlers/discussions.go:34`<br>`internal/domain/models/custom_role.go:6`<br>(+7 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `position` | `bigint` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/assignment_groups.go:24`<br>`internal/api/v1/handlers/assignments.go:35`<br>`internal/api/v1/handlers/auth_providers.go:27`<br>(+67 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `require_acknowledgement` | `boolean` | yes | `false` | `UNKNOWN` | — | `internal/api/v1/handlers/announcements.go:34`<br>`internal/domain/models/announcement.go:13` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `assignment_groups` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `assignment_override_students` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `assignment_overrides` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `set_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `set_type` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `set_id` | `bigint` | yes | — | `UNKNOWN` | — | `internal/domain/models/mastery_path.go:65`<br>`internal/repository/postgres/mastery_path.go:121`<br>`internal/service/mastery_path_service.go:161` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `set_type` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `assignments` (10)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `allowed_extensions` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `automatic_peer_reviews` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `grade_group_students_individually` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `muted` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `omit_from_final_grade` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `only_visible_to_overrides` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `peer_reviews` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `post_to_sis` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `turnitin_enabled` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `allowed_extensions` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `automatic_peer_reviews` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `grade_group_students_individually` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `muted` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `omit_from_final_grade` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `only_visible_to_overrides` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `peer_reviews` | `boolean` | yes | `false` | `UNKNOWN` | — | `internal/api/v1/router.go:909`<br>`internal/service/imscc_parser.go:111` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `post_to_sis` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `turnitin_enabled` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `attachments` (6)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `hidden` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `lock_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `locked` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `unlock_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `url` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `hidden` | `boolean` | yes | `false` | `UNKNOWN` | — | `internal/api/v1/handlers/custom_gradebook_columns.go:26`<br>`internal/api/v1/handlers/lti.go:199`<br>`internal/api/v1/handlers/submissions.go:519`<br>(+7 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `lock_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/assignment_overrides.go:27`<br>`internal/api/v1/handlers/assignments.go:31`<br>`internal/api/v1/handlers/discussions.go:32`<br>(+11 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `locked` | `boolean` | yes | `false` | `UNKNOWN` | — | `internal/api/v1/handlers/custom_roles.go:45`<br>`internal/api/v1/handlers/discussions.go:34`<br>`internal/domain/models/custom_role.go:6`<br>(+7 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `unlock_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/assignment_overrides.go:26`<br>`internal/api/v1/handlers/assignments.go:30`<br>`internal/api/v1/handlers/modules.go:27`<br>(+12 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `url` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/analytics.go:25`<br>`internal/api/v1/handlers/collaborations.go:30`<br>`internal/api/v1/handlers/course_home.go:53`<br>(+32 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `attendance_records` (2)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `recorded_by` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `recorded_by` | `bigint` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `audit_logs` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `data` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `data` | `text` | yes | — | `UNKNOWN` | — | `cmd/server/main.go:73`<br>`internal/api/v1/handlers/calendar_events.go:236`<br>`internal/api/v1/handlers/canvas_aliases.go:6`<br>(+73 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:46`<br>`internal/api/v1/handlers/announcements.go:44`<br>`internal/api/v1/handlers/appointment_groups.go:40`<br>(+158 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `authentication_providers` (13)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `auth_base` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `auth_filter` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `auth_host` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `auth_over_tls` | `text` | yes | `'simple_tls'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `auth_password` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `auth_port` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `auth_username` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `identifier_format` | `text` | yes | `'urn:oasis:names:tc:SAML:1.1:nameid-f...` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `idp_entity_id` | `text` | yes | — | `RENAME_CANDIDATE` | `id_p_entity_id` | Likely renamed. Wave 2b should copy data forward; drop happens in Wave 2c. |
-| `metadata_uri` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `requested_authn_context` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `settings` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `auth_base` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `auth_filter` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `auth_host` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `auth_over_tls` | `text` | yes | `'simple_tls'::text` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `auth_password` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `auth_port` | `bigint` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `auth_username` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `identifier_format` | `text` | yes | `'urn:oasis:names:tc:SAML:1.1:nameid-f...` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `idp_entity_id` | `text` | yes | — | `RENAME_CANDIDATE` | `id_p_entity_id` | `internal/api/v1/handlers/auth_providers.go:36`<br>`internal/domain/models/authentication_provider.go:12` | Likely renamed. Wave 2b should copy data forward; drop happens in Wave 2c. |
+| `metadata_uri` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `requested_authn_context` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `settings` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accounts.go:62`<br>`internal/api/v1/handlers/conferences.go:36`<br>`internal/api/v1/handlers/content_migrations.go:101`<br>(+9 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `blueprint_migrations` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `imports_status` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `started_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `imports_status` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `started_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/conferences.go:31`<br>`internal/api/v1/handlers/content_migrations.go:32`<br>`internal/api/v1/handlers/oneroster.go:63`<br>(+5 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `blueprint_subscriptions` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `blueprint_templates` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `restrictions_by_type` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `use_default_restrictions_by_type` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `restrictions_by_type` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `use_default_restrictions_by_type` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `calendar_events` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `all_day_date` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `user_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `context_id` | Pre-polymorphic-refactor FK. Data migration must populate context_id with a semantic value derived from the old user_id. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `all_day_date` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/assignment_overrides.go:29`<br>`internal/domain/models/assignment_override.go:13` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `user_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `context_id` | `internal/api/v1/handlers/access_tokens.go:37`<br>`internal/api/v1/handlers/accommodations.go:30`<br>`internal/api/v1/handlers/ai_assist.go:8`<br>(+170 more) | Pre-polymorphic-refactor FK. Data migration must populate context_id with a semantic value derived from the old user_id. |
 
 ### `collaborations` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `communication_channels` (7)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `bounce_count` | `bigint` | yes | `0` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `confirmation_code` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `last_bounce_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `last_suppression_bounce_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `path` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `path_type` | `text` | yes | `'email'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `bounce_count` | `bigint` | yes | `0` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `confirmation_code` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `last_bounce_at` | `timestamptz` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `last_suppression_bounce_at` | `timestamptz` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `path` | `text` | yes | — | `UNKNOWN` | — | `cmd/server/main.go:258`<br>`internal/api/v1/handlers/canvas_aliases.go:256`<br>`internal/api/v1/handlers/content_export.go:6`<br>(+42 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `path_type` | `text` | yes | `'email'::text` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `conference_participants` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `conferences` (4)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `conference_key` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `long_running` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `recording_url` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `conference_key` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `long_running` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `recording_url` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `content_migrations` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `content_tags` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `context_external_tools` (2)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `settings` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `settings` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accounts.go:62`<br>`internal/api/v1/handlers/conferences.go:36`<br>`internal/api/v1/handlers/content_migrations.go:101`<br>(+9 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `context_modules` (2)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `prerequisite_module_ids` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `prerequisite_module_ids` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/modules.go:270` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `conversation_messages` (4)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `author_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `forwarded_message_ids` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `generated` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `author_id` | `bigint` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/speedgrader.go:88`<br>`internal/api/v1/handlers/submissions.go:76`<br>`internal/api/v1/handlers/submissions_test.go:283`<br>(+1 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `forwarded_message_ids` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `generated` | `boolean` | yes | `false` | `UNKNOWN` | — | `internal/api/v1/handlers/content_export.go:92`<br>`internal/api/v1/handlers/lti.go:264`<br>`internal/config/config.go:88`<br>(+5 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `conversation_participants` (2)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `last_message_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `last_message_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/conversations.go:25`<br>`internal/domain/models/conversation.go:9`<br>`internal/repository/postgres/conversation.go:51` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `conversations` (4)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `context_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `context_type` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `message_count` | `bigint` | yes | `0` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `context_id` | `bigint` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/analytics.go:24`<br>`internal/api/v1/handlers/audit.go:33`<br>`internal/api/v1/handlers/calendar_events.go:26`<br>(+53 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `context_type` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/analytics.go:23`<br>`internal/api/v1/handlers/audit.go:32`<br>`internal/api/v1/handlers/calendar_events.go:25`<br>(+54 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `message_count` | `bigint` | yes | `0` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `course_home_buttons` (4)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `created_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `link_target` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `created_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/access_tokens.go:32`<br>`internal/api/v1/handlers/accommodations.go:45`<br>`internal/api/v1/handlers/analytics.go:29`<br>(+202 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `link_target` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:46`<br>`internal/api/v1/handlers/announcements.go:44`<br>`internal/api/v1/handlers/appointment_groups.go:40`<br>(+158 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `course_pace_module_items` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `course_paces` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `course_sections` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `course_visits` (6)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `created_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `last_module_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `last_module_item_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `last_page_url` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `last_visited_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `created_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/access_tokens.go:32`<br>`internal/api/v1/handlers/accommodations.go:45`<br>`internal/api/v1/handlers/analytics.go:29`<br>(+202 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `last_module_id` | `bigint` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `last_module_item_id` | `bigint` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `last_page_url` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `last_visited_at` | `timestamptz` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `courses` (8)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `apply_assignment_group_weights` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `description` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `enrollment_term_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `grading_standard_enabled` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `grading_standard_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `home_page_type` | `text` | yes | `'modules'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `storage_quota` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `apply_assignment_group_weights` | `boolean` | yes | `false` | `UNKNOWN` | — | `internal/api/v1/handlers/courses.go:49`<br>`internal/domain/models/course.go:19` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `description` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:33`<br>`internal/api/v1/handlers/appointment_groups.go:31`<br>`internal/api/v1/handlers/assignments.go:28`<br>(+49 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `enrollment_term_id` | `bigint` | yes | — | `UNKNOWN` | — | `internal/service/enrollment_term_service.go:73` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `grading_standard_enabled` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `grading_standard_id` | `bigint` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `home_page_type` | `text` | yes | `'modules'::text` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `storage_quota` | `bigint` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `custom_roles` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `data_deletion_requests` (4)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `data_types` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `requested_by` | `bigint` | no | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `workflow_state` | `text` | yes | `'pending'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `data_types` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `requested_by` | `bigint` | no | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `workflow_state` | `text` | yes | `'pending'::text` | `UNKNOWN` | — | `internal/api/v1/handlers/accounts.go:25`<br>`internal/api/v1/handlers/announcements.go:38`<br>`internal/api/v1/handlers/appointment_groups.go:38`<br>(+181 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `data_export_requests` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `requested_by` | `bigint` | no | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `workflow_state` | `text` | yes | `'pending'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `requested_by` | `bigint` | no | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `workflow_state` | `text` | yes | `'pending'::text` | `UNKNOWN` | — | `internal/api/v1/handlers/accounts.go:25`<br>`internal/api/v1/handlers/announcements.go:38`<br>`internal/api/v1/handlers/appointment_groups.go:38`<br>(+181 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `data_processing_agreements` (5)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `effective_date` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `expiration_date` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `signed_by` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `workflow_state` | `text` | yes | `'active'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `effective_date` | `timestamptz` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `expiration_date` | `timestamptz` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `signed_by` | `bigint` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `workflow_state` | `text` | yes | `'active'::text` | `UNKNOWN` | — | `internal/api/v1/handlers/accounts.go:25`<br>`internal/api/v1/handlers/announcements.go:38`<br>`internal/api/v1/handlers/appointment_groups.go:38`<br>(+181 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `data_retention_policies` (6)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `action_after_retention` | `text` | yes | `'anonymize'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `data_type` | `text` | no | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `last_applied_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `retention_period_days` | `bigint` | no | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `workflow_state` | `text` | yes | `'active'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `action_after_retention` | `text` | yes | `'anonymize'::text` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `data_type` | `text` | no | — | `UNKNOWN` | — | `internal/db/schemagen/introspect.go:75`<br>`internal/db/schemagen/types.go:33` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `last_applied_at` | `timestamptz` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `retention_period_days` | `bigint` | no | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `workflow_state` | `text` | yes | `'active'::text` | `UNKNOWN` | — | `internal/api/v1/handlers/accounts.go:25`<br>`internal/api/v1/handlers/announcements.go:38`<br>`internal/api/v1/handlers/appointment_groups.go:38`<br>(+181 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `developer_keys` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `api_key` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `icon_url` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `api_key` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/developer_keys.go:28`<br>`internal/domain/models/developer_key.go:10` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `icon_url` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/developer_keys.go:31`<br>`internal/domain/models/developer_key.go:14` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `discussion_entries` (2)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `depth` | `bigint` | yes | `0` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `depth` | `bigint` | yes | `0` | `UNKNOWN` | — | `internal/api/v1/handlers/ai_assist.go:37`<br>`internal/auth/ldap.go:704`<br>`internal/graphql/schema.go:341`<br>(+2 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `discussion_entry_participants` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `forced_read_state` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `read` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `forced_read_state` | `boolean` | yes | `false` | `UNKNOWN` | — | `internal/domain/models/discussion_topic_participant.go:10`<br>`internal/repository/postgres/discussion_topic_participant.go:23` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `read` | `boolean` | yes | `false` | `BOOL_TO_TIMESTAMP_REFACTOR` | `read_at` | `internal/api/v1/handlers/announcements.go:65`<br>`internal/api/v1/handlers/commons.go:60`<br>`internal/api/v1/handlers/conversations.go:263`<br>(+27 more) | Bool→timestamp refactor: presence of read_at implies true. Data migration needs a chosen seed timestamp for true rows (created_at? updated_at? NOW()?). |
 
 ### `discussion_entry_ratings` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `created_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `created_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/access_tokens.go:32`<br>`internal/api/v1/handlers/accommodations.go:45`<br>`internal/api/v1/handlers/analytics.go:29`<br>(+202 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:46`<br>`internal/api/v1/handlers/announcements.go:44`<br>`internal/api/v1/handlers/appointment_groups.go:40`<br>(+158 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `discussion_entry_versions` (2)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:46`<br>`internal/api/v1/handlers/announcements.go:44`<br>`internal/api/v1/handlers/appointment_groups.go:40`<br>(+158 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `discussion_topic_participants` (2)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `unread_entry_count` | `bigint` | yes | `0` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `unread_entry_count` | `bigint` | yes | `0` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `discussion_topics` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `position` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `published` | `boolean` | yes | `true` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `position` | `bigint` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/assignment_groups.go:24`<br>`internal/api/v1/handlers/assignments.go:35`<br>`internal/api/v1/handlers/auth_providers.go:27`<br>(+67 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `published` | `boolean` | yes | `true` | `UNKNOWN` | — | `internal/api/v1/handlers/assignments.go:37`<br>`internal/api/v1/handlers/canvas_aliases.go:238`<br>`internal/api/v1/handlers/module_items.go:159`<br>(+21 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `document_annotations` (7)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `attachment_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `page` | `bigint` | yes | `1` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `parent_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `resolved` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `resolved_by` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `stroke_data` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `attachment_id` | `bigint` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `page` | `bigint` | yes | `1` | `UNKNOWN` | — | `cmd/server/main.go:504`<br>`internal/api/v1/handlers/analytics.go:196`<br>`internal/api/v1/handlers/canvas_aliases.go:203`<br>(+41 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `parent_id` | `bigint` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/discussion_entries.go:24`<br>`internal/api/v1/handlers/discussions_v2.go:33`<br>`internal/api/v1/handlers/portfolio.go:109`<br>(+8 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `resolved` | `boolean` | yes | `false` | `BOOL_TO_TIMESTAMP_REFACTOR` | `resolved_at` | `internal/api/v1/handlers/document_annotations.go:294`<br>`internal/api/v1/middleware/pagination_test.go:15`<br>`internal/domain/models/document_annotation.go:23`<br>(+10 more) | Bool→timestamp refactor: presence of resolved_at implies true. Data migration needs a chosen seed timestamp for true rows (created_at? updated_at? NOW()?). |
+| `resolved_by` | `bigint` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `stroke_data` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `enrollment_terms` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `enrollments` (4)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `enrollment_type` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `limit_privileges_to_course_section` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `sis_import_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `enrollment_type` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/courses_test.go:212`<br>`internal/api/v1/handlers/quiz_submissions.go:110`<br>`internal/api/v1/middleware/permissions.go:73` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `limit_privileges_to_course_section` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `sis_import_id` | `bigint` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `folders` (5)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `hidden` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `lock_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `locked` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `unlock_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `hidden` | `boolean` | yes | `false` | `UNKNOWN` | — | `internal/api/v1/handlers/custom_gradebook_columns.go:26`<br>`internal/api/v1/handlers/lti.go:199`<br>`internal/api/v1/handlers/submissions.go:519`<br>(+7 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `lock_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/assignment_overrides.go:27`<br>`internal/api/v1/handlers/assignments.go:31`<br>`internal/api/v1/handlers/discussions.go:32`<br>(+11 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `locked` | `boolean` | yes | `false` | `UNKNOWN` | — | `internal/api/v1/handlers/custom_roles.go:45`<br>`internal/api/v1/handlers/discussions.go:34`<br>`internal/domain/models/custom_role.go:6`<br>(+7 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `unlock_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/assignment_overrides.go:26`<br>`internal/api/v1/handlers/assignments.go:30`<br>`internal/api/v1/handlers/modules.go:27`<br>(+12 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `grade_change_logs` (5)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `excused_after` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `excused_before` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `graded_anonymously` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `excused_after` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `excused_before` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `graded_anonymously` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:46`<br>`internal/api/v1/handlers/announcements.go:44`<br>`internal/api/v1/handlers/appointment_groups.go:40`<br>(+158 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `grading_period_groups` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `course_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `display_totals_for_all_grading_periods` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `course_id` | `bigint` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:31`<br>`internal/api/v1/handlers/analytics.go:33`<br>`internal/api/v1/handlers/announcements.go:28`<br>(+145 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `display_totals_for_all_grading_periods` | `boolean` | yes | `false` | `UNKNOWN` | — | `internal/api/v1/handlers/grading_periods.go:27`<br>`internal/domain/models/grading_period_group.go:10` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `grading_periods` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `grading_standards` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `group_categories` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `context_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `context_type` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `context_id` | `bigint` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/analytics.go:24`<br>`internal/api/v1/handlers/audit.go:33`<br>`internal/api/v1/handlers/calendar_events.go:26`<br>(+53 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `context_type` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/analytics.go:23`<br>`internal/api/v1/handlers/audit.go:32`<br>`internal/api/v1/handlers/calendar_events.go:25`<br>(+54 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `group_memberships` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `groups` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `late_policies` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `learning_outcome_groups` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `parent_outcome_group_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `context_id` | Pre-polymorphic-refactor FK. Data migration must populate context_id with a semantic value derived from the old parent_outcome_group_id. |
-| `vendor_guid` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `parent_outcome_group_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `context_id` | `internal/api/v1/handlers/learning_outcomes.go:26`<br>`internal/domain/models/learning_outcome_group.go:9` | Pre-polymorphic-refactor FK. Data migration must populate context_id with a semantic value derived from the old parent_outcome_group_id. |
+| `vendor_guid` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `learning_outcome_results` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `artifact_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `context_id` | Pre-polymorphic-refactor FK. Data migration must populate context_id with a semantic value derived from the old artifact_id. |
-| `artifact_type` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `artifact_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `context_id` | `internal/api/v1/handlers/portfolio.go:92`<br>`internal/api/v1/router.go:897`<br>`internal/domain/models/portfolio.go:69`<br>(+2 more) | Pre-polymorphic-refactor FK. Data migration must populate context_id with a semantic value derived from the old artifact_id. |
+| `artifact_type` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/portfolio.go:72`<br>`internal/domain/models/portfolio.go:48`<br>`internal/service/portfolio_service.go:216` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `learning_outcomes` (4)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `learning_outcome_group_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `context_id` | Pre-polymorphic-refactor FK. Data migration must populate context_id with a semantic value derived from the old learning_outcome_group_id. |
-| `ratings` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `vendor_guid` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `learning_outcome_group_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `context_id` | — | Pre-polymorphic-refactor FK. Data migration must populate context_id with a semantic value derived from the old learning_outcome_group_id. |
+| `ratings` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/learning_outcomes.go:48`<br>`internal/api/v1/handlers/outcome_proficiency.go:33`<br>`internal/domain/models/learning_outcome.go:17`<br>(+7 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `vendor_guid` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `lti_line_items` (2)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `context_external_tool_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `context_external_tool_id` | `bigint` | yes | — | `UNKNOWN` | — | `internal/domain/models/lti_resource_link.go:7` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `lti_resource_links` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `custom` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `description` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `custom` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/custom_gradebook_columns.go:10`<br>`internal/api/v1/handlers/custom_roles.go:13`<br>`internal/domain/models/course_home_button.go:6`<br>(+10 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `description` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:33`<br>`internal/api/v1/handlers/appointment_groups.go:31`<br>`internal/api/v1/handlers/assignments.go:28`<br>(+49 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `lti_results` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `lti_tool_configurations` (4)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `disabled` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `oidc_initiation_url` | `text` | yes | — | `RENAME_CANDIDATE` | `o_id_c_initiation_url` | Likely renamed. Wave 2b should copy data forward; drop happens in Wave 2c. |
-| `settings` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `disabled` | `boolean` | yes | `false` | `UNKNOWN` | — | `internal/api/v1/middleware/csp.go:38`<br>`internal/domain/models/feature_flag.go:9`<br>`internal/domain/models/role_override.go:7` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `oidc_initiation_url` | `text` | yes | — | `RENAME_CANDIDATE` | `o_id_c_initiation_url` | `internal/domain/models/lti_tool_configuration.go:11` | Likely renamed. Wave 2b should copy data forward; drop happens in Wave 2c. |
+| `settings` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accounts.go:62`<br>`internal/api/v1/handlers/conferences.go:36`<br>`internal/api/v1/handlers/content_migrations.go:101`<br>(+9 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `nonces` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `nonce` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `nonce` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/middleware/csp.go:12`<br>`internal/repository/interfaces.go:204`<br>`internal/repository/postgres/nonce.go:20`<br>(+1 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:46`<br>`internal/api/v1/handlers/announcements.go:44`<br>`internal/api/v1/handlers/appointment_groups.go:40`<br>(+158 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `notification_deliveries` (7)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `communication_channel_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `delivery_type` | `text` | yes | `'email'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `digest_batch_id` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `error_message` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `next_retry_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `workflow_state` | `text` | yes | `'pending'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `communication_channel_id` | `bigint` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `delivery_type` | `text` | yes | `'email'::text` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `digest_batch_id` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `error_message` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/content_migrations.go:34`<br>`internal/domain/models/content_migration.go:48` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `next_retry_at` | `timestamptz` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `workflow_state` | `text` | yes | `'pending'::text` | `UNKNOWN` | — | `internal/api/v1/handlers/accounts.go:25`<br>`internal/api/v1/handlers/announcements.go:38`<br>`internal/api/v1/handlers/appointment_groups.go:38`<br>(+181 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `notification_preferences` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `frequency` | `text` | yes | `'immediately'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `notification_category` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `frequency` | `text` | yes | `'immediately'::text` | `UNKNOWN` | — | `internal/service/notification_delivery_service.go:58` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `notification_category` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `notifications` (5)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `category` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `read` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `subject` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `url` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `category` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/custom_roles.go:338`<br>`internal/api/v1/handlers/groups.go:20`<br>`internal/domain/models/custom_role.go:20`<br>(+4 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `read` | `boolean` | yes | `false` | `UNKNOWN` | — | `internal/api/v1/handlers/announcements.go:65`<br>`internal/api/v1/handlers/commons.go:60`<br>`internal/api/v1/handlers/conversations.go:263`<br>(+27 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `subject` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/batch.go:138`<br>`internal/api/v1/handlers/commons.go:42`<br>`internal/api/v1/handlers/conversations.go:23`<br>(+9 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `url` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/analytics.go:25`<br>`internal/api/v1/handlers/collaborations.go:30`<br>`internal/api/v1/handlers/course_home.go:53`<br>(+32 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `one_roster_connections` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `one_roster_sync_logs` (8)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `created_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `created_count` | `bigint` | yes | `0` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `error_count` | `bigint` | yes | `0` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `finished_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `updated_count` | `bigint` | yes | `0` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `workflow_state` | `text` | yes | `'running'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `created_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/access_tokens.go:32`<br>`internal/api/v1/handlers/accommodations.go:45`<br>`internal/api/v1/handlers/analytics.go:29`<br>(+202 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `created_count` | `bigint` | yes | `0` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `error_count` | `bigint` | yes | `0` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `finished_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/content_migrations.go:33`<br>`internal/api/v1/handlers/quiz_submissions.go:30`<br>`internal/domain/models/content_migration.go:47`<br>(+1 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:46`<br>`internal/api/v1/handlers/announcements.go:44`<br>`internal/api/v1/handlers/appointment_groups.go:40`<br>(+158 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `updated_count` | `bigint` | yes | `0` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `workflow_state` | `text` | yes | `'running'::text` | `UNKNOWN` | — | `internal/api/v1/handlers/accounts.go:25`<br>`internal/api/v1/handlers/announcements.go:38`<br>`internal/api/v1/handlers/appointment_groups.go:38`<br>(+181 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `outcome_alignments` (5)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `content_id` | `bigint` | no | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `content_type` | `text` | no | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `context_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `context_type` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `content_id` | `bigint` | no | — | `UNKNOWN` | — | `internal/api/v1/handlers/module_items.go:72`<br>`internal/api/v1/handlers/modules.go:54`<br>`internal/domain/models/content_embedding.go:87`<br>(+5 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `content_type` | `text` | no | — | `UNKNOWN` | — | `internal/api/v1/handlers/files.go:36`<br>`internal/api/v1/handlers/submissions.go:225`<br>`internal/domain/models/attachment.go:13`<br>(+6 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `context_id` | `bigint` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/analytics.go:24`<br>`internal/api/v1/handlers/audit.go:33`<br>`internal/api/v1/handlers/calendar_events.go:26`<br>(+53 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `context_type` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/analytics.go:23`<br>`internal/api/v1/handlers/audit.go:32`<br>`internal/api/v1/handlers/calendar_events.go:25`<br>(+54 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `page_views` (7)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `asset_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `context_id` | Pre-polymorphic-refactor FK. Data migration must populate context_id with a semantic value derived from the old asset_id. |
-| `asset_type` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `http_method` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `remote_ip` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `user_agent` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `asset_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `context_id` | `internal/service/blueprint_service.go:624` | Pre-polymorphic-refactor FK. Data migration must populate context_id with a semantic value derived from the old asset_id. |
+| `asset_type` | `text` | yes | — | `UNKNOWN` | — | `internal/service/blueprint_service.go:623` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `http_method` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `remote_ip` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:46`<br>`internal/api/v1/handlers/announcements.go:44`<br>`internal/api/v1/handlers/appointment_groups.go:40`<br>(+158 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `user_agent` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/audit.go:37`<br>`internal/api/v1/handlers/ferpa.go:68`<br>`internal/domain/models/audit_log.go:17`<br>(+1 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `parental_consents` (5)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `granted_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `verification_code` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `verification_expires_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `workflow_state` | `text` | yes | `'pending'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `granted_at` | `timestamptz` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `verification_code` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `verification_expires_at` | `timestamptz` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `workflow_state` | `text` | yes | `'pending'::text` | `UNKNOWN` | — | `internal/api/v1/handlers/accounts.go:25`<br>`internal/api/v1/handlers/announcements.go:38`<br>`internal/api/v1/handlers/appointment_groups.go:38`<br>(+181 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `pii_access_logs` (6)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `accessed_by` | `bigint` | no | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `data_accessed` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `purpose` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `user_id` | `bigint` | no | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `accessed_by` | `bigint` | no | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `data_accessed` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `purpose` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/access_tokens.go:27`<br>`internal/api/v1/handlers/coppa.go:48`<br>`internal/api/v1/handlers/rubrics.go:45`<br>(+7 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:46`<br>`internal/api/v1/handlers/announcements.go:44`<br>`internal/api/v1/handlers/appointment_groups.go:40`<br>(+158 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `user_id` | `bigint` | no | — | `UNKNOWN` | — | `internal/api/v1/handlers/access_tokens.go:37`<br>`internal/api/v1/handlers/accommodations.go:30`<br>`internal/api/v1/handlers/ai_assist.go:8`<br>(+170 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `portfolio_artifacts` (7)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `attachment_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `source_id` | Pre-polymorphic-refactor FK. Data migration must populate source_id with a semantic value derived from the old attachment_id. |
-| `content` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `metadata` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `portfolio_section_id` | `bigint` | no | — | `POLYMORPHIC_REFACTOR` | `source_id` | Pre-polymorphic-refactor FK. Data migration must populate source_id with a semantic value derived from the old portfolio_section_id. |
-| `submission_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `source_id` | Pre-polymorphic-refactor FK. Data migration must populate source_id with a semantic value derived from the old submission_id. |
-| `url` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `attachment_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `source_id` | — | Pre-polymorphic-refactor FK. Data migration must populate source_id with a semantic value derived from the old attachment_id. |
+| `content` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/commons.go:14`<br>`internal/api/v1/handlers/content_export.go:14`<br>`internal/api/v1/handlers/content_import.go:23`<br>(+53 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `metadata` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/canvas_aliases.go:193`<br>`internal/api/v1/router.go:330`<br>`internal/auth/saml.go:29`<br>(+20 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `portfolio_section_id` | `bigint` | no | — | `POLYMORPHIC_REFACTOR` | `source_id` | — | Pre-polymorphic-refactor FK. Data migration must populate source_id with a semantic value derived from the old portfolio_section_id. |
+| `submission_id` | `bigint` | yes | — | `POLYMORPHIC_REFACTOR` | `source_id` | `cmd/server/main.go:357`<br>`internal/api/v1/handlers/audit.go:49`<br>`internal/api/v1/handlers/document_annotations.go:56`<br>(+13 more) | Pre-polymorphic-refactor FK. Data migration must populate source_id with a semantic value derived from the old submission_id. |
+| `url` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/analytics.go:25`<br>`internal/api/v1/handlers/collaborations.go:30`<br>`internal/api/v1/handlers/course_home.go:53`<br>(+32 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `portfolio_comments` (2)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `comment` | `text` | no | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `comment` | `text` | no | — | `UNKNOWN` | — | `internal/api/v1/handlers/blueprints.go:48`<br>`internal/api/v1/handlers/comment_bank.go:23`<br>`internal/api/v1/handlers/lti.go:609`<br>(+21 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `portfolio_reflections` (4)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `metadata` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `portfolio_artifact_id` | `bigint` | no | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `reflection_type` | `text` | yes | `'text'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `metadata` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/canvas_aliases.go:193`<br>`internal/api/v1/router.go:330`<br>`internal/auth/saml.go:29`<br>(+20 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `portfolio_artifact_id` | `bigint` | no | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `reflection_type` | `text` | yes | `'text'::text` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `portfolio_sections` (2)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `description` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `description` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:33`<br>`internal/api/v1/handlers/appointment_groups.go:31`<br>`internal/api/v1/handlers/assignments.go:28`<br>(+49 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `portfolio_templates` (4)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `structure` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `title` | `text` | no | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `workflow_state` | `text` | yes | `'active'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `structure` | `text` | yes | — | `UNKNOWN` | — | `internal/service/imscc_exporter.go:113`<br>`internal/service/imscc_parser.go:35`<br>`internal/service/mastery_path_service.go:60`<br>(+1 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `title` | `text` | no | — | `UNKNOWN` | — | `internal/api/v1/handlers/announcements.go:31`<br>`internal/api/v1/handlers/appointment_groups.go:30`<br>`internal/api/v1/handlers/assignment_overrides.go:24`<br>(+115 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `workflow_state` | `text` | yes | `'active'::text` | `UNKNOWN` | — | `internal/api/v1/handlers/accounts.go:25`<br>`internal/api/v1/handlers/announcements.go:38`<br>`internal/api/v1/handlers/appointment_groups.go:38`<br>(+181 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `portfolios` (5)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `published_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `share_token` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `template_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `visibility` | `text` | yes | `'private'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `published_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/course_paces.go:31`<br>`internal/domain/models/course_pace.go:14` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `share_token` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `template_id` | `bigint` | yes | — | `UNKNOWN` | — | `internal/api/v1/router.go:906`<br>`internal/service/blueprint_service.go:105` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `visibility` | `text` | yes | `'private'::text` | `UNKNOWN` | — | `internal/api/v1/handlers/commons.go:48`<br>`internal/domain/models/shared_content.go:30`<br>`internal/service/commons_service.go:103` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `quiz_questions` (2)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `question_name` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `question_name` | `text` | yes | — | `UNKNOWN` | — | `internal/domain/models/question_bank.go:19` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `quiz_submission_answers` (2)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `quiz_question_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `quiz_question_id` | `bigint` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/quiz_outcome_alignments.go:22`<br>`internal/domain/models/quiz_question_outcome_alignment.go:7`<br>`internal/repository/postgres/quiz_outcome_alignment.go:28`<br>(+2 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `quiz_submissions` (5)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `extra_attempts` | `bigint` | yes | `0` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `extra_time` | `bigint` | yes | `0` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `fudge_points` | `double precision` | yes | `0` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `manually_unlocked` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `extra_attempts` | `bigint` | yes | `0` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `extra_time` | `bigint` | yes | `0` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `fudge_points` | `double precision` | yes | `0` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `manually_unlocked` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `quizzes` (7)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `access_code` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `assignment_group_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `assignment_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `hide_correct_answers_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `ip_filter` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `show_correct_answers_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `access_code` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `assignment_group_id` | `bigint` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/assignments.go:26`<br>`internal/domain/models/assignment.go:16` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `assignment_id` | `bigint` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:305`<br>`internal/api/v1/handlers/assignment_overrides.go:23`<br>`internal/api/v1/handlers/audit.go:46`<br>(+31 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `hide_correct_answers_at` | `timestamptz` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `ip_filter` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `show_correct_answers_at` | `timestamptz` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `role_overrides` (2)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `custom_role_id` | `bigint` | no | — | `POLYMORPHIC_REFACTOR` | `context_id` | Pre-polymorphic-refactor FK. Data migration must populate context_id with a semantic value derived from the old custom_role_id. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `custom_role_id` | `bigint` | no | — | `POLYMORPHIC_REFACTOR` | `context_id` | — | Pre-polymorphic-refactor FK. Data migration must populate context_id with a semantic value derived from the old custom_role_id. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `rubric_assessments` (4)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `artifact_id` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `artifact_type` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `comments` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `artifact_id` | `bigint` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/portfolio.go:92`<br>`internal/api/v1/router.go:897`<br>`internal/domain/models/portfolio.go:69`<br>(+2 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `artifact_type` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/portfolio.go:72`<br>`internal/domain/models/portfolio.go:48`<br>`internal/service/portfolio_service.go:216` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `comments` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/peer_reviews.go:80`<br>`internal/api/v1/handlers/portfolio.go:964`<br>`internal/api/v1/handlers/speedgrader.go:55`<br>(+18 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `rubric_associations` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `rubrics` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `sis_batch_errors` (4)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `file_name` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `row_number` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `file_name` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `row_number` | `bigint` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:46`<br>`internal/api/v1/handlers/announcements.go:44`<br>`internal/api/v1/handlers/appointment_groups.go:40`<br>(+158 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `sis_batches` (8)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `batch_mode` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `created_count` | `bigint` | yes | `0` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `deleted_count` | `bigint` | yes | `0` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `diffing_data_set_identifier` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `ended_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `started_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `updated_count` | `bigint` | yes | `0` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `batch_mode` | `boolean` | yes | `false` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `created_count` | `bigint` | yes | `0` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `deleted_count` | `bigint` | yes | `0` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `diffing_data_set_identifier` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `ended_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/conferences.go:32`<br>`internal/domain/models/conference.go:14` | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `started_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/conferences.go:31`<br>`internal/api/v1/handlers/content_migrations.go:32`<br>`internal/api/v1/handlers/oneroster.go:63`<br>(+5 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `updated_count` | `bigint` | yes | `0` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `student_accommodations` (6)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `approved_by` | `bigint` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `details` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `expires_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `extended_time_multiplier` | `double precision` | yes | `1.0` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `workflow_state` | `text` | yes | `'active'::text` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `approved_by` | `bigint` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `details` | `text` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/custom_roles.go:329`<br>`internal/api/v1/handlers/planner.go:71`<br>`internal/api/v1/handlers/speedgrader.go:76`<br>(+3 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `expires_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/access_tokens.go:30`<br>`internal/api/v1/handlers/coppa.go:35`<br>`internal/api/v1/handlers/ferpa.go:32`<br>(+9 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `extended_time_multiplier` | `double precision` | yes | `1.0` | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `workflow_state` | `text` | yes | `'active'::text` | `UNKNOWN` | — | `internal/api/v1/handlers/accounts.go:25`<br>`internal/api/v1/handlers/announcements.go:38`<br>`internal/api/v1/handlers/appointment_groups.go:38`<br>(+181 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `submission_comments` (3)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `group_comment_id` | `text` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `hidden` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `group_comment_id` | `text` | yes | — | `UNKNOWN` | — | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `hidden` | `boolean` | yes | `false` | `UNKNOWN` | — | `internal/api/v1/handlers/custom_gradebook_columns.go:26`<br>`internal/api/v1/handlers/lti.go:199`<br>`internal/api/v1/handlers/submissions.go:519`<br>(+7 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `submissions` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `todays_lesson_overrides` (4)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `created_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `module_id` | `bigint` | no | — | `POLYMORPHIC_REFACTOR` | `link_id` | Pre-polymorphic-refactor FK. Data migration must populate link_id with a semantic value derived from the old module_id. |
-| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `created_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/access_tokens.go:32`<br>`internal/api/v1/handlers/accommodations.go:45`<br>`internal/api/v1/handlers/analytics.go:29`<br>(+202 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `module_id` | `bigint` | no | — | `POLYMORPHIC_REFACTOR` | `link_id` | `internal/api/v1/handlers/module_items.go:21`<br>`internal/api/v1/handlers/modules.go:49`<br>`internal/api/v1/router.go:419`<br>(+2 more) | Pre-polymorphic-refactor FK. Data migration must populate link_id with a semantic value derived from the old module_id. |
+| `updated_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/accommodations.go:46`<br>`internal/api/v1/handlers/announcements.go:44`<br>`internal/api/v1/handlers/appointment_groups.go:40`<br>(+158 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 
 ### `users` (1)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
 
 ### `wiki_pages` (4)
 
-| Column | Type | Nullable | Default | Category | Suggested target | Notes |
-|---|---|---|---|---|---|---|
-| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
-| `lock_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `published` | `boolean` | yes | `false` | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
-| `unlock_at` | `timestamptz` | yes | — | `UNKNOWN` | — | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |
+|---|---|---|---|---|---|---|---|
+| `deleted_at` | `timestamptz` | yes | — | `SOFT_DELETE_LEFTOVER` | — | — | GORM soft-delete column removed from the model. Safe to drop if no soft-deleted rows exist. |
+| `lock_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/assignment_overrides.go:27`<br>`internal/api/v1/handlers/assignments.go:31`<br>`internal/api/v1/handlers/discussions.go:32`<br>(+11 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `published` | `boolean` | yes | `false` | `UNKNOWN` | — | `internal/api/v1/handlers/assignments.go:37`<br>`internal/api/v1/handlers/canvas_aliases.go:238`<br>`internal/api/v1/handlers/module_items.go:159`<br>(+21 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
+| `unlock_at` | `timestamptz` | yes | — | `UNKNOWN` | — | `internal/api/v1/handlers/assignment_overrides.go:26`<br>`internal/api/v1/handlers/assignments.go:30`<br>`internal/api/v1/handlers/modules.go:27`<br>(+12 more) | No matching AM column found. Could be a removed feature, an in-use column missing from the model, or a column referenced only by hand-written SQL. Grep the codebase before dropping. |
 

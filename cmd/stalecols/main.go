@@ -15,12 +15,16 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"flag"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -37,21 +41,32 @@ import (
 type category string
 
 const (
-	catSoftDelete  category = "SOFT_DELETE_LEFTOVER"
-	catRename      category = "RENAME_CANDIDATE"
-	catPolymorphic category = "POLYMORPHIC_REFACTOR"
-	catUnknown     category = "UNKNOWN"
+	catSoftDelete    category = "SOFT_DELETE_LEFTOVER"
+	catRename        category = "RENAME_CANDIDATE"
+	catPolymorphic   category = "POLYMORPHIC_REFACTOR"
+	catBoolTimestamp category = "BOOL_TO_TIMESTAMP_REFACTOR"
+	catUnknown       category = "UNKNOWN"
 )
 
 // classification is the per-column result. SuggestedTarget is the AM column
-// the heuristic thinks the stale column was renamed to (RENAME_CANDIDATE) or
-// the polymorphic pair we found (POLYMORPHIC_REFACTOR). Empty otherwise.
+// the heuristic thinks the stale column was renamed to (RENAME_CANDIDATE,
+// BOOL_TO_TIMESTAMP_REFACTOR) or the polymorphic pair we found
+// (POLYMORPHIC_REFACTOR). Empty otherwise.
+//
+// References are file:line locations in the Go source where the column name
+// appears as a word-bounded token. Populated by the codebase scan after
+// categorization. A non-empty References list on an UNKNOWN row means the
+// column is referenced outside GORM's model registration — typically
+// hand-written SQL or a model bug — and must be investigated before any
+// Wave 2c drop.
 type classification struct {
 	Table           string
 	Column          *schemagen.Column
 	Category        category
 	SuggestedTarget string
 	Notes           string
+	References      []string
+	ExtraRefs       int // overflow beyond the kept References slice
 }
 
 func main() {
@@ -129,6 +144,12 @@ func run() int {
 	}
 
 	classifications := classifyAll(d.StaleColumns, want)
+
+	fmt.Fprintln(os.Stderr, "→ scanning Go source for column references...")
+	if err := populateReferences(classifications, "."); err != nil {
+		return fatal("scan references: %v", err)
+	}
+
 	md := renderMarkdown(classifications, len(d.StaleColumns))
 
 	if err := os.WriteFile(*outPath, []byte(md), 0o644); err != nil {
@@ -192,7 +213,23 @@ func classify(table string, c *schemagen.Column, amCols []*schemagen.Column) cla
 		}
 	}
 
-	// Heuristic 3: rename. Look for an AM column on the same table whose
+	// Heuristic 3: bool→timestamp refactor. Common pattern: replace a boolean
+	// `did_X` flag with a `did_X_at` timestamp where presence implies true.
+	// Data migration is non-trivial (true → some-timestamp, false → NULL), so
+	// these are split out from plain renames.
+	if isBoolean(c) {
+		target := c.Name + "_at"
+		for _, am := range amCols {
+			if am.Name == target && isTimestamptz(am) {
+				r.Category = catBoolTimestamp
+				r.SuggestedTarget = target
+				r.Notes = "Bool→timestamp refactor: presence of " + target + " implies true. Data migration needs a chosen seed timestamp for true rows (created_at? updated_at? NOW()?)."
+				return r
+			}
+		}
+	}
+
+	// Heuristic 4: rename. Look for an AM column on the same table whose
 	// normalized name is identical or one edit away. Normalization strips
 	// underscores and lowercases — catches both `is_under_13` → `is_under13`
 	// and case-difference variants without flagging unrelated short names.
@@ -328,6 +365,142 @@ func isTimestamptz(c *schemagen.Column) bool {
 	return c.DataType == "timestamp with time zone"
 }
 
+func isBoolean(c *schemagen.Column) bool {
+	return c.DataType == "boolean"
+}
+
+// populateReferences walks the Go source under root and records word-bounded
+// occurrences of each stale column name. The result lives on each
+// classification's References slice (capped at maxRefs; overflow tracked in
+// ExtraRefs).
+//
+// Excludes: vendor, node_modules, web (frontend), STALE_COLUMNS.md, the
+// stalecols tool itself, and the SQL migrations directory (those by
+// definition reference the columns we're investigating and are not evidence
+// of live use).
+//
+// Excluding *_test.go files would risk missing tests that hardcode column
+// names — those are also maintenance signal, so they stay in.
+//
+// One alternation regex is built up-front and applied per-file so the walk
+// stays O(files), not O(files × columns).
+func populateReferences(cs []classification, root string) error {
+	const maxRefs = 3
+
+	// Build a lookup from column name → indexes into cs. Multiple stale
+	// columns can share a name across tables (e.g. `deleted_at`), so the
+	// value is a slice of every classification that wants the reference.
+	idx := map[string][]int{}
+	names := make([]string, 0, len(cs))
+	for i, c := range cs {
+		if _, seen := idx[c.Column.Name]; !seen {
+			names = append(names, c.Column.Name)
+		}
+		idx[c.Column.Name] = append(idx[c.Column.Name], i)
+	}
+	if len(names) == 0 {
+		return nil
+	}
+
+	// One big alternation. Escape names defensively even though column names
+	// are identifiers and shouldn't contain regex metacharacters.
+	escaped := make([]string, len(names))
+	for i, n := range names {
+		escaped[i] = regexp.QuoteMeta(n)
+	}
+	pattern := `\b(` + strings.Join(escaped, "|") + `)\b`
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return fmt.Errorf("compile alternation: %w", err)
+	}
+
+	skipDir := map[string]bool{
+		"vendor":       true,
+		"node_modules": true,
+		"web":          true,
+		".git":         true,
+		// .claude holds agent worktrees — full clones of the repo that would
+		// double or triple every reference count and make the column look
+		// vastly more in-use than it is.
+		".claude": true,
+	}
+	// Path-suffix excludes (relative to root). These directories are valid
+	// Go but reference the very columns we're cataloging; counting them as
+	// "live use" would defeat the purpose.
+	skipRelDir := map[string]bool{
+		"cmd/stalecols":         true,
+		"cmd/schemadiff":        true,
+		"cmd/genschema":         true,
+		"internal/db/migrations": true,
+	}
+
+	return filepath.WalkDir(root, func(path string, dirent fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if dirent.IsDir() {
+			if skipDir[dirent.Name()] {
+				return filepath.SkipDir
+			}
+			rel, _ := filepath.Rel(root, path)
+			if skipRelDir[filepath.ToSlash(rel)] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		return scanFileForReferences(path, root, re, idx, cs, maxRefs)
+	})
+}
+
+// scanFileForReferences reads one Go file and, for every match of the
+// alternation regex, appends a "path:line" entry to each classification that
+// owns the matched column name. Matches beyond maxRefs are counted but not
+// stored, so the report shows "+N more" without unbounded memory growth.
+func scanFileForReferences(path, root string, re *regexp.Regexp, idx map[string][]int, cs []classification, maxRefs int) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	rel, _ := filepath.Rel(root, path)
+	rel = filepath.ToSlash(rel)
+
+	// Track which (file, column) pairs we've already credited so a column
+	// referenced 20 times in one file doesn't drown out signal from columns
+	// referenced once across many files.
+	seen := map[int]bool{}
+
+	scanner := bufio.NewScanner(f)
+	// Allow long generated lines (some embedded SQL strings exceed 64KB).
+	scanner.Buffer(make([]byte, 64*1024), 1<<20)
+	line := 0
+	for scanner.Scan() {
+		line++
+		matches := re.FindAllString(scanner.Text(), -1)
+		if len(matches) == 0 {
+			continue
+		}
+		for _, m := range matches {
+			for _, ci := range idx[m] {
+				if seen[ci] {
+					continue
+				}
+				seen[ci] = true
+				if len(cs[ci].References) < maxRefs {
+					cs[ci].References = append(cs[ci].References, fmt.Sprintf("%s:%d", rel, line))
+				} else {
+					cs[ci].ExtraRefs++
+				}
+			}
+		}
+	}
+	return scanner.Err()
+}
+
 // renderMarkdown writes the categorization report. Top-level summary first,
 // then a per-table section with one row per stale column.
 func renderMarkdown(cs []classification, tableCount int) string {
@@ -352,15 +525,31 @@ func renderMarkdown(cs []classification, tableCount int) string {
 	b.WriteString(fmt.Sprintf("| `SOFT_DELETE_LEFTOVER` | %d | `deleted_at` column whose model dropped the `gorm.DeletedAt` field. Safe to drop if no soft-deleted rows. |\n", counts[catSoftDelete]))
 	b.WriteString(fmt.Sprintf("| `RENAME_CANDIDATE` | %d | AM has a near-identical name on the same table — copy data forward, then drop. |\n", counts[catRename]))
 	b.WriteString(fmt.Sprintf("| `POLYMORPHIC_REFACTOR` | %d | AM table has a `(*_type, *_id)` polymorphic pair; this is the old typed FK. Needs semantic data migration. |\n", counts[catPolymorphic]))
-	b.WriteString(fmt.Sprintf("| `UNKNOWN` | %d | No matching AM column. Could be removed feature, model bug, or string-SQL reference. Investigate before dropping. |\n", counts[catUnknown]))
+	b.WriteString(fmt.Sprintf("| `BOOL_TO_TIMESTAMP_REFACTOR` | %d | Bool flag replaced by `<name>_at` timestamp. Data migration must choose a seed timestamp for true rows. |\n", counts[catBoolTimestamp]))
+	b.WriteString(fmt.Sprintf("| `UNKNOWN` | %d | No matching AM column. See **References** for Go-source occurrences before dropping. |\n", counts[catUnknown]))
 	b.WriteString("\n")
+
+	// Reference counts feed Wave 2c safety. A non-empty References list on an
+	// UNKNOWN row almost always means hand-written SQL — must be refactored or
+	// the column kept.
+	withRefs, withoutRefs := 0, 0
+	for _, c := range cs {
+		if len(c.References) > 0 {
+			withRefs++
+		} else {
+			withoutRefs++
+		}
+	}
+	fmt.Fprintf(&b, "**References:** %d columns are referenced by name in Go source (likely live use); %d have no references found (likely dead, but verify per-domain).\n\n", withRefs, withoutRefs)
 
 	b.WriteString("## How to read this file\n\n")
 	b.WriteString("Each row is a single stale column. The **Category** is a heuristic guess — please verify before authoring migrations.\n\n")
 	b.WriteString("Suggested workflow:\n\n")
 	b.WriteString("1. For each table, confirm each row's category. Edit this file in place.\n")
 	b.WriteString("2. Group rows by domain (assignments, outcomes, accommodations, etc.) for Wave 2b data migrations — one migration per domain.\n")
-	b.WriteString("3. Before any drop in Wave 2c, grep the Go codebase for the column name (string SQL queries can reference columns that GORM models don't).\n\n")
+	b.WriteString("3. **References** is a pre-run grep of the Go codebase for the column name as a word-bounded token. A non-empty References cell on an UNKNOWN row means hand-written SQL or a model bug — investigate before any Wave 2c drop.\n")
+	b.WriteString("4. References are matched **by column name only**, not by (table, column). Common names like `updated_at`, `created_at`, `name`, `description` will show inflated reference lists that include matches against other tables' columns of the same name. Use the file paths to judge relevance.\n")
+	b.WriteString("5. The scan excludes `web/`, `vendor/`, `node_modules/`, `internal/db/migrations/`, `.claude/`, and the schema tooling under `cmd/`. Test files are included intentionally — tests that hardcode column names are also signal.\n\n")
 
 	b.WriteString("## By table\n\n")
 
@@ -374,16 +563,17 @@ func renderMarkdown(cs []classification, tableCount int) string {
 	for _, t := range tables {
 		rows := grouped[t]
 		fmt.Fprintf(&b, "### `%s` (%d)\n\n", t, len(rows))
-		b.WriteString("| Column | Type | Nullable | Default | Category | Suggested target | Notes |\n")
-		b.WriteString("|---|---|---|---|---|---|---|\n")
+		b.WriteString("| Column | Type | Nullable | Default | Category | Suggested target | References | Notes |\n")
+		b.WriteString("|---|---|---|---|---|---|---|---|\n")
 		for _, r := range rows {
-			fmt.Fprintf(&b, "| `%s` | `%s` | %s | %s | `%s` | %s | %s |\n",
+			fmt.Fprintf(&b, "| `%s` | `%s` | %s | %s | `%s` | %s | %s | %s |\n",
 				r.Column.Name,
 				typeOf(r.Column),
 				yesNo(r.Column.Nullable),
 				defaultOf(r.Column),
 				r.Category,
 				codeOrDash(r.SuggestedTarget),
+				renderRefs(r.References, r.ExtraRefs),
 				r.Notes,
 			)
 		}
@@ -451,6 +641,24 @@ func codeOrDash(s string) string {
 		return "—"
 	}
 	return "`" + s + "`"
+}
+
+// renderRefs formats the References slice for the markdown table. Returns an
+// em-dash when empty so the column reads naturally. Trailing "(+N more)" shows
+// when the scan found more matches than maxRefs kept.
+func renderRefs(refs []string, extra int) string {
+	if len(refs) == 0 {
+		return "—"
+	}
+	quoted := make([]string, len(refs))
+	for i, r := range refs {
+		quoted[i] = "`" + r + "`"
+	}
+	s := strings.Join(quoted, "<br>")
+	if extra > 0 {
+		s += fmt.Sprintf("<br>(+%d more)", extra)
+	}
+	return s
 }
 
 // --- scratch DB plumbing (copied from cmd/schemadiff — keeping this tool
