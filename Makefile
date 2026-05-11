@@ -1,4 +1,4 @@
-.PHONY: build run test lint vet clean docker migrate-up migrate-down migrate-version migrate-baseline migrate-create schema-diff schema-diff-sql dev backup restore
+.PHONY: build run test lint vet clean docker migrate-up migrate-down migrate-version migrate-baseline migrate-create schema-diff schema-diff-sql stale-cols dev backup restore
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS = -ldflags "-X main.Version=$(VERSION)"
@@ -67,6 +67,13 @@ schema-diff:
 
 schema-diff-sql:
 	@go run ./cmd/schemadiff --emit-sql
+
+# Wave 2a: categorize stale columns (SQL chain has, AutoMigrate doesn't) into
+# RENAME_CANDIDATE, SOFT_DELETE_LEFTOVER, POLYMORPHIC_REFACTOR, or UNKNOWN, and
+# write the report to STALE_COLUMNS.md for human review before authoring
+# cleanup migrations.
+stale-cols:
+	@go run ./cmd/stalecols
 
 # Docker
 docker:
