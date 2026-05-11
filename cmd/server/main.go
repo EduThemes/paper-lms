@@ -519,6 +519,12 @@ func main() {
 	quizStimulusHandler := handlers.NewQuizStimulusHandler(quizStimulusService)
 	quizOutcomeAlignmentHandler := handlers.NewQuizOutcomeAlignmentHandler(quizOutcomeAlignmentService)
 
+	// Wave B: QTI / IMSCC importer + exporter. Sync only in v1 — no
+	// import-history table; partial-failure surfaces in the response
+	// summary.
+	qtiImportService := service.NewQTIImportService(quizRepo, quizQuestionRepo, quizItemBankService, quizStimulusService, cfg.FileStoragePath)
+	qtiImportHandler := handlers.NewQTIImportHandler(qtiImportService)
+
 	authMiddleware := middleware.NewAuthMiddleware(cfg.JWTSecret, accessTokenService, userRepo, tokenBlacklist)
 	permMiddleware := middleware.NewPermissionMiddleware(enrollmentRepo, userRepo)
 
@@ -614,6 +620,8 @@ func main() {
 		quizItemBankHandler,
 		quizStimulusHandler,
 		quizOutcomeAlignmentHandler,
+		// Wave B: QTI import + export.
+		qtiImportHandler,
 		authMiddleware,
 		permMiddleware,
 		accountRepo,

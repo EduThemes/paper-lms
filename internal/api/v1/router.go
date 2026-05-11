@@ -101,6 +101,8 @@ type Router struct {
 	quizItemBankHandler         *handlers.QuizItemBankHandler
 	quizStimulusHandler         *handlers.QuizStimulusHandler
 	quizOutcomeAlignmentHandler *handlers.QuizOutcomeAlignmentHandler
+	// Wave B: QTI / IMSCC import + export.
+	qtiImportHandler *handlers.QTIImportHandler
 	authMiddleware             *middleware.AuthMiddleware
 	permMiddleware             *middleware.PermissionMiddleware
 }
@@ -197,6 +199,8 @@ func NewRouter(
 	quizItemBankHandler *handlers.QuizItemBankHandler,
 	quizStimulusHandler *handlers.QuizStimulusHandler,
 	quizOutcomeAlignmentHandler *handlers.QuizOutcomeAlignmentHandler,
+	// Wave B: QTI / IMSCC import + export.
+	qtiImportHandler *handlers.QTIImportHandler,
 	authMiddleware *middleware.AuthMiddleware,
 	permMiddleware *middleware.PermissionMiddleware,
 	accountRepo repository.AccountRepository,
@@ -285,6 +289,7 @@ func NewRouter(
 		quizItemBankHandler:         quizItemBankHandler,
 		quizStimulusHandler:         quizStimulusHandler,
 		quizOutcomeAlignmentHandler: quizOutcomeAlignmentHandler,
+		qtiImportHandler:            qtiImportHandler,
 		authMiddleware:              authMiddleware,
 		permMiddleware:              permMiddleware,
 	}
@@ -1049,4 +1054,12 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Post("/quiz_questions/:question_id/outcome_alignments", instructor, r.quizOutcomeAlignmentHandler.Align)
 	protected.Delete("/quiz_questions/:question_id/outcome_alignments/:outcome_id", instructor, r.quizOutcomeAlignmentHandler.Unalign)
 	protected.Get("/learning_outcomes/:outcome_id/quiz_question_alignments", r.quizOutcomeAlignmentHandler.ListByOutcome)
+
+	// Wave B: Canvas QTI / IMSCC import + export.
+	// Sync-only in v1. The handler blocks while parsing + persisting;
+	// Canvas-sized exports complete in well under a second.
+	if r.qtiImportHandler != nil {
+		protected.Post("/courses/:course_id/qti_import", instructor, r.qtiImportHandler.Import)
+		protected.Get("/quizzes/:quiz_id/export.imscc", instructor, r.qtiImportHandler.Export)
+	}
 }
