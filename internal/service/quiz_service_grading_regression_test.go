@@ -423,16 +423,42 @@ func TestGradingRegression_Numerical(t *testing.T) {
 			note:         "QUIRK: numerical grader is string-equality; 42 != 42.0",
 		},
 		{
-			// REGRESSION: current behavior — see Wave A planning notes
-			// No margin/tolerance is applied despite the inline doc comment.
+			// CHANGED IN WAVE A1: Was previously routed to pending_review (bug). Now auto-grades per-pair. See PATCH.md.
+			// Bug 1B fixed: when `margin` is set, the numerical grader parses
+			// both sides as float64 and accepts the answer if |user-correct|
+			// is within tolerance. 42.1 vs 42 ±0.5 → accepted, full credit.
 			name:         "no_tolerance_applied_off_by_point_one",
 			questionType: "numerical_question",
 			points:       3.0,
 			answersJSON:  `[{"id":"n1","text":"42","margin":"0.5","weight":100}]`,
 			submitted:    "42.1",
+			wantScore:    3.0,
+			wantWorkflow: "complete",
+			note:         "FIXED IN WAVE A1: margin tolerance is now respected",
+		},
+		{
+			// Legacy preservation: when `margin` is empty/missing the grader
+			// falls back to string equality, matching pre-Wave-A1 behavior so
+			// existing quizzes are not silently re-scored.
+			name:         "no_margin_falls_back_to_string_equality",
+			questionType: "numerical_question",
+			points:       3.0,
+			answersJSON:  `[{"id":"n1","text":"42","weight":100}]`,
+			submitted:    "42.0",
 			wantScore:    0.0,
 			wantWorkflow: "complete",
-			note:         "QUIRK: 'margin' field in JSON is ignored by current grader",
+			note:         "Legacy behavior preserved: no margin → exact string match",
+		},
+		{
+			// Percent-margin semantics: "5%" of 200 = ±10, so 205 is accepted.
+			name:         "percent_margin_accepts_within_band",
+			questionType: "numerical_question",
+			points:       2.0,
+			answersJSON:  `[{"id":"n1","text":"200","margin":"5%","weight":100}]`,
+			submitted:    "205",
+			wantScore:    2.0,
+			wantWorkflow: "complete",
+			note:         "Percent margin: 5%% of 200 = ±10",
 		},
 		{
 			name:         "negative_number_correct",
@@ -544,14 +570,32 @@ func TestGradingRegression_Essay(t *testing.T) {
 func TestGradingRegression_Matching(t *testing.T) {
 	cases := []gradingCase{
 		{
-			name:         "matching_correct_pairs_still_pending_review",
+			// CHANGED IN WAVE A1: Was previously routed to pending_review (bug). Now auto-grades per-pair. See PATCH.md.
+			// Bug 2B fixed. Question JSON: [{left, right_id}]. Submission JSON:
+			// [{left, right_id}]. Score = points × (correct pairs / total pairs).
+			name:         "matching_correct_pairs_auto_graded",
+			questionType: "matching",
+			points:       4.0,
+			answersJSON:  `[{"left":"apple","right_id":"r1","weight":100},{"left":"banana","right_id":"r2","weight":100}]`,
+			submitted:    `[{"left":"apple","right_id":"r1"},{"left":"banana","right_id":"r2"}]`,
+			wantScore:    4.0,
+			wantWorkflow: "complete",
+			note:         "FIXED IN WAVE A1: matching now scores per-pair",
+		},
+		{
+			// Legacy preservation: pre-Wave-A1 matching items used the old
+			// answers JSON shape ({"id","text":"left=right"}) which is NOT
+			// parseable by the new per-pair grader. Those items still route
+			// to pending_review so historical submissions are preserved
+			// (until they're re-authored with the new shape).
+			name:         "matching_legacy_shape_still_pending_review",
 			questionType: "matching",
 			points:       4.0,
 			answersJSON:  `[{"id":"m1","text":"left=right","weight":100}]`,
 			submitted:    `{"m1":"right"}`,
 			wantScore:    0.0,
 			wantWorkflow: "pending_review",
-			note:         "QUIRK: matching is NOT auto-graded — Wave A target",
+			note:         "Legacy quiz JSON shape preserved as pending_review",
 		},
 		{
 			name:         "matching_empty_answer_pending_review",
@@ -584,14 +628,32 @@ func TestGradingRegression_Matching(t *testing.T) {
 func TestGradingRegression_FillInMultipleBlanks(t *testing.T) {
 	cases := []gradingCase{
 		{
-			name:         "fimb_correct_blanks_still_pending_review",
+			// CHANGED IN WAVE A1: Was previously routed to pending_review (bug). Now auto-grades per-pair. See PATCH.md.
+			// Bug 2B fixed. Question JSON: {blank_id: [accepted_answers]}.
+			// Submission JSON: {blank_id: user_answer}. Match is
+			// case-insensitive + TrimSpace'd per blank.
+			name:         "fimb_correct_blanks_auto_graded",
+			questionType: "fill_in_multiple_blanks",
+			points:       6.0,
+			answersJSON:  `{"color":["red","crimson"],"animal":["cat"]}`,
+			submitted:    `{"color":"RED","animal":"cat"}`,
+			wantScore:    6.0,
+			wantWorkflow: "complete",
+			note:         "FIXED IN WAVE A1: FIMB now scores per-blank",
+		},
+		{
+			// Legacy preservation: pre-Wave-A1 FIMB items used the old
+			// answers JSON shape ([{id,text:"color=red"}…]) which is NOT
+			// parseable by the new map-based grader, so they remain in
+			// pending_review until re-authored.
+			name:         "fimb_legacy_shape_still_pending_review",
 			questionType: "fill_in_multiple_blanks",
 			points:       6.0,
 			answersJSON:  `[{"id":"b1","text":"color=red","weight":100},{"id":"b2","text":"animal=cat","weight":100}]`,
 			submitted:    `{"color":"red","animal":"cat"}`,
 			wantScore:    0.0,
 			wantWorkflow: "pending_review",
-			note:         "QUIRK: fill_in_multiple_blanks is NOT auto-graded — Wave A target",
+			note:         "Legacy quiz JSON shape preserved as pending_review",
 		},
 		{
 			name:         "fimb_empty_answer_pending_review",
