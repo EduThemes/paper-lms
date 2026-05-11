@@ -177,6 +177,11 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.ContentEmbedding{},
 		&models.SharedContent{},
 		&models.SharedContentFavorite{},
+		// Wave A2: Quiz Item Banks, Stimulus Passages, Per-Question Outcome Alignment
+		&models.QuizItemBank{},
+		&models.QuizItemBankItem{},
+		&models.QuizStimulus{},
+		&models.QuizQuestionOutcomeAlignment{},
 	)
 }
 
