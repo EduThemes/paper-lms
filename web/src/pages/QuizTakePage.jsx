@@ -21,6 +21,17 @@ import QuestionPalette from '../components/quiz/QuestionPalette';
 import AutoSaveIndicator from '../components/quiz/AutoSaveIndicator';
 import RestoreAnswersDialog from '../components/quiz/RestoreAnswersDialog';
 import ShortcutsDialog from '../components/quiz/ShortcutsDialog';
+import ItemPlayer from '../components/quiz/itemTypes/ItemPlayer';
+
+// Question types that are essentially answer-set-driven and use the legacy
+// inline render path. Newer types delegate to ItemPlayer.
+const LEGACY_INLINE_TYPES = new Set([
+  'multiple_choice',
+  'true_false',
+  'short_answer',
+  'essay',
+  'numerical_question',
+]);
 
 const lsKey = (submissionId) => `paper.quiz.${submissionId}`;
 
@@ -290,70 +301,54 @@ const QuizTakePage = () => {
     setRestorePrompt(null);
   };
 
-  const renderQuestion = (q, idx) => (
-    <div
-      key={q.id}
-      className="bg-surface-0 rounded-lg shadow-sm border border-border-default p-6"
-      aria-labelledby={`q-${q.id}-label`}
-    >
-      <div className="flex items-center justify-between mb-3">
-        <span id={`q-${q.id}-label`} className="text-sm text-text-tertiary font-medium">
-          Question {idx + 1} of {questions.length}
-        </span>
-        {q.points_possible != null && (
-          <span className="text-xs text-text-tertiary">{q.points_possible} pts</span>
-        )}
-      </div>
+  const renderQuestion = (q, idx) => {
+    const stimulus = q.stimulus || null;
+    // multiple_dropdown renders its own inline question text with embedded
+    // <select>s, so suppress the default stem rendering for it.
+    const suppressStem = q.question_type === 'multiple_dropdown';
+    return (
       <div
-        className="prose prose-sm max-w-prose mb-5 text-text-primary"
-        dangerouslySetInnerHTML={{ __html: sanitizeHTML(q.question_text) }}
-      />
-      {(q.question_type === 'multiple_choice' || q.question_type === 'true_false') && (
-        <div role="radiogroup" aria-labelledby={`q-${q.id}-label`} className="space-y-2 max-w-prose">
-          {JSON.parse(q.answers || '[]').map(opt => {
-            const checked = answers[q.id] === opt.id;
-            return (
-              <label
-                key={opt.id}
-                className={`flex items-center gap-3 p-3 rounded border cursor-pointer transition-colors ${
-                  checked ? 'border-brand-500 bg-brand-50' : 'border-border-default hover:bg-surface-1'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name={`q-${q.id}`}
-                  checked={checked}
-                  onChange={() => handleAnswer(q.id, opt.id)}
-                  className="text-brand-600"
-                />
-                <span className="text-text-primary">{opt.text}</span>
-              </label>
-            );
-          })}
+        key={q.id}
+        className="bg-surface-0 rounded-lg shadow-sm border border-border-default p-6"
+        aria-labelledby={`q-${q.id}-label`}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <span id={`q-${q.id}-label`} className="text-sm text-text-tertiary font-medium">
+            Question {idx + 1} of {questions.length}
+          </span>
+          {q.points_possible != null && (
+            <span className="text-xs text-text-tertiary">{q.points_possible} pts</span>
+          )}
         </div>
-      )}
-      {(q.question_type === 'short_answer' || q.question_type === 'essay') && (
-        <textarea
-          className="w-full max-w-prose border border-border-strong rounded p-3 min-h-[100px] focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-          placeholder="Type your answer..."
-          value={answers[q.id] || ''}
-          onChange={e => handleAnswer(q.id, e.target.value)}
-          rows={q.question_type === 'essay' ? 8 : 3}
-          aria-labelledby={`q-${q.id}-label`}
+
+        {stimulus && (
+          <details
+            open
+            className="mb-4 border-l-4 border-brand-500 bg-surface-1 rounded-r"
+          >
+            <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-text-secondary">
+              Passage: {stimulus.title || 'Reading'}
+            </summary>
+            <div className="px-3 pb-3 prose prose-sm max-w-prose text-text-primary"
+                 dangerouslySetInnerHTML={{ __html: sanitizeHTML(stimulus.content || '') }} />
+          </details>
+        )}
+
+        {!suppressStem && (
+          <div
+            className="prose prose-sm max-w-prose mb-5 text-text-primary"
+            dangerouslySetInnerHTML={{ __html: sanitizeHTML(q.question_text) }}
+          />
+        )}
+
+        <ItemPlayer
+          question={q}
+          value={answers[q.id]}
+          onChange={(v) => handleAnswer(q.id, v)}
         />
-      )}
-      {q.question_type === 'numerical_question' && (
-        <input
-          type="number"
-          className="w-full max-w-xs border border-border-strong rounded p-3 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-          placeholder="Enter a number..."
-          value={answers[q.id] || ''}
-          onChange={e => handleAnswer(q.id, e.target.value)}
-          aria-labelledby={`q-${q.id}-label`}
-        />
-      )}
-    </div>
-  );
+      </div>
+    );
+  };
 
   const answeredCount = useMemo(
     () => questions.filter(q => answers[q.id] !== undefined && answers[q.id] !== '').length,
