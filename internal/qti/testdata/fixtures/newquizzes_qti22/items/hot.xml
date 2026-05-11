@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<assessmentItem xmlns="http://www.imsglobal.org/xsd/imsqti_v2p2" identifier="hot-item" title="Hotspot" adaptive="false" timeDependent="false">
+  <responseDeclaration identifier="RESPONSE" cardinality="single" baseType="identifier">
+    <correctResponse><value>spot1</value></correctResponse>
+  </responseDeclaration>
+  <itemBody>
+    <p>Click the correct area.</p>
+    <hotspotInteraction responseIdentifier="RESPONSE" maxChoices="1">
+      <object data="map.png" type="image/png" width="500" height="500"/>
+      <hotspotChoice identifier="spot1" shape="rect" coords="100,100,200,200"/>
+      <hotspotChoice identifier="spot2" shape="rect" coords="300,300,400,400"/>
+    </hotspotInteraction>
+  </itemBody>
+</assessmentItem>

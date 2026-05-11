@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<assessmentItem xmlns="http://www.imsglobal.org/xsd/imsqti_v2p2" identifier="num-item" title="Numerical" adaptive="false" timeDependent="false">
+  <responseDeclaration identifier="RESPONSE" cardinality="single" baseType="float">
+    <correctResponse><value>42</value></correctResponse>
+    <mapping lowerBound="41.5" upperBound="42.5" defaultValue="0">
+      <mapEntry mapKey="42" mappedValue="1"/>
+    </mapping>
+  </responseDeclaration>
+  <itemBody>
+    <p>What is the answer?</p>
+    <textEntryInteraction responseIdentifier="RESPONSE" expectedLength="5"/>
+  </itemBody>
+</assessmentItem>

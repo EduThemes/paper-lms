@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<assessmentTest xmlns="http://www.imsglobal.org/xsd/imsqti_v2p2"
+  identifier="nq-test-1" title="NQ Sample Quiz">
+  <testPart identifier="part-1" navigationMode="linear" submissionMode="individual">
+    <assessmentSection identifier="sec-1" title="Main" visible="true">
+      <assessmentItemRef identifier="mc" href="items/mc.xml"/>
+      <assessmentItemRef identifier="ma" href="items/ma.xml"/>
+      <assessmentItemRef identifier="tf" href="items/tf.xml"/>
+      <assessmentItemRef identifier="sa" href="items/sa.xml"/>
+      <assessmentItemRef identifier="num" href="items/num.xml"/>
+      <assessmentItemRef identifier="essay" href="items/essay.xml"/>
+      <assessmentItemRef identifier="upload" href="items/upload.xml"/>
+      <assessmentItemRef identifier="match" href="items/match.xml"/>
+      <assessmentItemRef identifier="inline" href="items/inline.xml"/>
+    </assessmentSection>
+    <assessmentSection identifier="stimulus-sec" title="With Passage" visible="true">
+      <rubricBlock view="candidate">The forest was deep and quiet, the kind of quiet that makes you listen.</rubricBlock>
+      <assessmentItemRef identifier="order" href="items/order.xml"/>
+      <assessmentItemRef identifier="gap" href="items/gap.xml"/>
+      <assessmentItemRef identifier="hot" href="items/hot.xml"/>
+    </assessmentSection>
+  </testPart>
+</assessmentTest>

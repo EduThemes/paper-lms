@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<assessmentItem xmlns="http://www.imsglobal.org/xsd/imsqti_v2p2" identifier="inline-item" title="Dropdowns" adaptive="false" timeDependent="false">
+  <responseDeclaration identifier="b1" cardinality="single" baseType="identifier">
+    <correctResponse><value>sky</value></correctResponse>
+  </responseDeclaration>
+  <responseDeclaration identifier="b2" cardinality="single" baseType="identifier">
+    <correctResponse><value>blue</value></correctResponse>
+  </responseDeclaration>
+  <itemBody>
+    <p>The
+      <inlineChoiceInteraction responseIdentifier="b1" shuffle="false">
+        <inlineChoice identifier="sky">sky</inlineChoice>
+        <inlineChoice identifier="grass">grass</inlineChoice>
+      </inlineChoiceInteraction>
+      is
+      <inlineChoiceInteraction responseIdentifier="b2" shuffle="false">
+        <inlineChoice identifier="blue">blue</inlineChoice>
+        <inlineChoice identifier="red">red</inlineChoice>
+      </inlineChoiceInteraction>
+      .
+    </p>
+  </itemBody>
+</assessmentItem>

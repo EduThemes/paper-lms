@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<questestinterop xmlns="http://www.imsglobal.org/xsd/ims_qtiasiv1p2">
+  <assessment ident="A1" title="Classic Sample Quiz">
+    <qtimetadata>
+      <qtimetadatafield><fieldlabel>quiz_type</fieldlabel><fieldentry>assignment</fieldentry></qtimetadatafield>
+      <qtimetadatafield><fieldlabel>time_limit</fieldlabel><fieldentry>30</fieldentry></qtimetadatafield>
+      <qtimetadatafield><fieldlabel>shuffle_answers</fieldlabel><fieldentry>true</fieldentry></qtimetadatafield>
+    </qtimetadata>
+    <section ident="root_section">
+
+      <item ident="mc1" title="MC">
+        <itemmetadata><qtimetadata>
+          <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>multiple_choice_question</fieldentry></qtimetadatafield>
+          <qtimetadatafield><fieldlabel>points_possible</fieldlabel><fieldentry>2</fieldentry></qtimetadatafield>
+        </qtimetadata></itemmetadata>
+        <presentation>
+          <material><mattext texttype="text/plain">What is 2+2?</mattext></material>
+          <response_lid ident="response1" rcardinality="Single">
+            <render_choice>
+              <response_label ident="a"><material><mattext>3</mattext></material></response_label>
+              <response_label ident="b"><material><mattext>4</mattext></material></response_label>
+              <response_label ident="c"><material><mattext>5</mattext></material></response_label>
+            </render_choice>
+          </response_lid>
+        </presentation>
+        <resprocessing>
+          <outcomes><decvar maxvalue="100" varname="SCORE"/></outcomes>
+          <respcondition continue="No">
+            <conditionvar><varequal respident="response1">b</varequal></conditionvar>
+            <setvar varname="SCORE" action="Set">100</setvar>
+            <displayfeedback linkrefid="correct_fb"/>
+          </respcondition>
+        </resprocessing>
+        <itemfeedback ident="correct_fb"><flow_mat><material><mattext>Correct!</mattext></material></flow_mat></itemfeedback>
+      </item>
+
+      <item ident="ma1" title="Multi-Answer">
+        <itemmetadata><qtimetadata>
+          <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>multiple_answers_question</fieldentry></qtimetadatafield>
+          <qtimetadatafield><fieldlabel>points_possible</fieldlabel><fieldentry>3</fieldentry></qtimetadatafield>
+        </qtimetadata></itemmetadata>
+        <presentation>
+          <material><mattext>Select primes</mattext></material>
+          <response_lid ident="response1" rcardinality="Multiple">
+            <render_choice>
+              <response_label ident="p2"><material><mattext>2</mattext></material></response_label>
+              <response_label ident="p3"><material><mattext>3</mattext></material></response_label>
+              <response_label ident="p4"><material><mattext>4</mattext></material></response_label>
+            </render_choice>
+          </response_lid>
+        </presentation>
+        <resprocessing>
+          <outcomes><decvar maxvalue="100" varname="SCORE"/></outcomes>
+          <respcondition continue="No">
+            <conditionvar>
+              <and>
+                <varequal respident="response1">p2</varequal>
+                <varequal respident="response1">p3</varequal>
+              </and>
+            </conditionvar>
+            <setvar varname="SCORE" action="Set">100</setvar>
+          </respcondition>
+        </resprocessing>
+      </item>
+
+      <item ident="tf1" title="True/False">
+        <itemmetadata><qtimetadata>
+          <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>true_false_question</fieldentry></qtimetadatafield>
+          <qtimetadatafield><fieldlabel>points_possible</fieldlabel><fieldentry>1</fieldentry></qtimetadatafield>
+        </qtimetadata></itemmetadata>
+        <presentation>
+          <material><mattext>The sky is blue.</mattext></material>
+          <response_lid ident="response1" rcardinality="Single">
+            <render_choice>
+              <response_label ident="t"><material><mattext>True</mattext></material></response_label>
+              <response_label ident="f"><material><mattext>False</mattext></material></response_label>
+            </render_choice>
+          </response_lid>
+        </presentation>
+        <resprocessing>
+          <outcomes><decvar maxvalue="100" varname="SCORE"/></outcomes>
+          <respcondition continue="No">
+            <conditionvar><varequal respident="response1">t</varequal></conditionvar>
+            <setvar varname="SCORE" action="Set">100</setvar>
+          </respcondition>
+        </resprocessing>
+      </item>
+
+      <item ident="sa1" title="Short Answer">
+        <itemmetadata><qtimetadata>
+          <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>short_answer_question</fieldentry></qtimetadatafield>
+          <qtimetadatafield><fieldlabel>points_possible</fieldlabel><fieldentry>1</fieldentry></qtimetadatafield>
+        </qtimetadata></itemmetadata>
+        <presentation>
+          <material><mattext>Name a planet.</mattext></material>
+          <response_str ident="response1"><render_fib rows="1"/></response_str>
+        </presentation>
+        <resprocessing>
+          <outcomes><decvar maxvalue="100" varname="SCORE"/></outcomes>
+          <respcondition continue="No">
+            <conditionvar><varequal respident="response1">Mars</varequal></conditionvar>
+            <setvar varname="SCORE" action="Set">100</setvar>
+          </respcondition>
+          <respcondition continue="No">
+            <conditionvar><varequal respident="response1">Earth</varequal></conditionvar>
+            <setvar varname="SCORE" action="Set">100</setvar>
+          </respcondition>
+        </resprocessing>
+      </item>
+
+      <item ident="fimb1" title="Fill in Multiple Blanks">
+        <itemmetadata><qtimetadata>
+          <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>fill_in_multiple_blanks_question</fieldentry></qtimetadatafield>
+          <qtimetadatafield><fieldlabel>points_possible</fieldlabel><fieldentry>2</fieldentry></qtimetadatafield>
+        </qtimetadata></itemmetadata>
+        <presentation>
+          <material><mattext>The [color1] [color2] fox.</mattext></material>
+          <response_str ident="color1"><render_fib rows="1"/></response_str>
+          <response_str ident="color2"><render_fib rows="1"/></response_str>
+        </presentation>
+        <resprocessing>
+          <outcomes><decvar maxvalue="100" varname="SCORE"/></outcomes>
+          <respcondition continue="No">
+            <conditionvar><varequal respident="color1">quick</varequal></conditionvar>
+            <setvar varname="SCORE" action="Set">100</setvar>
+          </respcondition>
+          <respcondition continue="No">
+            <conditionvar><varequal respident="color2">brown</varequal></conditionvar>
+            <setvar varname="SCORE" action="Set">100</setvar>
+          </respcondition>
+        </resprocessing>
+      </item>
+
+      <item ident="md1" title="Multiple Dropdowns">
+        <itemmetadata><qtimetadata>
+          <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>multiple_dropdowns_question</fieldentry></qtimetadatafield>
+          <qtimetadatafield><fieldlabel>points_possible</fieldlabel><fieldentry>2</fieldentry></qtimetadatafield>
+        </qtimetadata></itemmetadata>
+        <presentation>
+          <material><mattext>The [b1] is [b2].</mattext></material>
+          <response_lid ident="b1" rcardinality="Single">
+            <render_choice>
+              <response_label ident="b1_x"><material><mattext>sky</mattext></material></response_label>
+              <response_label ident="b1_y"><material><mattext>grass</mattext></material></response_label>
+            </render_choice>
+          </response_lid>
+          <response_lid ident="b2" rcardinality="Single">
+            <render_choice>
+              <response_label ident="b2_x"><material><mattext>blue</mattext></material></response_label>
+              <response_label ident="b2_y"><material><mattext>red</mattext></material></response_label>
+            </render_choice>
+          </response_lid>
+        </presentation>
+        <resprocessing>
+          <outcomes><decvar maxvalue="100" varname="SCORE"/></outcomes>
+          <respcondition continue="No">
+            <conditionvar><varequal respident="b1">b1_x</varequal></conditionvar>
+            <setvar varname="SCORE" action="Set">100</setvar>
+          </respcondition>
+          <respcondition continue="No">
+            <conditionvar><varequal respident="b2">b2_x</varequal></conditionvar>
+            <setvar varname="SCORE" action="Set">100</setvar>
+          </respcondition>
+        </resprocessing>
+      </item>
+
+      <item ident="match1" title="Matching">
+        <itemmetadata><qtimetadata>
+          <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>matching_question</fieldentry></qtimetadatafield>
+          <qtimetadatafield><fieldlabel>points_possible</fieldlabel><fieldentry>2</fieldentry></qtimetadatafield>
+        </qtimetadata></itemmetadata>
+        <presentation>
+          <material><mattext>Match country to capital.</mattext></material>
+          <response_lid ident="france" rcardinality="Single">
+            <render_choice>
+              <response_label ident="paris"><material><mattext>Paris</mattext></material></response_label>
+              <response_label ident="london"><material><mattext>London</mattext></material></response_label>
+            </render_choice>
+          </response_lid>
+          <response_lid ident="uk" rcardinality="Single">
+            <render_choice>
+              <response_label ident="paris2"><material><mattext>Paris</mattext></material></response_label>
+              <response_label ident="london2"><material><mattext>London</mattext></material></response_label>
+            </render_choice>
+          </response_lid>
+        </presentation>
+        <resprocessing>
+          <outcomes><decvar maxvalue="100" varname="SCORE"/></outcomes>
+          <respcondition continue="No">
+            <conditionvar><varequal respident="france">paris</varequal></conditionvar>
+            <setvar varname="SCORE" action="Set">50</setvar>
+          </respcondition>
+          <respcondition continue="No">
+            <conditionvar><varequal respident="uk">london2</varequal></conditionvar>
+            <setvar varname="SCORE" action="Set">50</setvar>
+          </respcondition>
+        </resprocessing>
+      </item>
+
+      <item ident="num1" title="Numerical">
+        <itemmetadata><qtimetadata>
+          <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>numerical_question</fieldentry></qtimetadatafield>
+          <qtimetadatafield><fieldlabel>points_possible</fieldlabel><fieldentry>1</fieldentry></qtimetadatafield>
+          <qtimetadatafield><fieldlabel>answer_exact</fieldlabel><fieldentry>42</fieldentry></qtimetadatafield>
+          <qtimetadatafield><fieldlabel>answer_error_margin</fieldlabel><fieldentry>0.5</fieldentry></qtimetadatafield>
+        </qtimetadata></itemmetadata>
+        <presentation>
+          <material><mattext>What is the answer?</mattext></material>
+          <response_str ident="response1"><render_fib rows="1"/></response_str>
+        </presentation>
+        <resprocessing>
+          <outcomes><decvar maxvalue="100" varname="SCORE"/></outcomes>
+          <respcondition continue="No">
+            <conditionvar><varequal respident="response1">42</varequal></conditionvar>
+            <setvar varname="SCORE" action="Set">100</setvar>
+          </respcondition>
+        </resprocessing>
+      </item>
+
+      <item ident="calc1" title="Calculated">
+        <itemmetadata><qtimetadata>
+          <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>calculated_question</fieldentry></qtimetadatafield>
+          <qtimetadatafield><fieldlabel>points_possible</fieldlabel><fieldentry>2</fieldentry></qtimetadatafield>
+          <qtimetadatafield><fieldlabel>answer_exact</fieldlabel><fieldentry>100</fieldentry></qtimetadatafield>
+          <qtimetadatafield><fieldlabel>answer_error_margin</fieldlabel><fieldentry>5%</fieldentry></qtimetadatafield>
+        </qtimetadata></itemmetadata>
+        <presentation>
+          <material><mattext>Compute the value.</mattext></material>
+          <response_str ident="response1"><render_fib rows="1"/></response_str>
+        </presentation>
+        <resprocessing>
+          <outcomes><decvar maxvalue="100" varname="SCORE"/></outcomes>
+          <respcondition continue="No">
+            <conditionvar><varequal respident="response1">100</varequal></conditionvar>
+            <setvar varname="SCORE" action="Set">100</setvar>
+          </respcondition>
+        </resprocessing>
+      </item>
+
+      <item ident="essay1" title="Essay">
+        <itemmetadata><qtimetadata>
+          <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>essay_question</fieldentry></qtimetadatafield>
+          <qtimetadatafield><fieldlabel>points_possible</fieldlabel><fieldentry>5</fieldentry></qtimetadatafield>
+        </qtimetadata></itemmetadata>
+        <presentation>
+          <material><mattext>Explain your reasoning.</mattext></material>
+          <response_str ident="response1"><render_fib rows="10"/></response_str>
+        </presentation>
+        <resprocessing><outcomes><decvar maxvalue="100" varname="SCORE"/></outcomes></resprocessing>
+      </item>
+
+      <item ident="file1" title="File Upload">
+        <itemmetadata><qtimetadata>
+          <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>file_upload_question</fieldentry></qtimetadatafield>
+          <qtimetadatafield><fieldlabel>points_possible</fieldlabel><fieldentry>3</fieldentry></qtimetadatafield>
+        </qtimetadata></itemmetadata>
+        <presentation>
+          <material><mattext>Upload your homework.</mattext></material>
+        </presentation>
+        <resprocessing><outcomes><decvar maxvalue="100" varname="SCORE"/></outcomes></resprocessing>
+      </item>
+
+      <item ident="text1" title="Text Only">
+        <itemmetadata><qtimetadata>
+          <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>text_only_question</fieldentry></qtimetadatafield>
+        </qtimetadata></itemmetadata>
+        <presentation>
+          <material><mattext>Section break: read carefully.</mattext></material>
+        </presentation>
+        <resprocessing><outcomes><decvar maxvalue="100" varname="SCORE"/></outcomes></resprocessing>
+      </item>
+
+    </section>
+
+    <section ident="bank_pull">
+      <sourcebank_ref>bank-1</sourcebank_ref>
+    </section>
+
+  </assessment>
+</questestinterop>

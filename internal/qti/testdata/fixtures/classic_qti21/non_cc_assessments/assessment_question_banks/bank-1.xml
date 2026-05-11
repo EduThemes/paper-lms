@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<questestinterop xmlns="http://www.imsglobal.org/xsd/ims_qtiasiv1p2">
+  <objectbank ident="bank-1">
+    <qtimetadata>
+      <qtimetadatafield><fieldlabel>bank_title</fieldlabel><fieldentry>Sample Bank</fieldentry></qtimetadatafield>
+      <qtimetadatafield><fieldlabel>description</fieldlabel><fieldentry>Reusable items</fieldentry></qtimetadatafield>
+    </qtimetadata>
+
+    <item ident="b1-q1" title="Bank MC">
+      <itemmetadata><qtimetadata>
+        <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>multiple_choice_question</fieldentry></qtimetadatafield>
+        <qtimetadatafield><fieldlabel>points_possible</fieldlabel><fieldentry>1</fieldentry></qtimetadatafield>
+      </qtimetadata></itemmetadata>
+      <presentation>
+        <material><mattext>Bank item 1: pick A.</mattext></material>
+        <response_lid ident="response1" rcardinality="Single">
+          <render_choice>
+            <response_label ident="A"><material><mattext>A</mattext></material></response_label>
+            <response_label ident="B"><material><mattext>B</mattext></material></response_label>
+          </render_choice>
+        </response_lid>
+      </presentation>
+      <resprocessing>
+        <outcomes><decvar maxvalue="100" varname="SCORE"/></outcomes>
+        <respcondition continue="No">
+          <conditionvar><varequal respident="response1">A</varequal></conditionvar>
+          <setvar varname="SCORE" action="Set">100</setvar>
+        </respcondition>
+      </resprocessing>
+    </item>
+
+    <item ident="b1-q2" title="Bank Short Answer">
+      <itemmetadata><qtimetadata>
+        <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>short_answer_question</fieldentry></qtimetadatafield>
+        <qtimetadatafield><fieldlabel>points_possible</fieldlabel><fieldentry>1</fieldentry></qtimetadatafield>
+      </qtimetadata></itemmetadata>
+      <presentation>
+        <material><mattext>Capital of France?</mattext></material>
+        <response_str ident="response1"><render_fib rows="1"/></response_str>
+      </presentation>
+      <resprocessing>
+        <outcomes><decvar maxvalue="100" varname="SCORE"/></outcomes>
+        <respcondition continue="No">
+          <conditionvar><varequal respident="response1">Paris</varequal></conditionvar>
+          <setvar varname="SCORE" action="Set">100</setvar>
+        </respcondition>
+      </resprocessing>
+    </item>
+
+    <item ident="b1-q3" title="Bank Essay">
+      <itemmetadata><qtimetadata>
+        <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>essay_question</fieldentry></qtimetadatafield>
+        <qtimetadatafield><fieldlabel>points_possible</fieldlabel><fieldentry>2</fieldentry></qtimetadatafield>
+      </qtimetadata></itemmetadata>
+      <presentation>
+        <material><mattext>Bank essay prompt.</mattext></material>
+        <response_str ident="response1"><render_fib rows="5"/></response_str>
+      </presentation>
+      <resprocessing><outcomes><decvar maxvalue="100" varname="SCORE"/></outcomes></resprocessing>
+    </item>
+
+  </objectbank>
+</questestinterop>

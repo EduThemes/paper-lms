@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest identifier="paper-lms-test-nq" xmlns="http://www.imsglobal.org/xsd/imsccv1p1/imscp_v1p1">
+  <metadata>
+    <schema>IMS Common Cartridge</schema>
+    <schemaversion>1.1.0</schemaversion>
+  </metadata>
+  <resources>
+    <resource identifier="test-1" type="imsqti_test_xmlv2p2" href="assessment.xml">
+      <file href="assessment.xml"/>
+      <file href="items/mc.xml"/>
+      <file href="items/ma.xml"/>
+      <file href="items/tf.xml"/>
+      <file href="items/sa.xml"/>
+      <file href="items/num.xml"/>
+      <file href="items/essay.xml"/>
+      <file href="items/upload.xml"/>
+      <file href="items/match.xml"/>
+      <file href="items/inline.xml"/>
+      <file href="items/order.xml"/>
+      <file href="items/gap.xml"/>
+      <file href="items/hot.xml"/>
+    </resource>
+  </resources>
+</manifest>
