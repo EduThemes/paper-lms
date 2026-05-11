@@ -506,6 +506,19 @@ func main() {
 	smartSearchHandler := handlers.NewSmartSearchHandler(smartSearchService, nil)
 	commonsHandler := handlers.NewCommonsHandler(commonsService, courseRepo)
 	aiAssistHandler := handlers.NewAIAssistHandler(aiAssistService)
+
+	// Wave A2: Quiz Item Banks, Stimuli, per-question Outcome Alignments
+	quizItemBankRepo := postgres.NewQuizItemBankRepository(database)
+	quizItemBankItemRepo := postgres.NewQuizItemBankItemRepository(database)
+	quizStimulusRepo := postgres.NewQuizStimulusRepository(database)
+	quizQuestionOutcomeAlignmentRepo := postgres.NewQuizQuestionOutcomeAlignmentRepository(database)
+	quizItemBankService := service.NewQuizItemBankService(quizItemBankRepo, quizItemBankItemRepo, quizQuestionRepo)
+	quizStimulusService := service.NewQuizStimulusService(quizStimulusRepo, quizQuestionRepo)
+	quizOutcomeAlignmentService := service.NewQuizOutcomeAlignmentService(quizQuestionOutcomeAlignmentRepo, quizQuestionRepo, outcomeRepo)
+	quizItemBankHandler := handlers.NewQuizItemBankHandler(quizItemBankService)
+	quizStimulusHandler := handlers.NewQuizStimulusHandler(quizStimulusService)
+	quizOutcomeAlignmentHandler := handlers.NewQuizOutcomeAlignmentHandler(quizOutcomeAlignmentService)
+
 	authMiddleware := middleware.NewAuthMiddleware(cfg.JWTSecret, accessTokenService, userRepo, tokenBlacklist)
 	permMiddleware := middleware.NewPermissionMiddleware(enrollmentRepo, userRepo)
 
@@ -597,6 +610,10 @@ func main() {
 		smartSearchHandler,
 		commonsHandler,
 		aiAssistHandler,
+		// Wave A2
+		quizItemBankHandler,
+		quizStimulusHandler,
+		quizOutcomeAlignmentHandler,
 		authMiddleware,
 		permMiddleware,
 		accountRepo,

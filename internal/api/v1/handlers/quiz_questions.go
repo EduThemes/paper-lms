@@ -30,6 +30,8 @@ func quizQuestionToJSON(q *models.QuizQuestion) fiber.Map {
 		"incorrect_comments":      q.IncorrectComments,
 		"neutral_comments":        q.NeutralComments,
 		"workflow_state":          q.WorkflowState,
+		"bank_item_id":            q.BankItemID,
+		"stimulus_id":             q.StimulusID,
 		"created_at":              q.CreatedAt,
 		"updated_at":              q.UpdatedAt,
 	}
