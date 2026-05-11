@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  GO_VERSION: '1.25'
+  NODE_VERSION: '22'
+
+jobs:
+  backend-lint:
+    name: Backend Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+        continue-on-error: true
+
+  backend-test:
+    name: Backend Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: paper
+          POSTGRES_PASSWORD: paper
+          POSTGRES_DB: paper_lms_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgres://paper:paper@localhost:5432/paper_lms_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run tests
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v5
+        with:
+          name: coverage
+          path: coverage.out
+
+  backend-build:
+    name: Backend Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build server
+        run: go build -ldflags "-X main.Version=${{ github.sha }}" -o bin/paper-lms ./cmd/server
+
+      - name: Build migrate
+        run: go build -o bin/migrate ./cmd/migrate
+
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+        working-directory: web
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: '1'
+
+      - name: Build
+        run: npm run build
+        working-directory: web
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: frontend-dist
+          path: web/dist
+
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [backend-build, frontend-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build backend image
+        run: |
+          docker build \
+            --build-arg VERSION=${{ github.sha }} \
+            -f deployments/docker/Dockerfile.backend \
+            -t paper-lms-backend:${{ github.sha }} \
+            -t paper-lms-backend:latest \
+            .
+
+      - name: Build frontend image
+        run: |
+          docker build \
+            -f deployments/docker/Dockerfile.frontend \
+            -t paper-lms-frontend:${{ github.sha }} \
+            -t paper-lms-frontend:latest \
+            .

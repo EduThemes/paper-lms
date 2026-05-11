@@ -1,0 +1,535 @@
+package handlers
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
+	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
+	"github.com/EduThemes/paper-lms/internal/auth"
+	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
+	"github.com/EduThemes/paper-lms/internal/service"
+)
+
+type UserHandler struct {
+	userService    *service.UserService
+	auditService   *service.AuditService
+	jwtSecret      string
+	environment    string
+	tokenBlacklist *service.TokenBlacklist
+}
+
+func NewUserHandler(userService *service.UserService, jwtSecret string, environment string, tokenBlacklist *service.TokenBlacklist, auditService *service.AuditService) *UserHandler {
+	return &UserHandler{userService: userService, jwtSecret: jwtSecret, environment: environment, tokenBlacklist: tokenBlacklist, auditService: auditService}
+}
+
+// setAuthCookie sets an httpOnly secure cookie with the JWT token.
+func (h *UserHandler) setAuthCookie(c *fiber.Ctx, token string) {
+	secure := h.environment == "production"
+	sameSite := "Lax"
+	c.Cookie(&fiber.Cookie{
+		Name:     "paper_session",
+		Value:    token,
+		Path:     "/",
+		HTTPOnly: true,
+		Secure:   secure,
+		SameSite: sameSite,
+		MaxAge:   86400, // 24 hours, matching JWT expiry
+		Expires:  time.Now().Add(24 * time.Hour),
+	})
+}
+
+// clearAuthCookie removes the session cookie.
+func (h *UserHandler) clearAuthCookie(c *fiber.Ctx) {
+	c.Cookie(&fiber.Cookie{
+		Name:     "paper_session",
+		Value:    "",
+		Path:     "/",
+		HTTPOnly: true,
+		MaxAge:   -1,
+		Expires:  time.Now().Add(-1 * time.Hour),
+	})
+}
+
+type loginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type registerRequest struct {
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+func (h *UserHandler) Login(c *fiber.Ctx) error {
+	var input loginRequest
+	if err := c.BodyParser(&input); err != nil {
+		return responses.BadRequest(c, "Invalid input")
+	}
+
+	user, err := h.userService.Authenticate(c.Context(), input.Email, input.Password)
+	if err != nil {
+		return responses.Error(c, fiber.StatusUnauthorized, "Invalid credentials")
+	}
+
+	token, err := auth.GenerateToken(user, h.jwtSecret)
+	if err != nil {
+		return responses.InternalError(c, "Could not generate token")
+	}
+
+	// Set httpOnly cookie for browser-based auth
+	h.setAuthCookie(c, token)
+
+	return c.JSON(fiber.Map{
+		"token": token,
+		"user": fiber.Map{
+			"id":            user.ID,
+			"name":          user.Name,
+			"sortable_name": user.SortableName,
+			"short_name":    user.ShortName,
+			"login_id":      user.LoginID,
+			"email":         user.Email,
+			"avatar_url":    user.AvatarURL,
+			"locale":        user.Locale,
+			"role":          user.Role,
+		},
+	})
+}
+
+func (h *UserHandler) Register(c *fiber.Ctx) error {
+	var input registerRequest
+	if err := c.BodyParser(&input); err != nil {
+		return responses.BadRequest(c, "Invalid input")
+	}
+
+	user, err := h.userService.Register(c.Context(), input.Name, input.Email, input.Password)
+	if err != nil {
+		return responses.BadRequest(c, err.Error())
+	}
+
+	token, err := auth.GenerateToken(user, h.jwtSecret)
+	if err != nil {
+		return responses.InternalError(c, "Could not generate token")
+	}
+
+	// Set httpOnly cookie for browser-based auth
+	h.setAuthCookie(c, token)
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"token": token,
+		"user": fiber.Map{
+			"id":            user.ID,
+			"name":          user.Name,
+			"sortable_name": user.SortableName,
+			"short_name":    user.ShortName,
+			"login_id":      user.LoginID,
+			"email":         user.Email,
+			"locale":        user.Locale,
+			"role":          user.Role,
+		},
+	})
+}
+
+func (h *UserHandler) Logout(c *fiber.Ctx) error {
+	// Revoke the current JWT so it cannot be reused until natural expiry
+	if h.tokenBlacklist != nil {
+		tokenStr := c.Cookies("paper_session")
+		if tokenStr == "" {
+			if authHeader := c.Get("Authorization"); authHeader != "" {
+				parts := strings.SplitN(authHeader, " ", 2)
+				if len(parts) == 2 && parts[0] == "Bearer" {
+					tokenStr = parts[1]
+				}
+			}
+		}
+		if tokenStr != "" {
+			h.tokenBlacklist.Revoke(tokenStr, time.Now().Add(24*time.Hour))
+		}
+	}
+	h.clearAuthCookie(c)
+	return c.JSON(fiber.Map{"logged_out": true})
+}
+
+func (h *UserHandler) GetUser(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid user ID")
+	}
+
+	user, err := h.userService.GetByID(c.Context(), uint(id))
+	if err != nil {
+		return responses.NotFound(c, "user")
+	}
+
+	return c.JSON(fiber.Map{
+		"id":            user.ID,
+		"name":          user.Name,
+		"sortable_name": user.SortableName,
+		"short_name":    user.ShortName,
+		"login_id":      user.LoginID,
+		"email":         user.Email,
+		"avatar_url":    user.AvatarURL,
+		"locale":        user.Locale,
+		"time_zone":     user.TimeZone,
+		"created_at":    user.CreatedAt,
+	})
+}
+
+func (h *UserHandler) GetUserProfile(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid user ID")
+	}
+
+	user, err := h.userService.GetByID(c.Context(), uint(id))
+	if err != nil {
+		return responses.NotFound(c, "user")
+	}
+
+	return c.JSON(fiber.Map{
+		"id":            user.ID,
+		"name":          user.Name,
+		"sortable_name": user.SortableName,
+		"short_name":    user.ShortName,
+		"login_id":      user.LoginID,
+		"primary_email": user.Email,
+		"avatar_url":    user.AvatarURL,
+		"locale":        user.Locale,
+		"time_zone":     user.TimeZone,
+	})
+}
+
+func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid user ID")
+	}
+
+	currentUserID, err := getUserID(c)
+	if err != nil {
+		return err
+	}
+	if currentUserID != uint(id) {
+		return responses.Error(c, fiber.StatusForbidden, "You can only update your own profile")
+	}
+
+	user, err := h.userService.GetByID(c.Context(), uint(id))
+	if err != nil {
+		return responses.NotFound(c, "user")
+	}
+
+	var input struct {
+		User struct {
+			Name     string `json:"name"`
+			Locale   string `json:"locale"`
+			TimeZone string `json:"time_zone"`
+		} `json:"user"`
+	}
+
+	if err := c.BodyParser(&input); err != nil {
+		return responses.BadRequest(c, "Invalid input")
+	}
+
+	if input.User.Name != "" {
+		user.Name = input.User.Name
+	}
+	if input.User.Locale != "" {
+		user.Locale = input.User.Locale
+	}
+	if input.User.TimeZone != "" {
+		user.TimeZone = input.User.TimeZone
+	}
+
+	if err := h.userService.Update(c.Context(), user); err != nil {
+		return responses.InternalError(c, "Could not update user")
+	}
+
+	return c.JSON(fiber.Map{
+		"id":            user.ID,
+		"name":          user.Name,
+		"sortable_name": user.SortableName,
+		"short_name":    user.ShortName,
+		"login_id":      user.LoginID,
+		"email":         user.Email,
+		"avatar_url":    user.AvatarURL,
+		"locale":        user.Locale,
+		"time_zone":     user.TimeZone,
+	})
+}
+
+// UpdateUserRole sets a user's role. Admin-only at the route level.
+func (h *UserHandler) UpdateUserRole(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid user ID")
+	}
+
+	var input struct {
+		Role string `json:"role"`
+	}
+	if err := c.BodyParser(&input); err != nil {
+		return responses.BadRequest(c, "Invalid input")
+	}
+	role := strings.TrimSpace(strings.ToLower(input.Role))
+	switch role {
+	case "admin", "teacher", "observer", "user":
+		// allowed
+	default:
+		return responses.BadRequest(c, "role must be one of: admin, teacher, observer, user")
+	}
+
+	user, err := h.userService.GetByID(c.Context(), uint(id))
+	if err != nil {
+		return responses.NotFound(c, "user")
+	}
+	user.Role = role
+	if err := h.userService.Update(c.Context(), user); err != nil {
+		return responses.InternalError(c, "Could not update role")
+	}
+	return c.JSON(fiber.Map{"id": user.ID, "email": user.Email, "role": user.Role})
+}
+
+func (h *UserHandler) GetSelf(c *fiber.Ctx) error {
+	userID, err := getUserID(c)
+	if err != nil {
+		return err
+	}
+	user, err := h.userService.GetByID(c.Context(), userID)
+	if err != nil {
+		return responses.NotFound(c, "user")
+	}
+
+	result := fiber.Map{
+		"id":            user.ID,
+		"name":          user.Name,
+		"sortable_name": user.SortableName,
+		"short_name":    user.ShortName,
+		"login_id":      user.LoginID,
+		"email":         user.Email,
+		"avatar_url":    user.AvatarURL,
+		"locale":        user.Locale,
+		"time_zone":     user.TimeZone,
+		"role":          user.Role,
+	}
+
+	// If masquerading, include masquerade info so the frontend can show the banner
+	if masqueradeByID, ok := c.Locals("masquerade_by").(uint); ok && masqueradeByID > 0 {
+		result["masquerading_as"] = user.Name
+		result["real_user_id"] = masqueradeByID
+		// Look up the real admin user to return their name for display
+		adminUser, adminErr := h.userService.GetByID(c.Context(), masqueradeByID)
+		if adminErr == nil {
+			result["real_user_name"] = adminUser.Name
+		}
+	}
+
+	return c.JSON(result)
+}
+
+// StartMasquerade allows an admin to start masquerading as a target user.
+// POST /api/v1/users/:id/masquerade
+func (h *UserHandler) StartMasquerade(c *fiber.Ctx) error {
+	adminUserID, err := getUserID(c)
+	if err != nil {
+		return err
+	}
+
+	targetUserID, err := c.ParamsInt("id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid user ID")
+	}
+
+	// Prevent masquerading as yourself
+	if uint(targetUserID) == adminUserID {
+		return responses.BadRequest(c, "Cannot masquerade as yourself")
+	}
+
+	// Prevent nested masquerade — if already masquerading, block
+	if masqueradeByID, ok := c.Locals("masquerade_by").(uint); ok && masqueradeByID > 0 {
+		return responses.BadRequest(c, "Cannot start a masquerade while already masquerading. End the current masquerade first.")
+	}
+
+	// Look up the target user
+	targetUser, err := h.userService.GetByID(c.Context(), uint(targetUserID))
+	if err != nil {
+		return responses.NotFound(c, "user")
+	}
+
+	// Generate a masquerade token (target user's identity + admin's ID in masquerade_by claim)
+	token, err := auth.GenerateMasqueradeToken(targetUser, adminUserID, h.jwtSecret)
+	if err != nil {
+		return responses.InternalError(c, "Could not generate masquerade token")
+	}
+
+	// Set the session cookie with the masquerade token
+	h.setAuthCookie(c, token)
+
+	// Create an audit log entry
+	if h.auditService != nil {
+		_ = h.auditService.LogEvent(
+			c.Context(),
+			"masquerade_start",
+			adminUserID,
+			nil, // courseID
+			nil, // accountID
+			"User",
+			targetUser.ID,
+			fmt.Sprintf("Admin user %d started masquerading as user %d (%s)", adminUserID, targetUser.ID, targetUser.Name),
+			fmt.Sprintf(`{"admin_user_id":%d,"target_user_id":%d,"target_user_name":"%s"}`, adminUserID, targetUser.ID, targetUser.Name),
+			c.IP(),
+			c.Get("User-Agent"),
+		)
+	}
+
+	return c.JSON(fiber.Map{
+		"masquerading": true,
+		"user": fiber.Map{
+			"id":            targetUser.ID,
+			"name":          targetUser.Name,
+			"sortable_name": targetUser.SortableName,
+			"short_name":    targetUser.ShortName,
+			"login_id":      targetUser.LoginID,
+			"email":         targetUser.Email,
+			"avatar_url":    targetUser.AvatarURL,
+			"locale":        targetUser.Locale,
+			"role":          targetUser.Role,
+		},
+	})
+}
+
+// EndMasquerade stops masquerading and restores the admin's session.
+// DELETE /api/v1/masquerade
+func (h *UserHandler) EndMasquerade(c *fiber.Ctx) error {
+	// Check that we are actually masquerading
+	masqueradeByID, ok := c.Locals("masquerade_by").(uint)
+	if !ok || masqueradeByID == 0 {
+		return responses.BadRequest(c, "Not currently masquerading")
+	}
+
+	// Look up the original admin user
+	adminUser, err := h.userService.GetByID(c.Context(), masqueradeByID)
+	if err != nil {
+		return responses.InternalError(c, "Could not find the original admin user")
+	}
+
+	// Generate a normal token for the admin user (no masquerade_by claim)
+	token, err := auth.GenerateToken(adminUser, h.jwtSecret)
+	if err != nil {
+		return responses.InternalError(c, "Could not generate token")
+	}
+
+	// Revoke the masquerade token
+	if h.tokenBlacklist != nil {
+		tokenStr := c.Cookies("paper_session")
+		if tokenStr != "" {
+			h.tokenBlacklist.Revoke(tokenStr, time.Now().Add(24*time.Hour))
+		}
+	}
+
+	// Set the session cookie back to admin
+	h.setAuthCookie(c, token)
+
+	// Get the masqueraded user's ID for audit logging
+	masqueradedUserID, _ := getUserID(c)
+
+	// Create an audit log entry
+	if h.auditService != nil {
+		_ = h.auditService.LogEvent(
+			c.Context(),
+			"masquerade_end",
+			masqueradeByID,
+			nil, // courseID
+			nil, // accountID
+			"User",
+			masqueradedUserID,
+			fmt.Sprintf("Admin user %d stopped masquerading as user %d", masqueradeByID, masqueradedUserID),
+			fmt.Sprintf(`{"admin_user_id":%d,"target_user_id":%d}`, masqueradeByID, masqueradedUserID),
+			c.IP(),
+			c.Get("User-Agent"),
+		)
+	}
+
+	return c.JSON(fiber.Map{
+		"masquerading": false,
+		"user": fiber.Map{
+			"id":            adminUser.ID,
+			"name":          adminUser.Name,
+			"sortable_name": adminUser.SortableName,
+			"short_name":    adminUser.ShortName,
+			"login_id":      adminUser.LoginID,
+			"email":         adminUser.Email,
+			"avatar_url":    adminUser.AvatarURL,
+			"locale":        adminUser.Locale,
+			"role":          adminUser.Role,
+		},
+	})
+}
+
+func (h *UserHandler) RequestPasswordReset(c *fiber.Ctx) error {
+	var input struct {
+		Email string `json:"email"`
+	}
+	if err := c.BodyParser(&input); err != nil {
+		return responses.BadRequest(c, "Invalid input")
+	}
+
+	// Always return success to avoid email enumeration
+	_, _ = h.userService.RequestPasswordReset(c.Context(), input.Email)
+	return c.JSON(fiber.Map{"requested": true})
+}
+
+func (h *UserHandler) ResetPassword(c *fiber.Ctx) error {
+	var input struct {
+		Token       string `json:"token"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := c.BodyParser(&input); err != nil {
+		return responses.BadRequest(c, "Invalid input")
+	}
+
+	if err := h.userService.ResetPassword(c.Context(), input.Token, input.NewPassword); err != nil {
+		return responses.BadRequest(c, err.Error())
+	}
+
+	return c.JSON(fiber.Map{"password_reset": true})
+}
+
+func (h *UserHandler) ListUsers(c *fiber.Ctx) error {
+	params := middleware.GetPagination(c)
+	searchTerm := c.Query("search_term")
+
+	var result *repository.PaginatedResult[models.User]
+	var err error
+	if searchTerm != "" {
+		result, err = h.userService.Search(c.Context(), searchTerm, params)
+	} else {
+		result, err = h.userService.List(c.Context(), params)
+	}
+	if err != nil {
+		return responses.InternalError(c, "Could not fetch users")
+	}
+
+	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
+
+	users := make([]fiber.Map, len(result.Items))
+	for i, u := range result.Items {
+		users[i] = fiber.Map{
+			"id":            u.ID,
+			"name":          u.Name,
+			"sortable_name": u.SortableName,
+			"short_name":    u.ShortName,
+			"login_id":      u.LoginID,
+			"email":         u.Email,
+			"avatar_url":    u.AvatarURL,
+			"locale":        u.Locale,
+			"role":          u.Role,
+			"created_at":    u.CreatedAt,
+		}
+	}
+
+	return c.JSON(users)
+}

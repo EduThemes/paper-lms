@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.backend
+      args:
+        VERSION: ${VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgres://paper:${POSTGRES_PASSWORD}@postgres:5432/paper_lms?sslmode=disable
+      - JWT_SECRET=${JWT_SECRET}
+      - ENVIRONMENT=production
+      - FRONTEND_URL=${FRONTEND_URL}
+      - AUTO_MIGRATE=false
+      - FILE_STORAGE_PATH=/data/files
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-noreply@paperlms.org}
+      - SMTP_ENABLED=${SMTP_ENABLED:-false}
+    volumes:
+      - file-storage:/data/files
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - backend
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=paper
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=paper_lms
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paper -d paper_lms"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backup:
+    image: postgres:16-alpine
+    volumes:
+      - backup-data:/backups
+      - ../../scripts:/scripts:ro
+    environment:
+      - DATABASE_URL=postgres://paper:${POSTGRES_PASSWORD}@postgres:5432/paper_lms?sslmode=disable
+      - BACKUP_DIR=/backups
+      - RETENTION_DAYS=30
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["while true; do sh /scripts/backup.sh; sleep 86400; done"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  file-storage:
+  backup-data:

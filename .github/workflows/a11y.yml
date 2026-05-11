@@ -1,0 +1,49 @@
+name: Accessibility
+
+# Manual trigger only for now — Puppeteer/Chromium download flow needs more
+# work in CI before this can gate every push. Run on demand via the Actions
+# tab or `gh workflow run a11y.yml`. See web/scripts/run-axe.mjs.
+on:
+  workflow_dispatch:
+
+jobs:
+  axe:
+    name: axe-core audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: '1'
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Start static server
+        run: npx serve dist -l 5174 &
+
+      - name: Wait for server
+        run: npx --yes wait-on http://localhost:5174 -t 30000
+
+      - name: Run axe-core
+        run: npm run axe
+
+      - name: Upload screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: axe-screenshots
+          path: web/axe-screenshots
+          if-no-files-found: ignore

@@ -1,0 +1,332 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Reading-prefs styles must load AFTER Tailwind's typography plugin so the
+ * accessibility font / size / line-height overrides win against `.prose`'s
+ * defaults (equal specificity → source order decides). */
+@import './styles/reading-prefs.css';
+
+/* =========================================================
+   Paper LMS design tokens.
+
+   Designed to be legible on:
+     • a desktop browser, light and dark
+     • an e-ink tablet with ~32 shades of grey
+   The palette is grayscale-forward (the "paper") with one
+   restrained Canvas-style blue and three muted status accents.
+   Avoid dropping in saturated tints — they dither into mud
+   on grayscale displays.
+
+   Tokens are RGB channels so Tailwind can compose alpha:
+     class="bg-surface-0/80"  →  rgb(var(--color-surface-0) / 0.8)
+   ========================================================= */
+
+/* ---------- LIGHT (paper) ---------- */
+:root {
+  /* Surfaces — warm neutral whites, not cold blue-grays */
+  --color-surface-0:      252 252 250;   /* page — like real paper */
+  --color-surface-1:      247 247 244;   /* subdued panel */
+  --color-surface-2:      240 240 236;   /* recessed / sunken */
+  --color-surface-raised: 255 255 255;   /* card / popover lifted above page */
+
+  /* Borders — soft graphite */
+  --color-border-subtle:  234 234 230;
+  --color-border-default: 218 218 213;
+  --color-border-strong:  179 179 173;
+
+  /* Text — Canvas-style deep gray, never pitch black */
+  --color-text-primary:   38 41 47;      /* #26292F */
+  --color-text-secondary: 75 81 92;
+  --color-text-tertiary:  118 124 134;
+  --color-text-disabled:  165 170 178;
+
+  /* Brand — restrained Canvas-style blue.
+     Anchored at brand-600 (#1B6EB1), close to Canvas's #008EE2
+     but desaturated so it reads as paper-ink, not vibe-coded. */
+  --color-brand-50:  235 243 250;
+  --color-brand-100: 213 229 244;
+  --color-brand-200: 173 205 232;
+  --color-brand-300: 121 175 215;
+  --color-brand-400: 65 138 191;
+  --color-brand-500: 38 117 175;
+  --color-brand-600: 27 110 177;          /* #1B6EB1 — primary */
+  --color-brand-700: 23 88 141;
+  --color-brand-800: 22 70 110;
+  --color-brand-900: 24 56 86;
+
+  /* Accents — muted; status colors must read on grayscale */
+  --color-accent-info:    27 110 177;     /* same as brand */
+  --color-accent-success: 47 122 65;      /* muted forest */
+  --color-accent-warning: 156 109 33;     /* ochre, not neon */
+  --color-accent-danger:  171 60 36;      /* Canvas-red brick */
+
+  /* Chrome — persistent app shell; matches Canvas chrome */
+  --color-chrome-sidebar:    45 59 69;    /* #2D3B45 */
+  --color-chrome-sidebar-fg: 252 252 250;
+  --color-chrome-tooltip:    38 41 47;
+  --color-chrome-tooltip-fg: 252 252 250;
+
+  /* shadcn/ui — HSL channels mapped to the same palette so
+     shadcn primitives (Card, Button, Dropdown, …) match. */
+  --background:        0 0% 99%;
+  --foreground:        220 10% 17%;
+  --card:              0 0% 100%;
+  --card-foreground:   220 10% 17%;
+  --popover:           0 0% 100%;
+  --popover-foreground:220 10% 17%;
+  --primary:           207 74% 40%;
+  --primary-foreground:0 0% 99%;
+  --secondary:         60 9% 95%;
+  --secondary-foreground: 220 10% 17%;
+  --muted:             60 8% 94%;
+  --muted-foreground:  220 8% 49%;
+  --accent:            60 9% 95%;
+  --accent-foreground: 220 10% 17%;
+  --destructive:       12 65% 41%;
+  --destructive-foreground: 0 0% 99%;
+  --input:             45 8% 87%;
+  --ring:              207 74% 40%;
+  --radius:            0.5rem;
+}
+
+/* ---------- DARK (graphite) ---------- */
+/* Warm dark grays, not cold navy. Pure black is hard on the eye;
+   warm graphite reads like ink-on-charcoal-paper at night. */
+.dark {
+  /* Surfaces */
+  --color-surface-0:      24 24 27;       /* page — warm graphite */
+  --color-surface-1:      30 30 33;
+  --color-surface-2:      40 40 44;
+  --color-surface-raised: 36 36 40;       /* cards lift above page */
+
+  /* Borders */
+  --color-border-subtle:  44 44 49;
+  --color-border-default: 60 60 66;
+  --color-border-strong:  92 92 100;
+
+  /* Text */
+  --color-text-primary:   240 239 232;    /* warm white */
+  --color-text-secondary: 196 195 188;
+  --color-text-tertiary:  140 140 134;
+  --color-text-disabled:  90 92 96;
+
+  /* Brand — lifted ~2 stops so it reads on dark surfaces */
+  --color-brand-50:  24 56 86;
+  --color-brand-100: 22 70 110;
+  --color-brand-200: 23 88 141;
+  --color-brand-300: 27 110 177;
+  --color-brand-400: 38 117 175;
+  --color-brand-500: 65 138 191;
+  --color-brand-600: 121 175 215;          /* primary on dark */
+  --color-brand-700: 173 205 232;
+  --color-brand-800: 213 229 244;
+  --color-brand-900: 235 243 250;
+
+  /* Accents — slightly lifted for legibility on dark, still muted */
+  --color-accent-info:    121 175 215;
+  --color-accent-success: 86 167 102;
+  --color-accent-warning: 200 159 76;
+  --color-accent-danger:  207 102 80;
+
+  /* Chrome — lift the sidebar so it reads as a distinct layer */
+  --color-chrome-sidebar:    18 18 21;
+  --color-chrome-sidebar-fg: 240 239 232;
+  --color-chrome-tooltip:    240 239 232;
+  --color-chrome-tooltip-fg: 24 24 27;
+
+  /* shadcn/ui dark — mapped to the same palette */
+  --background:        240 4% 10%;
+  --foreground:        45 12% 92%;
+  --card:              240 5% 14%;
+  --card-foreground:   45 12% 92%;
+  --popover:           240 5% 14%;
+  --popover-foreground:45 12% 92%;
+  --primary:           207 50% 66%;
+  --primary-foreground:240 4% 10%;
+  --secondary:         240 4% 16%;
+  --secondary-foreground: 45 12% 92%;
+  --muted:             240 4% 16%;
+  --muted-foreground:  45 8% 60%;
+  --accent:            240 4% 16%;
+  --accent-foreground: 45 12% 92%;
+  --destructive:       12 55% 56%;
+  --destructive-foreground: 45 12% 92%;
+  --input:             240 4% 22%;
+  --ring:              207 50% 66%;
+}
+
+/* Sidebar scrollbar — slim, ink-on-paper, only appears on hover.
+   The default OS scrollbar inside the dark chrome sidebar reads as a
+   bright white bar that clashes with the muted palette. */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 200ms ease;
+}
+.sidebar-scroll:hover,
+.sidebar-scroll:focus-within {
+  scrollbar-color: rgb(255 255 255 / 0.20) transparent;
+}
+.sidebar-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 3px;
+  transition: background-color 200ms ease;
+}
+.sidebar-scroll:hover::-webkit-scrollbar-thumb,
+.sidebar-scroll:focus-within::-webkit-scrollbar-thumb {
+  background-color: rgb(255 255 255 / 0.20);
+}
+
+/* Generic content scrollbars — same restrained style for any page
+   element using overflow + .paper-scroll. Uses ink-on-paper grays. */
+.paper-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--color-border-strong) / 0.5) transparent;
+}
+.paper-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.paper-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.paper-scroll::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--color-border-strong) / 0.5);
+  border-radius: 4px;
+}
+.paper-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(var(--color-border-strong) / 0.8);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Rich Content (.reading-surface .prose)
+
+   Defaults that mimic Canvas's content rendering so imported courses look
+   familiar to teachers migrating from Canvas. Tailwind's `prose` plugin is
+   conservative on heading sizes and forces every <img> to display:block,
+   which breaks Canvas's common pattern of putting an icon inline inside an
+   <h2>/<h3>/<summary>. These overrides are scoped to .reading-surface so
+   they don't bleed into app chrome.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.reading-surface .prose {
+  /* Body type at 16px / 1.625 line-height. 1.625 is the "leading-relaxed"
+     value — comfortably above WCAG's 1.5 minimum, close to (but cleaner
+     than) the golden ratio (1.618), and a Fibonacci-adjacent 13/8.
+     Larson & Carter (2003) and NN/g screen-reading studies converge on
+     1.5–1.7 as optimal for digital body sans-serif. Heading line-heights
+     stay tight (1.2–1.3) below — large text reads better with less air. */
+  --tw-prose-body: rgb(var(--color-text-primary));
+  font-size: 1rem;
+  line-height: 1.625;
+}
+
+/* Heading sizes calibrated to Canvas's defaults. Weight stays at semibold
+   (600) — anything heavier overpowers the cartridge's own visual treatment
+   on chalkboard / branded headers. */
+.reading-surface .prose :where(h1, h2, h3, h4, h5, h6):not(:where([class~="not-prose"] *)) {
+  font-weight: 600;
+  color: rgb(var(--color-text-primary));
+}
+.reading-surface .prose :where(h1):not(:where([class~="not-prose"] *)) { font-size: 1.75rem; line-height: 1.2; margin-top: 1.4em; margin-bottom: .6em; }
+.reading-surface .prose :where(h2):not(:where([class~="not-prose"] *)) { font-size: 1.5rem;  line-height: 1.25; margin-top: 1.3em; margin-bottom: .5em; }
+.reading-surface .prose :where(h3):not(:where([class~="not-prose"] *)) { font-size: 1.25rem; line-height: 1.3; margin-top: 1.2em; margin-bottom: .4em; }
+.reading-surface .prose :where(h4):not(:where([class~="not-prose"] *)) { font-size: 1.125rem; margin-top: 1.1em; margin-bottom: .35em; }
+.reading-surface .prose :where(h5):not(:where([class~="not-prose"] *)) { font-size: 1rem; margin-top: 1em; margin-bottom: .3em; }
+.reading-surface .prose :where(h6):not(:where([class~="not-prose"] *)) { font-size: .9rem; margin-top: 1em; margin-bottom: .3em; text-transform: uppercase; letter-spacing: .04em; color: rgb(var(--color-text-secondary)); }
+
+/* Inline images inside headings + <summary> elements should sit on the
+   same line as the text, not get pushed onto their own line by prose's
+   `display: block`. Drop the rounded-lg/shadow that prose adds to imgs in
+   these contexts too — they're decorative icons, not content. */
+.reading-surface .prose :where(h1, h2, h3, h4, h5, h6, summary) :where(img):not(:where([class~="not-prose"] *)) {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 .5em 0 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Same treatment for inline images inside short text blocks (Canvas often
+   puts an icon next to a label inside a <p> or <span>). Apply only when
+   the image's intrinsic width is small (~64px) — prose's block style is
+   still useful for full-width content imagery. */
+.reading-surface .prose :where(p, span, li, td) :where(img[width])[width]:not(:where([class~="not-prose"] *)) {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 .25em;
+}
+
+/* <details>/<summary>: clickable disclosures. Only style elements WITHOUT
+   an inline style attribute — Canvas course designers commonly set their
+   own background, padding, borders etc., and our defaults shouldn't fight
+   them. Cartridges that ship plain <details>/<summary> still get a
+   reasonable treatment here.
+
+   The :not([style]) guard is the key — it makes these rules a true fallback
+   instead of a heavy-handed override. */
+.reading-surface .prose :where(details):not([style]):not(:where([class~="not-prose"] *)) {
+  margin: .75em 0;
+}
+.reading-surface .prose :where(summary):not([style]):not(:where([class~="not-prose"] *)) {
+  cursor: pointer;
+  font-weight: 600;
+  padding: .25em 0;
+}
+.reading-surface .prose :where(summary):not([style]):not(:where([class~="not-prose"] *)):focus-visible {
+  outline: 2px solid rgb(var(--color-brand-500));
+  outline-offset: 2px;
+  border-radius: .25rem;
+}
+
+/* Tables: Canvas content uses tables heavily for layout + content. Soften
+   prose's table borders to feel less like a spreadsheet. */
+.reading-surface .prose :where(table):not(:where([class~="not-prose"] *)) {
+  margin: 1em 0;
+}
+
+/* Buttons inside imported content (Canvas instructors occasionally embed
+   <button>). Give them a recognizable affordance only when the author
+   hasn't styled them inline. */
+.reading-surface .prose :where(button):not([style]):not([class]):not(:where([class~="not-prose"] *)) {
+  display: inline-block;
+  padding: .4em .9em;
+  border-radius: .375rem;
+  background: rgb(var(--color-brand-500));
+  color: #fff;
+  border: 0;
+  font-size: .95em;
+  cursor: pointer;
+}
+
+/* Embedded iframes should be responsive by default. */
+.reading-surface .prose :where(iframe):not([style]):not(:where([class~="not-prose"] *)) {
+  max-width: 100%;
+  border-radius: .25rem;
+  margin: 1em 0;
+}
+
+/* Horizontal rule: subtle separator only when not custom-styled. */
+.reading-surface .prose :where(hr):not([style]):not(:where([class~="not-prose"] *)) {
+  border: 0;
+  border-top: 1px solid rgb(var(--color-border-default));
+  margin: 1.5em 0;
+}

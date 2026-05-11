@@ -1,0 +1,17 @@
+DROP INDEX IF EXISTS idx_submissions_assignment_user;
+DROP INDEX IF EXISTS idx_submissions_user_state;
+DROP INDEX IF EXISTS idx_assignments_course_state;
+DROP INDEX IF EXISTS idx_modules_course_position;
+DROP INDEX IF EXISTS idx_content_tags_module_position;
+DROP INDEX IF EXISTS idx_discussion_entries_topic_created;
+DROP INDEX IF EXISTS idx_quiz_submissions_quiz_user;
+DROP INDEX IF EXISTS idx_submission_comments_sub_created;
+DROP INDEX IF EXISTS idx_assignment_overrides_assignment;
+DROP INDEX IF EXISTS idx_assignment_override_students_override;
+DROP INDEX IF EXISTS idx_module_prerequisites_module;
+DROP INDEX IF EXISTS idx_outcome_alignments_assignment;
+DROP INDEX IF EXISTS idx_outcome_alignments_course;
+DROP INDEX IF EXISTS idx_peer_reviews_assignment_reviewer;
+DROP INDEX IF EXISTS idx_audit_logs_course_created;
+DROP INDEX IF EXISTS idx_grade_change_logs_course_created;
+DROP INDEX IF EXISTS idx_notifications_user_created;

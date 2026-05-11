@@ -1,0 +1,138 @@
+/* Reading Preferences — applied globally to .prose and .reading-surface.
+ *
+ * Accessibility fonts are self-hosted under /fonts/ so the prefs work
+ * offline (PWA), in air-gapped school networks, and without leaking
+ * student-IP-correlated requests to a third-party CDN. Each face is a
+ * single ~17–40 KB woff2 file; the four families together add ~600 KB
+ * which only loads when a user selects the corresponding preset.
+ *
+ * Sources (all licensed for redistribution):
+ *   Lexend                 — SIL Open Font License v1.1 (Google Fonts)
+ *   Atkinson Hyperlegible  — SIL OFL v1.1 (Braille Institute / Google Fonts)
+ *   OpenDyslexic           — SIL OFL v1.1 (antijingoist GitHub release v0.91.12)
+ *
+ * font-display: swap so the layout doesn't FOIT while a face is loading;
+ * the system fallback in the FONT_STACKS map renders first. */
+
+@font-face {
+  font-family: 'Lexend';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/lexend/variable.woff2') format('woff2-variations'),
+       url('/fonts/lexend/variable.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Atkinson Hyperlegible';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/atkinson-hyperlegible/regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Atkinson Hyperlegible';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/atkinson-hyperlegible/bold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Atkinson Hyperlegible';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/atkinson-hyperlegible/italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Atkinson Hyperlegible';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/atkinson-hyperlegible/bold-italic.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'OpenDyslexic';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/opendyslexic/regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'OpenDyslexic';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/opendyslexic/bold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'OpenDyslexic';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/opendyslexic/italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'OpenDyslexic';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/opendyslexic/bold-italic.woff2') format('woff2');
+}
+
+.prose,
+.prose *,
+.reading-surface,
+.reading-surface * {
+  font-family: var(--reading-font-family, inherit);
+  letter-spacing: var(--reading-letter-spacing, 0);
+}
+
+.prose,
+.reading-surface {
+  font-size: calc(1rem * var(--reading-font-scale, 1));
+  line-height: var(--reading-line-height, 1.6);
+}
+
+/* Headings scale proportionally but keep their own line-height for rhythm */
+.prose :where(h1, h2, h3, h4, h5, h6),
+.reading-surface :where(h1, h2, h3, h4, h5, h6) {
+  line-height: 1.25;
+  letter-spacing: var(--reading-letter-spacing, 0);
+}
+
+/* Reading column width — applies only when an explicit max is set */
+.reading-surface {
+  max-width: var(--reading-max-width, none);
+}
+
+/* Background themes — opt-in via data attribute on <html> */
+html[data-reading-bg="cream"] .prose,
+html[data-reading-bg="cream"] .reading-surface,
+html[data-reading-bg="gray"]  .prose,
+html[data-reading-bg="gray"]  .reading-surface,
+html[data-reading-bg="dark"]  .prose,
+html[data-reading-bg="dark"]  .reading-surface {
+  background-color: var(--reading-bg);
+  color: var(--reading-fg);
+  padding: 1rem 1.25rem;
+  border-radius: 0.5rem;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+html[data-reading-bg="dark"] .prose :where(h1, h2, h3, h4, h5, h6),
+html[data-reading-bg="dark"] .reading-surface :where(h1, h2, h3, h4, h5, h6) {
+  color: var(--reading-fg);
+}
+
+/* Suppress italics for dyslexic readers */
+html[data-reading-no-italic="1"] .prose :where(em, i, cite, blockquote),
+html[data-reading-no-italic="1"] .reading-surface :where(em, i, cite, blockquote) {
+  font-style: normal;
+}
+
+/* Honour reduced-motion users on the live preview transitions */
+@media (prefers-reduced-motion: reduce) {
+  .reading-surface { transition: none; }
+}

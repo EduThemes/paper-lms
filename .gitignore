@@ -1,0 +1,70 @@
+# Binaries
+/main
+/server
+/paper-lms
+/paper-lms-server
+/bin/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# File storage (local backend)
+/storage/files/
+
+# Dependencies
+web/node_modules/
+node_modules/
+
+# Build output
+web/dist/
+/dist/
+
+# Coverage
+coverage.out
+coverage.html
+web/coverage/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# macOS iCloud sync duplicates (Paper LMS dev environment)
+* 2.go
+* 2.sql
+* 2.jsx
+* 2.json
+* 2.md
+* 2.yml
+* 2.tsx
+* 2.ts
+* 2.css
+* 3.*
+* 4.*
+
+# Logs
+*.log
+logs/
+
+# Local Claude / agent scratch
+.claude/
+memory/
+CLAUDE.md
+# Defensive: never let phase-progress notes land in the tree even if a copy
+# ends up outside .claude/ or memory/.
+project_phase_progress.md
+project_phase*.md
+**/project_phase_progress.md

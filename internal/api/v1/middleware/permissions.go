@@ -1,0 +1,223 @@
+package middleware
+
+import (
+	"strconv"
+	"strings"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/EduThemes/paper-lms/internal/repository"
+)
+
+// PermissionMiddleware provides role-based access control for routes.
+type PermissionMiddleware struct {
+	enrollmentRepo repository.EnrollmentRepository
+	userRepo       repository.UserRepository
+}
+
+// NewPermissionMiddleware creates a new permission middleware.
+func NewPermissionMiddleware(enrollmentRepo repository.EnrollmentRepository, userRepo repository.UserRepository) *PermissionMiddleware {
+	return &PermissionMiddleware{
+		enrollmentRepo: enrollmentRepo,
+		userRepo:       userRepo,
+	}
+}
+
+// forbidden returns a 403 error in Canvas format.
+func forbidden(c *fiber.Ctx, msg string) error {
+	return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+		"errors": []fiber.Map{{"message": msg}},
+	})
+}
+
+// RequireAdmin ensures the user has admin role. Used for account-scoped routes.
+func (pm *PermissionMiddleware) RequireAdmin() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userID, ok := c.Locals("user_id").(uint)
+		if !ok || userID == 0 {
+			return forbidden(c, "user not authenticated")
+		}
+
+		user, err := pm.userRepo.FindByID(c.Context(), userID)
+		if err != nil {
+			return forbidden(c, "user not found")
+		}
+
+		if user.Role != "admin" {
+			return forbidden(c, "user is not an account admin")
+		}
+
+		c.Locals("is_admin", true)
+		return c.Next()
+	}
+}
+
+// RequireCourseRole ensures the user has one of the specified enrollment types
+// in the course identified by :course_id param. Admins always pass.
+// Valid roles: "TeacherEnrollment", "TaEnrollment", "StudentEnrollment",
+// "ObserverEnrollment", "DesignerEnrollment"
+func (pm *PermissionMiddleware) RequireCourseRole(roles ...string) fiber.Handler {
+	roleSet := make(map[string]bool, len(roles))
+	for _, r := range roles {
+		roleSet[r] = true
+	}
+
+	return func(c *fiber.Ctx) error {
+		userID, ok := c.Locals("user_id").(uint)
+		if !ok || userID == 0 {
+			return forbidden(c, "user not authenticated")
+		}
+
+		// Admins bypass course role checks
+		if pm.isAdmin(c, userID) {
+			c.Locals("is_admin", true)
+			c.Locals("enrollment_type", "TeacherEnrollment") // admin gets teacher-level access
+			return c.Next()
+		}
+
+		courseID, err := pm.extractCourseID(c)
+		if err != nil {
+			return forbidden(c, "invalid course_id")
+		}
+
+		enrollment, err := pm.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, courseID)
+		if err != nil {
+			return forbidden(c, "user is not enrolled in this course")
+		}
+
+		if enrollment.WorkflowState != "active" {
+			return forbidden(c, "enrollment is not active")
+		}
+
+		if !roleSet[enrollment.Type] {
+			return forbidden(c, "insufficient permissions for this action")
+		}
+
+		c.Locals("enrollment_type", enrollment.Type)
+		c.Locals("enrollment_id", enrollment.ID)
+		return c.Next()
+	}
+}
+
+// RequireEnrolled ensures the user is enrolled in the course (any role). Admins pass.
+func (pm *PermissionMiddleware) RequireEnrolled() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userID, ok := c.Locals("user_id").(uint)
+		if !ok || userID == 0 {
+			return forbidden(c, "user not authenticated")
+		}
+
+		if pm.isAdmin(c, userID) {
+			c.Locals("is_admin", true)
+			return c.Next()
+		}
+
+		courseID, err := pm.extractCourseID(c)
+		if err != nil {
+			return forbidden(c, "invalid course_id")
+		}
+
+		enrollment, err := pm.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, courseID)
+		if err != nil {
+			return forbidden(c, "user is not enrolled in this course")
+		}
+
+		if enrollment.WorkflowState != "active" {
+			return forbidden(c, "enrollment is not active")
+		}
+
+		c.Locals("enrollment_type", enrollment.Type)
+		c.Locals("enrollment_id", enrollment.ID)
+		return c.Next()
+	}
+}
+
+// RequireSelfOrAdmin ensures the user_id in the URL matches the authenticated user,
+// or the user is an admin.
+func (pm *PermissionMiddleware) RequireSelfOrAdmin() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userID, ok := c.Locals("user_id").(uint)
+		if !ok || userID == 0 {
+			return forbidden(c, "user not authenticated")
+		}
+
+		// Check if the URL user_id matches or is "self"
+		// Routes may use :user_id or :id — check both
+		paramUserID := c.Params("user_id")
+		if paramUserID == "" {
+			paramUserID = c.Params("id")
+		}
+		if paramUserID == "self" {
+			return c.Next()
+		}
+		if paramUserID == "" {
+			return forbidden(c, "missing user identifier in URL")
+		}
+
+		targetID, err := strconv.ParseUint(paramUserID, 10, 64)
+		if err != nil {
+			return forbidden(c, "invalid user_id")
+		}
+
+		if uint(targetID) == userID {
+			return c.Next()
+		}
+
+		// Not self — must be admin
+		if pm.isAdmin(c, userID) {
+			c.Locals("is_admin", true)
+			return c.Next()
+		}
+
+		return forbidden(c, "can only access your own data unless admin")
+	}
+}
+
+// RequireInstructor is a convenience for RequireCourseRole with teacher/TA roles.
+func (pm *PermissionMiddleware) RequireInstructor() fiber.Handler {
+	return pm.RequireCourseRole("TeacherEnrollment", "TaEnrollment")
+}
+
+// RequireStudentOrHigher allows students, TAs, teachers, designers, and admins.
+func (pm *PermissionMiddleware) RequireStudentOrHigher() fiber.Handler {
+	return pm.RequireCourseRole("StudentEnrollment", "TeacherEnrollment", "TaEnrollment", "DesignerEnrollment", "ObserverEnrollment")
+}
+
+// isAdmin checks if the user has admin role (with caching in Locals).
+func (pm *PermissionMiddleware) isAdmin(c *fiber.Ctx, userID uint) bool {
+	if cached, ok := c.Locals("is_admin").(bool); ok {
+		return cached
+	}
+
+	user, err := pm.userRepo.FindByID(c.Context(), userID)
+	if err != nil {
+		return false
+	}
+
+	isAdmin := user.Role == "admin"
+	c.Locals("is_admin", isAdmin)
+	return isAdmin
+}
+
+// extractCourseID gets the course ID from various URL param names.
+func (pm *PermissionMiddleware) extractCourseID(c *fiber.Ctx) (uint, error) {
+	// Try :course_id first, then :id for /courses/:id routes
+	courseIDStr := c.Params("course_id")
+	if courseIDStr == "" {
+		// For routes like /courses/:id, check the path
+		path := c.Path()
+		if strings.HasPrefix(path, "/api/v1/courses/") {
+			courseIDStr = c.Params("id")
+		}
+	}
+
+	if courseIDStr == "" {
+		return 0, fiber.NewError(fiber.StatusBadRequest, "no course_id found")
+	}
+
+	id, err := strconv.ParseUint(courseIDStr, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return uint(id), nil
+}
