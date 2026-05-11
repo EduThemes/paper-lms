@@ -87,7 +87,7 @@ describe('ItemBankManagerPage', () => {
     const checkbox = screen.getByRole('checkbox');
     fireEvent.click(checkbox);
     fireEvent.click(screen.getByRole('button', { name: /Add 1/ }));
-    await waitFor(() => expect(mockApi.addBankItemToQuiz).toHaveBeenCalledWith('1', '99', 10));
+    await waitFor(() => expect(mockApi.addBankItemToQuiz).toHaveBeenCalledWith(1, 10, '99'));
   });
 
   it('random draw calls randomDrawFromBank with the bank + count', async () => {
@@ -99,6 +99,6 @@ describe('ItemBankManagerPage', () => {
     const select = await screen.findByRole('combobox');
     fireEvent.change(select, { target: { value: '99' } });
     fireEvent.click(screen.getByRole('button', { name: /Draw 5/ }));
-    await waitFor(() => expect(mockApi.randomDrawFromBank).toHaveBeenCalledWith('1', '99', 1, 5));
+    await waitFor(() => expect(mockApi.randomDrawFromBank).toHaveBeenCalledWith(1, '99', 5));
   });
 });

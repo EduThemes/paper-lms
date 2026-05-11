@@ -119,7 +119,7 @@ const ItemBankManagerPage = () => {
       // pull_to_quiz endpoint when the new one isn't deployed yet.
       for (const itemId of selectedItemIds) {
         try {
-          await api.addBankItemToQuiz(courseId, targetQuizId, itemId);
+          await api.addBankItemToQuiz(pushDialog.bank.id, itemId, targetQuizId);
         } catch {
           await api.pullBankQuestionsToQuiz(courseId, pushDialog.bank.id, targetQuizId, [itemId]);
         }
@@ -138,7 +138,7 @@ const ItemBankManagerPage = () => {
     setPushing(true);
     try {
       try {
-        await api.randomDrawFromBank(courseId, targetQuizId, pushDialog.bank.id, Number(randomCount));
+        await api.randomDrawFromBank(pushDialog.bank.id, targetQuizId, Number(randomCount));
       } catch {
         // Fallback: pick N random item ids client-side and push them.
         const pool = [...items];
