@@ -17,4 +17,7 @@ type QuizQuestion struct {
 	WorkflowState     string    `json:"workflow_state" gorm:"not null;default:'active'"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
+	// Wave A2 additions — both nullable so existing rows are unaffected.
+	BankItemID *uint `json:"bank_item_id" gorm:"index"`
+	StimulusID *uint `json:"stimulus_id" gorm:"index"`
 }
