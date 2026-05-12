@@ -34,12 +34,13 @@ func courseToJSON(c *models.Course) fiber.Map {
 	}
 
 	return fiber.Map{
-		"id":             c.ID,
-		"account_id":     c.AccountID,
-		"name":           c.Name,
-		"course_code":    c.CourseCode,
-		"workflow_state": c.WorkflowState,
-		"start_at":       c.StartAt,
+		"id":                 c.ID,
+		"account_id":         c.AccountID,
+		"name":               c.Name,
+		"course_code":        c.CourseCode,
+		"workflow_state":     c.WorkflowState,
+		"enrollment_term_id": c.EnrollmentTermID,
+		"start_at":           c.StartAt,
 		"end_at":         c.EndAt,
 		"default_view":   c.DefaultView,
 		"syllabus_body":  c.SyllabusBody,
@@ -123,13 +124,14 @@ func (h *CourseHandler) GetCourse(c *fiber.Ctx) error {
 
 type createCourseRequest struct {
 	Course struct {
-		Name          string     `json:"name"`
-		CourseCode    string     `json:"course_code"`
-		StartAt       *time.Time `json:"start_at"`
-		EndAt         *time.Time `json:"end_at"`
-		DefaultView   string     `json:"default_view"`
-		SyllabusBody  string     `json:"syllabus_body"`
-		License       string     `json:"license"`
+		Name             string     `json:"name"`
+		CourseCode       string     `json:"course_code"`
+		EnrollmentTermID *uint      `json:"enrollment_term_id"`
+		StartAt          *time.Time `json:"start_at"`
+		EndAt            *time.Time `json:"end_at"`
+		DefaultView      string     `json:"default_view"`
+		SyllabusBody     string     `json:"syllabus_body"`
+		License          string     `json:"license"`
 		IsPublic          bool       `json:"is_public"`
 		UIMode            string     `json:"ui_mode"`
 		ApplyGroupWeights bool       `json:"apply_assignment_group_weights"`
@@ -152,13 +154,14 @@ func (h *CourseHandler) CreateCourse(c *fiber.Ctx) error {
 	}
 
 	course := &models.Course{
-		Name:         input.Course.Name,
-		CourseCode:   input.Course.CourseCode,
-		StartAt:      input.Course.StartAt,
-		EndAt:        input.Course.EndAt,
-		DefaultView:  input.Course.DefaultView,
-		SyllabusBody: input.Course.SyllabusBody,
-		License:      input.Course.License,
+		Name:             input.Course.Name,
+		CourseCode:       input.Course.CourseCode,
+		EnrollmentTermID: input.Course.EnrollmentTermID,
+		StartAt:          input.Course.StartAt,
+		EndAt:            input.Course.EndAt,
+		DefaultView:      input.Course.DefaultView,
+		SyllabusBody:     input.Course.SyllabusBody,
+		License:          input.Course.License,
 		IsPublic:          input.Course.IsPublic,
 		UIMode:            input.Course.UIMode,
 		ApplyGroupWeights: input.Course.ApplyGroupWeights,
@@ -192,10 +195,11 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 	var input struct {
 		Course struct {
 			Name          *string    `json:"name"`
-			CourseCode    *string    `json:"course_code"`
-			StartAt       *time.Time `json:"start_at"`
-			EndAt         *time.Time `json:"end_at"`
-			DefaultView   *string    `json:"default_view"`
+			CourseCode       *string    `json:"course_code"`
+			EnrollmentTermID *uint      `json:"enrollment_term_id"`
+			StartAt          *time.Time `json:"start_at"`
+			EndAt            *time.Time `json:"end_at"`
+			DefaultView      *string    `json:"default_view"`
 			SyllabusBody  *string    `json:"syllabus_body"`
 			License       *string    `json:"license"`
 			IsPublic      *bool      `json:"is_public"`
@@ -215,6 +219,9 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 	}
 	if input.Course.CourseCode != nil {
 		course.CourseCode = *input.Course.CourseCode
+	}
+	if input.Course.EnrollmentTermID != nil {
+		course.EnrollmentTermID = input.Course.EnrollmentTermID
 	}
 	if input.Course.StartAt != nil {
 		course.StartAt = input.Course.StartAt
