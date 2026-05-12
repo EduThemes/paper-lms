@@ -6,6 +6,72 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Phase 6 / Wave 1 Sprint D-1 — emit wiring + read-side API
+
+Wires the Sprint C rules engine into the rest of Paper LMS. Internal
+service-layer events (graded submissions, completed quizzes, course
+enrollments, page views) now fire `gamification.Emit` via async
+callback hooks, so any rule a teacher authors against those triggers
+actually fires in production. Adds the first slice of the read-side
+HTTP API (wallet + currencies) so a learner / admin can see engine
+state from the browser.
+
+- **`internal/service/gamification/vocabulary.go`**: canonical
+  `Verb*` and `Object*` constants (submitted, graded, completed,
+  viewed, enrolled / Assignment, Submission, Quiz, Page, Course, …).
+  Rules reference these strings directly; one source of truth so a
+  call-site and a rule can't drift.
+- **Callback infrastructure on three more services**: `QuizService`,
+  `EnrollmentService`, and the new `ContentViewService` (thin
+  orchestrator owning the `content_views` upsert) all gained the
+  `OnX(cb)` / `fireOnX(...)` pattern the existing
+  `SubmissionService.OnGraded` introduced. Goroutine fan-out with
+  panic recovery; failures NEVER block the originating write.
+- **`internal/service/gamification/wiring/`** (new package):
+  one wiring function per emit domain — `GradedSubmissionEmitCallback`,
+  `CompletedQuizEmitCallback`, `EnrolledCourseEmitCallback`,
+  `ViewedContentEmitCallback`. Each returns a typed callback closed
+  over the right repositories, walks the entity → course → account
+  chain for `tenant_id`, builds the xAPI-shaped event, and calls
+  `Emit`. Errors are logged via `slog.Error` and propagation is
+  swallowed by design (a gamification failure can't break the
+  student's submission write).
+- **`internal/api/v1/handlers/pages.go`**: the authenticated
+  `GetPage` handler calls `contentViewService.RecordView` after
+  rendering, upserting `content_views` and firing the
+  `verb=viewed, object_type=Page` callback. The anonymous
+  `GetPublicPage` path is intentionally untouched (no `user_id` in
+  Locals).
+- **`internal/api/v1/handlers/gamification.go`** (new):
+  `GET /api/v1/users/:id/wallet` — joined wallet balance + currency
+  metadata view (self-or-admin-authorized), and
+  `GET /api/v1/gamification/currencies` (with `?topbar_only=true`) —
+  every currency_type the tenant has defined, sorted by
+  `display_order`. These are the read endpoints the topbar widget
+  and learner profile will consume.
+- **`cmd/server/main.go`**: assembles the `Emitter` against every
+  Sprint C repository, registers each wiring callback against the
+  service that owns the lifecycle event, wires
+  `contentViewService` into the page handler via
+  `SetContentViewService`, and threads the new
+  `GamificationHandler` through `NewRouter` so the read API is
+  reachable.
+- **End-to-end test**:
+  `TestGradeSubmission_TriggersRuleViaCallback` — exercises the full
+  production path. Builds `SubmissionService` with the real
+  callback, calls `SubmissionService.Grade(95)`, polls until the
+  downstream wallet transaction lands (the callback fires
+  asynchronously in a goroutine), asserts +50 xp + a single
+  `rule_evaluation` row. This is the proof that *all* the Sprint A
+  → B → C → D-1 pieces snap together.
+
+Out of scope for Sprint D-1 (Sprint D-2 follow-up): discussion entry
+emit, outcome-mastery threshold-crossing emit, rubric assessment emit,
+`POST /api/v1/gamification/events` write endpoint, full pgvector CI
+matrix, and the policy-flag derivation refinement (the FERPA guard's
+"no tag → no violation" posture means current emits are safe with
+empty policy_flags).
+
 ### Phase 6 / Wave 1 Sprint C — rule engine end-to-end
 
 Lands the working rules engine: a public `gamification.Emit` entry point

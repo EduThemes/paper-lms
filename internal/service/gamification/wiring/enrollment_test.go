@@ -7,25 +7,15 @@ package wiring_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"fmt"
-	"net/url"
-	"os"
 	"testing"
-	"time"
 
-	"github.com/EduThemes/paper-lms/internal/db"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	pgrepo "github.com/EduThemes/paper-lms/internal/repository/postgres"
 	"github.com/EduThemes/paper-lms/internal/service/gamification"
-	gamificationEffects "github.com/EduThemes/paper-lms/internal/service/gamification/effects"
 	"github.com/EduThemes/paper-lms/internal/service/gamification/wiring"
-	_ "github.com/lib/pq"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 func TestEnrolledCourseEmitCallback_HappyPath(t *testing.T) {
@@ -230,113 +220,16 @@ type fixture struct {
 }
 
 // buildEmitterFixture wires a fully real gamification.Emitter against the
-// freshDB. Every Emitter dependency uses the real postgres impl so the
-// callback's full path (load enrollment → load course → Emit → persist
-// event → dispatch with empty rule index) exercises production code.
+// freshDB. Uses the shared buildEmitter helper in testhelpers_test.go and
+// adds just the two repos the enrollment callback closes over.
 func buildEmitterFixture(t *testing.T, g *gorm.DB) fixture {
 	t.Helper()
-	submissionRepo := pgrepo.NewSubmissionRepository(g)
-	quizSubRepo := pgrepo.NewQuizSubmissionRepository(g)
-	outcomeRepo := pgrepo.NewLearningOutcomeResultRepository(g)
-	contentViewRepo := pgrepo.NewContentViewRepository(g)
-	walletRepo := pgrepo.NewGamificationWalletRepository(g)
-	currencyRepo := pgrepo.NewGamificationCurrencyTypeRepository(g)
-	ruleRepo := pgrepo.NewGamificationRuleRepository(g)
-	eventRepo := pgrepo.NewGamificationEventRepository(g)
-	ferpaRepo := pgrepo.NewGamificationFerpaFieldTagRepository(g)
-
-	emitter := gamification.NewEmitter(gamification.EmitterDeps{
-		Dispatch: gamification.DispatchDeps{
-			Snapshot: gamification.SnapshotDeps{
-				Submissions:     submissionRepo,
-				QuizSubmissions: quizSubRepo,
-				OutcomeResults:  outcomeRepo,
-				ContentViews:    contentViewRepo,
-				Wallet:          walletRepo,
-				CurrencyType:    currencyRepo,
-			},
-			Rules: ruleRepo,
-			Effects: gamificationEffects.EffectDeps{
-				Wallet:       walletRepo,
-				CurrencyType: currencyRepo,
-			},
-		},
-		Events:    eventRepo,
-		FerpaTags: ferpaRepo,
-	})
-
 	return fixture{
-		emitter:        emitter,
+		emitter:        buildEmitter(t, g),
 		enrollmentRepo: pgrepo.NewEnrollmentRepository(g),
 		courseRepo:     pgrepo.NewCourseRepository(g),
 	}
 }
 
-// --- DB plumbing — mirrors internal/service/gamification/seed_test.go ---
-
-func freshDB(t *testing.T) (*gorm.DB, func()) {
-	t.Helper()
-	parityURL := os.Getenv("PARITY_DB_URL")
-	if parityURL == "" {
-		parityURL = os.Getenv("DATABASE_URL")
-	}
-	if parityURL == "" {
-		t.Skip("set PARITY_DB_URL (or DATABASE_URL) to run wiring integration tests")
-	}
-
-	adminURL := swapDatabase(t, parityURL, "postgres")
-	admin, err := sql.Open("postgres", adminURL)
-	if err != nil {
-		t.Fatalf("open admin: %v", err)
-	}
-
-	name := fmt.Sprintf("paper_lms_wiring_%d", time.Now().UnixNano())
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf(`CREATE DATABASE %q`, name)); err != nil {
-		_ = admin.Close()
-		t.Fatalf("create db %s: %v", name, err)
-	}
-
-	dbURL := swapDatabase(t, parityURL, name)
-	bs, err := sql.Open("postgres", dbURL)
-	if err != nil {
-		t.Fatalf("open %s: %v", dbURL, err)
-	}
-	if _, err := bs.Exec(`CREATE EXTENSION IF NOT EXISTS vector`); err != nil {
-		_ = bs.Close()
-		t.Fatalf("create extension: %v", err)
-	}
-	_ = bs.Close()
-
-	g, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("gorm open: %v", err)
-	}
-	if err := db.MigrateUp(g); err != nil {
-		t.Fatalf("migrate up: %v", err)
-	}
-
-	cleanup := func() {
-		if raw, err := g.DB(); err == nil {
-			_ = raw.Close()
-		}
-		dropCtx, dropCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer dropCancel()
-		_, _ = admin.ExecContext(dropCtx, fmt.Sprintf(`DROP DATABASE IF EXISTS %q WITH (FORCE)`, name))
-		_ = admin.Close()
-	}
-	return g, cleanup
-}
-
-func swapDatabase(t *testing.T, rawURL, dbName string) string {
-	t.Helper()
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		t.Fatalf("parse URL: %v", err)
-	}
-	u.Path = "/" + dbName
-	return u.String()
-}
+// DB plumbing (freshDB + swapDatabase) lives in testhelpers_test.go and is
+// shared across every wiring_test integration test.

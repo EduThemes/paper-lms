@@ -10,98 +10,19 @@ package wiring_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"fmt"
-	"net/url"
-	"os"
 	"testing"
-	"time"
 
-	"github.com/EduThemes/paper-lms/internal/db"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/repository/postgres"
 	"github.com/EduThemes/paper-lms/internal/service/gamification"
-	"github.com/EduThemes/paper-lms/internal/service/gamification/effects"
 	"github.com/EduThemes/paper-lms/internal/service/gamification/wiring"
-
-	_ "github.com/lib/pq"
-	gormpg "gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
-// freshDB spins up a one-shot database for a single test, mirroring the
-// pattern used in internal/service/gamification/seed_test.go. We
-// duplicate it here rather than export it to keep the gamification
-// package's test surface unchanged.
-func freshDB(t *testing.T) (*gorm.DB, func()) {
-	t.Helper()
-	parityURL := os.Getenv("PARITY_DB_URL")
-	if parityURL == "" {
-		parityURL = os.Getenv("DATABASE_URL")
-	}
-	if parityURL == "" {
-		t.Skip("set PARITY_DB_URL (or DATABASE_URL) to run wiring integration tests")
-	}
-
-	adminURL := swapDatabase(t, parityURL, "postgres")
-	admin, err := sql.Open("postgres", adminURL)
-	if err != nil {
-		t.Fatalf("open admin: %v", err)
-	}
-
-	name := fmt.Sprintf("paper_lms_wiring_%d", time.Now().UnixNano())
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf(`CREATE DATABASE %q`, name)); err != nil {
-		_ = admin.Close()
-		t.Fatalf("create db %s: %v", name, err)
-	}
-
-	dbURL := swapDatabase(t, parityURL, name)
-	bs, err := sql.Open("postgres", dbURL)
-	if err != nil {
-		t.Fatalf("open %s: %v", dbURL, err)
-	}
-	if _, err := bs.Exec(`CREATE EXTENSION IF NOT EXISTS vector`); err != nil {
-		_ = bs.Close()
-		t.Fatalf("create extension: %v", err)
-	}
-	_ = bs.Close()
-
-	g, err := gorm.Open(gormpg.Open(dbURL), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("gorm open: %v", err)
-	}
-	if err := db.MigrateUp(g); err != nil {
-		t.Fatalf("migrate up: %v", err)
-	}
-
-	cleanup := func() {
-		if raw, err := g.DB(); err == nil {
-			_ = raw.Close()
-		}
-		dropCtx, dropCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer dropCancel()
-		_, _ = admin.ExecContext(dropCtx, fmt.Sprintf(`DROP DATABASE IF EXISTS %q WITH (FORCE)`, name))
-		_ = admin.Close()
-	}
-	return g, cleanup
-}
-
-func swapDatabase(t *testing.T, rawURL, dbName string) string {
-	t.Helper()
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		t.Fatalf("parse URL: %v", err)
-	}
-	u.Path = "/" + dbName
-	return u.String()
-}
+// DB plumbing (freshDB + swapDatabase) lives in testhelpers_test.go and is
+// shared across every wiring_test integration test.
 
 // viewFixture bundles the rows + emitter the three callback tests share.
 type viewFixture struct {
@@ -149,37 +70,9 @@ func setupViewFixture(t *testing.T) viewFixture {
 		t.Fatalf("create page: %v", err)
 	}
 
-	// Wire emitter with the smallest possible dep set — the rules engine
-	// won't fire any rule (none seeded) but the events row must land.
-	subRepo := postgres.NewSubmissionRepository(g)
-	quizSubRepo := postgres.NewQuizSubmissionRepository(g)
-	outcomeRepo := postgres.NewLearningOutcomeResultRepository(g)
-	contentViewRepo := postgres.NewContentViewRepository(g)
-	walletRepo := postgres.NewGamificationWalletRepository(g)
-	currencyRepo := postgres.NewGamificationCurrencyTypeRepository(g)
-	ruleRepo := postgres.NewGamificationRuleRepository(g)
-	eventRepo := postgres.NewGamificationEventRepository(g)
-	ferpaRepo := postgres.NewGamificationFerpaFieldTagRepository(g)
-
-	emitter := gamification.NewEmitter(gamification.EmitterDeps{
-		Dispatch: gamification.DispatchDeps{
-			Snapshot: gamification.SnapshotDeps{
-				Submissions:     subRepo,
-				QuizSubmissions: quizSubRepo,
-				OutcomeResults:  outcomeRepo,
-				ContentViews:    contentViewRepo,
-				Wallet:          walletRepo,
-				CurrencyType:    currencyRepo,
-			},
-			Rules: ruleRepo,
-			Effects: effects.EffectDeps{
-				Wallet:       walletRepo,
-				CurrencyType: currencyRepo,
-			},
-		},
-		Events:    eventRepo,
-		FerpaTags: ferpaRepo,
-	})
+	// Shared buildEmitter from testhelpers_test.go wires every repository
+	// the gamification.Emitter needs against this scratch GORM connection.
+	emitter := buildEmitter(t, g)
 
 	return viewFixture{
 		db:       g,
