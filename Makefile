@@ -1,4 +1,4 @@
-.PHONY: build run test lint vet clean docker migrate-up migrate-down migrate-version migrate-baseline migrate-create dev backup restore
+.PHONY: build run test lint vet clean docker migrate-up migrate-down migrate-version migrate-baseline migrate-create schema-diff schema-diff-sql dev backup restore
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS = -ldflags "-X main.Version=$(VERSION)"
@@ -54,6 +54,19 @@ migrate-create:
 	touch "internal/db/migrations/$${padded}_$${name}.down.sql"; \
 	echo "Created internal/db/migrations/$${padded}_$${name}.up.sql"; \
 	echo "Created internal/db/migrations/$${padded}_$${name}.down.sql"
+
+# Schema parity: compare GORM AutoMigrate against the SQL migration chain.
+# Spins up two scratch databases on the configured Postgres, runs both schema
+# builders, and reports tables/indexes the SQL chain is missing. Add --emit-sql
+# to print paste-ready CREATE TABLE / CREATE INDEX statements.
+#
+# CI enforces parity via TestSchemaParity_Wave1; run this locally when you add
+# a new model to discover what migration content to author.
+schema-diff:
+	@go run ./cmd/schemadiff
+
+schema-diff-sql:
+	@go run ./cmd/schemadiff --emit-sql
 
 # Docker
 docker:

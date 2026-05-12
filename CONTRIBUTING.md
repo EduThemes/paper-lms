@@ -39,6 +39,24 @@ A "how to add a feature" cookbook lives in [PROJECT.md](./PROJECT.md), covering:
 
 The same cookbook is what keeps the codebase consistent — please follow it for new work.
 
+## Adding a new model
+
+The SQL migration chain (`internal/db/migrations/`) and GORM's `AutoMigrate`
+list (`internal/db/postgres.go`) are the two sources of truth for the schema —
+production deploys read from one, dev deploys read from the other, and they
+must agree. The `TestSchemaParity_Wave1` test enforces this in CI.
+
+When you add a model:
+
+1. Register it in `db.AutoMigrate` so dev deploys (`AUTO_MIGRATE=true`) pick it up.
+2. Run `make schema-diff` — it spins up two scratch databases, compares
+   AutoMigrate against the SQL chain, and prints the missing `CREATE TABLE` /
+   `CREATE INDEX` statements as paste-ready SQL.
+3. Save the output into a new numbered migration via `make migrate-create`
+   (writes both `.up.sql` and `.down.sql`). Author the down file by reversing
+   the up — drop the new tables, drop the new indexes.
+4. Re-run `make schema-diff`; the diff should be empty.
+
 ## What we're prioritizing
 
 The roadmap (see [CHANGELOG.md](./CHANGELOG.md) for done work):

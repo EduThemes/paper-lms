@@ -35,7 +35,9 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        # pgvector/pgvector:pg16 so TestSchemaParity_Wave1 can `CREATE EXTENSION
+        # vector`. The plain postgres:16-alpine doesn't ship the extension.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: paper
           POSTGRES_PASSWORD: paper
@@ -49,6 +51,7 @@ jobs:
           - 5432:5432
     env:
       DATABASE_URL: postgres://paper:paper@localhost:5432/paper_lms_test?sslmode=disable
+      PARITY_DB_URL: postgres://paper:paper@localhost:5432/postgres?sslmode=disable
     steps:
       - uses: actions/checkout@v5
 
