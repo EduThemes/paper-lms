@@ -13,12 +13,25 @@ import (
 	"github.com/EduThemes/paper-lms/internal/repository"
 )
 
+// Gate identifies which guard blocked a rule fire. Empty string when
+// the rule was allowed through. The dispatcher reads this directly
+// rather than parsing the Reason string, which lets the human-readable
+// reason evolve without breaking machine-readable audit tags.
+type Gate string
+
+const (
+	GateNone          Gate = ""
+	GateCooldown      Gate = "cooldown"
+	GateMaxPerWindow  Gate = "max_per_window"
+)
+
 // CooldownCheckResult is what the dispatcher consumes before deciding
-// whether to run a rule's effects. When Allowed is false, Reason is
-// populated so the gamification_rule_evaluations audit row can record
-// exactly why nothing fired.
+// whether to run a rule's effects. When Allowed is false, Gate names
+// the guard that blocked (cooldown vs. max_per_window) and Reason
+// carries the human-readable explanation for the audit row.
 type CooldownCheckResult struct {
 	Allowed bool
+	Gate    Gate
 	Reason  string
 }
 
@@ -66,6 +79,7 @@ func CheckCooldown(
 				}
 				return CooldownCheckResult{
 					Allowed: false,
+					Gate:    GateCooldown,
 					Reason:  fmt.Sprintf("cooldown active (%d seconds remaining)", remaining),
 				}, nil
 			}
@@ -98,6 +112,7 @@ func CheckCooldown(
 		if count >= int64(cfg.Count) {
 			return CooldownCheckResult{
 				Allowed: false,
+				Gate:    GateMaxPerWindow,
 				Reason:  fmt.Sprintf("max_per_window reached (%d in %s)", cfg.Count, cfg.Window),
 			}, nil
 		}

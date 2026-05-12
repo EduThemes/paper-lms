@@ -183,9 +183,9 @@ func buildConditionSetJSON(t *testing.T, op predicates.Op, threshold int, childK
 	}
 	wrapper := map[string]any{
 		"kind":      "ConditionSet",
-		"Op":        string(op),
-		"Threshold": threshold,
-		"Children":  children,
+		"op":        string(op),
+		"threshold": threshold,
+		"children":  children,
 	}
 	out, err := json.Marshal(wrapper)
 	if err != nil {
@@ -268,8 +268,8 @@ func TestDecodePredicate_DeeplyNested(t *testing.T) {
 		predicates.OutcomeMastery{OutcomeID: 9, MinLevel: "proficient"})
 	or := map[string]any{
 		"kind":     "ConditionSet",
-		"Op":       string(predicates.OpOR),
-		"Children": []json.RawMessage{innerAND, outcomeMastery},
+		"op":       string(predicates.OpOR),
+		"children": []json.RawMessage{innerAND, outcomeMastery},
 	}
 	orJSON, err := json.Marshal(or)
 	if err != nil {
@@ -279,8 +279,8 @@ func TestDecodePredicate_DeeplyNested(t *testing.T) {
 		predicates.CurrencyThreshold{Code: "xp", MinAmount: 100})
 	outer := map[string]any{
 		"kind":     "ConditionSet",
-		"Op":       string(predicates.OpAND),
-		"Children": []json.RawMessage{json.RawMessage(orJSON), currency},
+		"op":       string(predicates.OpAND),
+		"children": []json.RawMessage{json.RawMessage(orJSON), currency},
 	}
 	raw, err := json.Marshal(outer)
 	if err != nil {
@@ -314,6 +314,63 @@ func TestDecodePredicate_DeeplyNested(t *testing.T) {
 	}
 	if _, ok := cs.Children[1].(predicates.CurrencyThreshold); !ok {
 		t.Fatalf("outer[1] type: %T", cs.Children[1])
+	}
+}
+
+// TestDecodePredicate_ConditionSet_StructMarshalRoundTrip is the
+// regression for a real bug found in code review: an earlier draft of
+// the factory looked up "Op"/"Threshold"/"Children" (capitalized) but
+// ConditionSet's struct tags are snake_case, so a production
+// `json.Marshal(ConditionSet{...})` would produce keys the factory
+// couldn't read. This test serializes ConditionSet via the standard
+// library — the same path the rule_authoring tool will use — and
+// confirms the round-trip succeeds.
+func TestDecodePredicate_ConditionSet_StructMarshalRoundTrip(t *testing.T) {
+	// Build a struct, hand-splice the "kind" discriminator on each child
+	// so the recursive decoder can dispatch.
+	childA := withKind(t, "SubmittedAssignment", predicates.SubmittedAssignment{
+		AssignmentID:  42,
+		RequireOnTime: true,
+	})
+	childB := withKind(t, "OutcomeMastery", predicates.OutcomeMastery{
+		OutcomeID: 7,
+		MinLevel:  "proficient",
+	})
+
+	// Splice "kind":"ConditionSet" into the JSON object Go's default
+	// marshaller produces from a ConditionSet shell. We can't marshal
+	// ConditionSet directly because its Children are an interface slice
+	// that would strip the per-child "kind" tags.
+	shell := struct {
+		Op        predicates.Op     `json:"op"`
+		Threshold int               `json:"threshold,omitempty"`
+		Children  []json.RawMessage `json:"children"`
+	}{
+		Op:       predicates.OpAND,
+		Children: []json.RawMessage{childA, childB},
+	}
+	body, err := json.Marshal(shell)
+	if err != nil {
+		t.Fatalf("marshal shell: %v", err)
+	}
+	raw := json.RawMessage(fmt.Sprintf(`{"kind":"ConditionSet",%s`, string(body[1:])))
+
+	got, err := predicates.DecodePredicate(raw)
+	if err != nil {
+		t.Fatalf("decode struct-marshalled ConditionSet: %v", err)
+	}
+	cs, ok := got.(predicates.ConditionSet)
+	if !ok {
+		t.Fatalf("expected ConditionSet, got %T", got)
+	}
+	if cs.Op != predicates.OpAND || len(cs.Children) != 2 {
+		t.Fatalf("shape wrong: op=%s nchildren=%d", cs.Op, len(cs.Children))
+	}
+	if _, ok := cs.Children[0].(predicates.SubmittedAssignment); !ok {
+		t.Fatalf("child[0] type: %T", cs.Children[0])
+	}
+	if _, ok := cs.Children[1].(predicates.OutcomeMastery); !ok {
+		t.Fatalf("child[1] type: %T", cs.Children[1])
 	}
 }
 

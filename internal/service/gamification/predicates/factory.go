@@ -16,23 +16,23 @@ import (
 // fields. Rule authoring tools should validate at create-time; this
 // decoder is the eval-time backstop.
 //
-// The JSON shape mirrors the Go field names (default encoding/json
-// behavior — no struct tags are required on the predicate types). The
-// only synthetic field is "kind", which carries the discriminator and is
-// ignored by the per-predicate unmarshal pass.
+// The JSON shape follows the snake_case `json:"..."` tags declared on
+// each predicate struct (and on ConditionSet). The synthetic "kind"
+// field carries the discriminator and is ignored by the per-predicate
+// unmarshal pass.
 //
 // Example JSON for an atomic predicate:
 //
-//	{"kind":"SubmittedAssignment","AssignmentID":42,"RequireOnTime":true}
+//	{"kind":"SubmittedAssignment","assignment_id":42,"require_on_time":true}
 //
 // Example JSON for a ConditionSet:
 //
 //	{
 //	  "kind":"ConditionSet",
-//	  "Op":"AND",
-//	  "Children":[
-//	    {"kind":"SubmittedAssignment","AssignmentID":42},
-//	    {"kind":"OutcomeMastery","OutcomeID":7,"MinLevel":"proficient"}
+//	  "op":"AND",
+//	  "children":[
+//	    {"kind":"SubmittedAssignment","assignment_id":42},
+//	    {"kind":"OutcomeMastery","outcome_id":7,"min_level":"proficient"}
 //	  ]
 //	}
 func DecodePredicate(raw json.RawMessage) (Predicate, error) {
@@ -126,10 +126,13 @@ func DecodePredicate(raw json.RawMessage) (Predicate, error) {
 
 	case "ConditionSet":
 		// Two-pass: decode op/threshold and raw children, then recurse.
+		// Tags must match ConditionSet's snake_case struct tags so a
+		// json.Marshal(ConditionSet{...}) → DecodePredicate round-trip
+		// works in production rule-authoring flows.
 		var shell struct {
-			Op        Op                `json:"Op"`
-			Threshold int               `json:"Threshold"`
-			Children  []json.RawMessage `json:"Children"`
+			Op        Op                `json:"op"`
+			Threshold int               `json:"threshold"`
+			Children  []json.RawMessage `json:"children"`
 		}
 		if err := json.Unmarshal(raw, &shell); err != nil {
 			return nil, fmt.Errorf("ConditionSet: %w", err)

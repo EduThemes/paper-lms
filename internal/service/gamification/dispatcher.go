@@ -141,7 +141,7 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, rule *models.GamificationR
 		return outcome, false, false, false, false, fmt.Errorf("cooldown check: %w", gerr)
 	}
 	if !gate.Allowed {
-		outcome.BlockedBy = classifyGate(gate.Reason)
+		outcome.BlockedBy = string(gate.Gate)
 		outcome.Reason = gate.Reason
 		return outcome, false, true, false, false, nil
 	}
@@ -252,15 +252,3 @@ func (d *Dispatcher) recordEvaluation(ctx context.Context, rule *models.Gamifica
 	return d.deps.Rules.RecordEvaluation(ctx, eval)
 }
 
-// classifyGate maps a CooldownCheckResult.Reason string to a short
-// machine-readable tag so callers don't have to substring-match.
-func classifyGate(reason string) string {
-	switch {
-	case len(reason) >= 8 && reason[:8] == "cooldown":
-		return "cooldown"
-	case len(reason) >= 14 && reason[:14] == "max_per_window":
-		return "max_per_window"
-	default:
-		return "blocked"
-	}
-}
