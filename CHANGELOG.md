@@ -6,6 +6,84 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Phase 6 / Wave 1 Sprint C — rule engine end-to-end
+
+Lands the working rules engine: a public `gamification.Emit` entry point
+that takes one xAPI-shaped event, runs a FERPA pre-flight, persists the
+event, and dispatches every matching enabled rule through predicate
+evaluation, cooldown / max-per-window guards, and effect execution. The
+predicate vocabulary, mastery calculators, `AwardCurrency` effect, and
+system-currency seeder from prior Sprint B PRs are now consumed end-to-end.
+
+Highlights:
+
+- **Migration 000036 (`content_views`)**: per-user content-view
+  aggregates. Atomic upsert via `ON CONFLICT` for view-count and total-
+  seconds increments. The `ViewedContent` predicate now reads real
+  view counts and cumulative-seconds totals through the new
+  `ContentViewRepository`, supporting "block lesson progression until
+  user views page X at least N times" rule patterns.
+- **`Predicate.Needs()`**: every predicate declares which slices of
+  `ActorSnapshot` (and which IDs within them) it touches at evaluation
+  time. The snapshot loader unions Needs across a rule's full
+  condition_set tree and issues one targeted query per slice rather
+  than full-user dumps. `ConditionSet.Needs()` unions children.
+- **Snapshot loader** (`snapshot.go`): hydrates `ActorSnapshot` for one
+  user against a `Needs` declaration. Wallet hydration is triggered by
+  any currency-code dependency so `CurrencyThreshold` can resolve
+  codes. Wave 1 does not populate Enrollments / LastLogin (no
+  repository yet); predicates that need them fail-with-reason rather
+  than crash.
+- **Predicate + effect factories**: `predicates.DecodePredicate` and
+  `effects.DecodeEffect` / `DecodeEffects` parse `gamification_rules`
+  JSONB into typed values. Recursive ConditionSet decode + per-kind
+  validation (non-zero IDs, valid `MinLevel`, `Op` membership,
+  `N_OF_M` requires `Threshold > 0`).
+- **Rule index** (`rule_index.go`): `BuildRuleIndex` parses each rule's
+  `trigger_event` JSONB once and buckets rules by `(verb, object_type)`
+  for OnEvent, by handle for OnManualTrigger, and a flat list for
+  OnSchedule. Malformed-trigger rules land in `Skipped()` so observable
+  without blocking other rules.
+- **Cooldown + max-per-window guard** (`cooldown.go`):
+  `CheckCooldown(ctx, repo, rule, userID, now)` enforces both gates via
+  the new `LastFiringForUserRule` and `CountFiringsInWindow` repo
+  methods. Rolling 24h / 7d / lifetime windows. Unknown window value
+  returns an error (rule is misconfigured) rather than silently
+  allowing.
+- **FERPA guard** (`ferpa_guard.go`): pre-flight on `Emit` that
+  cross-checks every `result` / `context` field path against the
+  `gamification_ferpa_field_tags` lookup for the event's
+  `object_type`. Rejects emits where an `education_record`-classified
+  field appears without both `ferpa_protected` and `education_record`
+  policy flags. Wave 1 enforces only `education_record`; other
+  classifications are advisory.
+- **Dispatcher** (`dispatcher.go`): per-rule pipeline. Decodes
+  condition_set + effects, checks cooldown, hydrates snapshot,
+  evaluates predicates, runs effects with **stop-on-first-error**
+  semantics (prior successes stay durable in the wallet ledger,
+  subsequent effects are recorded as skipped in `effects_fired`).
+  Writes a `gamification_rule_evaluations` row per rule fire with the
+  full predicate trace and effect outcome list.
+- **Emitter** (`emitter.go`): single public `Emit(ctx, event)` entry
+  point. FERPA pre-flight → persist event → rebuild rule index per
+  emit at site scope → dispatch. Returns `EmitResult` with the
+  persisted event ID + the dispatch outcome.
+- **End-to-end DB integration tests**: 5 tests against a real `pgvector/pg16`
+  Postgres prove the full pipeline:
+  - Award-XP-on-assignment happy path (event → rule fires → wallet tx
+    of +50 → balance = 50)
+  - Non-matching trigger (zero rules considered)
+  - Predicate false (eval row with `result=false`, no wallet tx)
+  - Cooldown enforcement (second emit blocked, no second wallet tx)
+  - System reputation currency invariant
+
+Sprint D scope (task 12 + 13 + 14): xAPI emission from existing
+submission / quiz / lesson / course handlers (the 20 core triggers), API
+handlers (`POST /api/v1/gamification/events`, `GET /currencies`,
+`GET /wallet`), full integration-test pass against `pgvector/pgvector:pg16`,
+and the content-view emission middleware that increments `content_views`
+on every page render.
+
 ### Phase 6 / Wave 1 — gamification foundations
 
 First load-bearing slice of the unified gamification engine. Scaffolding
