@@ -182,6 +182,17 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.QuizItemBankItem{},
 		&models.QuizStimulus{},
 		&models.QuizQuestionOutcomeAlignment{},
+		// Phase 6 Wave 1: gamification foundations (migrations 000032-000035).
+		// All indexes for these tables live in the SQL chain, not the GORM tags,
+		// because the migrations use DESC ordering and partial WHERE clauses
+		// AutoMigrate can't reproduce.
+		&models.GamificationEvent{},
+		&models.GamificationRule{},
+		&models.GamificationRuleEvaluation{},
+		&models.GamificationCurrencyType{},
+		&models.GamificationWalletBalance{},
+		&models.GamificationWalletTransaction{},
+		&models.GamificationFerpaFieldTag{},
 	)
 }
 
