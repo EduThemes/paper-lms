@@ -8,8 +8,9 @@ type Course struct {
 	Name          string     `json:"name" gorm:"not null"`
 	CourseCode    string     `json:"course_code" gorm:"not null"`
 	SISCourseID   *string    `json:"sis_course_id" gorm:"uniqueIndex"`
-	WorkflowState string     `json:"workflow_state" gorm:"not null;default:'available';index"`
-	StartAt       *time.Time `json:"start_at"`
+	WorkflowState    string     `json:"workflow_state" gorm:"not null;default:'available';index"`
+	EnrollmentTermID *uint      `json:"enrollment_term_id" gorm:"index"`
+	StartAt          *time.Time `json:"start_at"`
 	EndAt         *time.Time `json:"end_at"`
 	DefaultView   string     `json:"default_view" gorm:"default:'modules'"`
 	UIMode        string     `json:"ui_mode" gorm:"default:'standard'"` // "standard", "k2", "3-5"

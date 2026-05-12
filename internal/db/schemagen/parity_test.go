@@ -111,16 +111,25 @@ func TestSchemaParity_Wave1(t *testing.T) {
 		t.Errorf("SQL chain has %d index(es) deferred behind missing columns — fix the columns and the indexes will follow", n)
 	}
 
-	// Stale columns are informational. They typically come from model
-	// refactors that bypassed migrations; dropping them is data-destructive,
-	// so we surface but never auto-fix.
+	// After Wave 2c, stale columns are a regression. Waves 2b and 2c walked
+	// the SQL chain back into lockstep with every GORM model; any new stale
+	// column means a model dropped a field without an accompanying DROP
+	// COLUMN migration, or someone hand-added a column that no model owns.
+	// Either way it deserves the same failure-mode as missing-columns.
 	if n := len(d.StaleColumns); n > 0 {
 		staleTotal := 0
-		for _, cols := range d.StaleColumns {
+		examples := make([]string, 0, 5)
+		for table, cols := range d.StaleColumns {
 			staleTotal += len(cols)
+			for _, c := range cols {
+				if len(examples) < 5 {
+					examples = append(examples, fmt.Sprintf("%s.%s", table, c.Name))
+				}
+			}
 		}
-		t.Logf("informational: %d stale column(s) across %d table(s) — usually leftover from model refactors. See `make schema-diff` for the full list; cleanup is a separate decision per column.",
-			staleTotal, n)
+		t.Errorf("SQL chain has %d stale column(s) across %d table(s) — present in migrations but not declared by any GORM model. Examples: %v.\n"+
+			"Either drop them in a new migration or re-declare the field on the model.",
+			staleTotal, n, examples)
 	}
 }
 
