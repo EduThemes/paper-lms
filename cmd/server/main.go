@@ -26,6 +26,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/scheduler"
 	"github.com/EduThemes/paper-lms/internal/service"
 	"github.com/EduThemes/paper-lms/internal/service/gamification"
+	gamificationEffects "github.com/EduThemes/paper-lms/internal/service/gamification/effects"
 	storageLib "github.com/EduThemes/paper-lms/internal/storage"
 )
 
@@ -231,10 +232,50 @@ func main() {
 	contentEmbeddingRepo := postgres.NewContentEmbeddingRepository(database)
 	sharedContentRepo := postgres.NewSharedContentRepository(database)
 
+	// Phase 6 Wave 1 Sprint D: gamification repositories + the rule-
+	// engine Emitter. Constructed here so any service that needs to fire
+	// xAPI events (via the callback hooks added in Sprint D) can have
+	// the emitter registered against it.
+	gamificationEventRepo := postgres.NewGamificationEventRepository(database)
+	gamificationRuleRepo := postgres.NewGamificationRuleRepository(database)
+	gamificationCurrencyTypeRepo := postgres.NewGamificationCurrencyTypeRepository(database)
+	gamificationWalletRepo := postgres.NewGamificationWalletRepository(database)
+	gamificationFerpaTagRepo := postgres.NewGamificationFerpaFieldTagRepository(database)
+	contentViewRepo := postgres.NewContentViewRepository(database)
+
+	gamificationEmitter := gamification.NewEmitter(gamification.EmitterDeps{
+		Dispatch: gamification.DispatchDeps{
+			Snapshot: gamification.SnapshotDeps{
+				Submissions:     submissionRepo,
+				QuizSubmissions: quizSubmissionRepo,
+				OutcomeResults:  outcomeResultRepo,
+				ContentViews:    contentViewRepo,
+				Wallet:          gamificationWalletRepo,
+				CurrencyType:    gamificationCurrencyTypeRepo,
+			},
+			Rules: gamificationRuleRepo,
+			Effects: gamificationEffects.EffectDeps{
+				Wallet:       gamificationWalletRepo,
+				CurrencyType: gamificationCurrencyTypeRepo,
+			},
+		},
+		Events:    gamificationEventRepo,
+		FerpaTags: gamificationFerpaTagRepo,
+	})
+	// Sprint D-1 Phase 3 wires this into the SubmissionService /
+	// QuizService / EnrollmentService / ContentViewService callbacks just
+	// below. The blank assignment keeps compile happy in the Phase 0
+	// landing commit; remove when the first OnX registration lands.
+	_ = gamificationEmitter
+
 	// Initialize services
 	userService := service.NewUserService(userRepo)
 	courseService := service.NewCourseService(courseRepo, enrollmentRepo, sectionRepo)
 	enrollmentService := service.NewEnrollmentService(enrollmentRepo)
+	contentViewService := service.NewContentViewService(contentViewRepo)
+	// Sprint D-1 agent-D wires contentViewService into the page handler;
+	// blank assignment keeps Phase 0 compiling until that lands.
+	_ = contentViewService
 	moduleService := service.NewModuleService(moduleRepo, moduleItemRepo, service.WithPrerequisiteRepo(modulePrerequisiteRepo))
 	pageService := service.NewPageService(pageRepo)
 	assignmentService := service.NewAssignmentService(assignmentRepo)
