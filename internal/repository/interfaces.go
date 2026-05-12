@@ -749,3 +749,75 @@ type WikiPageRevisionRepository interface {
 	GetLatestRevision(ctx context.Context, pageID uint) (*models.WikiPageRevision, error)
 	GetRevisionByNumber(ctx context.Context, pageID uint, revisionNumber int) (*models.WikiPageRevision, error)
 }
+
+// Phase 6 Wave 1: gamification foundations.
+// See docs/research/gamification-2026-05/PHASE6-WAVE1-PLAN.md.
+
+// GamificationEventFilter narrows queries against the xAPI event store.
+// Empty fields are ignored; multiple fields AND together.
+type GamificationEventFilter struct {
+	TenantID     *uint
+	ActorID      *uint
+	Verb         string
+	ObjectType   string
+	ObjectID     *uint
+	OccurredFrom *time.Time
+	OccurredTo   *time.Time
+}
+
+type GamificationEventRepository interface {
+	Create(ctx context.Context, event *models.GamificationEvent) error
+	FindByID(ctx context.Context, id uint) (*models.GamificationEvent, error)
+	// FindBySourceEventID supports idempotent ingest of external systems:
+	// re-deliveries of the same (source, source_event_id) pair return the
+	// original row rather than inserting a duplicate.
+	FindBySourceEventID(ctx context.Context, source, sourceEventID string) (*models.GamificationEvent, error)
+	List(ctx context.Context, filter GamificationEventFilter, params PaginationParams) (*PaginatedResult[models.GamificationEvent], error)
+}
+
+type GamificationRuleRepository interface {
+	Create(ctx context.Context, rule *models.GamificationRule) error
+	FindByID(ctx context.Context, id uint) (*models.GamificationRule, error)
+	Update(ctx context.Context, rule *models.GamificationRule) error
+	Delete(ctx context.Context, id uint) error
+	// ListEnabledByScope returns enabled rules at the exact (scope_type, scope_id).
+	// The dispatch loop (Wave 1 task 10) walks up the org tree itself.
+	ListEnabledByScope(ctx context.Context, scopeType models.GamificationScopeType, scopeID uint) ([]models.GamificationRule, error)
+	ListByTenantID(ctx context.Context, tenantID uint, params PaginationParams) (*PaginatedResult[models.GamificationRule], error)
+
+	// RecordEvaluation appends an audit row. The (rule_id, user_id, evaluated_at)
+	// tuple is uniquely indexed; a same-microsecond duplicate is a bug, not a retry.
+	RecordEvaluation(ctx context.Context, eval *models.GamificationRuleEvaluation) error
+	ListEvaluationsForUserRule(ctx context.Context, userID, ruleID uint, params PaginationParams) (*PaginatedResult[models.GamificationRuleEvaluation], error)
+}
+
+type GamificationCurrencyTypeRepository interface {
+	Create(ctx context.Context, currency *models.GamificationCurrencyType) error
+	FindByID(ctx context.Context, id uint) (*models.GamificationCurrencyType, error)
+	// FindByCode exact-matches (tenant_id, scope_type, scope_id, code).
+	// The resolution-order walk (section → course → school → district → site)
+	// is the caller's job; this is the single-lookup primitive.
+	FindByCode(ctx context.Context, tenantID uint, scopeType models.GamificationScopeType, scopeID uint, code string) (*models.GamificationCurrencyType, error)
+	Update(ctx context.Context, currency *models.GamificationCurrencyType) error
+	Delete(ctx context.Context, id uint) error
+	ListByTenant(ctx context.Context, tenantID uint) ([]models.GamificationCurrencyType, error)
+	ListInTopbar(ctx context.Context, tenantID uint) ([]models.GamificationCurrencyType, error)
+}
+
+type GamificationWalletRepository interface {
+	// GetBalance returns nil (no error) when the (user, currency) pair has
+	// never transacted. Callers treat that as a zero balance.
+	GetBalance(ctx context.Context, userID, currencyTypeID uint) (*models.GamificationWalletBalance, error)
+	ListBalancesForUser(ctx context.Context, userID uint) ([]models.GamificationWalletBalance, error)
+	// ApplyTransaction is the single atomic mutation primitive: appends a
+	// transaction row and updates the corresponding balance row in one DB
+	// transaction. The Wave 1 task-8 AwardCurrency effect calls this.
+	ApplyTransaction(ctx context.Context, tx *models.GamificationWalletTransaction) error
+	ListTransactionsForUser(ctx context.Context, userID uint, params PaginationParams) (*PaginatedResult[models.GamificationWalletTransaction], error)
+}
+
+type GamificationFerpaFieldTagRepository interface {
+	Upsert(ctx context.Context, tag *models.GamificationFerpaFieldTag) error
+	Find(ctx context.Context, objectType, fieldPath string) (*models.GamificationFerpaFieldTag, error)
+	ListByObjectType(ctx context.Context, objectType string) ([]models.GamificationFerpaFieldTag, error)
+}
