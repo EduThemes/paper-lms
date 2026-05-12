@@ -57,6 +57,39 @@ When you add a model:
    the up — drop the new tables, drop the new indexes.
 4. Re-run `make schema-diff`; the diff should be empty.
 
+## Removing or renaming a column
+
+`TestSchemaParity_Wave1` is a hard fail on *stale columns* — columns the SQL
+chain creates that no GORM model owns. That means you can't just delete a
+model field; you have to bring the SQL chain with you.
+
+When you **remove a field** from a model:
+
+1. Run `make stale-cols`. The column you removed will appear in
+   `STALE_COLUMNS.md` as the source of truth.
+2. Author a `DROP COLUMN IF EXISTS` migration in the same PR. The `.down.sql`
+   re-adds the column with its original type (data is lost on rollback —
+   document this in the migration header).
+3. Re-run `make stale-cols`. Empty report means CI will pass.
+
+When you **rename a field** (which usually means renaming the column too,
+because GORM derives column names from struct field names), the two states
+need a bridge so production data isn't lost:
+
+1. **Wave A migration**: keep the old column, add the new one (via
+   AutoMigrate + a backfill migration following the `make schema-diff`
+   workflow above), then `UPDATE table SET new_col = old_col WHERE new_col
+   IS NULL AND old_col IS NOT NULL;`. Idempotent — safe to re-run.
+2. **Wave B migration**, in a follow-up PR or at least a follow-up
+   migration: `DROP COLUMN IF EXISTS old_col`. Add a deprecation-window
+   comment to the `.up.sql` so operators know when the destructive change
+   landed and what prerequisite migration must have run.
+
+The `cmd/stalecols` tool prints a per-column **References** field listing
+where the column name appears in Go source. Empty refs = safe to drop.
+Non-empty refs = check whether it's a JSON tag, a hand-written SQL string,
+or a model field that really should be reinstated.
+
 ## What we're prioritizing
 
 The roadmap (see [CHANGELOG.md](./CHANGELOG.md) for done work):
