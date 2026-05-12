@@ -46,6 +46,7 @@ type ActorSnapshot struct {
 	Now            time.Time
 	Submissions    map[uint]SubmissionState // assignment_id → latest submission state
 	QuizAttempts   map[uint]QuizState       // quiz_id → latest attempt
+	ViewedContent  map[uint]time.Time       // content_id → first-viewed timestamp
 	OutcomeMastery map[uint]MasteryState    // outcome_id → calc'd mastery
 	WalletBalances map[uint]int64           // currency_type_id → balance
 	CurrencyByCode map[string]uint          // resolve "xp" → currency_type_id

@@ -65,6 +65,59 @@ calculators, AwardCurrency effect, system-currency seeder, rule dispatch
 loop, FERPA guard, xAPI emission hooks into existing services, API
 handlers, integration tests against `pgvector/pgvector:pg16`.
 
+### Phase 6 / Wave 1 — predicate vocabulary + mastery + AwardCurrency + seeder
+
+Sprint B of Wave 1. Lands four tasks (6, 7, 8, 9) from
+`docs/research/gamification-2026-05/PHASE6-WAVE1-PLAN.md` — no migrations,
+all Go-only.
+
+- **Six new predicates** in `internal/service/gamification/predicates/`:
+  `SubmittedQuiz`, `ViewedContent`, `OutcomeMastery`, `CurrencyThreshold`,
+  `EarnedBadge`, `ReputationThreshold`. Plus a `ViewedContent` map field
+  on `ActorSnapshot`. Each predicate ships with table-driven tests; the
+  vocabulary now covers Submission / Content / Mastery / Economy / Badge
+  with the room for Enrollment, Time, and Discussion predicates in later
+  sprints. `ReputationThreshold` is a thin wrapper that delegates to
+  `CurrencyThreshold` with `code="reputation"` so rule authors don't
+  repeat the literal.
+- **Six real mastery `calc_method` implementations** in
+  `internal/service/gamification/mastery/`: `most_recent`, `highest`,
+  `weighted_average`, `n_times`, `decaying_average`, and
+  `khan_spaced_retrieval`. Khan uses a real half-life
+  (`score · 2^(-Δdays/halfLife)`) with defaults 7-day half-life and 0.8
+  reattempt threshold. A shared `level_discretizer.go` maps the
+  continuous `Value` to `novice|familiar|proficient|mastered` so all six
+  agree on bucketing. `Params` grew a `Now` field so Khan can compute
+  final decay against arbitrary evaluation times.
+- **`AwardCurrency` effect** in a new
+  `internal/service/gamification/effects/` package, together with the
+  `Effect` interface, `EffectDeps`, `TriggeringContext`, and
+  `EffectResult` shapes that every future effect will implement
+  (`AwardBadge`, `ReleaseContent`, `BranchPath`, `UnlockCapability`,
+  `Notify`, `AdvanceRankOrLevel`, `EnrollInGroup`). `AwardCurrency`
+  resolves currencies by code via a scope-walking
+  `ResolveCurrencyByCode` helper (Wave 1 walk: requested scope →
+  site-fallback), applies an optional multiplier, and writes the
+  triggering rule/event IDs + FERPA policy flags onto the wallet
+  transaction.
+- **System-currency seeder + backfill binary**: a new
+  `internal/service/gamification/seed.go` exports
+  `SeedSystemCurrenciesForTenant`, idempotent via
+  `clause.OnConflict{DoNothing: true}` against the
+  `uniq_gam_currency_scope_code` index from migration 000034.
+  `cmd/seedgamification` is a one-shot CLI that lists every `accounts`
+  row and seeds each. `cmd/server/main.go` calls the seeder on every
+  boot right after `db.SeedDefaultAccount`, so new tenants always have
+  the four system currencies (xp, gems, mastery_points, reputation).
+  Integration tests against the dev Postgres prove single-tenant,
+  multi-tenant (3 tenants → 12 rows), and idempotent re-run behavior.
+
+Wave 1 remaining tasks after this PR: 10 (`gamification.Emitter` +
+rule dispatch loop), 11 (FERPA guard on Emit), 12 (xAPI emission from
+existing submission/quiz/lesson/course services), 13 (API handlers for
+events / currencies / wallet), 14 (full integration test pass against
+`pgvector/pgvector:pg16`).
+
 ## [0.1.0] — 2026-05-11
 
 Initial public release.

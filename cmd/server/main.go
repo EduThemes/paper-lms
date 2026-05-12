@@ -22,8 +22,10 @@ import (
 	"github.com/EduThemes/paper-lms/internal/db"
 	"github.com/EduThemes/paper-lms/internal/graphql"
 	"github.com/EduThemes/paper-lms/internal/repository/postgres"
+	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/scheduler"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/EduThemes/paper-lms/internal/service/gamification"
 	storageLib "github.com/EduThemes/paper-lms/internal/storage"
 )
 
@@ -73,6 +75,25 @@ func main() {
 	// Seed default data
 	if err := db.SeedDefaultAccount(database); err != nil {
 		log.Fatalf("Failed to seed database: %v", err)
+	}
+
+	// Backfill system gamification currencies for every tenant. Idempotent —
+	// re-runs on every boot, no-ops on already-populated tenants thanks to
+	// the uniq_gam_currency_scope_code index + ON CONFLICT DO NOTHING.
+	{
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		var accounts []models.Account
+		if err := database.WithContext(ctx).Select("id").Find(&accounts).Error; err != nil {
+			cancel()
+			log.Fatalf("Failed to list accounts for gamification seed: %v", err)
+		}
+		for _, a := range accounts {
+			if err := gamification.SeedSystemCurrenciesForTenant(ctx, database, a.ID); err != nil {
+				cancel()
+				log.Fatalf("Failed to seed gamification currencies for account %d: %v", a.ID, err)
+			}
+		}
+		cancel()
 	}
 
 	// Initialize repositories

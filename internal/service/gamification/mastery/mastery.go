@@ -47,6 +47,10 @@ type Event struct {
 // Params bundles the dial settings each calc method supports. Each method
 // ignores fields it doesn't use.
 type Params struct {
+	// Now is the reference time used by methods that need "current time"
+	// (khan_spaced_retrieval applies its final decay against this). Zero
+	// value means "use the latest event's OccurredAt."
+	Now time.Time
 	// DecayingAverageRecentWeight: blend factor for decaying_average.
 	// Default 0.65 (recent) / 0.35 (prior) per the plan.
 	DecayingAverageRecentWeight float64
@@ -56,7 +60,11 @@ type Params struct {
 	// NTimesThreshold: the per-attempt threshold for n_times (e.g. 0.8).
 	NTimesThreshold float64
 	// HalfLifeDays: spaced-retrieval half-life for khan_spaced_retrieval.
+	// Default 7 days.
 	HalfLifeDays float64
+	// ReattemptThreshold: at-or-above this score, khan_spaced_retrieval
+	// treats a reattempt as a "pass" that clamps score to 1.0. Default 0.8.
+	ReattemptThreshold float64
 }
 
 // State is the calculator's output. Value is the mastery probability or
