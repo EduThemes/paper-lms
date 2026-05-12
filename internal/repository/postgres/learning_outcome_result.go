@@ -85,3 +85,17 @@ func (r *learningOutcomeResultRepo) ListByUserAndContext(ctx context.Context, us
 	}
 	return results, nil
 }
+
+func (r *learningOutcomeResultRepo) ListByUserAndOutcomeIDs(ctx context.Context, userID uint, outcomeIDs []uint) ([]models.LearningOutcomeResult, error) {
+	if len(outcomeIDs) == 0 {
+		return nil, nil
+	}
+	var results []models.LearningOutcomeResult
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ? AND learning_outcome_id IN ?", userID, outcomeIDs).
+		Order("assessed_at ASC").
+		Find(&results).Error; err != nil {
+		return nil, err
+	}
+	return results, nil
+}

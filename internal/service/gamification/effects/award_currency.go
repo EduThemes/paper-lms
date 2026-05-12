@@ -18,9 +18,9 @@ import (
 // `round(Amount × Multiplier)`. Multipliers <= 0 are treated as 1.0 to keep
 // rule authors from accidentally zeroing an award.
 type AwardCurrency struct {
-	Code       string
-	Amount     int64
-	Multiplier *float64
+	Code       string   `json:"code"`
+	Amount     int64    `json:"amount"`
+	Multiplier *float64 `json:"multiplier,omitempty"`
 }
 
 func (a AwardCurrency) Kind() string { return "AwardCurrency" }

@@ -304,6 +304,14 @@ func (m *MockSubmissionRepository) ListByUserAndCourse(ctx context.Context, user
 	return args.Get(0).([]models.Submission), args.Error(1)
 }
 
+func (m *MockSubmissionRepository) ListByUserAndAssignmentIDs(ctx context.Context, userID uint, assignmentIDs []uint) ([]models.Submission, error) {
+	args := m.Called(ctx, userID, assignmentIDs)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.Submission), args.Error(1)
+}
+
 func (m *MockSubmissionRepository) BulkListByCourse(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Submission], error) {
 	args := m.Called(ctx, courseID, params)
 	if args.Get(0) == nil {
@@ -630,6 +638,14 @@ func (m *MockQuizSubmissionRepository) FindByQuizAndUser(ctx context.Context, qu
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*models.QuizSubmission), args.Error(1)
+}
+
+func (m *MockQuizSubmissionRepository) ListByUserAndQuizIDs(ctx context.Context, userID uint, quizIDs []uint) ([]models.QuizSubmission, error) {
+	args := m.Called(ctx, userID, quizIDs)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.QuizSubmission), args.Error(1)
 }
 
 func (m *MockQuizSubmissionRepository) ListByQuizID(ctx context.Context, quizID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.QuizSubmission], error) {

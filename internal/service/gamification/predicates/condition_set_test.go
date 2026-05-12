@@ -15,7 +15,8 @@ type stubPredicate struct {
 	called *bool
 }
 
-func (s stubPredicate) Kind() string { return "Stub" }
+func (s stubPredicate) Kind() string         { return "Stub" }
+func (s stubPredicate) Needs() predicates.Needs { return predicates.Needs{} }
 func (s stubPredicate) Evaluate(_ context.Context, _ predicates.ActorSnapshot) (bool, predicates.Trace) {
 	if s.called != nil {
 		*s.called = true

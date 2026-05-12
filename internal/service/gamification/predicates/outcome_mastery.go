@@ -15,12 +15,16 @@ import (
 // predicate itself; the loader is responsible for materializing the snapshot
 // using that method.
 type OutcomeMastery struct {
-	OutcomeID  uint
-	MinLevel   string // novice | familiar | proficient | mastered
-	CalcMethod string // optional override hint; used by the snapshot loader (Sprint C)
+	OutcomeID  uint   `json:"outcome_id"`
+	MinLevel   string `json:"min_level"`             // novice | familiar | proficient | mastered
+	CalcMethod string `json:"calc_method,omitempty"` // optional override hint; used by the snapshot loader (Sprint C)
 }
 
 func (p OutcomeMastery) Kind() string { return "OutcomeMastery" }
+
+func (p OutcomeMastery) Needs() Needs {
+	return Needs{OutcomeIDs: []uint{p.OutcomeID}}
+}
 
 func (p OutcomeMastery) Evaluate(_ context.Context, actor ActorSnapshot) (bool, Trace) {
 	trace := Trace{

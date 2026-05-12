@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -74,6 +75,36 @@ func (r *GamificationRuleRepo) ListByTenantID(ctx context.Context, tenantID uint
 
 func (r *GamificationRuleRepo) RecordEvaluation(ctx context.Context, eval *models.GamificationRuleEvaluation) error {
 	return r.db.WithContext(ctx).Create(eval).Error
+}
+
+// LastFiringForUserRule returns the most recent successful evaluation
+// (result=true) for (rule_id, user_id). Returns (nil, nil) when the rule
+// has never successfully fired for this user — callers treat that as "no
+// cooldown applies."
+func (r *GamificationRuleRepo) LastFiringForUserRule(ctx context.Context, userID, ruleID uint) (*models.GamificationRuleEvaluation, error) {
+	var eval models.GamificationRuleEvaluation
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND rule_id = ? AND result = ?", userID, ruleID, true).
+		Order("evaluated_at DESC").
+		First(&eval).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &eval, nil
+}
+
+// CountFiringsInWindow counts successful evaluations for (rule_id, user_id)
+// strictly since `since`. Powers the max_per_window guard.
+func (r *GamificationRuleRepo) CountFiringsInWindow(ctx context.Context, userID, ruleID uint, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&models.GamificationRuleEvaluation{}).
+		Where("user_id = ? AND rule_id = ? AND result = ? AND evaluated_at > ?", userID, ruleID, true, since).
+		Count(&count).Error
+	return count, err
 }
 
 func (r *GamificationRuleRepo) ListEvaluationsForUserRule(ctx context.Context, userID, ruleID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.GamificationRuleEvaluation], error) {

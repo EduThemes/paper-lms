@@ -100,6 +100,19 @@ func (r *submissionRepo) ListByUserAndCourse(ctx context.Context, userID, course
 	return submissions, nil
 }
 
+func (r *submissionRepo) ListByUserAndAssignmentIDs(ctx context.Context, userID uint, assignmentIDs []uint) ([]models.Submission, error) {
+	if len(assignmentIDs) == 0 {
+		return nil, nil
+	}
+	var submissions []models.Submission
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ? AND assignment_id IN ?", userID, assignmentIDs).
+		Find(&submissions).Error; err != nil {
+		return nil, err
+	}
+	return submissions, nil
+}
+
 func (r *submissionRepo) BulkListByCourse(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Submission], error) {
 	var submissions []models.Submission
 	var count int64

@@ -22,12 +22,22 @@ const (
 // This is how the 24-predicate vocabulary becomes the recursive AND/OR/
 // N_OF_M tree that the rules engine evaluates against an ActorSnapshot.
 type ConditionSet struct {
-	Op        Op
-	Threshold int // only meaningful for OpNOfM
-	Children  []Predicate
+	Op        Op          `json:"op"`
+	Threshold int         `json:"threshold,omitempty"` // only meaningful for OpNOfM
+	Children  []Predicate `json:"children"`
 }
 
 func (cs ConditionSet) Kind() string { return "ConditionSet" }
+
+// Needs returns the union of every child's Needs. Composite predicates
+// don't read the snapshot themselves; they're routing nodes.
+func (cs ConditionSet) Needs() Needs {
+	var u Needs
+	for _, child := range cs.Children {
+		u = Union(u, child.Needs())
+	}
+	return u
+}
 
 // Evaluate walks the children in order and applies the composition op.
 // Short-circuit semantics are critical for performance: a 20-child AND

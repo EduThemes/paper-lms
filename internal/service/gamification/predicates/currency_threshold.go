@@ -10,11 +10,15 @@ import (
 // resolves the code to a currency_type_id via ActorSnapshot.CurrencyByCode
 // before evaluation.
 type CurrencyThreshold struct {
-	Code      string
-	MinAmount int64
+	Code      string `json:"code"`
+	MinAmount int64  `json:"min_amount"`
 }
 
 func (p CurrencyThreshold) Kind() string { return "CurrencyThreshold" }
+
+func (p CurrencyThreshold) Needs() Needs {
+	return Needs{CurrencyCodes: []string{p.Code}}
+}
 
 func (p CurrencyThreshold) Evaluate(_ context.Context, actor ActorSnapshot) (bool, Trace) {
 	return p.evaluateWithKind(actor, p.Kind())
