@@ -6,12 +6,24 @@ import (
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
+	"gorm.io/gorm"
 )
+
+// OutcomeMasteryCrossedCallback fires (asynchronously) when a
+// LearningOutcomeResult row transitions from Mastery=nil/false to
+// Mastery=true on the same (user_id, learning_outcome_id, asset_type,
+// asset_id) composite key. Per-row transition only — rollup-level mastery
+// across multiple assets is left to the OutcomeMastery predicate. Receives
+// the user, outcome, and persisted result IDs. Same contract as
+// SubmissionGradedCallback: detached context, no panic, no error return.
+type OutcomeMasteryCrossedCallback func(ctx context.Context, userID, outcomeID, resultID uint)
 
 type LearningOutcomeService struct {
 	groupRepo   repository.LearningOutcomeGroupRepository
 	outcomeRepo repository.LearningOutcomeRepository
 	resultRepo  repository.LearningOutcomeResultRepository
+
+	onMasteryCrossedCallbacks []OutcomeMasteryCrossedCallback
 }
 
 func NewLearningOutcomeService(
@@ -23,6 +35,23 @@ func NewLearningOutcomeService(
 		groupRepo:   groupRepo,
 		outcomeRepo: outcomeRepo,
 		resultRepo:  resultRepo,
+	}
+}
+
+// OnMasteryCrossed registers a callback to fire after a
+// LearningOutcomeResult's Mastery flag flips false/nil → true on the same
+// (user, outcome, asset) row. Callbacks run in fresh goroutines with a
+// detached context; panics are recovered.
+func (s *LearningOutcomeService) OnMasteryCrossed(cb OutcomeMasteryCrossedCallback) {
+	s.onMasteryCrossedCallbacks = append(s.onMasteryCrossedCallbacks, cb)
+}
+
+func (s *LearningOutcomeService) fireOnMasteryCrossed(userID, outcomeID, resultID uint) {
+	for _, cb := range s.onMasteryCrossedCallbacks {
+		go func(cb OutcomeMasteryCrossedCallback) {
+			defer recoverFromPanic("learning outcome OnMasteryCrossed callback")
+			cb(context.Background(), userID, outcomeID, resultID)
+		}(cb)
 	}
 }
 
@@ -133,7 +162,32 @@ func (s *LearningOutcomeService) CreateResult(ctx context.Context, result *model
 		}
 	}
 
-	return s.resultRepo.Upsert(ctx, result)
+	// Capture the prior mastery state on the same composite key the Upsert
+	// uses, so the OnMasteryCrossed callback only fires on a false/nil→true
+	// transition. Lookup errors other than NotFound are ignored — we'd
+	// rather miss one transition emit than fail the result write.
+	wasMastered := false
+	prior, err := s.resultRepo.FindByUserOutcomeAsset(
+		ctx, result.UserID, result.LearningOutcomeID,
+		result.AssociatedAssetType, result.AssociatedAssetID,
+	)
+	if err == nil && prior != nil && prior.Mastery != nil {
+		wasMastered = *prior.Mastery
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		// Non-fatal: log via the gamification callback's own error path
+		// instead of returning here — the result write must succeed.
+		_ = err
+	}
+
+	if err := s.resultRepo.Upsert(ctx, result); err != nil {
+		return err
+	}
+
+	nowMastered := result.Mastery != nil && *result.Mastery
+	if nowMastered && !wasMastered {
+		s.fireOnMasteryCrossed(result.UserID, result.LearningOutcomeID, result.ID)
+	}
+	return nil
 }
 
 func (s *LearningOutcomeService) GetResult(ctx context.Context, id uint) (*models.LearningOutcomeResult, error) {

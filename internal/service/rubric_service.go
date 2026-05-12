@@ -16,10 +16,20 @@ type CriterionAssessment struct {
 	Comments string  `json:"comments"`
 }
 
+// RubricAssessmentCreatedCallback fires (asynchronously) after a rubric
+// assessment is successfully created. Receives the new assessment's ID.
+// Same contract as SubmissionGradedCallback: detached context, no panic,
+// no error return.
+type RubricAssessmentCreatedCallback func(ctx context.Context, assessmentID uint)
+
 type RubricService struct {
 	rubricRepo repository.RubricRepository
 	assocRepo  repository.RubricAssociationRepository
 	assessRepo repository.RubricAssessmentRepository
+
+	// onAssessmentCreatedCallbacks fire (in goroutines) after a
+	// successful CreateAssessment.
+	onAssessmentCreatedCallbacks []RubricAssessmentCreatedCallback
 }
 
 func NewRubricService(
@@ -31,6 +41,22 @@ func NewRubricService(
 		rubricRepo: rubricRepo,
 		assocRepo:  assocRepo,
 		assessRepo: assessRepo,
+	}
+}
+
+// OnAssessmentCreated registers a callback to fire after a successful
+// rubric-assessment write. Callbacks run in fresh goroutines with a
+// detached context; panics are recovered.
+func (s *RubricService) OnAssessmentCreated(cb RubricAssessmentCreatedCallback) {
+	s.onAssessmentCreatedCallbacks = append(s.onAssessmentCreatedCallbacks, cb)
+}
+
+func (s *RubricService) fireOnAssessmentCreated(assessmentID uint) {
+	for _, cb := range s.onAssessmentCreatedCallbacks {
+		go func(cb RubricAssessmentCreatedCallback) {
+			defer recoverFromPanic("rubric OnAssessmentCreated callback")
+			cb(context.Background(), assessmentID)
+		}(cb)
 	}
 }
 
@@ -145,7 +171,11 @@ func (s *RubricService) CreateAssessment(ctx context.Context, assessment *models
 		}
 	}
 
-	return s.assessRepo.Create(ctx, assessment)
+	if err := s.assessRepo.Create(ctx, assessment); err != nil {
+		return err
+	}
+	s.fireOnAssessmentCreated(assessment.ID)
+	return nil
 }
 
 func (s *RubricService) GetAssessment(ctx context.Context, id uint) (*models.RubricAssessment, error) {

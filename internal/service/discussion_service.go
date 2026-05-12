@@ -16,10 +16,22 @@ type ratingRepoWithSum interface {
 	SumByEntryID(ctx context.Context, entryID uint) (count int64, sum int64, err error)
 }
 
+// DiscussionEntryPostedCallback fires (asynchronously) after a discussion
+// entry is successfully created. Receives the new entry's ID. Fires for
+// every entry — top-level posts and replies alike — so the rule-side
+// predicate can filter on parent_id if it only cares about replies.
+// Same contract as SubmissionGradedCallback: detached context, no panic,
+// no error return.
+type DiscussionEntryPostedCallback func(ctx context.Context, entryID uint)
+
 type DiscussionService struct {
 	topicRepo  repository.DiscussionTopicRepository
 	entryRepo  repository.DiscussionEntryRepository
 	ratingRepo ratingRepoWithSum
+
+	// onEntryCreatedCallbacks fire (in goroutines) after a successful
+	// CreateEntry. Registered via OnEntryCreated.
+	onEntryCreatedCallbacks []DiscussionEntryPostedCallback
 }
 
 func NewDiscussionService(
@@ -31,6 +43,22 @@ func NewDiscussionService(
 		topicRepo:  topicRepo,
 		entryRepo:  entryRepo,
 		ratingRepo: ratingRepo,
+	}
+}
+
+// OnEntryCreated registers a callback to fire after a successful discussion
+// entry write. Callbacks run in fresh goroutines with a detached context;
+// panics are recovered.
+func (s *DiscussionService) OnEntryCreated(cb DiscussionEntryPostedCallback) {
+	s.onEntryCreatedCallbacks = append(s.onEntryCreatedCallbacks, cb)
+}
+
+func (s *DiscussionService) fireOnEntryCreated(entryID uint) {
+	for _, cb := range s.onEntryCreatedCallbacks {
+		go func(cb DiscussionEntryPostedCallback) {
+			defer recoverFromPanic("discussion OnEntryCreated callback")
+			cb(context.Background(), entryID)
+		}(cb)
 	}
 }
 
@@ -74,7 +102,11 @@ func (s *DiscussionService) CreateEntry(ctx context.Context, entry *models.Discu
 	if entry.WorkflowState == "" {
 		entry.WorkflowState = "active"
 	}
-	return s.entryRepo.Create(ctx, entry)
+	if err := s.entryRepo.Create(ctx, entry); err != nil {
+		return err
+	}
+	s.fireOnEntryCreated(entry.ID)
+	return nil
 }
 
 func (s *DiscussionService) GetEntry(ctx context.Context, id uint) (*models.DiscussionEntry, error) {

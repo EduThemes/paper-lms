@@ -78,6 +78,17 @@ func (r *learningOutcomeResultRepo) ListByOutcomeID(ctx context.Context, outcome
 	}, nil
 }
 
+func (r *learningOutcomeResultRepo) FindByUserOutcomeAsset(ctx context.Context, userID, outcomeID uint, assetType string, assetID uint) (*models.LearningOutcomeResult, error) {
+	var existing models.LearningOutcomeResult
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ? AND learning_outcome_id = ? AND associated_asset_type = ? AND associated_asset_id = ?",
+			userID, outcomeID, assetType, assetID).
+		First(&existing).Error; err != nil {
+		return nil, err
+	}
+	return &existing, nil
+}
+
 func (r *learningOutcomeResultRepo) ListByUserAndContext(ctx context.Context, userID uint, contextType string, contextID uint) ([]models.LearningOutcomeResult, error) {
 	var results []models.LearningOutcomeResult
 	if err := r.db.WithContext(ctx).Where("user_id = ? AND context_type = ? AND context_id = ?", userID, contextType, contextID).Order("created_at DESC").Find(&results).Error; err != nil {

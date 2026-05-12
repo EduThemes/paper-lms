@@ -479,6 +479,12 @@ type LearningOutcomeResultRepository interface {
 	Upsert(ctx context.Context, result *models.LearningOutcomeResult) error
 	ListByOutcomeID(ctx context.Context, outcomeID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcomeResult], error)
 	ListByUserAndContext(ctx context.Context, userID uint, contextType string, contextID uint) ([]models.LearningOutcomeResult, error)
+	// FindByUserOutcomeAsset returns the existing result row keyed on
+	// (user_id, learning_outcome_id, associated_asset_type, associated_asset_id) —
+	// the same composite the Upsert call uses. Returns gorm.ErrRecordNotFound
+	// when no prior row exists. Used by the OnMasteryCrossed transition
+	// detector to capture the pre-Upsert mastery state.
+	FindByUserOutcomeAsset(ctx context.Context, userID, outcomeID uint, assetType string, assetID uint) (*models.LearningOutcomeResult, error)
 	// ListByUserAndOutcomeIDs is the snapshot loader's targeted read for
 	// OutcomeMastery predicates. Returns every recorded result for the
 	// given outcome set; the mastery package consumes them via its
