@@ -193,6 +193,9 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.GamificationWalletBalance{},
 		&models.GamificationWalletTransaction{},
 		&models.GamificationFerpaFieldTag{},
+		// Phase 6 Wave 1 Sprint C: per-user content-view aggregates that
+		// the ViewedContent predicate reads at rule-evaluation time.
+		&models.ContentView{},
 	)
 }
 

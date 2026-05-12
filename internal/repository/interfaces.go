@@ -119,6 +119,10 @@ type SubmissionRepository interface {
 	FindByIDs(ctx context.Context, ids []uint) ([]models.Submission, error)
 	FindByAssignmentAndUser(ctx context.Context, assignmentID, userID uint) (*models.Submission, error)
 	FindByAssignmentAndUserIDs(ctx context.Context, assignmentID uint, userIDs []uint) ([]models.Submission, error)
+	// ListByUserAndAssignmentIDs is the snapshot loader's targeted read:
+	// pulls one user's submissions for a small set of assignments at once,
+	// avoiding the N round-trips a per-assignment loop would cost.
+	ListByUserAndAssignmentIDs(ctx context.Context, userID uint, assignmentIDs []uint) ([]models.Submission, error)
 	Update(ctx context.Context, submission *models.Submission) error
 	ListByAssignmentID(ctx context.Context, assignmentID uint, params PaginationParams) (*PaginatedResult[models.Submission], error)
 	ListByUserAndCourse(ctx context.Context, userID, courseID uint) ([]models.Submission, error)
@@ -290,6 +294,11 @@ type QuizSubmissionRepository interface {
 	FindByID(ctx context.Context, id uint) (*models.QuizSubmission, error)
 	Update(ctx context.Context, submission *models.QuizSubmission) error
 	FindByQuizAndUser(ctx context.Context, quizID, userID uint) (*models.QuizSubmission, error)
+	// ListByUserAndQuizIDs is the snapshot loader's targeted read for the
+	// SubmittedQuiz predicate. Returns the latest attempt per quiz in the
+	// supplied set; callers that need attempt history should still use
+	// FindByQuizAndUser plus the attempt column.
+	ListByUserAndQuizIDs(ctx context.Context, userID uint, quizIDs []uint) ([]models.QuizSubmission, error)
 	ListByQuizID(ctx context.Context, quizID uint, params PaginationParams) (*PaginatedResult[models.QuizSubmission], error)
 	ListCompletedByQuizID(ctx context.Context, quizID uint) ([]models.QuizSubmission, error)
 }
@@ -470,6 +479,11 @@ type LearningOutcomeResultRepository interface {
 	Upsert(ctx context.Context, result *models.LearningOutcomeResult) error
 	ListByOutcomeID(ctx context.Context, outcomeID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcomeResult], error)
 	ListByUserAndContext(ctx context.Context, userID uint, contextType string, contextID uint) ([]models.LearningOutcomeResult, error)
+	// ListByUserAndOutcomeIDs is the snapshot loader's targeted read for
+	// OutcomeMastery predicates. Returns every recorded result for the
+	// given outcome set; the mastery package consumes them via its
+	// per-method calculators.
+	ListByUserAndOutcomeIDs(ctx context.Context, userID uint, outcomeIDs []uint) ([]models.LearningOutcomeResult, error)
 }
 
 type OutcomeAlignmentRepository interface {
@@ -789,6 +803,29 @@ type GamificationRuleRepository interface {
 	// tuple is uniquely indexed; a same-microsecond duplicate is a bug, not a retry.
 	RecordEvaluation(ctx context.Context, eval *models.GamificationRuleEvaluation) error
 	ListEvaluationsForUserRule(ctx context.Context, userID, ruleID uint, params PaginationParams) (*PaginatedResult[models.GamificationRuleEvaluation], error)
+	// LastFiringForUserRule returns the most recent successful evaluation
+	// (result=true) for (rule_id, user_id) — the cooldown check's input.
+	// Returns (nil, nil) when the rule has never successfully fired for
+	// this user.
+	LastFiringForUserRule(ctx context.Context, userID, ruleID uint) (*models.GamificationRuleEvaluation, error)
+	// CountFiringsInWindow counts successful evaluations for
+	// (rule_id, user_id) since `since`. Powers the max_per_window guard.
+	CountFiringsInWindow(ctx context.Context, userID, ruleID uint, since time.Time) (int64, error)
+}
+
+// ContentViewRepository persists per-user content-view aggregates that the
+// ViewedContent predicate reads at rule-evaluation time. Schema lives at
+// migration 000036.
+type ContentViewRepository interface {
+	// IncrementView upserts the (user, object_type, object_id) row,
+	// incrementing view_count and total_seconds and bumping
+	// last_viewed_at. Atomic via ON CONFLICT … DO UPDATE.
+	IncrementView(ctx context.Context, userID uint, objectType string, objectID uint, durationSeconds int64) error
+	// ListByUserAndObjectIDs is the snapshot loader's targeted read.
+	ListByUserAndObjectIDs(ctx context.Context, userID uint, objectType string, objectIDs []uint) ([]models.ContentView, error)
+	// GetByUserAndObject returns (nil, nil) when no row exists; callers
+	// treat that as zero views.
+	GetByUserAndObject(ctx context.Context, userID uint, objectType string, objectID uint) (*models.ContentView, error)
 }
 
 type GamificationCurrencyTypeRepository interface {

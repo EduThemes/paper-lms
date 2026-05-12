@@ -12,13 +12,17 @@ import (
 // Wave 1 wires this predicate end-to-end as the proof-of-pattern; the
 // remaining six atomic predicates from PHASE6-WAVE1-PLAN.md task 6 follow.
 type SubmittedAssignment struct {
-	AssignmentID uint
-	MinScore     *float64 // inclusive lower bound on the submission's score
-	MaxScore     *float64 // inclusive upper bound
-	RequireOnTime bool    // if true, late submissions don't satisfy the predicate
+	AssignmentID  uint     `json:"assignment_id"`
+	MinScore      *float64 `json:"min_score,omitempty"`     // inclusive lower bound on the submission's score
+	MaxScore      *float64 `json:"max_score,omitempty"`     // inclusive upper bound
+	RequireOnTime bool     `json:"require_on_time,omitempty"` // if true, late submissions don't satisfy the predicate
 }
 
 func (p SubmittedAssignment) Kind() string { return "SubmittedAssignment" }
+
+func (p SubmittedAssignment) Needs() Needs {
+	return Needs{AssignmentIDs: []uint{p.AssignmentID}}
+}
 
 func (p SubmittedAssignment) Evaluate(_ context.Context, actor ActorSnapshot) (bool, Trace) {
 	trace := Trace{

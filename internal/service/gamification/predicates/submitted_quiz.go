@@ -13,12 +13,16 @@ import (
 // has no notion of lateness yet), so RequireOnTime is omitted here — add it
 // once the model gains the field.
 type SubmittedQuiz struct {
-	QuizID   uint
-	MinScore *float64 // inclusive lower bound on the submission's score
-	MaxScore *float64 // inclusive upper bound
+	QuizID   uint     `json:"quiz_id"`
+	MinScore *float64 `json:"min_score,omitempty"` // inclusive lower bound on the submission's score
+	MaxScore *float64 `json:"max_score,omitempty"` // inclusive upper bound
 }
 
 func (p SubmittedQuiz) Kind() string { return "SubmittedQuiz" }
+
+func (p SubmittedQuiz) Needs() Needs {
+	return Needs{QuizIDs: []uint{p.QuizID}}
+}
 
 func (p SubmittedQuiz) Evaluate(_ context.Context, actor ActorSnapshot) (bool, Trace) {
 	trace := Trace{

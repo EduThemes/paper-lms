@@ -4,43 +4,62 @@ import (
 	"context"
 )
 
-// ViewedContent tests whether the actor has visited a piece of content. Wave 1
-// only checks for first-view presence — the snapshot stores the first-viewed
-// timestamp keyed by content_id. A future MinSecondsViewed gate will land
-// once the content-view loader tracks cumulative duration (Sprint C).
+// ViewedContent tests whether the actor has visited a piece of content,
+// optionally constrained by a minimum view count and/or cumulative time on
+// page. The snapshot loader hydrates `ActorSnapshot.ViewedContent` from
+// the `content_views` aggregate table (migration 000036), which the
+// page-view emission middleware (Sprint D) increments on every render.
+//
+// MinViews defaults to 1 — the bare predicate "has viewed this page at
+// least once." Higher values gate progression on repeated views (e.g.
+// "review this lesson three times before unlocking the assessment").
+// MinSecondsViewed gates on cumulative seconds across all views.
 type ViewedContent struct {
-	ContentID uint
-	// MinSecondsViewed is parsed into the struct so rules can be authored
-	// against it today, but Wave 1 silently treats it as 0 — see the Reason
-	// trace when non-zero. Tracked under the same TODO as the snapshot
-	// duration extension.
-	MinSecondsViewed int
+	ContentID        uint `json:"content_id"`
+	MinViews         int  `json:"min_views,omitempty"`         // default 1
+	MinSecondsViewed int  `json:"min_seconds_viewed,omitempty"`
 }
 
 func (p ViewedContent) Kind() string { return "ViewedContent" }
 
+func (p ViewedContent) Needs() Needs {
+	return Needs{ContentIDs: []uint{p.ContentID}}
+}
+
 func (p ViewedContent) Evaluate(_ context.Context, actor ActorSnapshot) (bool, Trace) {
+	required := p.MinViews
+	if required <= 0 {
+		required = 1
+	}
+
 	trace := Trace{
 		Kind: p.Kind(),
 		Params: map[string]any{
 			"content_id": p.ContentID,
+			"min_views":  required,
 		},
 	}
 	if p.MinSecondsViewed > 0 {
 		trace.Params["min_seconds_viewed"] = p.MinSecondsViewed
 	}
 
-	_, ok := actor.ViewedContent[p.ContentID]
+	state, ok := actor.ViewedContent[p.ContentID]
 	if !ok {
 		trace.Reason = "no recorded view for content"
 		return false, trace
 	}
+	trace.Params["view_count"] = state.ViewCount
+	trace.Params["total_seconds"] = state.TotalSeconds
 
-	if p.MinSecondsViewed > 0 {
-		// Duration-of-view is not yet tracked in the snapshot; presence-only
-		// for Wave 1. Note this in the trace so debug output is honest.
-		trace.Reason = "duration-of-view not yet tracked; presence-only match"
+	if state.ViewCount < required {
+		trace.Reason = "view_count below MinViews"
+		return false, trace
 	}
+	if p.MinSecondsViewed > 0 && state.TotalSeconds < int64(p.MinSecondsViewed) {
+		trace.Reason = "total_seconds below MinSecondsViewed"
+		return false, trace
+	}
+
 	trace.Result = true
 	return true, trace
 }

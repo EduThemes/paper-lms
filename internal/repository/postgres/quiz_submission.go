@@ -40,6 +40,33 @@ func (r *quizSubmissionRepo) FindByQuizAndUser(ctx context.Context, quizID, user
 	return &submission, nil
 }
 
+// ListByUserAndQuizIDs returns the latest attempt per quiz in the supplied
+// set for the given user — exactly what the SubmittedQuiz predicate needs
+// during snapshot hydration. The "latest per quiz" filter is expressed as
+// a left-joined NOT EXISTS subquery against the same table, which Postgres
+// plans as an index-only lookup against the (quiz_id, user_id, attempt)
+// composite when one exists.
+func (r *quizSubmissionRepo) ListByUserAndQuizIDs(ctx context.Context, userID uint, quizIDs []uint) ([]models.QuizSubmission, error) {
+	if len(quizIDs) == 0 {
+		return nil, nil
+	}
+	var submissions []models.QuizSubmission
+	const stmt = `
+		SELECT qs.* FROM quiz_submissions qs
+		WHERE qs.user_id = ? AND qs.quiz_id IN ?
+		  AND NOT EXISTS (
+		    SELECT 1 FROM quiz_submissions later
+		    WHERE later.user_id = qs.user_id
+		      AND later.quiz_id = qs.quiz_id
+		      AND later.attempt > qs.attempt
+		  )
+	`
+	if err := r.db.WithContext(ctx).Raw(stmt, userID, quizIDs).Scan(&submissions).Error; err != nil {
+		return nil, err
+	}
+	return submissions, nil
+}
+
 func (r *quizSubmissionRepo) ListByQuizID(ctx context.Context, quizID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.QuizSubmission], error) {
 	var submissions []models.QuizSubmission
 	var count int64

@@ -8,10 +8,14 @@ import (
 // Set-membership only; the snapshot loader is responsible for hydrating the
 // slice from whichever source-of-truth survives badge issuance in Wave 2.
 type EarnedBadge struct {
-	BadgeID uint
+	BadgeID uint `json:"badge_id"`
 }
 
 func (p EarnedBadge) Kind() string { return "EarnedBadge" }
+
+func (p EarnedBadge) Needs() Needs {
+	return Needs{BadgeIDs: []uint{p.BadgeID}}
+}
 
 func (p EarnedBadge) Evaluate(_ context.Context, actor ActorSnapshot) (bool, Trace) {
 	trace := Trace{
