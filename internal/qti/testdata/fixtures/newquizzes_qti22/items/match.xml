@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<assessmentItem xmlns="http://www.imsglobal.org/xsd/imsqti_v2p2" identifier="match-item" title="Match" adaptive="false" timeDependent="false">
+  <responseDeclaration identifier="RESPONSE" cardinality="multiple" baseType="directedPair">
+    <correctResponse>
+      <value>france paris</value>
+      <value>uk london</value>
+    </correctResponse>
+  </responseDeclaration>
+  <itemBody>
+    <p>Match country to capital.</p>
+    <matchInteraction responseIdentifier="RESPONSE" shuffle="false" maxAssociations="2">
+      <simpleMatchSet>
+        <simpleAssociableChoice identifier="france" matchMax="1">France</simpleAssociableChoice>
+        <simpleAssociableChoice identifier="uk" matchMax="1">United Kingdom</simpleAssociableChoice>
+      </simpleMatchSet>
+      <simpleMatchSet>
+        <simpleAssociableChoice identifier="paris" matchMax="1">Paris</simpleAssociableChoice>
+        <simpleAssociableChoice identifier="london" matchMax="1">London</simpleAssociableChoice>
+      </simpleMatchSet>
+    </matchInteraction>
+  </itemBody>
+</assessmentItem>

@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import QuizzesSubNav from '../components/quiz/QuizzesSubNav';
 import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
@@ -112,6 +113,7 @@ const QuizzesPage = () => {
     return (
       <Layout>
         <CourseNav />
+        <QuizzesSubNav />
         <div className="space-y-3 p-6">
           <Skeleton className="h-9 w-48" />
           <Skeleton className="h-12 w-full" />
@@ -129,6 +131,7 @@ const QuizzesPage = () => {
   return (
     <Layout>
       <CourseNav />
+      <QuizzesSubNav />
       <div className="mb-6">
         <Link to={`/courses/${courseId}`} className="text-brand-600 hover:underline text-sm">
           &larr; Back to Course

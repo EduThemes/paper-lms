@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<assessmentItem xmlns="http://www.imsglobal.org/xsd/imsqti_v2p2" identifier="mc-item" title="MC" adaptive="false" timeDependent="false">
+  <responseDeclaration identifier="RESPONSE" cardinality="single" baseType="identifier">
+    <correctResponse><value>b</value></correctResponse>
+  </responseDeclaration>
+  <itemBody>
+    <p>What is 2+2?</p>
+    <choiceInteraction responseIdentifier="RESPONSE" shuffle="false" maxChoices="1">
+      <simpleChoice identifier="a">3</simpleChoice>
+      <simpleChoice identifier="b">4</simpleChoice>
+      <simpleChoice identifier="c">5</simpleChoice>
+    </choiceInteraction>
+  </itemBody>
+  <modalFeedback identifier="correct" outcomeIdentifier="FEEDBACK" showHide="show">Nice!</modalFeedback>
+</assessmentItem>

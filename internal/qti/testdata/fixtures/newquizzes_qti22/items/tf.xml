@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<assessmentItem xmlns="http://www.imsglobal.org/xsd/imsqti_v2p2" identifier="tf-item" title="TF" adaptive="false" timeDependent="false">
+  <responseDeclaration identifier="RESPONSE" cardinality="single" baseType="identifier">
+    <correctResponse><value>t</value></correctResponse>
+  </responseDeclaration>
+  <itemBody>
+    <p>The sky is blue.</p>
+    <choiceInteraction responseIdentifier="RESPONSE" shuffle="false" maxChoices="1">
+      <simpleChoice identifier="t">True</simpleChoice>
+      <simpleChoice identifier="f">False</simpleChoice>
+    </choiceInteraction>
+  </itemBody>
+</assessmentItem>

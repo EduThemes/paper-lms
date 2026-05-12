@@ -97,6 +97,12 @@ type Router struct {
 	smartSearchHandler          *handlers.SmartSearchHandler
 	commonsHandler              *handlers.CommonsHandler
 	aiAssistHandler             *handlers.AIAssistHandler
+	// Wave A2: Quiz Item Banks, Stimuli, per-question Outcome Alignments
+	quizItemBankHandler         *handlers.QuizItemBankHandler
+	quizStimulusHandler         *handlers.QuizStimulusHandler
+	quizOutcomeAlignmentHandler *handlers.QuizOutcomeAlignmentHandler
+	// Wave B: QTI / IMSCC import + export.
+	qtiImportHandler *handlers.QTIImportHandler
 	authMiddleware             *middleware.AuthMiddleware
 	permMiddleware             *middleware.PermissionMiddleware
 }
@@ -189,6 +195,12 @@ func NewRouter(
 	smartSearchHandler *handlers.SmartSearchHandler,
 	commonsHandler *handlers.CommonsHandler,
 	aiAssistHandler *handlers.AIAssistHandler,
+	// Wave A2: Quiz Item Banks, Stimuli, per-question Outcome Alignments
+	quizItemBankHandler *handlers.QuizItemBankHandler,
+	quizStimulusHandler *handlers.QuizStimulusHandler,
+	quizOutcomeAlignmentHandler *handlers.QuizOutcomeAlignmentHandler,
+	// Wave B: QTI / IMSCC import + export.
+	qtiImportHandler *handlers.QTIImportHandler,
 	authMiddleware *middleware.AuthMiddleware,
 	permMiddleware *middleware.PermissionMiddleware,
 	accountRepo repository.AccountRepository,
@@ -274,6 +286,10 @@ func NewRouter(
 		smartSearchHandler:          smartSearchHandler,
 		commonsHandler:              commonsHandler,
 		aiAssistHandler:             aiAssistHandler,
+		quizItemBankHandler:         quizItemBankHandler,
+		quizStimulusHandler:         quizStimulusHandler,
+		quizOutcomeAlignmentHandler: quizOutcomeAlignmentHandler,
+		qtiImportHandler:            qtiImportHandler,
 		authMiddleware:              authMiddleware,
 		permMiddleware:              permMiddleware,
 	}
@@ -1000,4 +1016,50 @@ func (r *Router) Register(app *fiber.App) {
 	// Per-user rate limit (30 / 5 min) is the cost gate — any authenticated user
 	// can call it, but no single account can drain the API budget.
 	protected.Post("/ai_assist/:action", middleware.AIAssistRateLimit(), r.aiAssistHandler.Dispatch)
+
+	// =====================================================================
+	// Wave A2: Quiz Item Banks, Stimulus Passages, Per-Question Outcome Alignment
+	// =====================================================================
+
+	// Quiz Item Banks (course-scoped reusable question library).
+	protected.Get("/courses/:course_id/quiz_item_banks", enrolled, r.quizItemBankHandler.ListBanks)
+	protected.Post("/courses/:course_id/quiz_item_banks", instructor, r.quizItemBankHandler.CreateBank)
+	protected.Get("/courses/:course_id/quiz_item_banks/:bank_id", enrolled, r.quizItemBankHandler.GetBank)
+	protected.Put("/courses/:course_id/quiz_item_banks/:bank_id", instructor, r.quizItemBankHandler.UpdateBank)
+	protected.Delete("/courses/:course_id/quiz_item_banks/:bank_id", instructor, r.quizItemBankHandler.DeleteBank)
+
+	// Quiz Item Bank Items (the reusable templates inside a bank).
+	protected.Get("/quiz_item_banks/:bank_id/items", r.quizItemBankHandler.ListBankItems)
+	protected.Post("/quiz_item_banks/:bank_id/items", r.quizItemBankHandler.CreateBankItem)
+	protected.Get("/quiz_item_banks/:bank_id/items/:item_id", r.quizItemBankHandler.GetBankItem)
+	protected.Put("/quiz_item_banks/:bank_id/items/:item_id", r.quizItemBankHandler.UpdateBankItem)
+	protected.Delete("/quiz_item_banks/:bank_id/items/:item_id", r.quizItemBankHandler.DeleteBankItem)
+
+	// Quiz integration: copy an item into a quiz, or draw N random items from a bank.
+	protected.Post("/quiz_item_banks/:bank_id/items/:item_id/add_to_quiz/:quiz_id", instructor, r.quizItemBankHandler.AddBankItemToQuiz)
+	protected.Post("/quiz_item_banks/:bank_id/random_draw", instructor, r.quizItemBankHandler.RandomDraw)
+
+	// Stimulus passages (TipTap docs shared across multiple quiz questions).
+	protected.Get("/courses/:course_id/quiz_stimuli", enrolled, r.quizStimulusHandler.ListStimuli)
+	protected.Post("/courses/:course_id/quiz_stimuli", instructor, r.quizStimulusHandler.CreateStimulus)
+	protected.Get("/courses/:course_id/quiz_stimuli/:stimulus_id", enrolled, r.quizStimulusHandler.GetStimulus)
+	protected.Put("/courses/:course_id/quiz_stimuli/:stimulus_id", instructor, r.quizStimulusHandler.UpdateStimulus)
+	protected.Delete("/courses/:course_id/quiz_stimuli/:stimulus_id", instructor, r.quizStimulusHandler.DeleteStimulus)
+	protected.Get("/quiz_stimuli/:stimulus_id/questions", r.quizStimulusHandler.ListQuestions)
+	protected.Post("/quiz_stimuli/:stimulus_id/questions/:question_id", instructor, r.quizStimulusHandler.LinkQuestion)
+	protected.Delete("/quiz_stimuli/:stimulus_id/questions/:question_id", instructor, r.quizStimulusHandler.UnlinkQuestion)
+
+	// Per-question outcome alignment (data layer only — grader does not consume yet).
+	protected.Get("/quiz_questions/:question_id/outcome_alignments", r.quizOutcomeAlignmentHandler.ListByQuestion)
+	protected.Post("/quiz_questions/:question_id/outcome_alignments", instructor, r.quizOutcomeAlignmentHandler.Align)
+	protected.Delete("/quiz_questions/:question_id/outcome_alignments/:outcome_id", instructor, r.quizOutcomeAlignmentHandler.Unalign)
+	protected.Get("/learning_outcomes/:outcome_id/quiz_question_alignments", r.quizOutcomeAlignmentHandler.ListByOutcome)
+
+	// Wave B: Canvas QTI / IMSCC import + export.
+	// Sync-only in v1. The handler blocks while parsing + persisting;
+	// Canvas-sized exports complete in well under a second.
+	if r.qtiImportHandler != nil {
+		protected.Post("/courses/:course_id/qti_import", instructor, r.qtiImportHandler.Import)
+		protected.Get("/quizzes/:quiz_id/export.imscc", instructor, r.qtiImportHandler.Export)
+	}
 }

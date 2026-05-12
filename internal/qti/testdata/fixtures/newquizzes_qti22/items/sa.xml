@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<assessmentItem xmlns="http://www.imsglobal.org/xsd/imsqti_v2p2" identifier="sa-item" title="Short Answer" adaptive="false" timeDependent="false">
+  <responseDeclaration identifier="RESPONSE" cardinality="single" baseType="string">
+    <correctResponse><value>Mars</value></correctResponse>
+  </responseDeclaration>
+  <itemBody>
+    <p>Name a planet.</p>
+    <textEntryInteraction responseIdentifier="RESPONSE" expectedLength="20"/>
+  </itemBody>
+</assessmentItem>

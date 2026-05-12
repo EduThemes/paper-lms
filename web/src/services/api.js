@@ -2269,6 +2269,92 @@ export const api = {
     return data;
   },
 
+  // ==========================================================================
+  // Wave A: Unified Quiz Engine — Item banks, stimuli, item analysis
+  // ==========================================================================
+  // QuizItemBank CRUD — the unified-engine bank system (distinct from the
+  // legacy /question_banks routes above, which target a separate older table).
+  listQuizItemBanks: async (courseId) => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks`);
+    return data || [];
+  },
+  getQuizItemBank: async (courseId, bankId) => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks/${bankId}`);
+    return data;
+  },
+  createQuizItemBank: async (courseId, title, description = '') => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks`, {
+      method: 'POST', body: JSON.stringify({ bank: { title, description } }),
+    });
+    return data;
+  },
+  updateQuizItemBank: async (courseId, bankId, fields) => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks/${bankId}`, {
+      method: 'PUT', body: JSON.stringify({ bank: fields }),
+    });
+    return data;
+  },
+  deleteQuizItemBank: async (courseId, bankId) => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks/${bankId}`, { method: 'DELETE' });
+    return data;
+  },
+  listQuizItemBankItems: async (bankId) => {
+    const { data } = await request(`/quiz_item_banks/${bankId}/items`);
+    return data || [];
+  },
+
+  // Add a single bank item to a quiz.
+  addBankItemToQuiz: async (bankId, itemId, quizId) => {
+    const { data } = await request(`/quiz_item_banks/${bankId}/items/${itemId}/add_to_quiz/${quizId}`, {
+      method: 'POST',
+    });
+    return data;
+  },
+  // Random draw: copy N random items from a bank into a quiz.
+  randomDrawFromBank: async (bankId, quizId, count) => {
+    const { data } = await request(`/quiz_item_banks/${bankId}/random_draw`, {
+      method: 'POST', body: JSON.stringify({ quiz_id: quizId, count }),
+    });
+    return data;
+  },
+
+  // Stimulus passages
+  listStimuli: async (courseId) => {
+    const { data } = await request(`/courses/${courseId}/quiz_stimuli`);
+    return data || [];
+  },
+  getStimulus: async (courseId, stimulusId) => {
+    const { data } = await request(`/courses/${courseId}/quiz_stimuli/${stimulusId}`);
+    return data;
+  },
+  createStimulus: async (courseId, payload) => {
+    const { data } = await request(`/courses/${courseId}/quiz_stimuli`, {
+      method: 'POST', body: JSON.stringify(payload),
+    });
+    return data;
+  },
+  updateStimulus: async (courseId, stimulusId, payload) => {
+    const { data } = await request(`/courses/${courseId}/quiz_stimuli/${stimulusId}`, {
+      method: 'PUT', body: JSON.stringify(payload),
+    });
+    return data;
+  },
+  deleteStimulus: async (courseId, stimulusId) => {
+    const { data } = await request(`/courses/${courseId}/quiz_stimuli/${stimulusId}`, { method: 'DELETE' });
+    return data;
+  },
+  getStimulusQuestions: async (stimulusId) => {
+    const { data } = await request(`/quiz_stimuli/${stimulusId}/questions`);
+    return data || [];
+  },
+
+  // Item analysis — no dedicated backend endpoint yet. ItemAnalysisPage falls
+  // back to client-side aggregation over submissions; returning null here makes
+  // the fallback path engage cleanly without a 404 round-trip.
+  getQuizItemAnalysis: async (_courseId, _quizId) => {
+    return null;
+  },
+
   // Module Prerequisites
   getModulePrerequisites: async (courseId, moduleId) => {
     const { data } = await request(`/courses/${courseId}/modules/${moduleId}/prerequisites`);

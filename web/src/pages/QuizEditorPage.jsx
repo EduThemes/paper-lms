@@ -1,22 +1,25 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, Link, Navigate } from 'react-router-dom';
-import { Plus, Trash2, GripVertical, Save, ChevronDown, ChevronUp, Check, Pencil, Layers, X } from 'lucide-react';
+import { Plus, Trash2, GripVertical, Save, ChevronDown, ChevronUp, Check, Pencil, Layers, X, BookOpen } from 'lucide-react';
 import { api } from '../services/api';
 import useIsTeacher from '../hooks/useIsTeacher';
 import useUnsavedChanges from '../hooks/useUnsavedChanges';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import QuizzesSubNav from '../components/quiz/QuizzesSubNav';
 import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
-
-const QUESTION_TYPES = [
-  { value: 'multiple_choice', label: 'Multiple Choice' },
-  { value: 'true_false', label: 'True/False' },
-  { value: 'short_answer', label: 'Short Answer' },
-  { value: 'essay', label: 'Essay' },
-  { value: 'numerical_question', label: 'Numerical' },
-];
+import { ALL_TYPES as QUESTION_TYPES, defaultAnswersForType, parseAnswers, stringifyAnswers } from '../components/quiz/itemTypes/types';
+import MultipleAnswerEditor from '../components/quiz/itemTypes/MultipleAnswerEditor';
+import MultipleDropdownEditor from '../components/quiz/itemTypes/MultipleDropdownEditor';
+import FillInBlankEditor from '../components/quiz/itemTypes/FillInBlankEditor';
+import FormulaEditor from '../components/quiz/itemTypes/FormulaEditor';
+import FileUploadEditor from '../components/quiz/itemTypes/FileUploadEditor';
+import OrderingEditor from '../components/quiz/itemTypes/OrderingEditor';
+import CategorizationEditor from '../components/quiz/itemTypes/CategorizationEditor';
+import HotSpotEditor from '../components/quiz/itemTypes/HotSpotEditor';
+import TextOnlyEditor from '../components/quiz/itemTypes/TextOnlyEditor';
 
 const emptyAnswer = () => ({
   id: `a${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -25,31 +28,7 @@ const emptyAnswer = () => ({
   comments: '',
 });
 
-const defaultAnswersForType = (type) => {
-  if (type === 'true_false') {
-    return [
-      { id: 'true', text: 'True', weight: 100, comments: '' },
-      { id: 'false', text: 'False', weight: 0, comments: '' },
-    ];
-  }
-  if (type === 'multiple_choice') {
-    return [
-      { ...emptyAnswer(), text: '', weight: 100 },
-      { ...emptyAnswer(), text: '', weight: 0 },
-      { ...emptyAnswer(), text: '', weight: 0 },
-      { ...emptyAnswer(), text: '', weight: 0 },
-    ];
-  }
-  if (type === 'short_answer') {
-    return [{ ...emptyAnswer(), text: '', weight: 100 }];
-  }
-  if (type === 'numerical_question') {
-    return [{ ...emptyAnswer(), text: '', weight: 100 }];
-  }
-  return [];
-};
-
-const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId }) => {
+const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId, stimuli = [] }) => {
   const [expanded, setExpanded] = useState(true);
   const [answers, setAnswers] = useState([]);
 
@@ -202,6 +181,26 @@ const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId 
             />
           </div>
 
+          {/* Linked stimulus (passage) selector */}
+          {stimuli.length > 0 && (
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1 flex items-center gap-1">
+                <BookOpen className="w-3.5 h-3.5" />
+                Link to stimulus passage <span className="text-text-disabled font-normal">(optional)</span>
+              </label>
+              <select
+                value={question.stimulus_id || ''}
+                onChange={(e) => updateField('stimulus_id', e.target.value ? Number(e.target.value) : null)}
+                className="w-full border border-border-strong rounded px-3 py-2 text-sm bg-surface-0 text-text-primary"
+              >
+                <option value="">None</option>
+                {stimuli.map(s => (
+                  <option key={s.id} value={s.id}>{s.title}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Answer Options (MC, TF) */}
           {(qType === 'multiple_choice' || qType === 'true_false') && (
             <div>
@@ -309,10 +308,39 @@ const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId 
             <p className="text-xs text-text-tertiary italic">Essay questions require manual grading.</p>
           )}
 
+          {/* Wave A new item types */}
+          {qType === 'multiple_answer' && (
+            <MultipleAnswerEditor answers={answers} onChange={updateAnswers} />
+          )}
+          {qType === 'multiple_dropdown' && (
+            <MultipleDropdownEditor
+              answers={answers}
+              onChange={updateAnswers}
+              questionText={question.question_text}
+            />
+          )}
+          {qType === 'fill_in_the_blank' && (
+            <FillInBlankEditor answers={answers} onChange={updateAnswers} />
+          )}
+          {qType === 'formula' && (
+            <FormulaEditor answers={answers} onChange={updateAnswers} />
+          )}
+          {qType === 'file_upload' && <FileUploadEditor />}
+          {qType === 'ordering' && (
+            <OrderingEditor answers={answers} onChange={updateAnswers} />
+          )}
+          {qType === 'categorization' && (
+            <CategorizationEditor answers={answers} onChange={updateAnswers} />
+          )}
+          {qType === 'hot_spot' && (
+            <HotSpotEditor answers={answers} onChange={updateAnswers} courseId={courseId} />
+          )}
+          {qType === 'text_only' && <TextOnlyEditor />}
+
           {/* Feedback */}
           <details className="text-sm">
             <summary className="cursor-pointer text-text-tertiary hover:text-text-secondary text-xs">Feedback (optional)</summary>
-            <div className="mt-2 grid grid-cols-2 gap-3">
+            <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs text-text-tertiary mb-1">Correct feedback</label>
                 <input
@@ -331,6 +359,16 @@ const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId 
                   onChange={(e) => updateField('incorrect_comments', e.target.value)}
                   className="w-full border border-border-strong rounded px-2 py-1 text-xs"
                   placeholder="Shown when incorrect..."
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-text-tertiary mb-1">Neutral feedback</label>
+                <input
+                  type="text"
+                  value={question.neutral_comments || ''}
+                  onChange={(e) => updateField('neutral_comments', e.target.value)}
+                  className="w-full border border-border-strong rounded px-2 py-1 text-xs"
+                  placeholder="Shown to everyone..."
                 />
               </div>
             </div>
@@ -355,6 +393,7 @@ const QuizEditorPage = () => {
   // Question groups
   const [groups, setGroups] = useState([]);
   const [questionBanks, setQuestionBanks] = useState([]);
+  const [stimuli, setStimuli] = useState([]);
   const [showGroupForm, setShowGroupForm] = useState(false);
   const [editingGroup, setEditingGroup] = useState(null);
   const [groupForm, setGroupForm] = useState({ name: '', pick_count: 1, question_bank_id: '' });
@@ -371,11 +410,12 @@ const QuizEditorPage = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [quizData, questionResult, groupsData, banksData] = await Promise.allSettled([
+        const [quizData, questionResult, groupsData, banksData, stimuliData] = await Promise.allSettled([
           api.getQuiz(courseId, quizId),
           api.getQuizQuestions(courseId, quizId, 1, 200),
           api.listQuizQuestionGroups(courseId, quizId),
           api.listQuestionBanks(courseId),
+          api.listStimuli ? api.listStimuli(courseId) : Promise.resolve([]),
         ]);
         if (quizData.status === 'rejected') throw new Error(quizData.reason?.message || 'Failed to load quiz');
         if (questionResult.status === 'rejected') throw new Error(questionResult.reason?.message || 'Failed to load questions');
@@ -394,6 +434,7 @@ const QuizEditorPage = () => {
         setQuestions(((qr.data || qr || []) instanceof Array ? (qr.data || qr) : []).sort((a, b) => (a.position || 0) - (b.position || 0)));
         if (groupsData.status === 'fulfilled') setGroups(groupsData.value || []);
         if (banksData.status === 'fulfilled') setQuestionBanks(banksData.value || []);
+        if (stimuliData.status === 'fulfilled') setStimuli(stimuliData.value || []);
       } catch (err) {
         setError(err.message);
       } finally {
@@ -475,7 +516,9 @@ const QuizEditorPage = () => {
           answers: typeof updated.answers === 'string' ? updated.answers : JSON.stringify(updated.answers || []),
           correct_comments: updated.correct_comments || '',
           incorrect_comments: updated.incorrect_comments || '',
+          neutral_comments: updated.neutral_comments || '',
           quiz_question_group_id: updated.quiz_question_group_id || null,
+          stimulus_id: updated.stimulus_id || null,
         };
         await api.updateQuizQuestion(courseId, quizId, updated.id, payload);
       } catch (err) {
@@ -588,6 +631,7 @@ const QuizEditorPage = () => {
   return (
     <Layout>
       <CourseNav />
+      <QuizzesSubNav quizId={quizId} />
       <div className="mb-6">
         <Link to={`/courses/${courseId}/quizzes`} className="text-brand-600 hover:underline text-sm">
           &larr; Back to Quizzes
@@ -869,6 +913,7 @@ const QuizEditorPage = () => {
                 onDelete={() => handleDeleteQuestion(q.id)}
                 groups={groups}
                 courseId={courseId}
+                stimuli={stimuli}
               />
             ))}
           </div>

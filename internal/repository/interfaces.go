@@ -703,6 +703,43 @@ type PlannerOverrideRepository interface {
 	ListByUserID(ctx context.Context, userID uint) ([]models.PlannerOverride, error)
 }
 
+// Wave A2: Quiz Item Banks, Stimuli, Per-Question Outcome Alignment
+
+type QuizItemBankRepository interface {
+	Create(ctx context.Context, bank *models.QuizItemBank) error
+	FindByID(ctx context.Context, id uint) (*models.QuizItemBank, error)
+	Update(ctx context.Context, bank *models.QuizItemBank) error
+	Delete(ctx context.Context, id uint) error
+	ListByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.QuizItemBank], error)
+}
+
+type QuizItemBankItemRepository interface {
+	Create(ctx context.Context, item *models.QuizItemBankItem) error
+	FindByID(ctx context.Context, id uint) (*models.QuizItemBankItem, error)
+	Update(ctx context.Context, item *models.QuizItemBankItem) error
+	Delete(ctx context.Context, id uint) error
+	ListByBankID(ctx context.Context, bankID uint) ([]models.QuizItemBankItem, error)
+}
+
+type QuizStimulusRepository interface {
+	Create(ctx context.Context, stimulus *models.QuizStimulus) error
+	FindByID(ctx context.Context, id uint) (*models.QuizStimulus, error)
+	Update(ctx context.Context, stimulus *models.QuizStimulus) error
+	Delete(ctx context.Context, id uint) error
+	ListByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.QuizStimulus], error)
+	ListQuestionsForStimulus(ctx context.Context, stimulusID uint) ([]models.QuizQuestion, error)
+	SetQuestionStimulus(ctx context.Context, questionID uint, stimulusID *uint) error
+}
+
+type QuizQuestionOutcomeAlignmentRepository interface {
+	Create(ctx context.Context, alignment *models.QuizQuestionOutcomeAlignment) error
+	Delete(ctx context.Context, id uint) error
+	DeleteByQuestionAndOutcome(ctx context.Context, quizQuestionID, outcomeID uint) error
+	FindByQuestionAndOutcome(ctx context.Context, quizQuestionID, outcomeID uint) (*models.QuizQuestionOutcomeAlignment, error)
+	ListByQuestionID(ctx context.Context, quizQuestionID uint) ([]models.QuizQuestionOutcomeAlignment, error)
+	ListByOutcomeID(ctx context.Context, outcomeID uint) ([]models.QuizQuestionOutcomeAlignment, error)
+}
+
 // Wiki Page Revisions
 
 type WikiPageRevisionRepository interface {

@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS users (
     id bigserial PRIMARY KEY,
     created_at timestamptz,
     updated_at timestamptz,
+    deleted_at timestamptz,
     name text NOT NULL,
     sortable_name text,
     short_name text,

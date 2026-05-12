@@ -52,6 +52,9 @@ const OneRosterPage = React.lazy(() => import('./pages/OneRosterPage'));
 const DocViewerPage = React.lazy(() => import('./pages/DocViewerPage'));
 const LoginPageSSO = React.lazy(() => import('./pages/LoginPageSSO'));
 const QuestionBanksPage = React.lazy(() => import('./pages/QuestionBanksPage'));
+const ItemBankManagerPage = React.lazy(() => import('./pages/ItemBankManagerPage'));
+const StimulusEditorPage = React.lazy(() => import('./pages/StimulusEditorPage'));
+const ItemAnalysisPage = React.lazy(() => import('./pages/ItemAnalysisPage'));
 const AccommodationsPage = React.lazy(() => import('./pages/AccommodationsPage'));
 const AttendancePage = React.lazy(() => import('./pages/AttendancePage'));
 import ParentalConsentPage from './pages/ParentalConsentPage';
@@ -169,6 +172,10 @@ const App = () => {
           <Route path="quizzes/:quizId/submissions/:submissionId/review" element={<QuizReviewPage />} />
           <Route path="quizzes/:quizId/submissions" element={<QuizSubmissionsPage />} />
           <Route path="quizzes/:quizId/statistics" element={<QuizStatisticsPage />} />
+          <Route path="quizzes/:quizId/item-analysis" element={<ItemAnalysisPage />} />
+          <Route path="item-banks" element={<ItemBankManagerPage />} />
+          <Route path="stimuli" element={<StimulusEditorPage />} />
+          <Route path="stimuli/:stimulusId" element={<StimulusEditorPage />} />
           <Route path="discussions" element={<DiscussionsPage />} />
           <Route path="discussions/:topicId" element={<DiscussionTopicPage />} />
           <Route path="files" element={<FilesPage />} />
