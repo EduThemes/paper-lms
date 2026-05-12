@@ -8,12 +8,40 @@ import (
 	"github.com/EduThemes/paper-lms/internal/repository"
 )
 
+// EnrollmentCreatedCallback fires asynchronously after a successful
+// EnrollmentService.Create. Mirrors the SubmissionGradedCallback pattern:
+// a fresh context.Background() is passed in so the callback survives the
+// originating request being cancelled. Gamification rules consume this
+// to fire `verb=enrolled, object_type=Course` triggers.
+type EnrollmentCreatedCallback func(ctx context.Context, enrollmentID uint)
+
 type EnrollmentService struct {
 	enrollmentRepo repository.EnrollmentRepository
+
+	// onCreatedCallbacks fire (in goroutines) after a successful Create.
+	// Registered via OnCreated; never invoked in tests unless explicitly
+	// wired.
+	onCreatedCallbacks []EnrollmentCreatedCallback
 }
 
 func NewEnrollmentService(enrollmentRepo repository.EnrollmentRepository) *EnrollmentService {
 	return &EnrollmentService{enrollmentRepo: enrollmentRepo}
+}
+
+// OnCreated registers a callback to fire after a successful enrollment
+// write. The callback runs in a fresh goroutine with a detached context.
+// Multiple registrations stack; order is registration order.
+func (s *EnrollmentService) OnCreated(cb EnrollmentCreatedCallback) {
+	s.onCreatedCallbacks = append(s.onCreatedCallbacks, cb)
+}
+
+func (s *EnrollmentService) fireOnCreated(enrollmentID uint) {
+	for _, cb := range s.onCreatedCallbacks {
+		go func(cb EnrollmentCreatedCallback) {
+			defer recoverFromPanic("enrollment OnCreated callback")
+			cb(context.Background(), enrollmentID)
+		}(cb)
+	}
 }
 
 var validEnrollmentTypes = map[string]bool{
@@ -39,7 +67,12 @@ func (s *EnrollmentService) Create(ctx context.Context, enrollment *models.Enrol
 		return errors.New("user is already enrolled in this course")
 	}
 
-	return s.enrollmentRepo.Create(ctx, enrollment)
+	if err := s.enrollmentRepo.Create(ctx, enrollment); err != nil {
+		return err
+	}
+
+	s.fireOnCreated(enrollment.ID)
+	return nil
 }
 
 func (s *EnrollmentService) ListByCourse(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Enrollment], error) {

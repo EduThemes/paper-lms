@@ -103,6 +103,8 @@ type Router struct {
 	quizOutcomeAlignmentHandler *handlers.QuizOutcomeAlignmentHandler
 	// Wave B: QTI / IMSCC import + export.
 	qtiImportHandler *handlers.QTIImportHandler
+	// Phase 6 Wave 1: gamification read API (wallet + currencies).
+	gamificationHandler *handlers.GamificationHandler
 	authMiddleware             *middleware.AuthMiddleware
 	permMiddleware             *middleware.PermissionMiddleware
 }
@@ -201,6 +203,8 @@ func NewRouter(
 	quizOutcomeAlignmentHandler *handlers.QuizOutcomeAlignmentHandler,
 	// Wave B: QTI / IMSCC import + export.
 	qtiImportHandler *handlers.QTIImportHandler,
+	// Phase 6 Wave 1: gamification read API.
+	gamificationHandler *handlers.GamificationHandler,
 	authMiddleware *middleware.AuthMiddleware,
 	permMiddleware *middleware.PermissionMiddleware,
 	accountRepo repository.AccountRepository,
@@ -290,6 +294,7 @@ func NewRouter(
 		quizStimulusHandler:         quizStimulusHandler,
 		quizOutcomeAlignmentHandler: quizOutcomeAlignmentHandler,
 		qtiImportHandler:            qtiImportHandler,
+		gamificationHandler:         gamificationHandler,
 		authMiddleware:              authMiddleware,
 		permMiddleware:              permMiddleware,
 	}
@@ -1061,5 +1066,16 @@ func (r *Router) Register(app *fiber.App) {
 	if r.qtiImportHandler != nil {
 		protected.Post("/courses/:course_id/qti_import", instructor, r.qtiImportHandler.Import)
 		protected.Get("/quizzes/:quiz_id/export.imscc", instructor, r.qtiImportHandler.Export)
+	}
+
+	// =====================================================================
+	// Phase 6 Wave 1: Gamification read API.
+	// Handler enforces its own self-or-admin check (no route-level middleware
+	// because the user-id is in the URL, not derived from a course).
+	// =====================================================================
+	if r.gamificationHandler != nil {
+		gam := protected.Group("/gamification")
+		gam.Get("/currencies", r.gamificationHandler.ListCurrencies)
+		protected.Get("/users/:id/wallet", r.gamificationHandler.GetUserWallet)
 	}
 }

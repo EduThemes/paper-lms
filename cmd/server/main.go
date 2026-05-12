@@ -26,6 +26,8 @@ import (
 	"github.com/EduThemes/paper-lms/internal/scheduler"
 	"github.com/EduThemes/paper-lms/internal/service"
 	"github.com/EduThemes/paper-lms/internal/service/gamification"
+	gamificationEffects "github.com/EduThemes/paper-lms/internal/service/gamification/effects"
+	"github.com/EduThemes/paper-lms/internal/service/gamification/wiring"
 	storageLib "github.com/EduThemes/paper-lms/internal/storage"
 )
 
@@ -231,10 +233,42 @@ func main() {
 	contentEmbeddingRepo := postgres.NewContentEmbeddingRepository(database)
 	sharedContentRepo := postgres.NewSharedContentRepository(database)
 
+	// Phase 6 Wave 1 Sprint D: gamification repositories + the rule-
+	// engine Emitter. Constructed here so any service that needs to fire
+	// xAPI events (via the callback hooks added in Sprint D) can have
+	// the emitter registered against it.
+	gamificationEventRepo := postgres.NewGamificationEventRepository(database)
+	gamificationRuleRepo := postgres.NewGamificationRuleRepository(database)
+	gamificationCurrencyTypeRepo := postgres.NewGamificationCurrencyTypeRepository(database)
+	gamificationWalletRepo := postgres.NewGamificationWalletRepository(database)
+	gamificationFerpaTagRepo := postgres.NewGamificationFerpaFieldTagRepository(database)
+	contentViewRepo := postgres.NewContentViewRepository(database)
+
+	gamificationEmitter := gamification.NewEmitter(gamification.EmitterDeps{
+		Dispatch: gamification.DispatchDeps{
+			Snapshot: gamification.SnapshotDeps{
+				Submissions:     submissionRepo,
+				QuizSubmissions: quizSubmissionRepo,
+				OutcomeResults:  outcomeResultRepo,
+				ContentViews:    contentViewRepo,
+				Wallet:          gamificationWalletRepo,
+				CurrencyType:    gamificationCurrencyTypeRepo,
+			},
+			Rules: gamificationRuleRepo,
+			Effects: gamificationEffects.EffectDeps{
+				Wallet:       gamificationWalletRepo,
+				CurrencyType: gamificationCurrencyTypeRepo,
+			},
+		},
+		Events:    gamificationEventRepo,
+		FerpaTags: gamificationFerpaTagRepo,
+	})
+
 	// Initialize services
 	userService := service.NewUserService(userRepo)
 	courseService := service.NewCourseService(courseRepo, enrollmentRepo, sectionRepo)
 	enrollmentService := service.NewEnrollmentService(enrollmentRepo)
+	contentViewService := service.NewContentViewService(contentViewRepo)
 	moduleService := service.NewModuleService(moduleRepo, moduleItemRepo, service.WithPrerequisiteRepo(modulePrerequisiteRepo))
 	pageService := service.NewPageService(pageRepo)
 	assignmentService := service.NewAssignmentService(assignmentRepo)
@@ -285,6 +319,26 @@ func main() {
 		service.WithQuestionGroupRepo(quizQuestionGroupRepo),
 		service.WithBankEntryRepo(questionBankEntryRepo),
 	)
+	// Phase 6 Wave 1 Sprint D-1: register every gamification emit
+	// callback against the services that own the lifecycle event. The
+	// wiring functions in internal/service/gamification/wiring build
+	// callbacks closed over the right repositories; failures inside
+	// these callbacks are logged via slog and never propagate to the
+	// originating request (the goal is "rule fires never break grading
+	// or submission writes").
+	submissionService.OnGraded(wiring.GradedSubmissionEmitCallback(
+		gamificationEmitter, submissionRepo, assignmentRepo, courseRepo,
+	))
+	quizService.OnCompleted(wiring.CompletedQuizEmitCallback(
+		gamificationEmitter, quizSubmissionRepo, quizRepo, courseRepo,
+	))
+	enrollmentService.OnCreated(wiring.EnrolledCourseEmitCallback(
+		gamificationEmitter, enrollmentRepo, courseRepo,
+	))
+	contentViewService.OnViewed(wiring.ViewedContentEmitCallback(
+		gamificationEmitter, pageRepo, courseRepo,
+	))
+
 	rubricService := service.NewRubricService(rubricRepo, rubricAssocRepo, rubricAssessRepo)
 	gradingPeriodService := service.NewGradingPeriodService(gradingPeriodGroupRepo, gradingPeriodRepo)
 	overrideService := service.NewOverrideService(assignmentOverrideRepo, assignmentOverrideStudentRepo, enrollmentRepo, sectionRepo)
@@ -438,6 +492,11 @@ func main() {
 	moduleHandler := handlers.NewModuleHandler(moduleService)
 	moduleItemHandler := handlers.NewModuleItemHandler(moduleService, pageService)
 	pageHandler := handlers.NewPageHandler(pageService)
+	// Sprint D-1: instrument the authenticated page-fetch path so every
+	// render upserts content_views and fans out to the ViewedContent
+	// callback that fires gamification rules.
+	pageHandler.SetContentViewService(contentViewService)
+	gamificationHandler := handlers.NewGamificationHandler(gamificationWalletRepo, gamificationCurrencyTypeRepo)
 	assignmentHandler := handlers.NewAssignmentHandler(assignmentService)
 	assignmentGroupHandler := handlers.NewAssignmentGroupHandler(assignmentGroupService)
 	submissionHandler := handlers.NewSubmissionHandler(submissionService, submissionCommentRepo, attachmentRepo, userRepo, assignmentRepo, notificationDeliveryService, observerService, outcomeAlignmentRepo, learningOutcomeService)
@@ -643,6 +702,7 @@ func main() {
 		quizOutcomeAlignmentHandler,
 		// Wave B: QTI import + export.
 		qtiImportHandler,
+		gamificationHandler,
 		authMiddleware,
 		permMiddleware,
 		accountRepo,

@@ -48,6 +48,14 @@ type answerOption struct {
 	Left string `json:"left"`
 }
 
+// QuizCompletedCallback is invoked asynchronously after a quiz submission
+// transitions to "complete" or "pending_review" via CompleteSubmission.
+// Mirrors SubmissionGradedCallback: callbacks receive a fresh context and
+// must be self-contained (no reliance on the request's context.Cancel).
+// Used by the gamification engine to fire `verb=completed, object_type=Quiz`
+// rules without coupling the quiz service to the rule engine.
+type QuizCompletedCallback func(ctx context.Context, submissionID uint)
+
 type QuizService struct {
 	quizRepo             repository.QuizRepository
 	questionRepo         repository.QuizQuestionRepository
@@ -56,6 +64,32 @@ type QuizService struct {
 	groupRepo            repository.QuizQuestionGroupRepository
 	bankEntryRepo        repository.QuestionBankEntryRepository
 	accommodationService *AccommodationService
+
+	// onCompletedCallbacks fire (in goroutines) after a successful
+	// CompleteSubmission. Registered via OnCompleted; never invoked in
+	// tests unless explicitly wired.
+	onCompletedCallbacks []QuizCompletedCallback
+}
+
+// OnCompleted registers a callback to fire after CompleteSubmission
+// successfully writes the terminal workflow state. The callback runs in
+// a fresh goroutine with a detached context.Background(); panics are
+// recovered and logged. Multiple registrations stack; order is
+// registration order.
+func (s *QuizService) OnCompleted(cb QuizCompletedCallback) {
+	s.onCompletedCallbacks = append(s.onCompletedCallbacks, cb)
+}
+
+// fireOnCompleted runs all registered callbacks in goroutines with a
+// detached context. Panics are recovered. Errors are the callback's
+// responsibility — the signature returns nothing.
+func (s *QuizService) fireOnCompleted(submissionID uint) {
+	for _, cb := range s.onCompletedCallbacks {
+		go func(cb QuizCompletedCallback) {
+			defer recoverFromPanic("quiz OnCompleted callback")
+			cb(context.Background(), submissionID)
+		}(cb)
+	}
 }
 
 func NewQuizService(
@@ -527,6 +561,11 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 	if err := s.submissionRepo.Update(ctx, submission); err != nil {
 		return nil, err
 	}
+
+	// Fire post-completion callbacks (gamification, notifications, etc.)
+	// asynchronously. Failures in callbacks must never block completion
+	// or surface as errors here.
+	s.fireOnCompleted(submission.ID)
 
 	return submission, nil
 }
