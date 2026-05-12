@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -9,14 +10,52 @@ import (
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/EduThemes/paper-lms/internal/service/gamification"
 )
 
 type PageHandler struct {
 	pageService *service.PageService
+
+	// contentViewService is optional. When set (via SetContentViewService
+	// at startup), every successful single-page fetch records a view that
+	// the gamification engine consumes asynchronously. Nil is the safe
+	// default: tests and the Phase 0 wiring leave it unset, and the
+	// handler quietly skips view-recording in that case.
+	contentViewService *service.ContentViewService
 }
 
 func NewPageHandler(pageService *service.PageService) *PageHandler {
 	return &PageHandler{pageService: pageService}
+}
+
+// SetContentViewService attaches the optional content-view sink after
+// construction. cmd/server/main.go (Sprint D-1 Phase 3) calls this once
+// the gamification emitter is wired; the constructor stays single-arg
+// so older call-sites and tests don't need to thread the new dep.
+func (h *PageHandler) SetContentViewService(s *service.ContentViewService) {
+	h.contentViewService = s
+}
+
+// recordPageView fires a RecordView for the just-served page if a
+// ContentViewService is wired. Errors are logged and swallowed: a
+// gamification failure must never fail the page render.
+func (h *PageHandler) recordPageView(c *fiber.Ctx, page *models.WikiPage) {
+	if h.contentViewService == nil || page == nil {
+		return
+	}
+	userID, ok := c.Locals("user_id").(uint)
+	if !ok || userID == 0 {
+		return
+	}
+	// durationSeconds=0: Wave 1 doesn't track duration. Sprint D-2 will
+	// supply real values from a client beacon.
+	if err := h.contentViewService.RecordView(c.Context(), userID, gamification.ObjectPage, page.ID, 0); err != nil {
+		slog.Error("pages: record content view",
+			"page_id", page.ID,
+			"user_id", userID,
+			"error", err,
+		)
+	}
 }
 
 func pageToJSON(p *models.WikiPage) fiber.Map {
@@ -73,6 +112,7 @@ func (h *PageHandler) GetPage(c *fiber.Ctx) error {
 		if err != nil {
 			return responses.NotFound(c, "page")
 		}
+		h.recordPageView(c, page)
 		return c.JSON(pageToJSON(page))
 	}
 
@@ -82,6 +122,7 @@ func (h *PageHandler) GetPage(c *fiber.Ctx) error {
 		return responses.NotFound(c, "page")
 	}
 
+	h.recordPageView(c, page)
 	return c.JSON(pageToJSON(page))
 }
 
