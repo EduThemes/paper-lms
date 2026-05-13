@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { X } from 'lucide-react';
+import { Settings, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { CurrencyIcon } from './currencyIcon';
 
@@ -174,6 +175,18 @@ export default function WalletDrawer({ userId, balance, open, onOpenChange }) {
               </button>
             )}
           </div>
+
+          <footer className="px-5 py-3 border-t border-surface-raised">
+            <DialogPrimitive.Close asChild>
+              <Link
+                to="/profile/gamification"
+                className="inline-flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                Privacy settings
+              </Link>
+            </DialogPrimitive.Close>
+          </footer>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

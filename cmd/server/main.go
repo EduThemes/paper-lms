@@ -512,7 +512,7 @@ func main() {
 	// render upserts content_views and fans out to the ViewedContent
 	// callback that fires gamification rules.
 	pageHandler.SetContentViewService(contentViewService)
-	gamificationHandler := handlers.NewGamificationHandler(gamificationWalletRepo, gamificationCurrencyTypeRepo)
+	gamificationHandler := handlers.NewGamificationHandler(gamificationWalletRepo, gamificationCurrencyTypeRepo, userRepo)
 	assignmentHandler := handlers.NewAssignmentHandler(assignmentService)
 	assignmentGroupHandler := handlers.NewAssignmentGroupHandler(assignmentGroupService)
 	submissionHandler := handlers.NewSubmissionHandler(submissionService, submissionCommentRepo, attachmentRepo, userRepo, assignmentRepo, notificationDeliveryService, observerService, outcomeAlignmentRepo, learningOutcomeService)

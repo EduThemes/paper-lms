@@ -1020,6 +1020,16 @@ func (m *MockUserRepository) FindByIDs(ctx context.Context, ids []uint) ([]model
 	return args.Get(0).([]models.User), args.Error(1)
 }
 
+// FilterPublicLeaderboardCandidates mocks the W2-C privacy filter that
+// strips opted-out learners from leaderboard candidate sets.
+func (m *MockUserRepository) FilterPublicLeaderboardCandidates(ctx context.Context, candidateIDs []uint) ([]uint, error) {
+	args := m.Called(ctx, candidateIDs)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]uint), args.Error(1)
+}
+
 func (m *MockAssignmentRepository) FindByIDs(ctx context.Context, ids []uint) ([]models.Assignment, error) {
 	args := m.Called(ctx, ids)
 	if args.Get(0) == nil {

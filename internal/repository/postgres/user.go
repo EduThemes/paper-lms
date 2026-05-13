@@ -114,3 +114,28 @@ func (r *userRepo) Search(ctx context.Context, searchTerm string, params reposit
 		PerPage:    params.PerPage,
 	}, nil
 }
+
+// FilterPublicLeaderboardCandidates returns the subset of `candidateIDs`
+// that have `leaderboard_opt_out = FALSE`. Order is not preserved (the
+// caller already has the relevance ordering from the leaderboard query;
+// this is a set-membership filter, not a ranking).
+//
+// Implementation note: phrased as an inclusive SELECT rather than a
+// NOT IN against the opted-out partial index because the candidate set
+// is typically already small (≤30 per leaderboard cohort per SYNTHESIS
+// §7's relative-leaderboard sizing). Wave 3 may revisit if larger boards
+// land.
+func (r *userRepo) FilterPublicLeaderboardCandidates(ctx context.Context, candidateIDs []uint) ([]uint, error) {
+	if len(candidateIDs) == 0 {
+		return nil, nil
+	}
+	var ids []uint
+	err := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Where("id IN ? AND leaderboard_opt_out = ?", candidateIDs, false).
+		Pluck("id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
