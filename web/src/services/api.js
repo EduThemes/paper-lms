@@ -2535,4 +2535,27 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  // Phase 6 gamification (Wave 2 W2-A onward). The nested namespace keeps
+  // wallet/currency/rule/badge surfaces clearly grouped as the engine grows.
+  gamification: {
+    getUserWallet: async (userId) => {
+      const { data } = await request(`/users/${userId}/wallet`);
+      return data;
+    },
+    listUserWalletTransactions: async (userId, currencyTypeId, { page = 1, perPage = 20 } = {}) => {
+      const params = new URLSearchParams({
+        currency_type_id: String(currencyTypeId),
+        page: String(page),
+        per_page: String(perPage),
+      });
+      const { data } = await request(`/users/${userId}/wallet/transactions?${params}`);
+      return data;
+    },
+    listCurrencies: async ({ topbarOnly = false } = {}) => {
+      const query = topbarOnly ? '?topbar_only=true' : '';
+      const { data } = await request(`/gamification/currencies${query}`);
+      return data;
+    },
+  },
 };

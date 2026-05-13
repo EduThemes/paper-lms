@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/assert"
@@ -51,6 +52,14 @@ func (m *mockGamWalletRepo) ApplyTransaction(ctx context.Context, tx *models.Gam
 
 func (m *mockGamWalletRepo) ListTransactionsForUser(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.GamificationWalletTransaction], error) {
 	args := m.Called(ctx, userID, params)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*repository.PaginatedResult[models.GamificationWalletTransaction]), args.Error(1)
+}
+
+func (m *mockGamWalletRepo) ListTransactionsForUserAndCurrency(ctx context.Context, userID, currencyTypeID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.GamificationWalletTransaction], error) {
+	args := m.Called(ctx, userID, currencyTypeID, params)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -133,6 +142,7 @@ func setupGamificationHandler(callerID uint, isAdmin bool) (*fiber.App, *mockGam
 	})
 
 	app.Get("/api/v1/users/:id/wallet", h.GetUserWallet)
+	app.Get("/api/v1/users/:id/wallet/transactions", h.ListUserWalletTransactions)
 	app.Get("/api/v1/gamification/currencies", h.ListCurrencies)
 	return app, walletRepo, currencyRepo
 }
@@ -217,6 +227,7 @@ func TestGetUserWallet_Self_HappyPath(t *testing.T) {
 	require.Len(t, rows, 2)
 
 	first := rows[0].(map[string]interface{})
+	assert.Equal(t, float64(11), first["currency_type_id"])
 	assert.Equal(t, "xp", first["code"])
 	assert.Equal(t, "XP", first["display_label"])
 	assert.Equal(t, "zap", first["icon"])
@@ -229,6 +240,7 @@ func TestGetUserWallet_Self_HappyPath(t *testing.T) {
 	assert.Equal(t, float64(1), first["display_order"])
 
 	second := rows[1].(map[string]interface{})
+	assert.Equal(t, float64(12), second["currency_type_id"])
 	assert.Equal(t, "gems", second["code"])
 	assert.Equal(t, true, second["spendable"])
 	assert.Equal(t, float64(8), second["balance"])
@@ -369,5 +381,120 @@ func TestListCurrencies_RepoError(t *testing.T) {
 	currencyRepo.On("ListByTenant", mock.Anything, uint(1)).Return(nil, errors.New("db down"))
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/gamification/currencies", nil)
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+}
+
+// ---------------------------------------------------------------------------
+// ListUserWalletTransactions (Wave 2 W2-A: powers the wallet drawer).
+// ---------------------------------------------------------------------------
+
+func TestListUserWalletTransactions_Self_HappyPath(t *testing.T) {
+	app, walletRepo, _ := setupGamificationHandler(42, false)
+
+	occurredAt := time.Date(2026, 5, 13, 9, 30, 0, 0, time.UTC)
+	ruleID := uint(7)
+	page := &repository.PaginatedResult[models.GamificationWalletTransaction]{
+		Items: []models.GamificationWalletTransaction{
+			{ID: 101, UserID: 42, CurrencyTypeID: 11, Delta: 25, Reason: "rule:7", TriggeringRuleID: &ruleID, OccurredAt: occurredAt},
+			{ID: 100, UserID: 42, CurrencyTypeID: 11, Delta: 10, Reason: "rule:7", TriggeringRuleID: &ruleID, OccurredAt: occurredAt.Add(-time.Hour)},
+		},
+		TotalCount: 2, Page: 1, PerPage: 20,
+	}
+	walletRepo.On(
+		"ListTransactionsForUserAndCurrency", mock.Anything,
+		uint(42), uint(11),
+		repository.PaginationParams{Page: 1, PerPage: 20},
+	).Return(page, nil)
+
+	resp := testutil.MakeRequest(app, http.MethodGet,
+		"/api/v1/users/42/wallet/transactions?currency_type_id=11", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body, err := testutil.ParseJSONMap(resp)
+	require.NoError(t, err)
+	assert.Equal(t, float64(42), body["user_id"])
+	assert.Equal(t, float64(11), body["currency_type_id"])
+	assert.Equal(t, float64(2), body["total_count"])
+	rows := body["transactions"].([]interface{})
+	require.Len(t, rows, 2)
+	first := rows[0].(map[string]interface{})
+	assert.Equal(t, float64(101), first["id"])
+	assert.Equal(t, float64(25), first["delta"])
+	assert.Equal(t, "rule:7", first["reason"])
+	assert.Equal(t, "2026-05-13T09:30:00Z", first["occurred_at"])
+
+	walletRepo.AssertExpectations(t)
+}
+
+func TestListUserWalletTransactions_Admin_OtherUser(t *testing.T) {
+	app, walletRepo, _ := setupGamificationHandler(99, true)
+
+	walletRepo.On(
+		"ListTransactionsForUserAndCurrency", mock.Anything,
+		uint(42), uint(11),
+		repository.PaginationParams{Page: 1, PerPage: 20},
+	).Return(&repository.PaginatedResult[models.GamificationWalletTransaction]{
+		Items: []models.GamificationWalletTransaction{}, TotalCount: 0, Page: 1, PerPage: 20,
+	}, nil)
+
+	resp := testutil.MakeRequest(app, http.MethodGet,
+		"/api/v1/users/42/wallet/transactions?currency_type_id=11", nil)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestListUserWalletTransactions_Forbidden(t *testing.T) {
+	app, walletRepo, _ := setupGamificationHandler(99, false)
+
+	resp := testutil.MakeRequest(app, http.MethodGet,
+		"/api/v1/users/42/wallet/transactions?currency_type_id=11", nil)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	walletRepo.AssertNotCalled(t, "ListTransactionsForUserAndCurrency",
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestListUserWalletTransactions_MissingCurrencyTypeID(t *testing.T) {
+	app, _, _ := setupGamificationHandler(42, false)
+
+	resp := testutil.MakeRequest(app, http.MethodGet,
+		"/api/v1/users/42/wallet/transactions", nil)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestListUserWalletTransactions_InvalidCurrencyTypeID(t *testing.T) {
+	app, _, _ := setupGamificationHandler(42, false)
+
+	resp := testutil.MakeRequest(app, http.MethodGet,
+		"/api/v1/users/42/wallet/transactions?currency_type_id=0", nil)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestListUserWalletTransactions_PerPageClampedTo100(t *testing.T) {
+	app, walletRepo, _ := setupGamificationHandler(42, false)
+
+	walletRepo.On(
+		"ListTransactionsForUserAndCurrency", mock.Anything,
+		uint(42), uint(11),
+		repository.PaginationParams{Page: 1, PerPage: 100},
+	).Return(&repository.PaginatedResult[models.GamificationWalletTransaction]{
+		Items: []models.GamificationWalletTransaction{}, TotalCount: 0, Page: 1, PerPage: 100,
+	}, nil)
+
+	resp := testutil.MakeRequest(app, http.MethodGet,
+		"/api/v1/users/42/wallet/transactions?currency_type_id=11&per_page=9999", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	walletRepo.AssertExpectations(t)
+}
+
+func TestListUserWalletTransactions_RepoError(t *testing.T) {
+	app, walletRepo, _ := setupGamificationHandler(42, false)
+
+	walletRepo.On(
+		"ListTransactionsForUserAndCurrency", mock.Anything,
+		uint(42), uint(11),
+		repository.PaginationParams{Page: 1, PerPage: 20},
+	).Return(nil, errors.New("db down"))
+
+	resp := testutil.MakeRequest(app, http.MethodGet,
+		"/api/v1/users/42/wallet/transactions?currency_type_id=11", nil)
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 }

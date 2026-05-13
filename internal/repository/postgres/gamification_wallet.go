@@ -129,3 +129,27 @@ func (r *GamificationWalletRepo) ListTransactionsForUser(ctx context.Context, us
 		PerPage:    params.PerPage,
 	}, nil
 }
+
+func (r *GamificationWalletRepo) ListTransactionsForUserAndCurrency(ctx context.Context, userID, currencyTypeID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.GamificationWalletTransaction], error) {
+	query := r.db.WithContext(ctx).
+		Model(&models.GamificationWalletTransaction{}).
+		Where("user_id = ? AND currency_type_id = ?", userID, currencyTypeID)
+
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return nil, err
+	}
+
+	var txs []models.GamificationWalletTransaction
+	offset := (params.Page - 1) * params.PerPage
+	if err := query.Offset(offset).Limit(params.PerPage).Order("occurred_at DESC").Find(&txs).Error; err != nil {
+		return nil, err
+	}
+
+	return &repository.PaginatedResult[models.GamificationWalletTransaction]{
+		Items:      txs,
+		TotalCount: count,
+		Page:       params.Page,
+		PerPage:    params.PerPage,
+	}, nil
+}

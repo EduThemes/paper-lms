@@ -6,6 +6,96 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Phase 6 / Wave 2 Sprint W2-A — top-bar currency pills + wallet drawer
+
+Wave 2 opens with the smallest-viable visible loop: a horizontal
+subheader strip above `<main>` that renders the signed-in user's
+topbar currencies as pill buttons, and a right-slide-out
+`WalletDrawer` that shows per-currency transaction history. Pure
+read-side; no schema changes. Locks in the design language
+(grayscale-friendly tokens, lucide icon resolution, no alpha-wash
+backgrounds) for the four UI-heavy sprints that follow.
+
+- **New backend endpoint**
+  `GET /api/v1/users/:id/wallet/transactions?currency_type_id=N&page=&per_page=`.
+  Self-or-admin auth (mirrors `GetUserWallet`). `currency_type_id` is
+  required and validated; `per_page` clamps to `[1, 100]` with a default
+  of `20`. Resolves to
+  `GamificationWalletRepository.ListTransactionsForUserAndCurrency`
+  — a new repo method that narrows the existing ledger query to a
+  single currency. Powers the drawer's per-currency tab without
+  over-fetching when a user has years of cross-currency history.
+- **`walletBalanceJSON.currency_type_id` now exposed** on the existing
+  `GET /users/:id/wallet` response so the drawer can fetch
+  unambiguously. Codes can repeat across scopes (e.g., two
+  course-scoped "coins"); IDs disambiguate.
+- **Frontend `gamificationApi` namespace** added to
+  `web/src/services/api.js` (nested under `api.gamification`): wallet
+  read, wallet transactions, and currencies list. Future Wave 2
+  sprints extend the same namespace for rules/badges/CRUD.
+- **`<CurrencyPills>`** in `web/src/components/gamification/` —
+  fetches the caller's wallet on mount, filters to
+  `visible_in_topbar=true`, sorts by `display_order`, renders pills as
+  icon+balance buttons with `title` tooltips. Large balances
+  compact-format (`12.4k`, `150k`). Subscribes to a
+  `wallet:refresh` window event for future writes to ping.
+  `currencyIcon.jsx` resolves the seed's `icon` field — a lucide name
+  (`zap`/`gem`/`target`/`shield-check`) → emoji glyph → `Sparkles`
+  fallback. Grayscale-eink-friendly: no tinted backgrounds, all
+  paper-aesthetic tokens (`surface-1`, `surface-raised`, `text-primary`).
+- **`<WalletDrawer>`** — Radix dialog from the right edge, ~28rem
+  wide, full height, with the currency's icon + label + balance +
+  lifetime-earned in the header and a paginated transaction list in
+  the body. `reason` field humanized (`rule:7` → `Rule #7`, `manual:N`
+  → `Manual award`, `seed:N` → `Initial grant`, `spend:N` → `Spent: N`).
+  "Load more" button appends pages until `total_count` exhausted.
+  Honors `motion-reduce`.
+- **Layout subheader strip** mounted in both standard mode and 3-5
+  mode at the top of the main content column (above `<main>`,
+  right-aligned, `h-10 border-b border-surface-raised`). K-2 mode
+  intentionally skips pills — K-12 mode defaults game chrome OFF
+  for the youngest learners per SYNTHESIS §5. Standard mode hides
+  the strip on mobile (`hidden md:flex`) where the hamburger button
+  already crowds the top.
+- **Tests**: `CurrencyPills.test.jsx` exercises filter-by-topbar,
+  display_order ordering, compact balance formatting, drawer-open +
+  per-currency transaction fetch, and the `wallet:refresh` event
+  refetch. `gamification_test.go` gains six new tests for the
+  transactions endpoint (happy path, admin-other-user, forbidden,
+  missing/invalid currency_type_id, per_page clamping, repo error).
+  Full frontend suite: 91 tests (up from 86); full backend
+  `./internal/...` suite green.
+
+Also closes two Wave 1 correctness bugs surfaced by browser-testing
+W2-A:
+
+- **`SeedSystemCurrenciesForTenant` bool-default regression**.
+  `gorm:"default:..."` tags on the `Monotonic` and `VisibleInTopbar`
+  columns caused GORM to elide zero-valued bool inserts in favor of
+  the SQL DEFAULT TRUE. The seed declared `mastery_points.VisibleInTopbar=false`
+  and `gems.Monotonic=false`, but every tenant came up with
+  `mastery_points` *in* the topbar (FERPA breach per SYNTHESIS §2) and
+  `gems` flagged as monotonic (breaks spendable semantics — gems are
+  meant to decrease on shop spends). Rewrote the seed to use a raw
+  parameterized INSERT with explicit columns and ON CONFLICT DO
+  NOTHING — every column written every time. The
+  `TestSeedSystemCurrenciesForTenant` integration test now pins the
+  full {`Spendable`, `Monotonic`, `VisibleInTopbar`} matrix for all
+  four system currencies so this regression class can't sneak back.
+- **Migration 000039** backfills any tenant rows already written
+  through the buggy path: flips `mastery_points.visible_in_topbar` and
+  `gems.monotonic` back to `FALSE` where they're currently `TRUE` on
+  system-owned rows. Idempotent against post-fix tenants. Down
+  migration is intentionally empty (re-creating the bug would
+  re-create a compliance violation).
+
+Out of scope for W2-A (deferred to W2-B or later):
+- Currency-create write API — Sprint W2-B.
+- Animation on balance change (subtle pulse on increment) — deferred
+  until W2-B lands so the design language settles first.
+- `/wallet` deep-history route — drawer's "Load more" is sufficient
+  for Wave 2; route-level view added when the first user complains.
+
 ### Phase 6 / Wave 1 Sprint D-3 — correctness finalize (UNIQUE + FERPA seed + flag derivation)
 
 Closes Wave 1. Three correctness wins land together, all behind

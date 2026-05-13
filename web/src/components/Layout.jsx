@@ -14,6 +14,7 @@ import AdminNav from './AdminNav';
 import NotificationBell from './NotificationBell';
 import MobileBottomNav from './MobileBottomNav';
 import ThemeToggle from './ThemeToggle';
+import CurrencyPills from './gamification/CurrencyPills';
 
 const baseNav = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -238,6 +239,7 @@ const Layout = ({ children }) => {
         {showAdminNav && <AdminNav />}
 
         <div className={`flex-1 ${showAdminNav ? 'ml-[284px]' : 'ml-20'}`}>
+          <CurrencyPills />
           <main id="main-content" className="max-w-7xl mx-auto px-6 py-8 pb-16 md:pb-0" role="main">
             {children}
           </main>
@@ -373,6 +375,9 @@ const Layout = ({ children }) => {
 
       {/* Main content area */}
       <div className={`flex-1 ${showAdminNav ? 'md:ml-[280px] ml-0' : 'md:ml-16 ml-0'}`}>
+        <div className="hidden md:block">
+          <CurrencyPills />
+        </div>
         <main id="main-content" className="max-w-7xl mx-auto px-6 py-8 pb-16 md:pb-0 pt-14 md:pt-8" role="main">
           {children}
         </main>

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -32,8 +33,11 @@ func NewGamificationHandler(
 
 // walletBalanceJSON is the topbar-pill payload: balance plus enough currency
 // metadata for the frontend to render label/icon/color without a follow-up
-// fetch.
+// fetch. currency_type_id is exposed so the wallet drawer can fetch
+// per-currency transaction history without re-resolving by code (codes can
+// repeat across scopes).
 type walletBalanceJSON struct {
+	CurrencyTypeID     uint   `json:"currency_type_id"`
 	Code               string `json:"code"`
 	DisplayLabel       string `json:"display_label"`
 	DisplayLabelPlural string `json:"display_label_plural"`
@@ -123,6 +127,7 @@ func (h *GamificationHandler) GetUserWallet(c *fiber.Ctx) error {
 			// metadata. system_owned currencies cannot be deleted, so this
 			// only triggers for instructor-defined currencies post-delete.
 			out.Balances = append(out.Balances, walletBalanceJSON{
+				CurrencyTypeID: b.CurrencyTypeID,
 				Code:           "",
 				Balance:        b.Balance,
 				LifetimeEarned: b.LifetimeEarned,
@@ -130,6 +135,7 @@ func (h *GamificationHandler) GetUserWallet(c *fiber.Ctx) error {
 			continue
 		}
 		out.Balances = append(out.Balances, walletBalanceJSON{
+			CurrencyTypeID:     currency.ID,
 			Code:               currency.Code,
 			DisplayLabel:       currency.DisplayLabel,
 			DisplayLabelPlural: currency.DisplayLabelPlural,
@@ -195,6 +201,105 @@ func (h *GamificationHandler) ListCurrencies(c *fiber.Ctx) error {
 			VisibleInTopbar:    ct.VisibleInTopbar,
 			SystemOwned:        ct.SystemOwned,
 			Description:        ct.Description,
+		})
+	}
+
+	return c.JSON(out)
+}
+
+// walletTxJSON is one ledger entry projected for the wallet drawer.
+type walletTxJSON struct {
+	ID                uint   `json:"id"`
+	Delta             int64  `json:"delta"`
+	Reason            string `json:"reason"`
+	TriggeringEventID *uint  `json:"triggering_event_id,omitempty"`
+	TriggeringRuleID  *uint  `json:"triggering_rule_id,omitempty"`
+	OccurredAt        string `json:"occurred_at"`
+}
+
+type walletTransactionsResponse struct {
+	UserID         uint           `json:"user_id"`
+	CurrencyTypeID uint           `json:"currency_type_id"`
+	Transactions   []walletTxJSON `json:"transactions"`
+	TotalCount     int64          `json:"total_count"`
+	Page           int            `json:"page"`
+	PerPage        int            `json:"per_page"`
+}
+
+// ListUserWalletTransactions handles
+// GET /api/v1/users/:id/wallet/transactions?currency_type_id=N&page=&per_page=.
+//
+// Authorization: same self-or-admin rule as GetUserWallet — the caller must
+// be the :id user or hold the cached is_admin flag.
+//
+// currency_type_id is required; the drawer always shows one currency at a
+// time. Pagination defaults to page=1, per_page=20 (max 100).
+func (h *GamificationHandler) ListUserWalletTransactions(c *fiber.Ctx) error {
+	pathID, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return responses.BadRequest(c, "invalid user id")
+	}
+	targetUserID := uint(pathID)
+
+	callerID, ok := c.Locals("user_id").(uint)
+	if !ok || callerID == 0 {
+		return responses.Unauthorized(c)
+	}
+
+	isAdmin, _ := c.Locals("is_admin").(bool)
+	if callerID != targetUserID && !isAdmin {
+		return responses.Error(c, fiber.StatusForbidden, "you can only access your own wallet")
+	}
+
+	currencyTypeRaw := c.Query("currency_type_id")
+	if currencyTypeRaw == "" {
+		return responses.BadRequest(c, "currency_type_id is required")
+	}
+	currencyTypeParsed, err := strconv.ParseUint(currencyTypeRaw, 10, 64)
+	if err != nil || currencyTypeParsed == 0 {
+		return responses.BadRequest(c, "invalid currency_type_id")
+	}
+	currencyTypeID := uint(currencyTypeParsed)
+
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	perPage, _ := strconv.Atoi(c.Query("per_page", "20"))
+	if perPage < 1 {
+		perPage = 20
+	}
+	if perPage > 100 {
+		perPage = 100
+	}
+
+	result, err := h.walletRepo.ListTransactionsForUserAndCurrency(
+		c.Context(),
+		targetUserID,
+		currencyTypeID,
+		repository.PaginationParams{Page: page, PerPage: perPage},
+	)
+	if err != nil {
+		return responses.InternalError(c, "could not fetch wallet transactions")
+	}
+
+	out := walletTransactionsResponse{
+		UserID:         targetUserID,
+		CurrencyTypeID: currencyTypeID,
+		Transactions:   make([]walletTxJSON, 0, len(result.Items)),
+		TotalCount:     result.TotalCount,
+		Page:           result.Page,
+		PerPage:        result.PerPage,
+	}
+	for i := range result.Items {
+		tx := &result.Items[i]
+		out.Transactions = append(out.Transactions, walletTxJSON{
+			ID:                tx.ID,
+			Delta:             tx.Delta,
+			Reason:            tx.Reason,
+			TriggeringEventID: tx.TriggeringEventID,
+			TriggeringRuleID:  tx.TriggeringRuleID,
+			OccurredAt:        tx.OccurredAt.UTC().Format(time.RFC3339),
 		})
 	}
 

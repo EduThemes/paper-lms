@@ -10,7 +10,6 @@ import (
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // systemCurrencySeed is the shape of one of the four hard-coded rows the
@@ -74,28 +73,32 @@ func SeedSystemCurrenciesForTenant(ctx context.Context, db *gorm.DB, tenantID ui
 	if tenantID == 0 {
 		return fmt.Errorf("SeedSystemCurrenciesForTenant: tenantID must be > 0")
 	}
-	rows := make([]models.GamificationCurrencyType, 0, len(systemCurrencies))
+	// Raw INSERT (not gorm.Create) because GORM's `default:` tags cause
+	// zero-valued bools to be elided in favor of the column DEFAULT —
+	// which silently flips `mastery_points.visible_in_topbar` and
+	// `gems.monotonic` to TRUE in violation of SYNTHESIS §2's FERPA
+	// contract and the four-currency design. Every column is written
+	// explicitly here; ON CONFLICT DO NOTHING keeps this idempotent
+	// against the uniq_gam_currency_scope_code unique index.
+	const insertSQL = `
+		INSERT INTO gamification_currency_types
+			(tenant_id, scope_type, scope_id, code, display_label,
+			 display_label_plural, icon, color, display_order, spendable,
+			 monotonic, ferpa_classification, visible_to_student,
+			 visible_in_topbar, system_owned, description, created_at, updated_at)
+		VALUES
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+		ON CONFLICT ON CONSTRAINT uniq_gam_currency_scope_code DO NOTHING`
+	tx := db.WithContext(ctx)
 	for _, s := range systemCurrencies {
-		rows = append(rows, models.GamificationCurrencyType{
-			TenantID:            tenantID,
-			ScopeType:           models.ScopeSite,
-			ScopeID:             tenantID,
-			Code:                s.Code,
-			DisplayLabel:        s.Label,
-			DisplayLabelPlural:  s.LabelPlural,
-			Icon:                s.Icon,
-			Color:               s.Color,
-			DisplayOrder:        s.Order,
-			Spendable:           s.Spendable,
-			Monotonic:           s.Monotonic,
-			FerpaClassification: s.Ferpa,
-			VisibleToStudent:    true,
-			VisibleInTopbar:     s.VisibleInTopbar,
-			SystemOwned:         true,
-			Description:         s.Description,
-		})
+		if err := tx.Exec(insertSQL,
+			tenantID, models.ScopeSite, tenantID, s.Code, s.Label,
+			s.LabelPlural, s.Icon, s.Color, s.Order, s.Spendable,
+			s.Monotonic, s.Ferpa, true,
+			s.VisibleInTopbar, true, s.Description,
+		).Error; err != nil {
+			return fmt.Errorf("seed %s: %w", s.Code, err)
+		}
 	}
-	return db.WithContext(ctx).
-		Clauses(clause.OnConflict{DoNothing: true}).
-		Create(&rows).Error
+	return nil
 }

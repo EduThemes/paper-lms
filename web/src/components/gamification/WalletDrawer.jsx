@@ -1,0 +1,181 @@
+import React, { useCallback, useEffect, useState } from 'react';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
+import { X } from 'lucide-react';
+import { api } from '../../services/api';
+import { CurrencyIcon } from './currencyIcon';
+
+function formatDelta(n) {
+  const sign = n > 0 ? '+' : '';
+  return `${sign}${n.toLocaleString()}`;
+}
+
+function formatWhen(iso) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+// Human-readable label for a transaction row. The backend stores
+// "rule:<id>" / "manual:<actor>" / "seed:<source>" / "spend:<sku>" patterns;
+// strip the colon prefix for display, keep the suffix for the operator.
+function describeReason(reason) {
+  if (!reason) return 'Adjustment';
+  const [kind, detail] = reason.split(':', 2);
+  switch (kind) {
+    case 'rule':
+      return detail ? `Rule #${detail}` : 'Rule';
+    case 'manual':
+      return 'Manual award';
+    case 'seed':
+      return 'Initial grant';
+    case 'spend':
+      return detail ? `Spent: ${detail}` : 'Spent';
+    default:
+      return reason;
+  }
+}
+
+// WalletDrawer slides in from the right and shows the transaction history
+// for a single currency. The drawer always renders to keep Radix focus-trap
+// behavior consistent; an `open` prop drives visibility.
+export default function WalletDrawer({ userId, balance, open, onOpenChange }) {
+  const [transactions, setTransactions] = useState([]);
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const currencyTypeId = balance?.currency_type_id;
+
+  const loadPage = useCallback(
+    async (nextPage) => {
+      if (!userId || !currencyTypeId) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await api.gamification.listUserWalletTransactions(userId, currencyTypeId, {
+          page: nextPage,
+          perPage: 20,
+        });
+        setPage(result.page);
+        setTotalCount(result.total_count || 0);
+        setTransactions((prev) =>
+          nextPage === 1 ? result.transactions || [] : [...prev, ...(result.transactions || [])],
+        );
+      } catch (err) {
+        console.error('WalletDrawer: failed to load transactions', err);
+        setError('Could not load transaction history.');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [userId, currencyTypeId],
+  );
+
+  useEffect(() => {
+    if (open && currencyTypeId) {
+      setTransactions([]);
+      setPage(1);
+      setTotalCount(0);
+      loadPage(1);
+    }
+  }, [open, currencyTypeId, loadPage]);
+
+  const canLoadMore = transactions.length < totalCount;
+
+  return (
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay
+          className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 motion-reduce:transition-none"
+        />
+        <DialogPrimitive.Content
+          className="fixed right-0 top-0 z-50 h-full w-full max-w-md bg-surface-0 shadow-xl border-l border-surface-raised flex flex-col data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right duration-200 motion-reduce:duration-0"
+          aria-describedby={undefined}
+        >
+          <header className="flex items-center gap-3 px-5 py-4 border-b border-surface-raised">
+            {balance && (
+              <CurrencyIcon
+                icon={balance.icon}
+                color={balance.color}
+                className="w-6 h-6 flex-shrink-0"
+                title={balance.display_label}
+              />
+            )}
+            <div className="flex-1 min-w-0">
+              <DialogPrimitive.Title className="text-base font-semibold text-text-primary truncate">
+                {balance?.display_label || 'Wallet'}
+              </DialogPrimitive.Title>
+              <div className="text-sm text-text-secondary tabular-nums">
+                {typeof balance?.balance === 'number'
+                  ? `${balance.balance.toLocaleString()} ${balance.display_label_plural || balance.display_label}`
+                  : ''}
+                {typeof balance?.lifetime_earned === 'number' && balance.lifetime_earned !== balance.balance && (
+                  <span className="ml-2 text-text-tertiary">
+                    · {balance.lifetime_earned.toLocaleString()} lifetime
+                  </span>
+                )}
+              </div>
+            </div>
+            <DialogPrimitive.Close
+              className="p-1.5 rounded-md text-text-secondary hover:bg-surface-2 hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-brand-400/60"
+              aria-label="Close"
+            >
+              <X className="w-4 h-4" />
+            </DialogPrimitive.Close>
+          </header>
+
+          <div className="flex-1 overflow-y-auto px-5 py-3">
+            {error && (
+              <div className="text-sm text-accent-danger border border-accent-danger rounded-md px-3 py-2 mb-3">
+                {error}
+              </div>
+            )}
+
+            {!error && transactions.length === 0 && !loading && (
+              <div className="text-sm text-text-tertiary text-center py-8">
+                No transactions yet.
+              </div>
+            )}
+
+            <ul className="divide-y divide-surface-raised">
+              {transactions.map((tx) => (
+                <li key={tx.id} className="py-3 flex items-start gap-3">
+                  <span
+                    className={
+                      'tabular-nums text-sm font-semibold w-16 text-right flex-shrink-0 ' +
+                      (tx.delta >= 0 ? 'text-accent-success' : 'text-accent-danger')
+                    }
+                  >
+                    {formatDelta(tx.delta)}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-text-primary truncate">{describeReason(tx.reason)}</div>
+                    <div className="text-xs text-text-tertiary">{formatWhen(tx.occurred_at)}</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+
+            {loading && (
+              <div className="text-sm text-text-tertiary text-center py-4">Loading…</div>
+            )}
+
+            {!loading && canLoadMore && (
+              <button
+                type="button"
+                onClick={() => loadPage(page + 1)}
+                className="mt-2 w-full py-2 text-sm rounded-md border border-surface-raised text-text-secondary hover:bg-surface-2 focus:outline-none focus:ring-2 focus:ring-brand-400/60"
+              >
+                Load more
+              </button>
+            )}
+          </div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  );
+}

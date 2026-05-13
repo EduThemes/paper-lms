@@ -1,0 +1,5 @@
+-- Down migration is intentionally empty. The up migration is a data-fix
+-- that restores SYNTHESIS §2's FERPA contract; reverting would re-create a
+-- compliance bug and there's no signal here to identify which rows were
+-- flipped by the migration vs which were already (incorrectly) TRUE before
+-- the fix shipped.

@@ -860,6 +860,11 @@ type GamificationWalletRepository interface {
 	// transaction. The Wave 1 task-8 AwardCurrency effect calls this.
 	ApplyTransaction(ctx context.Context, tx *models.GamificationWalletTransaction) error
 	ListTransactionsForUser(ctx context.Context, userID uint, params PaginationParams) (*PaginatedResult[models.GamificationWalletTransaction], error)
+	// ListTransactionsForUserAndCurrency narrows the ledger to a single
+	// currency. Powers the wallet drawer's per-currency tab in Wave 2 —
+	// avoids over-fetching when a user has years of cross-currency
+	// transactions.
+	ListTransactionsForUserAndCurrency(ctx context.Context, userID, currencyTypeID uint, params PaginationParams) (*PaginatedResult[models.GamificationWalletTransaction], error)
 }
 
 type GamificationFerpaFieldTagRepository interface {
