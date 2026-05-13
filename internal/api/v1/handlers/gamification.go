@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"errors"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -57,9 +60,11 @@ type userWalletResponse struct {
 }
 
 // currencyJSON is the per-tenant currency-type descriptor consumed by the
-// frontend topbar + admin-debug screens.
+// frontend topbar + admin-debug screens + W2-B editor.
 type currencyJSON struct {
 	ID                 uint   `json:"id"`
+	ScopeType          string `json:"scope_type"`
+	ScopeID            uint   `json:"scope_id"`
 	Code               string `json:"code"`
 	DisplayLabel       string `json:"display_label"`
 	DisplayLabelPlural string `json:"display_label_plural"`
@@ -186,22 +191,7 @@ func (h *GamificationHandler) ListCurrencies(c *fiber.Ctx) error {
 		Currencies: make([]currencyJSON, 0, len(currencies)),
 	}
 	for i := range currencies {
-		ct := &currencies[i]
-		out.Currencies = append(out.Currencies, currencyJSON{
-			ID:                 ct.ID,
-			Code:               ct.Code,
-			DisplayLabel:       ct.DisplayLabel,
-			DisplayLabelPlural: ct.DisplayLabelPlural,
-			Icon:               ct.Icon,
-			Color:              ct.Color,
-			DisplayOrder:       ct.DisplayOrder,
-			Spendable:          ct.Spendable,
-			Monotonic:          ct.Monotonic,
-			VisibleToStudent:   ct.VisibleToStudent,
-			VisibleInTopbar:    ct.VisibleInTopbar,
-			SystemOwned:        ct.SystemOwned,
-			Description:        ct.Description,
-		})
+		out.Currencies = append(out.Currencies, currencyJSONFor(&currencies[i]))
 	}
 
 	return c.JSON(out)
@@ -304,4 +294,281 @@ func (h *GamificationHandler) ListUserWalletTransactions(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(out)
+}
+
+// ---------------------------------------------------------------------------
+// Sprint W2-B — Currency CRUD (POST/PATCH/DELETE).
+//
+// Two URL surfaces sharing the same handler logic:
+//
+//   Site scope    (admin):
+//     POST   /api/v1/gamification/currencies
+//     PATCH  /api/v1/gamification/currencies/:id
+//     DELETE /api/v1/gamification/currencies/:id
+//
+//   Course scope (course instructor):
+//     POST   /api/v1/courses/:course_id/gamification/currencies
+//     PATCH  /api/v1/courses/:course_id/gamification/currencies/:id
+//     DELETE /api/v1/courses/:course_id/gamification/currencies/:id
+//
+// The site routes infer scope from the absence of :course_id; the
+// instructor routes infer scope from the presence of :course_id. The
+// authorization is enforced by router-level middleware (RequireAdmin /
+// RequireInstructor), not re-checked in the handler.
+// ---------------------------------------------------------------------------
+
+// codeRE pins the user-defined-currency code shape: lowercase, must start
+// with a letter, then [a-z0-9_], 2–32 chars total. Matches the predicate
+// engine's resolution scheme (rules reference currencies by code). The
+// 2-char minimum accommodates seeded "xp"; "rep" / "gems" / longer
+// teacher-defined codes (`coins`, `class_bucks`) all fit comfortably.
+var codeRE = regexp.MustCompile(`^[a-z][a-z0-9_]{1,31}$`)
+
+// colorRE accepts a 6-digit hex color or the empty string (which means
+// "fall through to the frontend's default chip color").
+var colorRE = regexp.MustCompile(`^(#[0-9A-Fa-f]{6})?$`)
+
+// createCurrencyInput is the JSON body for POST. Fields default to
+// sensible "non_PII, visible to student, visible in topbar, monotonic"
+// values so a teacher who only fills in {code, display_label} gets a
+// working currency.
+type createCurrencyInput struct {
+	Code               string  `json:"code"`
+	DisplayLabel       string  `json:"display_label"`
+	DisplayLabelPlural string  `json:"display_label_plural"`
+	Icon               string  `json:"icon"`
+	Color              string  `json:"color"`
+	DisplayOrder       int     `json:"display_order"`
+	Spendable          bool    `json:"spendable"`
+	Monotonic          *bool   `json:"monotonic"`
+	VisibleToStudent   *bool   `json:"visible_to_student"`
+	VisibleInTopbar    *bool   `json:"visible_in_topbar"`
+	Description        string  `json:"description"`
+}
+
+// patchCurrencyInput accepts only the fields a teacher/admin is allowed
+// to change. Code, scope, system_owned, and tenant are intentionally
+// absent — those are immutable post-create. Pointers everywhere so we
+// can distinguish "field not provided" from "field set to zero value".
+type patchCurrencyInput struct {
+	DisplayLabel       *string `json:"display_label"`
+	DisplayLabelPlural *string `json:"display_label_plural"`
+	Icon               *string `json:"icon"`
+	Color              *string `json:"color"`
+	DisplayOrder       *int    `json:"display_order"`
+	Spendable          *bool   `json:"spendable"`
+	Monotonic          *bool   `json:"monotonic"`
+	VisibleToStudent   *bool   `json:"visible_to_student"`
+	VisibleInTopbar    *bool   `json:"visible_in_topbar"`
+	Description        *string `json:"description"`
+}
+
+func validateCommonFields(label, color, description string) error {
+	if l := strings.TrimSpace(label); l == "" || len(l) > 64 {
+		return errors.New("display_label is required, max 64 chars")
+	}
+	if !colorRE.MatchString(color) {
+		return errors.New("color must be a 6-digit hex like #A855F7, or empty")
+	}
+	if len(description) > 500 {
+		return errors.New("description max 500 chars")
+	}
+	return nil
+}
+
+// resolveScope reads :course_id from the URL if present, returning the
+// derived (scope_type, scope_id) for the handler. No :course_id → site
+// scope keyed to the caller's account.
+func resolveScope(c *fiber.Ctx) (models.GamificationScopeType, uint) {
+	if cs := c.Params("course_id"); cs != "" {
+		if id, err := strconv.ParseUint(cs, 10, 64); err == nil && id > 0 {
+			return models.ScopeCourse, uint(id)
+		}
+	}
+	return models.ScopeSite, callerAccountID(c)
+}
+
+// currencyJSONFor projects a model row to the same shape as ListCurrencies.
+func currencyJSONFor(ct *models.GamificationCurrencyType) currencyJSON {
+	return currencyJSON{
+		ID:                 ct.ID,
+		ScopeType:          string(ct.ScopeType),
+		ScopeID:            ct.ScopeID,
+		Code:               ct.Code,
+		DisplayLabel:       ct.DisplayLabel,
+		DisplayLabelPlural: ct.DisplayLabelPlural,
+		Icon:               ct.Icon,
+		Color:              ct.Color,
+		DisplayOrder:       ct.DisplayOrder,
+		Spendable:          ct.Spendable,
+		Monotonic:          ct.Monotonic,
+		VisibleToStudent:   ct.VisibleToStudent,
+		VisibleInTopbar:    ct.VisibleInTopbar,
+		SystemOwned:        ct.SystemOwned,
+		Description:        ct.Description,
+	}
+}
+
+// CreateCurrency handles POST. Always creates with `system_owned=false`
+// (the four system rows are reserved for the per-tenant seeder).
+// Conflicts on (tenant_id, scope_type, scope_id, code) return 409.
+func (h *GamificationHandler) CreateCurrency(c *fiber.Ctx) error {
+	var in createCurrencyInput
+	if err := c.BodyParser(&in); err != nil {
+		return responses.BadRequest(c, "invalid request body")
+	}
+	in.Code = strings.TrimSpace(in.Code)
+	if !codeRE.MatchString(in.Code) {
+		return responses.BadRequest(c, "code must match ^[a-z][a-z0-9_]{1,31}$ (lowercase, starts with a letter, 2–32 chars)")
+	}
+	if err := validateCommonFields(in.DisplayLabel, in.Color, in.Description); err != nil {
+		return responses.BadRequest(c, err.Error())
+	}
+
+	scopeType, scopeID := resolveScope(c)
+	tenantID := callerAccountID(c)
+
+	// Reject duplicates explicitly so we can return 409 with a useful
+	// message instead of letting the DB unique constraint surface as 500.
+	existing, err := h.currencyRepo.FindByCode(c.Context(), tenantID, scopeType, scopeID, in.Code)
+	if err != nil {
+		return responses.InternalError(c, "could not check currency uniqueness")
+	}
+	if existing != nil {
+		return responses.Error(c, fiber.StatusConflict, "a currency with this code already exists in this scope")
+	}
+
+	row := &models.GamificationCurrencyType{
+		TenantID:            tenantID,
+		ScopeType:           scopeType,
+		ScopeID:             scopeID,
+		Code:                in.Code,
+		DisplayLabel:        strings.TrimSpace(in.DisplayLabel),
+		DisplayLabelPlural:  strings.TrimSpace(in.DisplayLabelPlural),
+		Icon:                strings.TrimSpace(in.Icon),
+		Color:               strings.TrimSpace(in.Color),
+		DisplayOrder:        in.DisplayOrder,
+		Spendable:           in.Spendable,
+		Monotonic:           derefBool(in.Monotonic, true),
+		FerpaClassification: "non_PII",
+		VisibleToStudent:    derefBool(in.VisibleToStudent, true),
+		VisibleInTopbar:     derefBool(in.VisibleInTopbar, true),
+		SystemOwned:         false,
+		Description:         strings.TrimSpace(in.Description),
+	}
+	if err := h.currencyRepo.Create(c.Context(), row); err != nil {
+		return responses.InternalError(c, "could not create currency")
+	}
+	return c.Status(fiber.StatusCreated).JSON(currencyJSONFor(row))
+}
+
+// UpdateCurrency handles PATCH. system_owned rows allow every editable
+// field except code/scope; non-system rows allow the same set (the code
+// is treated as immutable post-create regardless of system_owned status
+// because rules reference currencies by code — renaming a code breaks
+// every authored rule).
+func (h *GamificationHandler) UpdateCurrency(c *fiber.Ctx) error {
+	idRaw, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return responses.BadRequest(c, "invalid currency id")
+	}
+	row, err := h.currencyRepo.FindByID(c.Context(), uint(idRaw))
+	if err != nil {
+		return responses.InternalError(c, "could not load currency")
+	}
+	if row == nil {
+		return responses.NotFound(c, "currency")
+	}
+
+	// Scope guard: route-derived scope must match the row's stored scope.
+	// Prevents an instructor on course A from PATCHing a currency that
+	// lives on course B (or at site scope).
+	scopeType, scopeID := resolveScope(c)
+	tenantID := callerAccountID(c)
+	if row.TenantID != tenantID || row.ScopeType != scopeType || row.ScopeID != scopeID {
+		return responses.Error(c, fiber.StatusForbidden, "currency is not in the requested scope")
+	}
+
+	var in patchCurrencyInput
+	if err := c.BodyParser(&in); err != nil {
+		return responses.BadRequest(c, "invalid request body")
+	}
+
+	if in.DisplayLabel != nil {
+		row.DisplayLabel = strings.TrimSpace(*in.DisplayLabel)
+	}
+	if in.DisplayLabelPlural != nil {
+		row.DisplayLabelPlural = strings.TrimSpace(*in.DisplayLabelPlural)
+	}
+	if in.Icon != nil {
+		row.Icon = strings.TrimSpace(*in.Icon)
+	}
+	if in.Color != nil {
+		row.Color = strings.TrimSpace(*in.Color)
+	}
+	if in.DisplayOrder != nil {
+		row.DisplayOrder = *in.DisplayOrder
+	}
+	if in.Spendable != nil {
+		row.Spendable = *in.Spendable
+	}
+	if in.Monotonic != nil {
+		row.Monotonic = *in.Monotonic
+	}
+	if in.VisibleToStudent != nil {
+		row.VisibleToStudent = *in.VisibleToStudent
+	}
+	if in.VisibleInTopbar != nil {
+		row.VisibleInTopbar = *in.VisibleInTopbar
+	}
+	if in.Description != nil {
+		row.Description = strings.TrimSpace(*in.Description)
+	}
+
+	if err := validateCommonFields(row.DisplayLabel, row.Color, row.Description); err != nil {
+		return responses.BadRequest(c, err.Error())
+	}
+
+	if err := h.currencyRepo.Update(c.Context(), row); err != nil {
+		return responses.InternalError(c, "could not update currency")
+	}
+	return c.JSON(currencyJSONFor(row))
+}
+
+// DeleteCurrency handles DELETE. system_owned rows return 409 — those
+// codes are referenced by rules and capability unlocks; deleting one
+// would silently break authored content. Tenants may rename them via
+// PATCH but never remove them.
+func (h *GamificationHandler) DeleteCurrency(c *fiber.Ctx) error {
+	idRaw, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return responses.BadRequest(c, "invalid currency id")
+	}
+	row, err := h.currencyRepo.FindByID(c.Context(), uint(idRaw))
+	if err != nil {
+		return responses.InternalError(c, "could not load currency")
+	}
+	if row == nil {
+		return responses.NotFound(c, "currency")
+	}
+
+	scopeType, scopeID := resolveScope(c)
+	tenantID := callerAccountID(c)
+	if row.TenantID != tenantID || row.ScopeType != scopeType || row.ScopeID != scopeID {
+		return responses.Error(c, fiber.StatusForbidden, "currency is not in the requested scope")
+	}
+	if row.SystemOwned {
+		return responses.Error(c, fiber.StatusConflict, "system currencies cannot be deleted")
+	}
+	if err := h.currencyRepo.Delete(c.Context(), row.ID); err != nil {
+		return responses.InternalError(c, "could not delete currency")
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+func derefBool(p *bool, def bool) bool {
+	if p == nil {
+		return def
+	}
+	return *p
 }

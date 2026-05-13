@@ -17,8 +17,32 @@ func NewGamificationCurrencyTypeRepository(db *gorm.DB) *GamificationCurrencyTyp
 	return &GamificationCurrencyTypeRepo{db: db}
 }
 
+// Create persists a new currency definition. Uses a raw parameterized
+// INSERT (not gorm.Create) so zero-valued bools — `Monotonic: false` for
+// spendable currencies, `VisibleInTopbar: false` for FERPA-protected
+// ones — are written explicitly. GORM's `default:` tags otherwise elide
+// false in favor of the SQL column DEFAULT TRUE, the same regression
+// class as the W2-A seed fix (see seed.go).
 func (r *GamificationCurrencyTypeRepo) Create(ctx context.Context, currency *models.GamificationCurrencyType) error {
-	return r.db.WithContext(ctx).Create(currency).Error
+	const insertSQL = `
+		INSERT INTO gamification_currency_types
+			(tenant_id, scope_type, scope_id, code, display_label,
+			 display_label_plural, icon, color, display_order, spendable,
+			 monotonic, ferpa_classification, visible_to_student,
+			 visible_in_topbar, system_owned, description,
+			 created_at, updated_at)
+		VALUES
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+		RETURNING id, created_at, updated_at`
+	row := r.db.WithContext(ctx).Raw(insertSQL,
+		currency.TenantID, currency.ScopeType, currency.ScopeID,
+		currency.Code, currency.DisplayLabel, currency.DisplayLabelPlural,
+		currency.Icon, currency.Color, currency.DisplayOrder,
+		currency.Spendable, currency.Monotonic, currency.FerpaClassification,
+		currency.VisibleToStudent, currency.VisibleInTopbar,
+		currency.SystemOwned, currency.Description,
+	).Row()
+	return row.Scan(&currency.ID, &currency.CreatedAt, &currency.UpdatedAt)
 }
 
 func (r *GamificationCurrencyTypeRepo) FindByID(ctx context.Context, id uint) (*models.GamificationCurrencyType, error) {

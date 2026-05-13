@@ -2557,5 +2557,35 @@ export const api = {
       const { data } = await request(`/gamification/currencies${query}`);
       return data;
     },
+
+    // W2-B: currency CRUD. `courseId` is optional; pass it to scope the
+    // write to a course (instructor surface), omit for site scope
+    // (tenant admin). The handler reads scope from the URL pattern.
+    createCurrency: async (body, { courseId } = {}) => {
+      const path = courseId
+        ? `/courses/${courseId}/gamification/currencies`
+        : `/gamification/currencies`;
+      const { data } = await request(path, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      return data;
+    },
+    updateCurrency: async (id, patch, { courseId } = {}) => {
+      const path = courseId
+        ? `/courses/${courseId}/gamification/currencies/${id}`
+        : `/gamification/currencies/${id}`;
+      const { data } = await request(path, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      });
+      return data;
+    },
+    deleteCurrency: async (id, { courseId } = {}) => {
+      const path = courseId
+        ? `/courses/${courseId}/gamification/currencies/${id}`
+        : `/gamification/currencies/${id}`;
+      await requestRaw(path, { method: 'DELETE' });
+    },
   },
 };
