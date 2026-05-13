@@ -6,6 +6,26 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Phase 6 / Wave 2 Sprint W2-B follow-up — admin nav entry + plural-label clarity
+
+Closes the discoverability gap on the currency editor: it was reachable
+only by typing `/admin/gamification/currencies` directly. Also makes the
+singular/plural distinction in the editor self-explanatory.
+
+- `AdminNav` gains a new "Gamification" group inside the "More…"
+  popover with a "Currencies" entry (Coins lucide icon) pointing at
+  `/admin/gamification/currencies`. Placed at the end of the
+  secondary-groups list because it's not yet a daily-frequent surface;
+  the group will grow to "Recipes" / "Badges" / "Leaderboards" in
+  W2-D/E and may promote to a top-level nav entry once that happens.
+- `CurrencyEditor` renames "Display label" → "Display label (singular)"
+  and adds one-line hints under both that field and "Plural label"
+  showing exactly when each form is rendered (`"You earned 1 Coin"` vs
+  `"You earned 4 Coins"`). The backend has always stored both forms;
+  the W2-A `WalletDrawer` header already uses the plural for non-1
+  balances. The W2-D notification surface will pick singular vs plural
+  off `amount === 1` at render time.
+
 ### Phase 6 / Wave 2 Sprint W2-B review follow-up — race-safe duplicate detection
 
 `/review` on PR #13 flagged the only real risk: the original

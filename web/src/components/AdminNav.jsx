@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   Home, BookOpen, Users, Flag, Sliders, MoreHorizontal,
   FileText, GraduationCap, ClipboardCheck, Upload, KeyRound,
-  Shield, UserCog, RefreshCw, Key, Bell, Code,
+  Shield, UserCog, RefreshCw, Key, Bell, Code, Coins,
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
@@ -50,6 +50,16 @@ const secondaryGroups = [
     items: [
       { to: '/graphiql',              icon: Code,           label: 'GraphiQL' },
       { to: '/settings/notifications', icon: Bell,          label: 'Notifications' },
+    ],
+  },
+  // Phase 6 Wave 2 gamification chrome. Lives in the More… popover for
+  // now because it's not yet a daily-frequent surface; once recipes /
+  // badges / leaderboards land in W2-D/E it may promote to a top-level
+  // entry (or get its own sub-nav).
+  {
+    label: 'Gamification',
+    items: [
+      { to: '/admin/gamification/currencies', icon: Coins, label: 'Currencies' },
     ],
   },
 ];

@@ -171,7 +171,7 @@ export default function CurrencyEditor({
                 )}
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-text-secondary">Display label</span>
+                <span className="text-xs font-medium text-text-secondary">Display label (singular)</span>
                 <input
                   type="text"
                   value={displayLabel}
@@ -180,6 +180,9 @@ export default function CurrencyEditor({
                   placeholder="Coin"
                   className="px-2.5 py-1.5 rounded-md border border-surface-raised bg-surface-1 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-brand-400/60"
                 />
+                <span className="text-[11px] text-text-tertiary">
+                  Shown when the amount is 1. e.g., &ldquo;You earned 1 Coin.&rdquo;
+                </span>
               </label>
             </div>
 
@@ -194,6 +197,9 @@ export default function CurrencyEditor({
                   placeholder="Coins"
                   className="px-2.5 py-1.5 rounded-md border border-surface-raised bg-surface-1 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-brand-400/60"
                 />
+                <span className="text-[11px] text-text-tertiary">
+                  Shown for amounts ≠ 1. e.g., &ldquo;You earned 4 Coins.&rdquo;
+                </span>
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-xs font-medium text-text-secondary">Display order</span>
