@@ -54,18 +54,24 @@ func NewEmitter(deps EmitterDeps) *Emitter {
 
 // Emit runs the full ingest pipeline:
 //
-//  1. FERPA pre-flight (CheckFerpa) — rejects events whose result/context
-//     fields are tagged education_record but whose PolicyFlags don't
-//     carry both ferpa_protected + education_record. Returns a wrapped
-//     error listing every violation so debuggers see all problems at once.
-//  2. EmittedAt = Emitter.now() if zero (callers that backdate must set
+//  1. Policy-flag derivation (DerivePolicyFlags) — appends
+//     ferpa_protected + education_record to PolicyFlags whenever the
+//     event carries an education_record-tagged field. Internal emit
+//     call-sites never set these manually; the derivation is the single
+//     source of truth.
+//  2. FERPA guard (CheckFerpa) — backstop that rejects events whose
+//     result/context fields are tagged education_record but whose
+//     PolicyFlags STILL don't carry both required flags. After
+//     derivation this only fires on hand-built events (e.g. a future
+//     POST /events endpoint, webhook bridge, etc.).
+//  3. EmittedAt = Emitter.now() if zero (callers that backdate must set
 //     OccurredAt explicitly; EmittedAt is always "when the engine saw
 //     it").
-//  3. Persist the gamification_events row.
-//  4. Build a fresh RuleIndex from every enabled rule at site scope
+//  4. Persist the gamification_events row.
+//  5. Build a fresh RuleIndex from every enabled rule at site scope
 //     for the event's tenant. Course/section/school/district rollup
 //     lands in Sprint D; Wave 1 only fires site-scoped rules.
-//  5. Dispatch through the rule loop.
+//  6. Dispatch through the rule loop.
 //
 // Returns (EmitResult, error). The event is persisted before dispatch,
 // so a dispatch failure does not erase the event — callers can re-run
@@ -75,8 +81,15 @@ func (e *Emitter) Emit(ctx context.Context, event *models.GamificationEvent) (Em
 		return EmitResult{}, errors.New("emitter: nil event")
 	}
 
-	// 1. FERPA guard. Education-record fields require ferpa_protected +
-	// education_record on PolicyFlags.
+	// 1. Derive policy_flags from the FERPA tag lookup.
+	if err := DerivePolicyFlags(ctx, e.deps.FerpaTags, event); err != nil {
+		return EmitResult{}, fmt.Errorf("derive policy flags: %w", err)
+	}
+
+	// 2. FERPA guard. Education-record fields require ferpa_protected +
+	// education_record on PolicyFlags. After derivation this only fires
+	// for events the caller hand-built without going through Emit's
+	// derivation step.
 	violations, err := CheckFerpa(ctx, e.deps.FerpaTags, event)
 	if err != nil {
 		return EmitResult{}, fmt.Errorf("ferpa check: %w", err)
