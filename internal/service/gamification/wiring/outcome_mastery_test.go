@@ -66,6 +66,7 @@ func TestOutcomeMasteryCrossedEmitCallback_EmitsEvent(t *testing.T) {
 		CalculationInt:    65,
 		MasteryPoints:     3.0,
 		PointsPossible:    5.0,
+		RatingsData:       "[]",
 		WorkflowState:     "active",
 	}
 	if err := g.Create(&outcome).Error; err != nil {

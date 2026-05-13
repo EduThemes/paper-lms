@@ -350,6 +350,22 @@ func main() {
 	// services
 	contentMigrationService := service.NewContentMigrationService(contentMigrationRepo)
 	learningOutcomeService := service.NewLearningOutcomeService(outcomeGroupRepo, outcomeRepo, outcomeResultRepo)
+
+	// Phase 6 Wave 1 Sprint D-2: register the remaining three emit
+	// callbacks (discussion entries, rubric assessments, outcome-mastery
+	// transitions) against the services that own each lifecycle event.
+	// Same async + slog.Error-only error contract as the Sprint D-1 block
+	// above — a failed emit never breaks the originating write.
+	discussionService.OnEntryCreated(wiring.DiscussionEntryPostedEmitCallback(
+		gamificationEmitter, discussionEntryRepo, discussionTopicRepo, courseRepo,
+	))
+	rubricService.OnAssessmentCreated(wiring.RubricAssessmentCreatedEmitCallback(
+		gamificationEmitter, rubricAssessRepo, rubricRepo, courseRepo,
+	))
+	learningOutcomeService.OnMasteryCrossed(wiring.OutcomeMasteryCrossedEmitCallback(
+		gamificationEmitter, outcomeResultRepo, outcomeRepo, courseRepo,
+	))
+
 	speedGraderService := service.NewSpeedGraderService(submissionRepo, submissionCommentRepo, assignmentRepo, enrollmentRepo, rubricAssessRepo)
 	// services
 	groupService := service.NewGroupService(groupCategoryRepo, groupRepo, groupMembershipRepo, enrollmentRepo)
