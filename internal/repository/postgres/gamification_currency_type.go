@@ -2,9 +2,11 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"gorm.io/gorm"
 )
 
@@ -17,12 +19,25 @@ func NewGamificationCurrencyTypeRepository(db *gorm.DB) *GamificationCurrencyTyp
 	return &GamificationCurrencyTypeRepo{db: db}
 }
 
-// Create persists a new currency definition. Uses a raw parameterized
-// INSERT (not gorm.Create) so zero-valued bools — `Monotonic: false` for
-// spendable currencies, `VisibleInTopbar: false` for FERPA-protected
-// ones — are written explicitly. GORM's `default:` tags otherwise elide
-// false in favor of the SQL column DEFAULT TRUE, the same regression
-// class as the W2-A seed fix (see seed.go).
+// Create persists a new currency definition.
+//
+// Uses a raw parameterized INSERT (not gorm.Create) for two reasons:
+//
+//  1. Zero-valued bools — `Monotonic: false` for spendable currencies,
+//     `VisibleInTopbar: false` for FERPA-protected ones — are written
+//     explicitly. GORM's `default:` tags otherwise elide false in favor
+//     of the SQL column DEFAULT TRUE (same regression class as the W2-A
+//     seed fix; see seed.go).
+//
+//  2. `ON CONFLICT … DO NOTHING RETURNING …` collapses duplicate
+//     detection into a single atomic statement. A naive
+//     "FindByCode then Create" sequence has a TOCTOU window where two
+//     concurrent admins minting the same code both pass the pre-check
+//     and one then surfaces the unique-constraint hit as a 500. With
+//     ON CONFLICT, the conflicting INSERT just returns zero rows; we
+//     translate the resulting sql.ErrNoRows into
+//     repository.ErrCurrencyDuplicate so the handler can map cleanly
+//     to a 409.
 func (r *GamificationCurrencyTypeRepo) Create(ctx context.Context, currency *models.GamificationCurrencyType) error {
 	const insertSQL = `
 		INSERT INTO gamification_currency_types
@@ -33,6 +48,7 @@ func (r *GamificationCurrencyTypeRepo) Create(ctx context.Context, currency *mod
 			 created_at, updated_at)
 		VALUES
 			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+		ON CONFLICT ON CONSTRAINT uniq_gam_currency_scope_code DO NOTHING
 		RETURNING id, created_at, updated_at`
 	row := r.db.WithContext(ctx).Raw(insertSQL,
 		currency.TenantID, currency.ScopeType, currency.ScopeID,
@@ -42,7 +58,13 @@ func (r *GamificationCurrencyTypeRepo) Create(ctx context.Context, currency *mod
 		currency.VisibleToStudent, currency.VisibleInTopbar,
 		currency.SystemOwned, currency.Description,
 	).Row()
-	return row.Scan(&currency.ID, &currency.CreatedAt, &currency.UpdatedAt)
+	if err := row.Scan(&currency.ID, &currency.CreatedAt, &currency.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return repository.ErrCurrencyDuplicate
+		}
+		return err
+	}
+	return nil
 }
 
 func (r *GamificationCurrencyTypeRepo) FindByID(ctx context.Context, id uint) (*models.GamificationCurrencyType, error) {

@@ -535,8 +535,6 @@ func deleteReq(app *fiber.App, path string) *http.Response {
 func TestCreateCurrency_HappyPath_SiteScope(t *testing.T) {
 	app, _, currencyRepo := setupGamificationHandler(7, true)
 
-	currencyRepo.On("FindByCode", mock.Anything, uint(1), models.ScopeSite, uint(1), "coins").
-		Return(nil, nil)
 	currencyRepo.On("Create", mock.Anything, mock.MatchedBy(func(c *models.GamificationCurrencyType) bool {
 		return c.Code == "coins" &&
 			c.ScopeType == models.ScopeSite &&
@@ -574,8 +572,6 @@ func TestCreateCurrency_HappyPath_SiteScope(t *testing.T) {
 func TestCreateCurrency_CourseScope_ResolvedFromURL(t *testing.T) {
 	app, _, currencyRepo := setupGamificationHandler(7, false)
 
-	currencyRepo.On("FindByCode", mock.Anything, uint(1), models.ScopeCourse, uint(99), "stars").
-		Return(nil, nil)
 	currencyRepo.On("Create", mock.Anything, mock.MatchedBy(func(c *models.GamificationCurrencyType) bool {
 		return c.ScopeType == models.ScopeCourse && c.ScopeID == 99 && c.Code == "stars"
 	})).Run(func(args mock.Arguments) {
@@ -612,23 +608,28 @@ func TestCreateCurrency_RejectsEmptyLabel(t *testing.T) {
 }
 
 func TestCreateCurrency_Duplicate_Returns409(t *testing.T) {
+	// Atomic duplicate detection: the repo's INSERT ... ON CONFLICT DO
+	// NOTHING returns ErrCurrencyDuplicate when the (tenant, scope, code)
+	// tuple already exists. The handler maps that to 409. This collapses
+	// what would otherwise be a "FindByCode then Create" sequence with a
+	// TOCTOU window into a single round-trip — concurrent admins minting
+	// the same code each get a deterministic 409 (or one of them gets
+	// 201) instead of one getting a 500 from the unique constraint.
 	app, _, currencyRepo := setupGamificationHandler(7, true)
-	existing := fixtureXP()
-	currencyRepo.On("FindByCode", mock.Anything, uint(1), models.ScopeSite, uint(1), "xp").
-		Return(&existing, nil)
+	currencyRepo.On("Create", mock.Anything, mock.MatchedBy(func(c *models.GamificationCurrencyType) bool {
+		return c.Code == "xp"
+	})).Return(repository.ErrCurrencyDuplicate)
 
 	resp := postJSON(app, "/api/v1/gamification/currencies",
 		`{"code":"xp","display_label":"Duplicate"}`)
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
-	currencyRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+	currencyRepo.AssertExpectations(t)
 }
 
 func TestCreateCurrency_ForcesSystemOwnedFalse(t *testing.T) {
 	// Even if a malicious client sends system_owned=true in the JSON, the
 	// handler should ignore it. (The struct doesn't even unmarshal it.)
 	app, _, currencyRepo := setupGamificationHandler(7, true)
-	currencyRepo.On("FindByCode", mock.Anything, uint(1), models.ScopeSite, uint(1), "evil").
-		Return(nil, nil)
 	currencyRepo.On("Create", mock.Anything, mock.MatchedBy(func(c *models.GamificationCurrencyType) bool {
 		return !c.SystemOwned
 	})).Run(func(args mock.Arguments) {

@@ -428,16 +428,6 @@ func (h *GamificationHandler) CreateCurrency(c *fiber.Ctx) error {
 	scopeType, scopeID := resolveScope(c)
 	tenantID := callerAccountID(c)
 
-	// Reject duplicates explicitly so we can return 409 with a useful
-	// message instead of letting the DB unique constraint surface as 500.
-	existing, err := h.currencyRepo.FindByCode(c.Context(), tenantID, scopeType, scopeID, in.Code)
-	if err != nil {
-		return responses.InternalError(c, "could not check currency uniqueness")
-	}
-	if existing != nil {
-		return responses.Error(c, fiber.StatusConflict, "a currency with this code already exists in this scope")
-	}
-
 	row := &models.GamificationCurrencyType{
 		TenantID:            tenantID,
 		ScopeType:           scopeType,
@@ -456,7 +446,13 @@ func (h *GamificationHandler) CreateCurrency(c *fiber.Ctx) error {
 		SystemOwned:         false,
 		Description:         strings.TrimSpace(in.Description),
 	}
+	// Duplicate detection is atomic in the repo via ON CONFLICT DO NOTHING
+	// + sentinel translation. Avoids the TOCTOU window a "FindByCode then
+	// Create" sequence would open under concurrent admin POSTs.
 	if err := h.currencyRepo.Create(c.Context(), row); err != nil {
+		if errors.Is(err, repository.ErrCurrencyDuplicate) {
+			return responses.Error(c, fiber.StatusConflict, "a currency with this code already exists in this scope")
+		}
 		return responses.InternalError(c, "could not create currency")
 	}
 	return c.Status(fiber.StatusCreated).JSON(currencyJSONFor(row))

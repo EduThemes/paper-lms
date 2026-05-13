@@ -2,10 +2,18 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 )
+
+// ErrCurrencyDuplicate is returned by GamificationCurrencyTypeRepository.Create
+// when the (tenant_id, scope_type, scope_id, code) tuple already exists. The
+// repo translates the unique-constraint hit atomically via
+// `INSERT ... ON CONFLICT DO NOTHING RETURNING ...`, so callers can map this
+// to a 409 without a two-query pre-check race window.
+var ErrCurrencyDuplicate = errors.New("currency with this code already exists in this scope")
 
 type PaginationParams struct {
 	Page    int

@@ -6,6 +6,31 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Phase 6 / Wave 2 Sprint W2-B review follow-up — race-safe duplicate detection
+
+`/review` on PR #13 flagged the only real risk: the original
+`CreateCurrency` ran `FindByCode` then `Create` non-atomically. Two
+concurrent admins minting the same code could both pass the pre-check;
+one would then surface the unique-constraint hit as a generic 500.
+
+Closed by collapsing duplicate detection into a single atomic statement:
+
+- `GamificationCurrencyTypeRepo.Create` now uses
+  `INSERT … ON CONFLICT ON CONSTRAINT uniq_gam_currency_scope_code DO
+  NOTHING RETURNING id, created_at, updated_at`. Conflict → zero rows →
+  `sql.ErrNoRows` on the Scan → translated to a new typed sentinel
+  `repository.ErrCurrencyDuplicate`.
+- `CreateCurrency` handler drops the `FindByCode` pre-check entirely
+  and switches its conflict path to `errors.Is(err,
+  repository.ErrCurrencyDuplicate) → 409`. One DB round-trip per POST
+  instead of two; race-free under any interleaving.
+- `TestCreateCurrency_Duplicate_Returns409` rewritten to assert via
+  the sentinel rather than a stubbed `FindByCode` hit. Other Create
+  tests dropped their now-unused `FindByCode` mocks.
+- Smoke-verified end-to-end against live Postgres: two back-to-back
+  POSTs of the same code returned `201 Created` then `409 Conflict`
+  with the user-friendly message.
+
 ### Phase 6 / Wave 2 Sprint W2-B — currency-create write API + editor UI
 
 Closes the teacher→learner authoring loop opened by W2-A: tenant admins
