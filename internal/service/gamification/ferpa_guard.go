@@ -44,6 +44,86 @@ type FerpaViolation struct {
 // be present; either missing produces a violation.
 var requiredEducationRecordFlags = []string{"ferpa_protected", "education_record"}
 
+// DerivePolicyFlags inspects the event's result/context against the
+// FERPA field-tag lookup for the event's ObjectType and appends any
+// required policy_flags the event is missing. Idempotent: existing
+// flags are deduplicated, no flag is appended twice.
+//
+// Wave 1 derivation rule: if any top-level result or context field on
+// the event is tagged education_record, ensure both
+// ferpa_protected and education_record are present on PolicyFlags.
+// Other classifications (directory_information, instructor_metadata,
+// non_PII) remain advisory in Wave 1 and don't trigger flag additions.
+//
+// This is the canonical surface for internal emit call-sites — wire it
+// before CheckFerpa so the guard only ever finds violations on
+// hand-built events (e.g. a future POST /events write endpoint or a
+// webhook bridge) that didn't go through the derivation step.
+//
+// Returns an error only when the event's Result/Context JSONB itself
+// is structurally broken; tag-lookup failures bubble up as errors too,
+// since silently skipping derivation would leave the event mis-classified.
+func DerivePolicyFlags(ctx context.Context, repo repository.GamificationFerpaFieldTagRepository, event *models.GamificationEvent) error {
+	if event == nil {
+		return nil
+	}
+	tags, err := repo.ListByObjectType(ctx, event.ObjectType)
+	if err != nil {
+		return err
+	}
+	if len(tags) == 0 {
+		return nil
+	}
+
+	resultMap, err := decodeJSONBucket(event.Result)
+	if err != nil {
+		return err
+	}
+	contextMap, err := decodeJSONBucket(event.Context)
+	if err != nil {
+		return err
+	}
+
+	needsEducationRecord := false
+	for _, tag := range tags {
+		if tag.Classification != "education_record" {
+			continue
+		}
+		bucket, key, ok := splitFieldPath(tag.FieldPath)
+		if !ok {
+			continue
+		}
+		var present bool
+		switch bucket {
+		case "result":
+			_, present = resultMap[key]
+		case "context":
+			_, present = contextMap[key]
+		}
+		if present {
+			needsEducationRecord = true
+			break
+		}
+	}
+
+	if !needsEducationRecord {
+		return nil
+	}
+
+	flagSet := make(map[string]struct{}, len(event.PolicyFlags))
+	for _, f := range event.PolicyFlags {
+		flagSet[f] = struct{}{}
+	}
+	for _, required := range requiredEducationRecordFlags {
+		if _, ok := flagSet[required]; ok {
+			continue
+		}
+		event.PolicyFlags = append(event.PolicyFlags, required)
+		flagSet[required] = struct{}{}
+	}
+	return nil
+}
+
 // CheckFerpa scans the event's Result and Context JSONB against the
 // FERPA field-tag lookup for the event's ObjectType. Returns the
 // slice of violations; empty means the event is policy-compliant.

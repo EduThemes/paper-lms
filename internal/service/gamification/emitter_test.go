@@ -9,7 +9,6 @@ package gamification_test
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -532,11 +531,14 @@ func TestEmit_MaxPerWindow(t *testing.T) {
 	}
 }
 
-// TestEmit_FerpaViolation rejects an event whose result carries an
-// education_record-classified field without the matching policy flags.
-// Proves the FERPA guard is wired into Emit's pre-flight, not just unit-
-// tested in isolation.
-func TestEmit_FerpaViolation(t *testing.T) {
+// TestEmit_DerivesPolicyFlags proves that Emit's policy-flag derivation
+// (Sprint D-3) auto-fills the required FERPA flags for internal call-
+// sites that don't set them manually. An event carrying an
+// education_record-tagged field but no policy_flags emits cleanly
+// because derivation adds ferpa_protected + education_record before
+// the guard checks them — and the persisted event row carries those
+// flags so downstream policy queries see the correct classification.
+func TestEmit_DerivesPolicyFlags(t *testing.T) {
 	fx := setupEmitterFixture(t, nil)
 	gdb := fx.db
 
@@ -549,7 +551,8 @@ func TestEmit_FerpaViolation(t *testing.T) {
 		t.Fatalf("create ferpa tag: %v", err)
 	}
 
-	// Event carries result.score but no policy_flags.
+	// Event carries result.score but no policy_flags. With derivation
+	// wired in, Emit auto-appends ferpa_protected + education_record.
 	resultBlob, err := json.Marshal(map[string]any{"score": 91})
 	if err != nil {
 		t.Fatalf("marshal result: %v", err)
@@ -564,38 +567,38 @@ func TestEmit_FerpaViolation(t *testing.T) {
 		Result:     datatypes.JSON(resultBlob),
 		Source:     "internal",
 	}
-	_, err = fx.emitter.Emit(context.Background(), event)
-	if err == nil {
-		t.Fatalf("expected FERPA violation error, got nil")
-	}
-	if !strings.Contains(err.Error(), "ferpa") {
-		t.Fatalf("expected error mentioning ferpa, got %v", err)
+	if _, err := fx.emitter.Emit(context.Background(), event); err != nil {
+		t.Fatalf("expected emit to succeed with derived flags, got %v", err)
 	}
 
-	// Confirm no event row was persisted (FERPA fails before Create).
-	var eventCount int64
-	if err := gdb.Model(&models.GamificationEvent{}).Count(&eventCount).Error; err != nil {
-		t.Fatalf("count events: %v", err)
-	}
-	if eventCount != 0 {
-		t.Fatalf("expected zero events persisted on FERPA failure, got %d", eventCount)
+	// The in-memory event the caller passed should have the derived flags
+	// appended (mutation is part of the contract).
+	if !containsAll(event.PolicyFlags, []string{"ferpa_protected", "education_record"}) {
+		t.Fatalf("expected derived flags on in-memory event, got %v", event.PolicyFlags)
 	}
 
-	// Now retry with the required policy flags — should succeed.
-	event2 := &models.GamificationEvent{
-		OccurredAt:  time.Now(),
-		TenantID:    fx.tenantID,
-		ActorID:     fx.userID,
-		Verb:        "completed",
-		ObjectType:  "Assignment",
-		ObjectID:    &fx.assignmentID,
-		Result:      datatypes.JSON(resultBlob),
-		PolicyFlags: pqStringArray("ferpa_protected", "education_record"),
-		Source:      "internal",
+	// And the persisted row should carry the same flags, so downstream
+	// policy queries on the events table see the right classification.
+	var persisted models.GamificationEvent
+	if err := gdb.First(&persisted, event.ID).Error; err != nil {
+		t.Fatalf("fetch persisted event: %v", err)
 	}
-	if _, err := fx.emitter.Emit(context.Background(), event2); err != nil {
-		t.Fatalf("expected emit to succeed once flags set, got %v", err)
+	if !containsAll([]string(persisted.PolicyFlags), []string{"ferpa_protected", "education_record"}) {
+		t.Fatalf("expected derived flags on persisted event, got %v", persisted.PolicyFlags)
 	}
+}
+
+func containsAll(haystack []string, needles []string) bool {
+	set := make(map[string]struct{}, len(haystack))
+	for _, h := range haystack {
+		set[h] = struct{}{}
+	}
+	for _, n := range needles {
+		if _, ok := set[n]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // TestEmit_EffectFailure_StopOnError proves the dispatcher's stop-on-

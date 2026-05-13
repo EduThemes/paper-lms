@@ -37,33 +37,53 @@ func (r *learningOutcomeResultRepo) Update(ctx context.Context, result *models.L
 // Upsert writes a result row, returning the row's mastery value as it was
 // BEFORE the write. priorMastery is nil when no prior row existed (or when
 // the prior row's Mastery was nil); otherwise it points to a copy of the
-// prior bool. The lookup-then-write runs in a single transaction with
-// SELECT … FOR UPDATE on the existing row to serialize concurrent updates
-// to the same (user, outcome, asset) composite — preventing the
-// check-then-act race that would otherwise let two concurrent
-// CreateResult calls each observe "not yet mastered" and both fire the
-// OnMasteryCrossed callback.
+// prior bool.
 //
-// The residual race is on INSERT (two concurrent writes both finding no
-// row and both calling Create). Closing that fully needs a UNIQUE index on
-// (user_id, learning_outcome_id, associated_asset_type, associated_asset_id)
-// + ON CONFLICT semantics — a Sprint D-3 migration.
+// Race-safety: the (user_id, learning_outcome_id, associated_asset_type,
+// associated_asset_id) composite is DB-enforced unique by migration 000037.
+// Concurrent writes are serialized as follows:
+//
+//   - Update path: SELECT … FOR UPDATE locks the existing row; concurrent
+//     callers serialize on the lock and each see the post-prior-commit
+//     state as their "prior".
+//   - Insert path: ON CONFLICT DO NOTHING tells the loser of a concurrent
+//     first-time write to skip the INSERT (RowsAffected = 0). The loser
+//     then re-fetches under the row lock and falls through to the update
+//     path, observing the just-inserted row as its "prior" — so neither
+//     racer mis-fires the OnMasteryCrossed callback as a fresh transition.
 func (r *learningOutcomeResultRepo) Upsert(ctx context.Context, result *models.LearningOutcomeResult) (priorMastery *bool, err error) {
+	whereComposite := func(tx *gorm.DB) *gorm.DB {
+		return tx.Where("user_id = ? AND learning_outcome_id = ? AND associated_asset_type = ? AND associated_asset_id = ?",
+			result.UserID, result.LearningOutcomeID, result.AssociatedAssetType, result.AssociatedAssetID)
+	}
+
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing models.LearningOutcomeResult
-		findErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("user_id = ? AND learning_outcome_id = ? AND associated_asset_type = ? AND associated_asset_id = ?",
-				result.UserID, result.LearningOutcomeID, result.AssociatedAssetType, result.AssociatedAssetID).
-			First(&existing).Error
+		findErr := whereComposite(tx.Clauses(clause.Locking{Strength: "UPDATE"})).First(&existing).Error
+
 		if errors.Is(findErr, gorm.ErrRecordNotFound) {
-			// No prior row; create. priorMastery stays nil.
-			return tx.Create(result).Error
-		}
-		if findErr != nil {
+			// No prior row visible to this tx. Try INSERT … ON CONFLICT
+			// DO NOTHING: if another tx inserted concurrently we'll get
+			// RowsAffected=0 and fall through to the update path.
+			insRes := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(result)
+			if insRes.Error != nil {
+				return insRes.Error
+			}
+			if insRes.RowsAffected == 1 {
+				// Clean insert. priorMastery stays nil.
+				return nil
+			}
+			// Concurrent insert beat us. Re-fetch the now-existing row
+			// under the row lock; it becomes our "prior" for transition
+			// detection.
+			if err := whereComposite(tx.Clauses(clause.Locking{Strength: "UPDATE"})).First(&existing).Error; err != nil {
+				return err
+			}
+		} else if findErr != nil {
 			return findErr
 		}
 
-		// Snapshot prior mastery before mutating the existing row.
+		// Update path. Snapshot prior mastery before mutating.
 		if existing.Mastery != nil {
 			prior := *existing.Mastery
 			priorMastery = &prior

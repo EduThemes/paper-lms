@@ -6,6 +6,60 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Phase 6 / Wave 1 Sprint D-3 — correctness finalize (UNIQUE + FERPA seed + flag derivation)
+
+Closes Wave 1. Three correctness wins land together, all behind
+migrations or guarded behind the FERPA tag lookup.
+
+- **Migration 000037 — `UNIQUE` constraint on `learning_outcome_results
+  (user_id, learning_outcome_id, associated_asset_type,
+  associated_asset_id)`**. Closes the residual INSERT-side mastery
+  race that PR #10's CHANGELOG documented as outstanding. The migration
+  defensively deduplicates any pre-existing dupes (keep most recent;
+  tie-break on lower id) before adding the constraint, so it applies
+  cleanly against a non-empty prod table.
+- **`LearningOutcomeResultRepository.Upsert` reshaped to use
+  `INSERT … ON CONFLICT DO NOTHING`**. The loser of a concurrent
+  first-time write sees `RowsAffected = 0`, re-fetches under the row
+  lock, and falls through to the update path — observing the
+  just-inserted row as its "prior" state. Two concurrent
+  `CreateResult` calls on the same composite now both produce exactly
+  one `OnMasteryCrossed` fire (or zero), never two.
+- **Migration 000038 — seed `gamification_ferpa_field_tags`**. The
+  table was previously empty in prod, so the FERPA guard had no rules
+  to enforce. This migration seeds policy classifications for every
+  result/context field shape the seven live emit verbs produce
+  (graded submission, completed quiz, enrolled course, viewed page,
+  posted discussion entry, mastered outcome, assessed rubric).
+  Scores, percents, mastery flags, and per-criterion rubric ratings
+  are tagged `education_record`. Course / enrollment / assessor
+  identity references are `directory_information`. Workflow state and
+  calc methods are `instructor_metadata`. Internal record IDs are
+  `non_PII`.
+- **`gamification.DerivePolicyFlags`** (new function) wired as the
+  first step of `Emitter.Emit`. Walks the event's result/context
+  against the tag table and appends `ferpa_protected` +
+  `education_record` to `PolicyFlags` whenever an
+  education-record-tagged field is present. Idempotent. Means internal
+  emit call-sites never need to set policy flags manually — the FERPA
+  classification flows from the seeded tags into the persisted event
+  row, where downstream policy queries can trust it.
+- **`CheckFerpa` is now a backstop, not a hot path**. After
+  derivation, the guard only fires on hand-built events that bypass
+  derivation (e.g., a future external write endpoint). Documented in
+  the emitter pipeline godoc.
+
+What this means in practice: a graded outcome now emits an event whose
+`policy_flags` contains `{ferpa_protected, education_record}` — making
+the row queryable as FERPA-protected at the data-access layer (Wave 2
+leaderboards will rely on this).
+
+**Wave 1 is now closed.** The remaining "out of scope" items from
+the earlier sprints — `POST /api/v1/gamification/events` write
+endpoint, the 13 remaining trigger verbs — are deferred to a future
+"Wave 1 extras" PR or until consumed by Wave 2 features. The pgvector
+CI matrix was already in place since Sprint A; no change needed.
+
 ### Phase 6 / Wave 1 Sprint D-2 — discussion + outcome mastery + rubric emit wiring
 
 Lands the three remaining Wave 1 emit verbs. After Sprint D-2 the
