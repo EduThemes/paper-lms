@@ -35,13 +35,17 @@ type Effect interface {
 }
 
 // EffectDeps is the bag of repositories effects pull from. Future effects
-// extend this struct with their own dependencies (BadgeRepo,
-// NotificationDispatcher, ContentReleaseService, …); old effects ignore
-// the new fields. Adding a field is non-breaking — calling code only sets
-// the deps it provides.
+// extend this struct with their own dependencies (NotificationDispatcher,
+// ContentReleaseService, …); old effects ignore the new fields. Adding
+// a field is non-breaking — calling code only sets the deps it provides.
 type EffectDeps struct {
 	Wallet       repository.GamificationWalletRepository
 	CurrencyType repository.GamificationCurrencyTypeRepository
+	// W2-D: badge deps for AwardBadge. Nil-safe — effects that don't
+	// touch badges (AwardCurrency, etc.) never read these fields, and
+	// dispatcher wiring that doesn't ship badges yet can leave them nil.
+	Badge      repository.GamificationBadgeRepository
+	BadgeAward repository.GamificationBadgeAwardRepository
 }
 
 // TriggeringContext is everything an effect needs to know about the event

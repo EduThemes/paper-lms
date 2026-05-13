@@ -2601,5 +2601,55 @@ export const api = {
       });
       return data;
     },
+
+    // W2-D: badge CRUD + per-user list + manual award/revoke. courseId
+    // toggles between admin (site) and instructor (course) surfaces
+    // for the write paths, same convention as currency CRUD.
+    listBadges: async () => {
+      const { data } = await request('/gamification/badges');
+      return data;
+    },
+    createBadge: async (body, { courseId } = {}) => {
+      const path = courseId
+        ? `/courses/${courseId}/gamification/badges`
+        : `/gamification/badges`;
+      const { data } = await request(path, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      return data;
+    },
+    updateBadge: async (id, patch, { courseId } = {}) => {
+      const path = courseId
+        ? `/courses/${courseId}/gamification/badges/${id}`
+        : `/gamification/badges/${id}`;
+      const { data } = await request(path, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      });
+      return data;
+    },
+    deleteBadge: async (id, { courseId } = {}) => {
+      const path = courseId
+        ? `/courses/${courseId}/gamification/badges/${id}`
+        : `/gamification/badges/${id}`;
+      await requestRaw(path, { method: 'DELETE' });
+    },
+    listUserBadges: async (userId) => {
+      const { data } = await request(`/users/${userId}/badges`);
+      return data;
+    },
+    awardBadge: async (userId, badgeId) => {
+      const { data } = await request(`/users/${userId}/badges`, {
+        method: 'POST',
+        body: JSON.stringify({ badge_id: badgeId }),
+      });
+      return data;
+    },
+    revokeBadge: async (userId, badgeId) => {
+      await requestRaw(`/users/${userId}/badges/${badgeId}`, {
+        method: 'DELETE',
+      });
+    },
   },
 };

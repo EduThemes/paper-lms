@@ -32,6 +32,15 @@ func DecodeEffect(raw json.RawMessage) (Effect, error) {
 			return nil, fmt.Errorf("AwardCurrency.Amount must be > 0, got %d", ac.Amount)
 		}
 		return ac, nil
+	case "AwardBadge":
+		var ab AwardBadge
+		if err := json.Unmarshal(raw, &ab); err != nil {
+			return nil, fmt.Errorf("decode AwardBadge: %w", err)
+		}
+		if ab.Code == "" {
+			return nil, fmt.Errorf("AwardBadge.Code must be non-empty")
+		}
+		return ab, nil
 	default:
 		return nil, fmt.Errorf("unknown effect kind: %q", head.Kind)
 	}

@@ -41,3 +41,26 @@ func ResolveCurrencyByCode(
 	}
 	return nil, nil
 }
+
+// ResolveBadgeByCode is the badge equivalent of ResolveCurrencyByCode —
+// same section → course → school → district → site walk, same first-
+// match-wins semantics, same (nil, nil) on no match. Powers W2-D's
+// AwardBadge effect.
+func ResolveBadgeByCode(
+	ctx context.Context,
+	repo repository.GamificationBadgeRepository,
+	tenantID uint,
+	scopeType models.GamificationScopeType,
+	scopeID uint,
+	code string,
+) (*models.GamificationBadge, error) {
+	if b, err := repo.FindByCode(ctx, tenantID, scopeType, scopeID, code); err != nil || b != nil {
+		return b, err
+	}
+	if scopeType != models.ScopeSite {
+		if b, err := repo.FindByCode(ctx, tenantID, models.ScopeSite, tenantID, code); err != nil || b != nil {
+			return b, err
+		}
+	}
+	return nil, nil
+}

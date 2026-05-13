@@ -75,7 +75,10 @@ func TestDecodeEffect(t *testing.T) {
 	})
 
 	t.Run("unknown kind returns error", func(t *testing.T) {
-		raw := json.RawMessage(`{"kind":"AwardBadge","Code":"hero"}`)
+		// AwardBadge moved from "unknown" to "registered" in W2-D; use a
+		// truly-unknown discriminator here (e.g. ReleaseContent will land
+		// in W2-E, BranchPath later still).
+		raw := json.RawMessage(`{"kind":"ReleaseContent","item_id":42}`)
 		_, err := DecodeEffect(raw)
 		if err == nil {
 			t.Fatalf("expected error for unknown kind")
@@ -83,7 +86,7 @@ func TestDecodeEffect(t *testing.T) {
 		if !strings.Contains(err.Error(), "unknown effect kind") {
 			t.Errorf("error %q does not mention 'unknown effect kind'", err.Error())
 		}
-		if !strings.Contains(err.Error(), "AwardBadge") {
+		if !strings.Contains(err.Error(), "ReleaseContent") {
 			t.Errorf("error %q does not mention the offending kind", err.Error())
 		}
 	})

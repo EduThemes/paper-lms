@@ -117,10 +117,75 @@ func (m *mockGamCurrencyRepo) ListInTopbar(ctx context.Context, tenantID uint) (
 	return args.Get(0).([]models.GamificationCurrencyType), args.Error(1)
 }
 
+// W2-D: badge + badge-award mocks.
+
+type mockGamBadgeRepo struct{ mock.Mock }
+
+func (m *mockGamBadgeRepo) Create(ctx context.Context, b *models.GamificationBadge) error {
+	args := m.Called(ctx, b)
+	return args.Error(0)
+}
+func (m *mockGamBadgeRepo) FindByID(ctx context.Context, id uint) (*models.GamificationBadge, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.GamificationBadge), args.Error(1)
+}
+func (m *mockGamBadgeRepo) FindByCode(ctx context.Context, tenantID uint, scopeType models.GamificationScopeType, scopeID uint, code string) (*models.GamificationBadge, error) {
+	args := m.Called(ctx, tenantID, scopeType, scopeID, code)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.GamificationBadge), args.Error(1)
+}
+func (m *mockGamBadgeRepo) Update(ctx context.Context, b *models.GamificationBadge) error {
+	args := m.Called(ctx, b)
+	return args.Error(0)
+}
+func (m *mockGamBadgeRepo) Delete(ctx context.Context, id uint) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+func (m *mockGamBadgeRepo) ListByTenant(ctx context.Context, tenantID uint) ([]models.GamificationBadge, error) {
+	args := m.Called(ctx, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.GamificationBadge), args.Error(1)
+}
+
+type mockGamBadgeAwardRepo struct{ mock.Mock }
+
+func (m *mockGamBadgeAwardRepo) Award(ctx context.Context, a *models.GamificationBadgeAward) (bool, error) {
+	args := m.Called(ctx, a)
+	return args.Bool(0), args.Error(1)
+}
+func (m *mockGamBadgeAwardRepo) Revoke(ctx context.Context, userID, badgeID uint) error {
+	args := m.Called(ctx, userID, badgeID)
+	return args.Error(0)
+}
+func (m *mockGamBadgeAwardRepo) ListForUser(ctx context.Context, userID uint) ([]models.GamificationBadgeAward, error) {
+	args := m.Called(ctx, userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.GamificationBadgeAward), args.Error(1)
+}
+func (m *mockGamBadgeAwardRepo) FindByUserAndBadge(ctx context.Context, userID, badgeID uint) (*models.GamificationBadgeAward, error) {
+	args := m.Called(ctx, userID, badgeID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.GamificationBadgeAward), args.Error(1)
+}
+
 // Compile-time check: our mocks satisfy the production interfaces.
 var (
-	_ repository.GamificationWalletRepository       = (*mockGamWalletRepo)(nil)
-	_ repository.GamificationCurrencyTypeRepository = (*mockGamCurrencyRepo)(nil)
+	_ repository.GamificationWalletRepository         = (*mockGamWalletRepo)(nil)
+	_ repository.GamificationCurrencyTypeRepository   = (*mockGamCurrencyRepo)(nil)
+	_ repository.GamificationBadgeRepository          = (*mockGamBadgeRepo)(nil)
+	_ repository.GamificationBadgeAwardRepository     = (*mockGamBadgeAwardRepo)(nil)
 )
 
 // ---------------------------------------------------------------------------
@@ -131,11 +196,13 @@ var (
 // the two routes on a test app. The auth-stub middleware injects the given
 // callerID + isAdmin flag into Locals so the handler's self-or-admin check
 // has something to read.
-func setupGamificationHandler(callerID uint, isAdmin bool) (*fiber.App, *mockGamWalletRepo, *mockGamCurrencyRepo, *mocks.MockUserRepository) {
+func setupGamificationHandler(callerID uint, isAdmin bool) (*fiber.App, *mockGamWalletRepo, *mockGamCurrencyRepo, *mocks.MockUserRepository, *mockGamBadgeRepo, *mockGamBadgeAwardRepo) {
 	walletRepo := new(mockGamWalletRepo)
 	currencyRepo := new(mockGamCurrencyRepo)
 	userRepo := new(mocks.MockUserRepository)
-	h := handlers.NewGamificationHandler(walletRepo, currencyRepo, userRepo)
+	badgeRepo := new(mockGamBadgeRepo)
+	badgeAwardRepo := new(mockGamBadgeAwardRepo)
+	h := handlers.NewGamificationHandler(walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo)
 
 	app := testutil.SetupTestApp()
 	app.Use(func(c *fiber.Ctx) error {
@@ -158,7 +225,18 @@ func setupGamificationHandler(callerID uint, isAdmin bool) (*fiber.App, *mockGam
 	// W2-C: self-only gamification preferences.
 	app.Get("/api/v1/users/self/gamification_preferences", h.GetMyGamificationPreferences)
 	app.Put("/api/v1/users/self/gamification_preferences", h.UpdateMyGamificationPreferences)
-	return app, walletRepo, currencyRepo, userRepo
+	// W2-D: badge CRUD + per-user list + manual award/revoke.
+	app.Get("/api/v1/gamification/badges", h.ListBadges)
+	app.Post("/api/v1/gamification/badges", h.CreateBadge)
+	app.Patch("/api/v1/gamification/badges/:id", h.UpdateBadge)
+	app.Delete("/api/v1/gamification/badges/:id", h.DeleteBadge)
+	app.Post("/api/v1/courses/:course_id/gamification/badges", h.CreateBadge)
+	app.Patch("/api/v1/courses/:course_id/gamification/badges/:id", h.UpdateBadge)
+	app.Delete("/api/v1/courses/:course_id/gamification/badges/:id", h.DeleteBadge)
+	app.Get("/api/v1/users/:id/badges", h.ListUserBadges)
+	app.Post("/api/v1/users/:user_id/badges", h.AwardBadgeToUser)
+	app.Delete("/api/v1/users/:user_id/badges/:badge_id", h.RevokeBadgeFromUser)
+	return app, walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo
 }
 
 func fixtureXP() models.GamificationCurrencyType {
@@ -221,7 +299,7 @@ func fixtureHidden() models.GamificationCurrencyType {
 // ---------------------------------------------------------------------------
 
 func TestGetUserWallet_Self_HappyPath(t *testing.T) {
-	app, walletRepo, currencyRepo, _ := setupGamificationHandler(42, false)
+	app, walletRepo, currencyRepo, _, _, _ := setupGamificationHandler(42, false)
 
 	balances := []models.GamificationWalletBalance{
 		{UserID: 42, CurrencyTypeID: 11, Balance: 250, LifetimeEarned: 250},
@@ -269,7 +347,7 @@ func TestGetUserWallet_Self_HappyPath(t *testing.T) {
 }
 
 func TestGetUserWallet_AdminViewingOtherUser(t *testing.T) {
-	app, walletRepo, currencyRepo, _ := setupGamificationHandler(99, true /*isAdmin*/)
+	app, walletRepo, currencyRepo, _, _, _ := setupGamificationHandler(99, true /*isAdmin*/)
 
 	balances := []models.GamificationWalletBalance{
 		{UserID: 42, CurrencyTypeID: 11, Balance: 100, LifetimeEarned: 100},
@@ -287,7 +365,7 @@ func TestGetUserWallet_AdminViewingOtherUser(t *testing.T) {
 
 func TestGetUserWallet_Unauthorized_NotSelfNotAdmin(t *testing.T) {
 	// caller=99 trying to view user 42's wallet, not an admin.
-	app, walletRepo, currencyRepo, _ := setupGamificationHandler(99, false)
+	app, walletRepo, currencyRepo, _, _, _ := setupGamificationHandler(99, false)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/users/42/wallet", nil)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
@@ -298,7 +376,7 @@ func TestGetUserWallet_Unauthorized_NotSelfNotAdmin(t *testing.T) {
 }
 
 func TestGetUserWallet_EmptyBalances_ReturnsEmptyArrayNot404(t *testing.T) {
-	app, walletRepo, _, _ := setupGamificationHandler(42, false)
+	app, walletRepo, _, _, _, _ := setupGamificationHandler(42, false)
 
 	walletRepo.On("ListBalancesForUser", mock.Anything, uint(42)).
 		Return([]models.GamificationWalletBalance{}, nil)
@@ -316,14 +394,14 @@ func TestGetUserWallet_EmptyBalances_ReturnsEmptyArrayNot404(t *testing.T) {
 }
 
 func TestGetUserWallet_InvalidUserID(t *testing.T) {
-	app, _, _, _ := setupGamificationHandler(1, true)
+	app, _, _, _, _, _ := setupGamificationHandler(1, true)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/users/abc/wallet", nil)
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
 func TestGetUserWallet_WalletRepoError(t *testing.T) {
-	app, walletRepo, _, _ := setupGamificationHandler(42, false)
+	app, walletRepo, _, _, _, _ := setupGamificationHandler(42, false)
 
 	walletRepo.On("ListBalancesForUser", mock.Anything, uint(42)).
 		Return(nil, errors.New("db down"))
@@ -337,7 +415,7 @@ func TestGetUserWallet_WalletRepoError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestListCurrencies_All(t *testing.T) {
-	app, _, currencyRepo, _ := setupGamificationHandler(7, false)
+	app, _, currencyRepo, _, _, _ := setupGamificationHandler(7, false)
 
 	xp := fixtureXP()
 	gems := fixtureGems()
@@ -369,7 +447,7 @@ func TestListCurrencies_All(t *testing.T) {
 }
 
 func TestListCurrencies_TopbarOnly(t *testing.T) {
-	app, _, currencyRepo, _ := setupGamificationHandler(7, false)
+	app, _, currencyRepo, _, _, _ := setupGamificationHandler(7, false)
 
 	xp := fixtureXP()
 	gems := fixtureGems()
@@ -394,7 +472,7 @@ func TestListCurrencies_TopbarOnly(t *testing.T) {
 }
 
 func TestListCurrencies_RepoError(t *testing.T) {
-	app, _, currencyRepo, _ := setupGamificationHandler(7, false)
+	app, _, currencyRepo, _, _, _ := setupGamificationHandler(7, false)
 
 	currencyRepo.On("ListByTenant", mock.Anything, uint(1)).Return(nil, errors.New("db down"))
 
@@ -407,7 +485,7 @@ func TestListCurrencies_RepoError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestListUserWalletTransactions_Self_HappyPath(t *testing.T) {
-	app, walletRepo, _, _ := setupGamificationHandler(42, false)
+	app, walletRepo, _, _, _, _ := setupGamificationHandler(42, false)
 
 	occurredAt := time.Date(2026, 5, 13, 9, 30, 0, 0, time.UTC)
 	ruleID := uint(7)
@@ -445,7 +523,7 @@ func TestListUserWalletTransactions_Self_HappyPath(t *testing.T) {
 }
 
 func TestListUserWalletTransactions_Admin_OtherUser(t *testing.T) {
-	app, walletRepo, _, _ := setupGamificationHandler(99, true)
+	app, walletRepo, _, _, _, _ := setupGamificationHandler(99, true)
 
 	walletRepo.On(
 		"ListTransactionsForUserAndCurrency", mock.Anything,
@@ -461,7 +539,7 @@ func TestListUserWalletTransactions_Admin_OtherUser(t *testing.T) {
 }
 
 func TestListUserWalletTransactions_Forbidden(t *testing.T) {
-	app, walletRepo, _, _ := setupGamificationHandler(99, false)
+	app, walletRepo, _, _, _, _ := setupGamificationHandler(99, false)
 
 	resp := testutil.MakeRequest(app, http.MethodGet,
 		"/api/v1/users/42/wallet/transactions?currency_type_id=11", nil)
@@ -471,7 +549,7 @@ func TestListUserWalletTransactions_Forbidden(t *testing.T) {
 }
 
 func TestListUserWalletTransactions_MissingCurrencyTypeID(t *testing.T) {
-	app, _, _, _ := setupGamificationHandler(42, false)
+	app, _, _, _, _, _ := setupGamificationHandler(42, false)
 
 	resp := testutil.MakeRequest(app, http.MethodGet,
 		"/api/v1/users/42/wallet/transactions", nil)
@@ -479,7 +557,7 @@ func TestListUserWalletTransactions_MissingCurrencyTypeID(t *testing.T) {
 }
 
 func TestListUserWalletTransactions_InvalidCurrencyTypeID(t *testing.T) {
-	app, _, _, _ := setupGamificationHandler(42, false)
+	app, _, _, _, _, _ := setupGamificationHandler(42, false)
 
 	resp := testutil.MakeRequest(app, http.MethodGet,
 		"/api/v1/users/42/wallet/transactions?currency_type_id=0", nil)
@@ -487,7 +565,7 @@ func TestListUserWalletTransactions_InvalidCurrencyTypeID(t *testing.T) {
 }
 
 func TestListUserWalletTransactions_PerPageClampedTo100(t *testing.T) {
-	app, walletRepo, _, _ := setupGamificationHandler(42, false)
+	app, walletRepo, _, _, _, _ := setupGamificationHandler(42, false)
 
 	walletRepo.On(
 		"ListTransactionsForUserAndCurrency", mock.Anything,
@@ -504,7 +582,7 @@ func TestListUserWalletTransactions_PerPageClampedTo100(t *testing.T) {
 }
 
 func TestListUserWalletTransactions_RepoError(t *testing.T) {
-	app, walletRepo, _, _ := setupGamificationHandler(42, false)
+	app, walletRepo, _, _, _, _ := setupGamificationHandler(42, false)
 
 	walletRepo.On(
 		"ListTransactionsForUserAndCurrency", mock.Anything,
@@ -538,7 +616,7 @@ func deleteReq(app *fiber.App, path string) *http.Response {
 }
 
 func TestCreateCurrency_HappyPath_SiteScope(t *testing.T) {
-	app, _, currencyRepo, _ := setupGamificationHandler(7, true)
+	app, _, currencyRepo, _, _, _ := setupGamificationHandler(7, true)
 
 	currencyRepo.On("Create", mock.Anything, mock.MatchedBy(func(c *models.GamificationCurrencyType) bool {
 		return c.Code == "coins" &&
@@ -575,7 +653,7 @@ func TestCreateCurrency_HappyPath_SiteScope(t *testing.T) {
 }
 
 func TestCreateCurrency_CourseScope_ResolvedFromURL(t *testing.T) {
-	app, _, currencyRepo, _ := setupGamificationHandler(7, false)
+	app, _, currencyRepo, _, _, _ := setupGamificationHandler(7, false)
 
 	currencyRepo.On("Create", mock.Anything, mock.MatchedBy(func(c *models.GamificationCurrencyType) bool {
 		return c.ScopeType == models.ScopeCourse && c.ScopeID == 99 && c.Code == "stars"
@@ -590,7 +668,7 @@ func TestCreateCurrency_CourseScope_ResolvedFromURL(t *testing.T) {
 }
 
 func TestCreateCurrency_RejectsBadCode(t *testing.T) {
-	app, _, _, _ := setupGamificationHandler(7, true)
+	app, _, _, _, _, _ := setupGamificationHandler(7, true)
 	for _, code := range []string{"", "X", "XP", "1coin", "has space", "WAY_TOO_LONG_CODE_THAT_EXCEEDS_THIRTY_TWO_CHARS"} {
 		body := `{"code":"` + code + `","display_label":"Test"}`
 		resp := postJSON(app, "/api/v1/gamification/currencies", body)
@@ -599,14 +677,14 @@ func TestCreateCurrency_RejectsBadCode(t *testing.T) {
 }
 
 func TestCreateCurrency_RejectsBadColor(t *testing.T) {
-	app, _, _, _ := setupGamificationHandler(7, true)
+	app, _, _, _, _, _ := setupGamificationHandler(7, true)
 	resp := postJSON(app, "/api/v1/gamification/currencies",
 		`{"code":"coins","display_label":"Coin","color":"not-a-hex"}`)
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
 func TestCreateCurrency_RejectsEmptyLabel(t *testing.T) {
-	app, _, _, _ := setupGamificationHandler(7, true)
+	app, _, _, _, _, _ := setupGamificationHandler(7, true)
 	resp := postJSON(app, "/api/v1/gamification/currencies",
 		`{"code":"coins","display_label":""}`)
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
@@ -620,7 +698,7 @@ func TestCreateCurrency_Duplicate_Returns409(t *testing.T) {
 	// TOCTOU window into a single round-trip — concurrent admins minting
 	// the same code each get a deterministic 409 (or one of them gets
 	// 201) instead of one getting a 500 from the unique constraint.
-	app, _, currencyRepo, _ := setupGamificationHandler(7, true)
+	app, _, currencyRepo, _, _, _ := setupGamificationHandler(7, true)
 	currencyRepo.On("Create", mock.Anything, mock.MatchedBy(func(c *models.GamificationCurrencyType) bool {
 		return c.Code == "xp"
 	})).Return(repository.ErrCurrencyDuplicate)
@@ -634,7 +712,7 @@ func TestCreateCurrency_Duplicate_Returns409(t *testing.T) {
 func TestCreateCurrency_ForcesSystemOwnedFalse(t *testing.T) {
 	// Even if a malicious client sends system_owned=true in the JSON, the
 	// handler should ignore it. (The struct doesn't even unmarshal it.)
-	app, _, currencyRepo, _ := setupGamificationHandler(7, true)
+	app, _, currencyRepo, _, _, _ := setupGamificationHandler(7, true)
 	currencyRepo.On("Create", mock.Anything, mock.MatchedBy(func(c *models.GamificationCurrencyType) bool {
 		return !c.SystemOwned
 	})).Run(func(args mock.Arguments) {
@@ -651,7 +729,7 @@ func TestUpdateCurrency_HappyPath_RenameSystem(t *testing.T) {
 	// A tenant admin can rename system_owned currencies (label/icon/color)
 	// but not their code. The code field isn't in patchCurrencyInput so
 	// any attempt to change it via JSON is silently ignored.
-	app, _, currencyRepo, _ := setupGamificationHandler(7, true)
+	app, _, currencyRepo, _, _, _ := setupGamificationHandler(7, true)
 	xp := fixtureXP() // system_owned=true, code="xp"
 	currencyRepo.On("FindByID", mock.Anything, uint(11)).Return(&xp, nil)
 	currencyRepo.On("Update", mock.Anything, mock.MatchedBy(func(c *models.GamificationCurrencyType) bool {
@@ -670,7 +748,7 @@ func TestUpdateCurrency_TogglesVisibleInTopbar(t *testing.T) {
 	// Verifies the bool-default class regression is closed for PATCH: a
 	// teacher setting visible_in_topbar=false on a currency that was true
 	// must actually persist false. db.Save (not db.Updates) handles this.
-	app, _, currencyRepo, _ := setupGamificationHandler(7, true)
+	app, _, currencyRepo, _, _, _ := setupGamificationHandler(7, true)
 	gems := fixtureGems()
 	currencyRepo.On("FindByID", mock.Anything, uint(12)).Return(&gems, nil)
 	currencyRepo.On("Update", mock.Anything, mock.MatchedBy(func(c *models.GamificationCurrencyType) bool {
@@ -687,7 +765,7 @@ func TestUpdateCurrency_ScopeMismatch_403(t *testing.T) {
 	// A site-scoped XP currency cannot be PATCHed via the course-scoped
 	// route. Prevents a course instructor on course A from touching a
 	// site-scoped currency they don't own.
-	app, _, currencyRepo, _ := setupGamificationHandler(7, false)
+	app, _, currencyRepo, _, _, _ := setupGamificationHandler(7, false)
 	xp := fixtureXP() // site/1
 	currencyRepo.On("FindByID", mock.Anything, uint(11)).Return(&xp, nil)
 
@@ -698,14 +776,14 @@ func TestUpdateCurrency_ScopeMismatch_403(t *testing.T) {
 }
 
 func TestUpdateCurrency_NotFound(t *testing.T) {
-	app, _, currencyRepo, _ := setupGamificationHandler(7, true)
+	app, _, currencyRepo, _, _, _ := setupGamificationHandler(7, true)
 	currencyRepo.On("FindByID", mock.Anything, uint(99)).Return(nil, nil)
 	resp := patchJSON(app, "/api/v1/gamification/currencies/99", `{"display_label":"X"}`)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
 func TestDeleteCurrency_SystemOwned_409(t *testing.T) {
-	app, _, currencyRepo, _ := setupGamificationHandler(7, true)
+	app, _, currencyRepo, _, _, _ := setupGamificationHandler(7, true)
 	xp := fixtureXP()
 	currencyRepo.On("FindByID", mock.Anything, uint(11)).Return(&xp, nil)
 
@@ -715,7 +793,7 @@ func TestDeleteCurrency_SystemOwned_409(t *testing.T) {
 }
 
 func TestDeleteCurrency_CustomRow_204(t *testing.T) {
-	app, _, currencyRepo, _ := setupGamificationHandler(7, true)
+	app, _, currencyRepo, _, _, _ := setupGamificationHandler(7, true)
 	custom := models.GamificationCurrencyType{
 		ID: 50, TenantID: 1, ScopeType: models.ScopeSite, ScopeID: 1,
 		Code: "coins", DisplayLabel: "Coin", SystemOwned: false,
@@ -729,7 +807,7 @@ func TestDeleteCurrency_CustomRow_204(t *testing.T) {
 }
 
 func TestDeleteCurrency_ScopeMismatch_403(t *testing.T) {
-	app, _, currencyRepo, _ := setupGamificationHandler(7, false)
+	app, _, currencyRepo, _, _, _ := setupGamificationHandler(7, false)
 	custom := models.GamificationCurrencyType{
 		ID: 50, TenantID: 1, ScopeType: models.ScopeCourse, ScopeID: 99,
 		Code: "stars", SystemOwned: false,
@@ -746,7 +824,7 @@ func TestDeleteCurrency_ScopeMismatch_403(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestGetMyGamificationPreferences_HappyPath(t *testing.T) {
-	app, _, _, userRepo := setupGamificationHandler(42, false)
+	app, _, _, userRepo, _, _ := setupGamificationHandler(42, false)
 	userRepo.On("FindByID", mock.Anything, uint(42)).
 		Return(&models.User{ID: 42, LeaderboardOptOut: true}, nil)
 
@@ -761,7 +839,7 @@ func TestGetMyGamificationPreferences_HappyPath(t *testing.T) {
 }
 
 func TestGetMyGamificationPreferences_DefaultsToFalse(t *testing.T) {
-	app, _, _, userRepo := setupGamificationHandler(42, false)
+	app, _, _, userRepo, _, _ := setupGamificationHandler(42, false)
 	userRepo.On("FindByID", mock.Anything, uint(42)).
 		Return(&models.User{ID: 42}, nil) // LeaderboardOptOut zero-value
 
@@ -775,7 +853,7 @@ func TestGetMyGamificationPreferences_DefaultsToFalse(t *testing.T) {
 func TestUpdateMyGamificationPreferences_TogglesOn(t *testing.T) {
 	// Verifies the bool-default class is closed for this PATCH too:
 	// learner opts IN (false→true) via a PUT with a single field.
-	app, _, _, userRepo := setupGamificationHandler(42, false)
+	app, _, _, userRepo, _, _ := setupGamificationHandler(42, false)
 	existing := &models.User{ID: 42, LeaderboardOptOut: false}
 	userRepo.On("FindByID", mock.Anything, uint(42)).Return(existing, nil)
 	userRepo.On("Update", mock.Anything, mock.MatchedBy(func(u *models.User) bool {
@@ -796,7 +874,7 @@ func TestUpdateMyGamificationPreferences_TogglesOff(t *testing.T) {
 	// Verifies the inverse: learner opts back IN (true→false). The pointer
 	// PATCH body distinguishes "explicitly set to false" from "field
 	// omitted", so db.Save writes the false explicitly.
-	app, _, _, userRepo := setupGamificationHandler(42, false)
+	app, _, _, userRepo, _, _ := setupGamificationHandler(42, false)
 	existing := &models.User{ID: 42, LeaderboardOptOut: true}
 	userRepo.On("FindByID", mock.Anything, uint(42)).Return(existing, nil)
 	userRepo.On("Update", mock.Anything, mock.MatchedBy(func(u *models.User) bool {
@@ -814,7 +892,7 @@ func TestUpdateMyGamificationPreferences_OmittedFieldIsNoop(t *testing.T) {
 	// A PUT body with no leaderboard_opt_out leaves the existing value
 	// unchanged. This is the contract for adding more prefs over time:
 	// each PUT is a partial update, never a wipe.
-	app, _, _, userRepo := setupGamificationHandler(42, false)
+	app, _, _, userRepo, _, _ := setupGamificationHandler(42, false)
 	existing := &models.User{ID: 42, LeaderboardOptOut: true}
 	userRepo.On("FindByID", mock.Anything, uint(42)).Return(existing, nil)
 	userRepo.On("Update", mock.Anything, mock.MatchedBy(func(u *models.User) bool {
@@ -829,7 +907,7 @@ func TestUpdateMyGamificationPreferences_OmittedFieldIsNoop(t *testing.T) {
 }
 
 func TestUpdateMyGamificationPreferences_RejectsBadBody(t *testing.T) {
-	app, _, _, _ := setupGamificationHandler(42, false)
+	app, _, _, _, _, _ := setupGamificationHandler(42, false)
 
 	resp := testutil.MakeRequest(app, http.MethodPut,
 		"/api/v1/users/self/gamification_preferences",
@@ -839,9 +917,232 @@ func TestUpdateMyGamificationPreferences_RejectsBadBody(t *testing.T) {
 
 func TestGetMyGamificationPreferences_Unauthenticated(t *testing.T) {
 	// callerID=0 — middleware Locals not set; handler must 401.
-	app, _, _, _ := setupGamificationHandler(0, false)
+	app, _, _, _, _, _ := setupGamificationHandler(0, false)
 
 	resp := testutil.MakeRequest(app, http.MethodGet,
 		"/api/v1/users/self/gamification_preferences", nil)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+// ---------------------------------------------------------------------------
+// W2-D: Badge CRUD + per-user list + manual award/revoke.
+// ---------------------------------------------------------------------------
+
+func fixtureBadge() models.GamificationBadge {
+	return models.GamificationBadge{
+		ID:           50,
+		TenantID:     1,
+		ScopeType:    models.ScopeSite,
+		ScopeID:      1,
+		Code:         "first_quiz",
+		Name:         "First Quiz",
+		Description:  "Pass your first quiz.",
+		Icon:         "trophy",
+		Color:        "#F59E0B",
+		InternalOnly: true,
+	}
+}
+
+func TestCreateBadge_HappyPath_SiteScope(t *testing.T) {
+	app, _, _, _, badgeRepo, _ := setupGamificationHandler(7, true)
+	badgeRepo.On("Create", mock.Anything, mock.MatchedBy(func(b *models.GamificationBadge) bool {
+		return b.Code == "first_quiz" &&
+			b.Name == "First Quiz" &&
+			b.ScopeType == models.ScopeSite && b.ScopeID == 1 &&
+			b.InternalOnly == true && // default-on
+			b.SystemOwned == false
+	})).Run(func(args mock.Arguments) {
+		args.Get(1).(*models.GamificationBadge).ID = 99
+	}).Return(nil)
+
+	resp := postJSON(app, "/api/v1/gamification/badges",
+		`{"code":"first_quiz","name":"First Quiz","description":"Pass your first quiz."}`)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	body, _ := testutil.ParseJSONMap(resp)
+	assert.Equal(t, float64(99), body["id"])
+	assert.Equal(t, true, body["internal_only"])
+	badgeRepo.AssertExpectations(t)
+}
+
+func TestCreateBadge_CourseScope(t *testing.T) {
+	app, _, _, _, badgeRepo, _ := setupGamificationHandler(7, false)
+	badgeRepo.On("Create", mock.Anything, mock.MatchedBy(func(b *models.GamificationBadge) bool {
+		return b.ScopeType == models.ScopeCourse && b.ScopeID == 99
+	})).Run(func(args mock.Arguments) {
+		args.Get(1).(*models.GamificationBadge).ID = 100
+	}).Return(nil)
+
+	resp := postJSON(app, "/api/v1/courses/99/gamification/badges",
+		`{"code":"explorer","name":"Course Explorer"}`)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	badgeRepo.AssertExpectations(t)
+}
+
+func TestCreateBadge_AtomicDuplicate_409(t *testing.T) {
+	// Mirrors W2-B's race-safe path: repo returns ErrBadgeDuplicate from
+	// ON CONFLICT DO NOTHING; handler maps to 409.
+	app, _, _, _, badgeRepo, _ := setupGamificationHandler(7, true)
+	badgeRepo.On("Create", mock.Anything, mock.Anything).Return(repository.ErrBadgeDuplicate)
+
+	resp := postJSON(app, "/api/v1/gamification/badges",
+		`{"code":"dupe","name":"Dupe"}`)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	badgeRepo.AssertExpectations(t)
+}
+
+func TestCreateBadge_RejectsBadInputs(t *testing.T) {
+	app, _, _, _, _, _ := setupGamificationHandler(7, true)
+	for _, body := range []string{
+		`{"code":"","name":"X"}`,                 // bad code
+		`{"code":"X","name":"Y"}`,                // uppercase
+		`{"code":"good","name":""}`,              // empty name
+		`{"code":"good","name":"X","color":"oops"}`, // bad color
+	} {
+		resp := postJSON(app, "/api/v1/gamification/badges", body)
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "body %q must be rejected", body)
+	}
+}
+
+func TestUpdateBadge_HappyPath(t *testing.T) {
+	app, _, _, _, badgeRepo, _ := setupGamificationHandler(7, true)
+	row := fixtureBadge()
+	badgeRepo.On("FindByID", mock.Anything, uint(50)).Return(&row, nil)
+	badgeRepo.On("Update", mock.Anything, mock.MatchedBy(func(b *models.GamificationBadge) bool {
+		return b.Code == "first_quiz" && // unchanged
+			b.Name == "Renamed" &&
+			b.InternalOnly == false // toggled — bool-default class
+	})).Return(nil)
+
+	resp := patchJSON(app, "/api/v1/gamification/badges/50",
+		`{"name":"Renamed","internal_only":false,"code":"hijack_attempt"}`)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	badgeRepo.AssertExpectations(t)
+}
+
+func TestUpdateBadge_ScopeMismatch_403(t *testing.T) {
+	// A site-scoped badge can't be PATCHed via the course-scoped route.
+	app, _, _, _, badgeRepo, _ := setupGamificationHandler(7, false)
+	row := fixtureBadge() // site
+	badgeRepo.On("FindByID", mock.Anything, uint(50)).Return(&row, nil)
+
+	resp := patchJSON(app, "/api/v1/courses/99/gamification/badges/50",
+		`{"name":"Hijack"}`)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	badgeRepo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
+}
+
+func TestDeleteBadge_SystemOwned_409(t *testing.T) {
+	app, _, _, _, badgeRepo, _ := setupGamificationHandler(7, true)
+	sys := fixtureBadge()
+	sys.SystemOwned = true
+	badgeRepo.On("FindByID", mock.Anything, uint(50)).Return(&sys, nil)
+
+	resp := deleteReq(app, "/api/v1/gamification/badges/50")
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	badgeRepo.AssertNotCalled(t, "Delete", mock.Anything, mock.Anything)
+}
+
+func TestDeleteBadge_CustomRow_204(t *testing.T) {
+	app, _, _, _, badgeRepo, _ := setupGamificationHandler(7, true)
+	row := fixtureBadge() // system_owned=false
+	badgeRepo.On("FindByID", mock.Anything, uint(50)).Return(&row, nil)
+	badgeRepo.On("Delete", mock.Anything, uint(50)).Return(nil)
+
+	resp := deleteReq(app, "/api/v1/gamification/badges/50")
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	badgeRepo.AssertExpectations(t)
+}
+
+func TestListUserBadges_Self_HappyPath(t *testing.T) {
+	app, _, _, _, badgeRepo, awardRepo := setupGamificationHandler(42, false)
+	row := fixtureBadge()
+	awardRepo.On("ListForUser", mock.Anything, uint(42)).
+		Return([]models.GamificationBadgeAward{
+			{ID: 1, UserID: 42, BadgeID: 50, AwardedAt: time.Date(2026, 5, 13, 9, 0, 0, 0, time.UTC)},
+		}, nil)
+	badgeRepo.On("FindByID", mock.Anything, uint(50)).Return(&row, nil)
+
+	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/users/42/badges", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body, _ := testutil.ParseJSONMap(resp)
+	assert.Equal(t, float64(42), body["user_id"])
+	rows := body["badges"].([]interface{})
+	require.Len(t, rows, 1)
+	first := rows[0].(map[string]interface{})
+	assert.Equal(t, "first_quiz", first["code"])
+	assert.Equal(t, "First Quiz", first["name"])
+	assert.Equal(t, "2026-05-13T09:00:00Z", first["awarded_at"])
+}
+
+func TestListUserBadges_Forbidden(t *testing.T) {
+	app, _, _, _, _, _ := setupGamificationHandler(99, false)
+	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/users/42/badges", nil)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+func TestAwardBadgeToUser_Created(t *testing.T) {
+	app, _, _, _, badgeRepo, awardRepo := setupGamificationHandler(7, true)
+	row := fixtureBadge()
+	badgeRepo.On("FindByID", mock.Anything, uint(50)).Return(&row, nil)
+	awardRepo.On("Award", mock.Anything, mock.MatchedBy(func(a *models.GamificationBadgeAward) bool {
+		return a.UserID == 42 && a.BadgeID == 50 && a.AwardedBy != nil && *a.AwardedBy == 7
+	})).Run(func(args mock.Arguments) {
+		args.Get(1).(*models.GamificationBadgeAward).ID = 11
+	}).Return(true, nil)
+
+	resp := postJSON(app, "/api/v1/users/42/badges", `{"badge_id":50}`)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	body, _ := testutil.ParseJSONMap(resp)
+	assert.Equal(t, true, body["created"])
+}
+
+func TestAwardBadgeToUser_Idempotent200(t *testing.T) {
+	// Re-awarding the same badge → 200 OK with created=false (no error).
+	app, _, _, _, badgeRepo, awardRepo := setupGamificationHandler(7, true)
+	row := fixtureBadge()
+	badgeRepo.On("FindByID", mock.Anything, uint(50)).Return(&row, nil)
+	awardRepo.On("Award", mock.Anything, mock.Anything).Return(false, nil)
+
+	resp := postJSON(app, "/api/v1/users/42/badges", `{"badge_id":50}`)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body, _ := testutil.ParseJSONMap(resp)
+	assert.Equal(t, false, body["created"])
+}
+
+func TestAwardBadgeToUser_RejectsBadInput(t *testing.T) {
+	app, _, _, _, _, _ := setupGamificationHandler(7, true)
+	resp := postJSON(app, "/api/v1/users/42/badges", `{}`)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestAwardBadgeToUser_TenantMismatch_403(t *testing.T) {
+	app, _, _, _, badgeRepo, _ := setupGamificationHandler(7, true)
+	row := fixtureBadge()
+	row.TenantID = 99 // someone else's tenant
+	badgeRepo.On("FindByID", mock.Anything, uint(50)).Return(&row, nil)
+
+	resp := postJSON(app, "/api/v1/users/42/badges", `{"badge_id":50}`)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+func TestRevokeBadgeFromUser_NoContent(t *testing.T) {
+	app, _, _, _, _, awardRepo := setupGamificationHandler(7, true)
+	awardRepo.On("Revoke", mock.Anything, uint(42), uint(50)).Return(nil)
+	resp := deleteReq(app, "/api/v1/users/42/badges/50")
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	awardRepo.AssertExpectations(t)
+}
+
+func TestListBadges_HappyPath(t *testing.T) {
+	app, _, _, _, badgeRepo, _ := setupGamificationHandler(7, false)
+	row := fixtureBadge()
+	badgeRepo.On("ListByTenant", mock.Anything, uint(1)).
+		Return([]models.GamificationBadge{row}, nil)
+
+	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/gamification/badges", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body, _ := testutil.ParseJSONMap(resp)
+	rows := body["badges"].([]interface{})
+	require.Len(t, rows, 1)
+	assert.Equal(t, "first_quiz", rows[0].(map[string]interface{})["code"])
 }
