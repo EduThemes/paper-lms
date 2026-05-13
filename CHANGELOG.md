@@ -26,12 +26,19 @@ verbs already use.
   with panic recovery as the D-1 callbacks; failures never block the
   originating write.
 - **Per-row mastery transition guard in `LearningOutcomeService`**:
-  the service now captures prior mastery (via a new
-  `LearningOutcomeResultRepository.FindByUserOutcomeAsset` finder)
-  before calling `Upsert`, and fires `OnMasteryCrossed` only on the
-  false/nil → true transition on the same
-  `(user_id, learning_outcome_id, asset_type, asset_id)` composite.
-  Rollup-level mastery is left to the `OutcomeMastery` predicate.
+  `LearningOutcomeResultRepository.Upsert` now returns the atomic
+  pre-write mastery value `(priorMastery *bool, err error)` and runs
+  its read-then-write inside a single transaction with
+  `SELECT … FOR UPDATE` on the existing row. This serializes
+  concurrent writes to the same
+  `(user_id, learning_outcome_id, asset_type, asset_id)` composite
+  and lets `CreateResult` fire `OnMasteryCrossed` only on the
+  false/nil → true transition without the check-then-act race two
+  separate roundtrips would have introduced. Rollup-level mastery
+  is still left to the `OutcomeMastery` predicate. The residual
+  INSERT-side race (two concurrent first-time writes both finding
+  no row) is left to a Sprint D-3 migration that adds a UNIQUE
+  index on the composite + `ON CONFLICT` semantics.
 - **`internal/service/gamification/wiring/`** (three new files):
   `DiscussionEntryPostedEmitCallback`,
   `OutcomeMasteryCrossedEmitCallback`,

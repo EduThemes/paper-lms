@@ -476,15 +476,18 @@ type LearningOutcomeResultRepository interface {
 	Create(ctx context.Context, result *models.LearningOutcomeResult) error
 	FindByID(ctx context.Context, id uint) (*models.LearningOutcomeResult, error)
 	Update(ctx context.Context, result *models.LearningOutcomeResult) error
-	Upsert(ctx context.Context, result *models.LearningOutcomeResult) error
+	// Upsert writes a result row keyed on
+	// (user_id, learning_outcome_id, associated_asset_type, associated_asset_id)
+	// and returns the row's Mastery value as it was BEFORE the write.
+	// priorMastery is nil if no prior row existed or the prior row's
+	// Mastery was nil. The implementation must serialize concurrent
+	// writes to the same composite (the postgres impl uses a single
+	// transaction with SELECT … FOR UPDATE) so that the
+	// LearningOutcomeService.OnMasteryCrossed transition detector can
+	// trust the returned value as the atomic pre-write state.
+	Upsert(ctx context.Context, result *models.LearningOutcomeResult) (priorMastery *bool, err error)
 	ListByOutcomeID(ctx context.Context, outcomeID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcomeResult], error)
 	ListByUserAndContext(ctx context.Context, userID uint, contextType string, contextID uint) ([]models.LearningOutcomeResult, error)
-	// FindByUserOutcomeAsset returns the existing result row keyed on
-	// (user_id, learning_outcome_id, associated_asset_type, associated_asset_id) —
-	// the same composite the Upsert call uses. Returns gorm.ErrRecordNotFound
-	// when no prior row exists. Used by the OnMasteryCrossed transition
-	// detector to capture the pre-Upsert mastery state.
-	FindByUserOutcomeAsset(ctx context.Context, userID, outcomeID uint, assetType string, assetID uint) (*models.LearningOutcomeResult, error)
 	// ListByUserAndOutcomeIDs is the snapshot loader's targeted read for
 	// OutcomeMastery predicates. Returns every recorded result for the
 	// given outcome set; the mastery package consumes them via its

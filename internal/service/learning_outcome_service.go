@@ -6,7 +6,6 @@ import (
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
-	"gorm.io/gorm"
 )
 
 // OutcomeMasteryCrossedCallback fires (asynchronously) when a
@@ -162,27 +161,16 @@ func (s *LearningOutcomeService) CreateResult(ctx context.Context, result *model
 		}
 	}
 
-	// Capture the prior mastery state on the same composite key the Upsert
-	// uses, so the OnMasteryCrossed callback only fires on a false/nil→true
-	// transition. Lookup errors other than NotFound are ignored — we'd
-	// rather miss one transition emit than fail the result write.
-	wasMastered := false
-	prior, err := s.resultRepo.FindByUserOutcomeAsset(
-		ctx, result.UserID, result.LearningOutcomeID,
-		result.AssociatedAssetType, result.AssociatedAssetID,
-	)
-	if err == nil && prior != nil && prior.Mastery != nil {
-		wasMastered = *prior.Mastery
-	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		// Non-fatal: log via the gamification callback's own error path
-		// instead of returning here — the result write must succeed.
-		_ = err
-	}
-
-	if err := s.resultRepo.Upsert(ctx, result); err != nil {
+	// Upsert returns the atomic pre-write Mastery value (captured inside
+	// the same row-locked transaction that performs the write). priorMastery
+	// nil means either no prior row existed or the prior row's Mastery was
+	// nil — either way "not yet mastered" for transition-detection purposes.
+	priorMastery, err := s.resultRepo.Upsert(ctx, result)
+	if err != nil {
 		return err
 	}
 
+	wasMastered := priorMastery != nil && *priorMastery
 	nowMastered := result.Mastery != nil && *result.Mastery
 	if nowMastered && !wasMastered {
 		s.fireOnMasteryCrossed(result.UserID, result.LearningOutcomeID, result.ID)

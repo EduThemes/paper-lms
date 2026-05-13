@@ -2,10 +2,12 @@ package postgres
 
 import (
 	"context"
+	"errors"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type learningOutcomeResultRepo struct {
@@ -32,30 +34,59 @@ func (r *learningOutcomeResultRepo) Update(ctx context.Context, result *models.L
 	return r.db.WithContext(ctx).Save(result).Error
 }
 
-func (r *learningOutcomeResultRepo) Upsert(ctx context.Context, result *models.LearningOutcomeResult) error {
-	var existing models.LearningOutcomeResult
-	err := r.db.WithContext(ctx).Where("user_id = ? AND learning_outcome_id = ? AND associated_asset_type = ? AND associated_asset_id = ?",
-		result.UserID, result.LearningOutcomeID, result.AssociatedAssetType, result.AssociatedAssetID).First(&existing).Error
-	if err == gorm.ErrRecordNotFound {
-		return r.db.WithContext(ctx).Create(result).Error
-	}
+// Upsert writes a result row, returning the row's mastery value as it was
+// BEFORE the write. priorMastery is nil when no prior row existed (or when
+// the prior row's Mastery was nil); otherwise it points to a copy of the
+// prior bool. The lookup-then-write runs in a single transaction with
+// SELECT … FOR UPDATE on the existing row to serialize concurrent updates
+// to the same (user, outcome, asset) composite — preventing the
+// check-then-act race that would otherwise let two concurrent
+// CreateResult calls each observe "not yet mastered" and both fire the
+// OnMasteryCrossed callback.
+//
+// The residual race is on INSERT (two concurrent writes both finding no
+// row and both calling Create). Closing that fully needs a UNIQUE index on
+// (user_id, learning_outcome_id, associated_asset_type, associated_asset_id)
+// + ON CONFLICT semantics — a Sprint D-3 migration.
+func (r *learningOutcomeResultRepo) Upsert(ctx context.Context, result *models.LearningOutcomeResult) (priorMastery *bool, err error) {
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing models.LearningOutcomeResult
+		findErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND learning_outcome_id = ? AND associated_asset_type = ? AND associated_asset_id = ?",
+				result.UserID, result.LearningOutcomeID, result.AssociatedAssetType, result.AssociatedAssetID).
+			First(&existing).Error
+		if errors.Is(findErr, gorm.ErrRecordNotFound) {
+			// No prior row; create. priorMastery stays nil.
+			return tx.Create(result).Error
+		}
+		if findErr != nil {
+			return findErr
+		}
+
+		// Snapshot prior mastery before mutating the existing row.
+		if existing.Mastery != nil {
+			prior := *existing.Mastery
+			priorMastery = &prior
+		}
+
+		existing.Score = result.Score
+		existing.Possible = result.Possible
+		existing.Mastery = result.Mastery
+		existing.Percent = result.Percent
+		existing.Attempt = result.Attempt
+		existing.AssessedAt = result.AssessedAt
+		existing.SubmittedAt = result.SubmittedAt
+		existing.Title = result.Title
+		existing.ContextType = result.ContextType
+		existing.ContextID = result.ContextID
+
+		result.ID = existing.ID
+		return tx.Save(&existing).Error
+	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-
-	existing.Score = result.Score
-	existing.Possible = result.Possible
-	existing.Mastery = result.Mastery
-	existing.Percent = result.Percent
-	existing.Attempt = result.Attempt
-	existing.AssessedAt = result.AssessedAt
-	existing.SubmittedAt = result.SubmittedAt
-	existing.Title = result.Title
-	existing.ContextType = result.ContextType
-	existing.ContextID = result.ContextID
-
-	result.ID = existing.ID
-	return r.db.WithContext(ctx).Save(&existing).Error
+	return priorMastery, nil
 }
 
 func (r *learningOutcomeResultRepo) ListByOutcomeID(ctx context.Context, outcomeID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcomeResult], error) {
@@ -76,17 +107,6 @@ func (r *learningOutcomeResultRepo) ListByOutcomeID(ctx context.Context, outcome
 		Page:       params.Page,
 		PerPage:    params.PerPage,
 	}, nil
-}
-
-func (r *learningOutcomeResultRepo) FindByUserOutcomeAsset(ctx context.Context, userID, outcomeID uint, assetType string, assetID uint) (*models.LearningOutcomeResult, error) {
-	var existing models.LearningOutcomeResult
-	if err := r.db.WithContext(ctx).
-		Where("user_id = ? AND learning_outcome_id = ? AND associated_asset_type = ? AND associated_asset_id = ?",
-			userID, outcomeID, assetType, assetID).
-		First(&existing).Error; err != nil {
-		return nil, err
-	}
-	return &existing, nil
 }
 
 func (r *learningOutcomeResultRepo) ListByUserAndContext(ctx context.Context, userID uint, contextType string, contextID uint) ([]models.LearningOutcomeResult, error) {
