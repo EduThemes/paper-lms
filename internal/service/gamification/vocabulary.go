@@ -28,9 +28,15 @@ const (
 	// Enrollment verbs.
 	VerbEnrolled = "enrolled"
 
-	// Mastery / outcome verbs (Sprint D-2 will start emitting these).
+	// Mastery / outcome verbs.
 	VerbMastered    = "mastered"
 	VerbProgressed  = "progressed"
+
+	// Discussion / contribution verbs.
+	VerbPosted = "posted"
+
+	// Rubric / peer-review verbs.
+	VerbAssessed = "assessed"
 )
 
 // Object type values are the canonical Go model type names (singular,
@@ -45,6 +51,12 @@ const (
 	ObjectModule     = "Module"
 	ObjectCourse     = "Course"
 	ObjectOutcome    = "Outcome"
+
+	// Discussion contribution objects.
+	ObjectDiscussionEntry = "DiscussionEntry"
+
+	// Rubric assessment objects.
+	ObjectRubric = "Rubric"
 )
 
 // EmitterSource is the canonical source string for events emitted by

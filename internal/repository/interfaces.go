@@ -476,7 +476,16 @@ type LearningOutcomeResultRepository interface {
 	Create(ctx context.Context, result *models.LearningOutcomeResult) error
 	FindByID(ctx context.Context, id uint) (*models.LearningOutcomeResult, error)
 	Update(ctx context.Context, result *models.LearningOutcomeResult) error
-	Upsert(ctx context.Context, result *models.LearningOutcomeResult) error
+	// Upsert writes a result row keyed on
+	// (user_id, learning_outcome_id, associated_asset_type, associated_asset_id)
+	// and returns the row's Mastery value as it was BEFORE the write.
+	// priorMastery is nil if no prior row existed or the prior row's
+	// Mastery was nil. The implementation must serialize concurrent
+	// writes to the same composite (the postgres impl uses a single
+	// transaction with SELECT … FOR UPDATE) so that the
+	// LearningOutcomeService.OnMasteryCrossed transition detector can
+	// trust the returned value as the atomic pre-write state.
+	Upsert(ctx context.Context, result *models.LearningOutcomeResult) (priorMastery *bool, err error)
 	ListByOutcomeID(ctx context.Context, outcomeID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcomeResult], error)
 	ListByUserAndContext(ctx context.Context, userID uint, contextType string, contextID uint) ([]models.LearningOutcomeResult, error)
 	// ListByUserAndOutcomeIDs is the snapshot loader's targeted read for

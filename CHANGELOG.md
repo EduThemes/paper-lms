@@ -6,6 +6,62 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Phase 6 / Wave 1 Sprint D-2 — discussion + outcome mastery + rubric emit wiring
+
+Lands the three remaining Wave 1 emit verbs. After Sprint D-2 the
+in-product gamification engine recognizes every Wave 1 trigger that
+SYNTHESIS.md called for: a posted discussion entry, an outcome
+mastery transition, and a rubric assessment all flow through the
+same dispatcher → predicate → effect path that the Sprint C/D-1
+verbs already use.
+
+- **`internal/service/gamification/vocabulary.go`**: adds
+  `VerbPosted`, `VerbAssessed`, `ObjectDiscussionEntry`,
+  `ObjectRubric` to the canonical constants. `VerbMastered` and
+  `ObjectOutcome` were already present from Sprint C.
+- **Callback infrastructure on three more services**:
+  `DiscussionService.OnEntryCreated`,
+  `RubricService.OnAssessmentCreated`,
+  `LearningOutcomeService.OnMasteryCrossed`. Same goroutine fan-out
+  with panic recovery as the D-1 callbacks; failures never block the
+  originating write.
+- **Per-row mastery transition guard in `LearningOutcomeService`**:
+  `LearningOutcomeResultRepository.Upsert` now returns the atomic
+  pre-write mastery value `(priorMastery *bool, err error)` and runs
+  its read-then-write inside a single transaction with
+  `SELECT … FOR UPDATE` on the existing row. This serializes
+  concurrent writes to the same
+  `(user_id, learning_outcome_id, asset_type, asset_id)` composite
+  and lets `CreateResult` fire `OnMasteryCrossed` only on the
+  false/nil → true transition without the check-then-act race two
+  separate roundtrips would have introduced. Rollup-level mastery
+  is still left to the `OutcomeMastery` predicate. The residual
+  INSERT-side race (two concurrent first-time writes both finding
+  no row) is left to a Sprint D-3 migration that adds a UNIQUE
+  index on the composite + `ON CONFLICT` semantics.
+- **`internal/service/gamification/wiring/`** (three new files):
+  `DiscussionEntryPostedEmitCallback`,
+  `OutcomeMasteryCrossedEmitCallback`,
+  `RubricAssessmentCreatedEmitCallback`. Each mirrors the Sprint D-1
+  pattern: load the entity, walk to its course / outcome / rubric for
+  the tenant_id, emit a snake-case-keyed xAPI-shaped event. Errors
+  are logged via `slog.Error` and swallowed.
+- **`cmd/server/main.go`**: registers the three new callbacks
+  against `discussionService`, `rubricService`, and
+  `learningOutcomeService` in a Sprint D-2 block alongside the
+  existing D-1 wiring.
+- **End-to-end test**:
+  `TestCreateResult_TriggersMasteryRuleOnFirstTransitionOnly` —
+  exercises the full path through `LearningOutcomeService.CreateResult`
+  → service-level transition detection → callback → wiring emit →
+  rule dispatch → AwardCurrency effect → wallet ledger. Asserts
+  exactly one wallet transaction across two CreateResult calls (the
+  second is mastered-to-mastered, so it must NOT re-emit).
+
+Out of scope for D-2 (Sprint D-3 targets):
+`POST /api/v1/gamification/events` write endpoint, full pgvector
+CI matrix, policy-flag derivation, seeded FERPA tag rows.
+
 ### Phase 6 / Wave 1 Sprint D-1 — emit wiring + read-side API
 
 Wires the Sprint C rules engine into the rest of Paper LMS. Internal
