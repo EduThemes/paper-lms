@@ -51,6 +51,9 @@ func (r *learningOutcomeResultRepo) Update(ctx context.Context, result *models.L
 //     then re-fetches under the row lock and falls through to the update
 //     path, observing the just-inserted row as its "prior" — so neither
 //     racer mis-fires the OnMasteryCrossed callback as a fresh transition.
+//     PG blocks the loser's INSERT until the winner's tx resolves, so
+//     RowsAffected = 0 always happens after a committed winner — the
+//     re-fetch is guaranteed to find the row.
 func (r *learningOutcomeResultRepo) Upsert(ctx context.Context, result *models.LearningOutcomeResult) (priorMastery *bool, err error) {
 	whereComposite := func(tx *gorm.DB) *gorm.DB {
 		return tx.Where("user_id = ? AND learning_outcome_id = ? AND associated_asset_type = ? AND associated_asset_id = ?",

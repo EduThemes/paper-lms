@@ -274,3 +274,127 @@ func stringSliceEqual(a, b []string) bool {
 	}
 	return true
 }
+
+// TestDerivePolicyFlags pins the Sprint D-3 derivation contract: when
+// any education_record-tagged field is present on an event, the
+// required policy_flags (ferpa_protected + education_record) are
+// appended in-place. Idempotent. Other classifications don't trigger
+// flag additions in Wave 1.
+func TestDerivePolicyFlags(t *testing.T) {
+	cases := []struct {
+		name      string
+		tags      []models.GamificationFerpaFieldTag
+		event     *models.GamificationEvent
+		wantFlags []string
+		wantErr   bool
+	}{
+		{
+			name: "education_record field present, no flags → both added",
+			tags: []models.GamificationFerpaFieldTag{
+				tag("Submission", "result.score", "education_record"),
+			},
+			event:     event("Submission", `{"score":91}`, ""),
+			wantFlags: []string{"ferpa_protected", "education_record"},
+		},
+		{
+			name: "education_record field present, one flag already set → only missing one added",
+			tags: []models.GamificationFerpaFieldTag{
+				tag("Submission", "result.score", "education_record"),
+			},
+			event:     event("Submission", `{"score":91}`, "", "education_record"),
+			wantFlags: []string{"education_record", "ferpa_protected"},
+		},
+		{
+			name: "education_record field present, both flags already set → no-op (no duplicates)",
+			tags: []models.GamificationFerpaFieldTag{
+				tag("Submission", "result.score", "education_record"),
+			},
+			event:     event("Submission", `{"score":91}`, "", "ferpa_protected", "education_record"),
+			wantFlags: []string{"ferpa_protected", "education_record"},
+		},
+		{
+			name: "education_record tag exists but field absent on event → no flags added",
+			tags: []models.GamificationFerpaFieldTag{
+				tag("Submission", "result.score", "education_record"),
+			},
+			event:     event("Submission", `{"other":1}`, ""),
+			wantFlags: []string{},
+		},
+		{
+			name: "only directory_information tags → no flags added (advisory in Wave 1)",
+			tags: []models.GamificationFerpaFieldTag{
+				tag("Submission", "context.course_id", "directory_information"),
+			},
+			event:     event("Submission", "", `{"course_id":7}`),
+			wantFlags: []string{},
+		},
+		{
+			name:      "no tags for object_type → no flags added",
+			tags:      []models.GamificationFerpaFieldTag{},
+			event:     event("Submission", `{"score":91}`, ""),
+			wantFlags: []string{},
+		},
+		{
+			name: "education_record field in context bucket → flags added",
+			tags: []models.GamificationFerpaFieldTag{
+				tag("Outcome", "context.mastery_level", "education_record"),
+			},
+			event:     event("Outcome", "", `{"mastery_level":"proficient"}`),
+			wantFlags: []string{"ferpa_protected", "education_record"},
+		},
+		{
+			name: "malformed result JSON → error",
+			tags: []models.GamificationFerpaFieldTag{
+				tag("Submission", "result.score", "education_record"),
+			},
+			event:   event("Submission", `not-json`, ""),
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeTagRepo{tags: tc.tags}
+			err := gamification.DerivePolicyFlags(context.Background(), repo, tc.event)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			gotSorted := append([]string{}, []string(tc.event.PolicyFlags)...)
+			wantSorted := append([]string{}, tc.wantFlags...)
+			sort.Strings(gotSorted)
+			sort.Strings(wantSorted)
+			if !stringSliceEqual(gotSorted, wantSorted) {
+				t.Errorf("flags mismatch:\n  want %v\n   got %v", wantSorted, gotSorted)
+			}
+		})
+	}
+}
+
+// TestDerivePolicyFlags_NilEvent is a defensive guard. The Emitter's
+// nil-check happens before derivation, so this shouldn't be reachable
+// in prod — but the function's godoc promises nil-safety.
+func TestDerivePolicyFlags_NilEvent(t *testing.T) {
+	repo := &fakeTagRepo{tags: []models.GamificationFerpaFieldTag{
+		tag("Submission", "result.score", "education_record"),
+	}}
+	if err := gamification.DerivePolicyFlags(context.Background(), repo, nil); err != nil {
+		t.Fatalf("unexpected error for nil event: %v", err)
+	}
+}
+
+// TestDerivePolicyFlags_RepoError propagates the tag-lookup error
+// rather than silently skipping. Silent skip would leave the event
+// mis-classified — fail loud instead.
+func TestDerivePolicyFlags_RepoError(t *testing.T) {
+	repo := &erroringTagRepo{err: errors.New("boom")}
+	ev := event("Submission", `{"score":91}`, "")
+	if err := gamification.DerivePolicyFlags(context.Background(), repo, ev); err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+}
