@@ -84,6 +84,7 @@ const AppointmentGroupEditorPage = React.lazy(() => import('./pages/AppointmentG
 const OutcomeProficiencyPage = React.lazy(() => import('./pages/OutcomeProficiencyPage'));
 const MasteryGradebookPage = React.lazy(() => import('./pages/MasteryGradebookPage'));
 const ReadingPreferencesPage = React.lazy(() => import('./pages/ReadingPreferencesPage'));
+const GamificationPreferencesPage = React.lazy(() => import('./pages/GamificationPreferencesPage'));
 // Smart Search, Commons
 const SmartSearchPage = React.lazy(() => import('./pages/SmartSearchPage'));
 const CommonsPage = React.lazy(() => import('./pages/CommonsPage'));
@@ -406,6 +407,14 @@ const App = () => {
           element={
             <ProtectedRoute>
               <ReadingPreferencesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/profile/gamification"
+          element={
+            <ProtectedRoute>
+              <GamificationPreferencesPage />
             </ProtectedRoute>
           }
         />

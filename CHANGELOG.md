@@ -6,6 +6,83 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Phase 6 / Wave 2 Sprint W2-C — per-learner leaderboard opt-out
+
+Ships the privacy primitive that lets a learner remove themselves from
+public leaderboard surfaces without losing XP / gems / mastery / awards.
+Genuine whitespace vs Brightspace's admin-only `MaskUsernames` toggle,
+which lacks per-learner control (SYNTHESIS §5).
+
+The first leaderboard surface lands in Wave 3. Shipping the column +
+backend filter helper + frontend toggle now means Wave 3 starts from a
+state where every leaderboard query path can call
+`UserRepository.FilterPublicLeaderboardCandidates` against the existing
+opt-out set, rather than retrofitting the privacy guard later.
+
+Backend
+- **Migration 000040** — `ALTER TABLE users ADD COLUMN
+  leaderboard_opt_out BOOLEAN NOT NULL DEFAULT FALSE` + partial index
+  on `(id) WHERE leaderboard_opt_out` for the (typically small)
+  opted-out subset.
+- **`User.LeaderboardOptOut`** added to the domain model. No `default:`
+  GORM tag, by deliberate W2-A/W2-B lessons — `UserRepo.Update` uses
+  `db.Save` so all columns are written, and the migration carries the
+  SQL DEFAULT FALSE.
+- **`UserRepository.FilterPublicLeaderboardCandidates(ctx,
+  candidateIDs)`** new interface method + Postgres impl. Returns the
+  subset that has NOT opted out. Order is not preserved (caller has
+  ranking from its own leaderboard query; this is set-membership).
+- **`GET /api/v1/users/self/gamification_preferences`** + **`PUT`**.
+  Self-only — the handler reads `user_id` from Locals and never
+  accepts another user's id in the path. PATCH body uses pointer
+  semantics so `{}` is a no-op (additive update, never a wipe).
+  Writing `leaderboard_opt_out=true` does NOT zero the learner's
+  wallet / awards / mastery (SYNTHESIS §5: visibility control, not
+  awards reset).
+
+Frontend
+- **`<GamificationPreferencesPage>`** at `/profile/gamification`.
+  Single toggle today: "Hide me from public leaderboards" with helper
+  text that puts the no-progress-loss contract in bold: *"Your XP,
+  gems, mastery points, and badges are not affected."* Optimistic UI
+  with revert-on-failure.
+- **`api.gamification.{getMyPreferences, updateMyPreferences}`** added.
+- **`<WalletDrawer>` footer** gains a small "⚙ Privacy settings" link
+  to `/profile/gamification`. Closes the drawer on click (Radix
+  `DialogPrimitive.Close asChild`). The drawer is the only learner-
+  facing gamification surface today, so its footer is the natural
+  discovery point for the toggle. A future "Profile settings" nav
+  cluster can promote this to a top-level entry; until then, the
+  drawer link is the entry path.
+
+Tests
+- **`internal/repository/postgres/user_test.go`** (new) — integration
+  test against `PARITY_DB_URL` exercising all five
+  `FilterPublicLeaderboardCandidates` scenarios: empty input, all
+  opted-in, all opted-out, mixed set, non-existent IDs.
+- **`gamification_test.go`** gains 6 W2-C handler tests: happy path,
+  default-false on a fresh user, toggle-on, toggle-off (the bool-
+  default class again — pinned for the User.LeaderboardOptOut path),
+  omitted-field-is-noop, unauthenticated→401.
+- **`GamificationPreferencesPage.test.jsx`** (new): renders OFF for
+  fresh learner, renders ON for opted-out, toggles fire the API,
+  optimistic revert on failure, copy contract is present.
+- Backend `./internal/...` clean. Frontend: 101 tests pass (up from 96;
+  +5 for the new page).
+- Shared `MockUserRepository` extended with the new method;
+  `CurrencyPills.test.jsx` wrapped in `MemoryRouter` because the
+  W2-C wallet drawer footer link needs a router context.
+
+End-to-end verified against live Postgres: GET returns false → PUT
+true → GET returns true → PUT false → GET returns false.
+
+Out of scope for W2-C (deferred to W2-D / Wave 3):
+- A dedicated "Profile settings" nav cluster — drawer-footer link is
+  sufficient until W2-D / W2-E grow more learner prefs.
+- Wave 3 leaderboard surfaces — the filter helper is in place and
+  parity-tested so any leaderboard query path can adopt it without
+  schema or repo changes.
+
 ### Phase 6 / Wave 2 Sprint W2-B follow-up — admin nav entry + plural-label clarity
 
 Closes the discoverability gap on the currency editor: it was reachable

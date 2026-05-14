@@ -2587,5 +2587,19 @@ export const api = {
         : `/gamification/currencies/${id}`;
       await requestRaw(path, { method: 'DELETE' });
     },
+
+    // W2-C: per-learner gamification preferences. Self-only; the
+    // backend reads user_id from the session, not the path.
+    getMyPreferences: async () => {
+      const { data } = await request('/users/self/gamification_preferences');
+      return data;
+    },
+    updateMyPreferences: async (patch) => {
+      const { data } = await request('/users/self/gamification_preferences', {
+        method: 'PUT',
+        body: JSON.stringify(patch),
+      });
+      return data;
+    },
   },
 };

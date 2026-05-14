@@ -38,6 +38,14 @@ type UserRepository interface {
 	List(ctx context.Context, params PaginationParams) (*PaginatedResult[models.User], error)
 	FindByResetToken(ctx context.Context, token string) (*models.User, error)
 	Search(ctx context.Context, searchTerm string, params PaginationParams) (*PaginatedResult[models.User], error)
+	// FilterPublicLeaderboardCandidates returns the subset of `candidateIDs`
+	// that have NOT opted out of public leaderboards (W2-C). Used by any
+	// leaderboard query path before projection. Stacks with the data-access
+	// FERPA block on `mastery_points` — opt-out is the per-learner privacy
+	// control, FERPA is the field-classification control; both must allow
+	// for a row to surface on a public board. Ships in W2-C so Wave 3's
+	// leaderboard primitives don't retrofit the privacy guard later.
+	FilterPublicLeaderboardCandidates(ctx context.Context, candidateIDs []uint) ([]uint, error)
 }
 
 type AccountRepository interface {

@@ -1087,5 +1087,12 @@ func (r *Router) Register(app *fiber.App) {
 		protected.Post("/courses/:course_id/gamification/currencies", instructor, r.gamificationHandler.CreateCurrency)
 		protected.Patch("/courses/:course_id/gamification/currencies/:id", instructor, r.gamificationHandler.UpdateCurrency)
 		protected.Delete("/courses/:course_id/gamification/currencies/:id", instructor, r.gamificationHandler.DeleteCurrency)
+
+		// Per-learner gamification preferences (W2-C). Self-only; the
+		// handler reads user_id from Locals and never accepts another
+		// user's id in the path. Currently exposes the leaderboard
+		// opt-out toggle.
+		protected.Get("/users/self/gamification_preferences", r.gamificationHandler.GetMyGamificationPreferences)
+		protected.Put("/users/self/gamification_preferences", r.gamificationHandler.UpdateMyGamificationPreferences)
 	}
 }

@@ -21,16 +21,21 @@ import (
 type GamificationHandler struct {
 	walletRepo   repository.GamificationWalletRepository
 	currencyRepo repository.GamificationCurrencyTypeRepository
+	userRepo     repository.UserRepository
 }
 
-// NewGamificationHandler wires the read-side handlers.
+// NewGamificationHandler wires the read-side handlers. The userRepo
+// dependency arrived in W2-C for the leaderboard opt-out preference
+// (the toggle lives on `users.leaderboard_opt_out`).
 func NewGamificationHandler(
 	walletRepo repository.GamificationWalletRepository,
 	currencyRepo repository.GamificationCurrencyTypeRepository,
+	userRepo repository.UserRepository,
 ) *GamificationHandler {
 	return &GamificationHandler{
 		walletRepo:   walletRepo,
 		currencyRepo: currencyRepo,
+		userRepo:     userRepo,
 	}
 }
 
@@ -567,4 +572,70 @@ func derefBool(p *bool, def bool) bool {
 		return def
 	}
 	return *p
+}
+
+// ---------------------------------------------------------------------------
+// Sprint W2-C — per-learner gamification preferences.
+//
+// One toggle today: leaderboard_opt_out. The endpoints sit on
+// /users/self/* (self-only; we don't expose another user's prefs even
+// to admins — those settings belong to the learner). Self-scope is
+// enforced by the existing RequireSelfOrAdmin pattern at the route
+// layer, but the handler reads `user_id` from Locals directly to
+// avoid leaking an admin-override path.
+// ---------------------------------------------------------------------------
+
+type gamificationPreferencesJSON struct {
+	LeaderboardOptOut bool `json:"leaderboard_opt_out"`
+}
+
+// GetMyGamificationPreferences returns the signed-in learner's
+// gamification preferences. Always 200 with a stable shape — missing
+// users get default values, never 404.
+func (h *GamificationHandler) GetMyGamificationPreferences(c *fiber.Ctx) error {
+	userID, ok := c.Locals("user_id").(uint)
+	if !ok || userID == 0 {
+		return responses.Unauthorized(c)
+	}
+	user, err := h.userRepo.FindByID(c.Context(), userID)
+	if err != nil || user == nil {
+		return responses.InternalError(c, "could not load preferences")
+	}
+	return c.JSON(gamificationPreferencesJSON{
+		LeaderboardOptOut: user.LeaderboardOptOut,
+	})
+}
+
+// UpdateMyGamificationPreferences writes the signed-in learner's
+// preferences. Uses a pointer-typed PATCH body so omitting a field is
+// distinguishable from setting it to its zero value (this is the same
+// bool-default lesson the currency editor pinned in W2-B).
+//
+// Side-effect contract: writing leaderboard_opt_out=true does NOT zero
+// the learner's wallet / awards / mastery. SYNTHESIS §5: opting out is
+// a visibility control, not an awards reset.
+func (h *GamificationHandler) UpdateMyGamificationPreferences(c *fiber.Ctx) error {
+	userID, ok := c.Locals("user_id").(uint)
+	if !ok || userID == 0 {
+		return responses.Unauthorized(c)
+	}
+	var in struct {
+		LeaderboardOptOut *bool `json:"leaderboard_opt_out"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return responses.BadRequest(c, "invalid request body")
+	}
+	user, err := h.userRepo.FindByID(c.Context(), userID)
+	if err != nil || user == nil {
+		return responses.InternalError(c, "could not load user")
+	}
+	if in.LeaderboardOptOut != nil {
+		user.LeaderboardOptOut = *in.LeaderboardOptOut
+	}
+	if err := h.userRepo.Update(c.Context(), user); err != nil {
+		return responses.InternalError(c, "could not save preferences")
+	}
+	return c.JSON(gamificationPreferencesJSON{
+		LeaderboardOptOut: user.LeaderboardOptOut,
+	})
 }
