@@ -1079,8 +1079,12 @@ func (r *Router) Register(app *fiber.App) {
 		gam.Post("/currencies", admin, r.gamificationHandler.CreateCurrency)
 		gam.Patch("/currencies/:id", admin, r.gamificationHandler.UpdateCurrency)
 		gam.Delete("/currencies/:id", admin, r.gamificationHandler.DeleteCurrency)
-		protected.Get("/users/:id/wallet", r.gamificationHandler.GetUserWallet)
-		protected.Get("/users/:id/wallet/transactions", r.gamificationHandler.ListUserWalletTransactions)
+		// selfOrAdmin populates is_admin Locals so the handler's self-or-admin
+		// branch lets actual admins through. Without it, admins viewing
+		// another user's wallet fall through to 403 because the handler
+		// defaults is_admin=false on missing Locals.
+		protected.Get("/users/:id/wallet", selfOrAdmin, r.gamificationHandler.GetUserWallet)
+		protected.Get("/users/:id/wallet/transactions", selfOrAdmin, r.gamificationHandler.ListUserWalletTransactions)
 
 		// Course-scoped instructor surface. Same handler, scope inferred
 		// from :course_id presence in the URL.
@@ -1094,5 +1098,26 @@ func (r *Router) Register(app *fiber.App) {
 		// opt-out toggle.
 		protected.Get("/users/self/gamification_preferences", r.gamificationHandler.GetMyGamificationPreferences)
 		protected.Put("/users/self/gamification_preferences", r.gamificationHandler.UpdateMyGamificationPreferences)
+
+		// W2-D — Badge CRUD + per-user list + manual award/revoke.
+		gam.Get("/badges", r.gamificationHandler.ListBadges)
+		gam.Post("/badges", admin, r.gamificationHandler.CreateBadge)
+		gam.Patch("/badges/:id", admin, r.gamificationHandler.UpdateBadge)
+		gam.Delete("/badges/:id", admin, r.gamificationHandler.DeleteBadge)
+		// Course-scoped instructor surface for badges. Same handler,
+		// scope inferred from :course_id (resolveScope).
+		protected.Post("/courses/:course_id/gamification/badges", instructor, r.gamificationHandler.CreateBadge)
+		protected.Patch("/courses/:course_id/gamification/badges/:id", instructor, r.gamificationHandler.UpdateBadge)
+		protected.Delete("/courses/:course_id/gamification/badges/:id", instructor, r.gamificationHandler.DeleteBadge)
+		// Per-user earned-badges list. The selfOrAdmin middleware sets
+		// the is_admin Locals flag the handler reads — required because
+		// without it admins land in the handler's "you can only view
+		// your own" branch (the handler defaults is_admin=false when
+		// the Locals isn't populated by middleware).
+		protected.Get("/users/:id/badges", selfOrAdmin, r.gamificationHandler.ListUserBadges)
+		// Manual award / revoke. Admin only at the route level today;
+		// instructor-flow lands when course-scope role check matures.
+		protected.Post("/users/:user_id/badges", admin, r.gamificationHandler.AwardBadgeToUser)
+		protected.Delete("/users/:user_id/badges/:badge_id", admin, r.gamificationHandler.RevokeBadgeFromUser)
 	}
 }

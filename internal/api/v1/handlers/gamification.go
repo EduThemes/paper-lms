@@ -19,23 +19,30 @@ import (
 // metadata. Write paths (rule-fired AwardCurrency, manual grants) live in the
 // dispatcher / effect package, not here.
 type GamificationHandler struct {
-	walletRepo   repository.GamificationWalletRepository
-	currencyRepo repository.GamificationCurrencyTypeRepository
-	userRepo     repository.UserRepository
+	walletRepo      repository.GamificationWalletRepository
+	currencyRepo    repository.GamificationCurrencyTypeRepository
+	userRepo        repository.UserRepository
+	badgeRepo       repository.GamificationBadgeRepository
+	badgeAwardRepo  repository.GamificationBadgeAwardRepository
 }
 
-// NewGamificationHandler wires the read-side handlers. The userRepo
-// dependency arrived in W2-C for the leaderboard opt-out preference
-// (the toggle lives on `users.leaderboard_opt_out`).
+// NewGamificationHandler wires the read-side handlers.
+//
+//   - userRepo: W2-C (leaderboard opt-out toggle lives on users.leaderboard_opt_out)
+//   - badgeRepo + badgeAwardRepo: W2-D (badge CRUD + manual award)
 func NewGamificationHandler(
 	walletRepo repository.GamificationWalletRepository,
 	currencyRepo repository.GamificationCurrencyTypeRepository,
 	userRepo repository.UserRepository,
+	badgeRepo repository.GamificationBadgeRepository,
+	badgeAwardRepo repository.GamificationBadgeAwardRepository,
 ) *GamificationHandler {
 	return &GamificationHandler{
-		walletRepo:   walletRepo,
-		currencyRepo: currencyRepo,
-		userRepo:     userRepo,
+		walletRepo:     walletRepo,
+		currencyRepo:   currencyRepo,
+		userRepo:       userRepo,
+		badgeRepo:      badgeRepo,
+		badgeAwardRepo: badgeAwardRepo,
 	}
 }
 
@@ -638,4 +645,408 @@ func (h *GamificationHandler) UpdateMyGamificationPreferences(c *fiber.Ctx) erro
 	return c.JSON(gamificationPreferencesJSON{
 		LeaderboardOptOut: user.LeaderboardOptOut,
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Sprint W2-D — Badge CRUD + admin manual-award + self list.
+//
+// URL surfaces mirror the W2-B currency CRUD pattern:
+//
+//   Site scope (admin):
+//     GET    /api/v1/gamification/badges
+//     POST   /api/v1/gamification/badges
+//     PATCH  /api/v1/gamification/badges/:id
+//     DELETE /api/v1/gamification/badges/:id
+//
+//   Course scope (instructor):
+//     POST/PATCH/DELETE /api/v1/courses/:course_id/gamification/badges[/:id]
+//
+//   Per-user (self-or-admin):
+//     GET    /api/v1/users/:id/badges
+//
+//   Manual award + revoke (admin or instructor):
+//     POST   /api/v1/users/:user_id/badges       — body {badge_id, evidence?}
+//     DELETE /api/v1/users/:user_id/badges/:badge_id
+//
+// The site/course scope split + system_owned + code-immutability rules
+// are inherited verbatim from W2-B's currency surface.
+// ---------------------------------------------------------------------------
+
+type badgeJSON struct {
+	ID            uint   `json:"id"`
+	ScopeType     string `json:"scope_type"`
+	ScopeID       uint   `json:"scope_id"`
+	Code          string `json:"code"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Icon          string `json:"icon"`
+	ImageURL      string `json:"image_url"`
+	Color         string `json:"color"`
+	InternalOnly  bool   `json:"internal_only"`
+	SystemOwned   bool   `json:"system_owned"`
+	AudienceLevel string `json:"audience_level"`
+}
+
+func badgeJSONFor(b *models.GamificationBadge) badgeJSON {
+	return badgeJSON{
+		ID:            b.ID,
+		ScopeType:     string(b.ScopeType),
+		ScopeID:       b.ScopeID,
+		Code:          b.Code,
+		Name:          b.Name,
+		Description:   b.Description,
+		Icon:          b.Icon,
+		ImageURL:      b.ImageURL,
+		Color:         b.Color,
+		InternalOnly:  b.InternalOnly,
+		SystemOwned:   b.SystemOwned,
+		AudienceLevel: b.AudienceLevel,
+	}
+}
+
+type listBadgesResponse struct {
+	Badges []badgeJSON `json:"badges"`
+}
+
+type createBadgeInput struct {
+	Code          string `json:"code"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Icon          string `json:"icon"`
+	ImageURL      string `json:"image_url"`
+	Color         string `json:"color"`
+	// InternalOnly defaults to true if omitted (SYNTHESIS §5: K-12 has
+	// no production OB 3.0 wallet for under-13, so badges stay
+	// internal). Tenants can flip per-badge in a future PATCH once OB
+	// 3.0 export ships.
+	InternalOnly  *bool  `json:"internal_only"`
+	AudienceLevel string `json:"audience_level"`
+}
+
+type patchBadgeInput struct {
+	Name          *string `json:"name"`
+	Description   *string `json:"description"`
+	Icon          *string `json:"icon"`
+	ImageURL      *string `json:"image_url"`
+	Color         *string `json:"color"`
+	InternalOnly  *bool   `json:"internal_only"`
+	AudienceLevel *string `json:"audience_level"`
+}
+
+// ListBadges handles GET /api/v1/gamification/badges. Any authenticated
+// user — badge definitions are tenant-wide metadata, not FERPA-
+// protected per-user data. Listing earned badges is a separate endpoint.
+func (h *GamificationHandler) ListBadges(c *fiber.Ctx) error {
+	if _, ok := c.Locals("user_id").(uint); !ok {
+		return responses.Unauthorized(c)
+	}
+	tenantID := callerAccountID(c)
+	badges, err := h.badgeRepo.ListByTenant(c.Context(), tenantID)
+	if err != nil {
+		return responses.InternalError(c, "could not fetch badges")
+	}
+	out := listBadgesResponse{Badges: make([]badgeJSON, 0, len(badges))}
+	for i := range badges {
+		out.Badges = append(out.Badges, badgeJSONFor(&badges[i]))
+	}
+	return c.JSON(out)
+}
+
+// CreateBadge handles POST. Always system_owned=false. Conflicts on
+// (tenant_id, scope_type, scope_id, code) return 409 atomically via the
+// repo's ON CONFLICT DO NOTHING translation.
+func (h *GamificationHandler) CreateBadge(c *fiber.Ctx) error {
+	var in createBadgeInput
+	if err := c.BodyParser(&in); err != nil {
+		return responses.BadRequest(c, "invalid request body")
+	}
+	in.Code = strings.TrimSpace(in.Code)
+	if !codeRE.MatchString(in.Code) {
+		return responses.BadRequest(c, "code must match ^[a-z][a-z0-9_]{1,31}$ (lowercase, starts with a letter, 2–32 chars)")
+	}
+	if l := strings.TrimSpace(in.Name); l == "" || len(l) > 80 {
+		return responses.BadRequest(c, "name is required, max 80 chars")
+	}
+	if !colorRE.MatchString(in.Color) {
+		return responses.BadRequest(c, "color must be a 6-digit hex like #A855F7, or empty")
+	}
+	if len(in.Description) > 500 {
+		return responses.BadRequest(c, "description max 500 chars")
+	}
+
+	scopeType, scopeID := resolveScope(c)
+	tenantID := callerAccountID(c)
+	creatorID, _ := c.Locals("user_id").(uint)
+	var createdBy *uint
+	if creatorID > 0 {
+		createdBy = &creatorID
+	}
+
+	row := &models.GamificationBadge{
+		TenantID:      tenantID,
+		ScopeType:     scopeType,
+		ScopeID:       scopeID,
+		Code:          in.Code,
+		Name:          strings.TrimSpace(in.Name),
+		Description:   strings.TrimSpace(in.Description),
+		Icon:          strings.TrimSpace(in.Icon),
+		ImageURL:      strings.TrimSpace(in.ImageURL),
+		Color:         strings.TrimSpace(in.Color),
+		InternalOnly:  derefBool(in.InternalOnly, true),
+		SystemOwned:   false,
+		AudienceLevel: strings.TrimSpace(in.AudienceLevel),
+		CreatedBy:     createdBy,
+	}
+	if err := h.badgeRepo.Create(c.Context(), row); err != nil {
+		if errors.Is(err, repository.ErrBadgeDuplicate) {
+			return responses.Error(c, fiber.StatusConflict, "a badge with this code already exists in this scope")
+		}
+		return responses.InternalError(c, "could not create badge")
+	}
+	return c.Status(fiber.StatusCreated).JSON(badgeJSONFor(row))
+}
+
+// UpdateBadge handles PATCH. Code, scope, system_owned are immutable
+// (rules reference badges by code; renaming breaks authored content).
+func (h *GamificationHandler) UpdateBadge(c *fiber.Ctx) error {
+	idRaw, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return responses.BadRequest(c, "invalid badge id")
+	}
+	row, err := h.badgeRepo.FindByID(c.Context(), uint(idRaw))
+	if err != nil {
+		return responses.InternalError(c, "could not load badge")
+	}
+	if row == nil {
+		return responses.NotFound(c, "badge")
+	}
+
+	scopeType, scopeID := resolveScope(c)
+	tenantID := callerAccountID(c)
+	if row.TenantID != tenantID || row.ScopeType != scopeType || row.ScopeID != scopeID {
+		return responses.Error(c, fiber.StatusForbidden, "badge is not in the requested scope")
+	}
+
+	var in patchBadgeInput
+	if err := c.BodyParser(&in); err != nil {
+		return responses.BadRequest(c, "invalid request body")
+	}
+	if in.Name != nil {
+		row.Name = strings.TrimSpace(*in.Name)
+	}
+	if in.Description != nil {
+		row.Description = strings.TrimSpace(*in.Description)
+	}
+	if in.Icon != nil {
+		row.Icon = strings.TrimSpace(*in.Icon)
+	}
+	if in.ImageURL != nil {
+		row.ImageURL = strings.TrimSpace(*in.ImageURL)
+	}
+	if in.Color != nil {
+		row.Color = strings.TrimSpace(*in.Color)
+	}
+	if in.InternalOnly != nil {
+		row.InternalOnly = *in.InternalOnly
+	}
+	if in.AudienceLevel != nil {
+		row.AudienceLevel = strings.TrimSpace(*in.AudienceLevel)
+	}
+	if row.Name == "" || len(row.Name) > 80 {
+		return responses.BadRequest(c, "name is required, max 80 chars")
+	}
+	if !colorRE.MatchString(row.Color) {
+		return responses.BadRequest(c, "color must be a 6-digit hex or empty")
+	}
+	if len(row.Description) > 500 {
+		return responses.BadRequest(c, "description max 500 chars")
+	}
+	if err := h.badgeRepo.Update(c.Context(), row); err != nil {
+		return responses.InternalError(c, "could not update badge")
+	}
+	return c.JSON(badgeJSONFor(row))
+}
+
+// DeleteBadge handles DELETE. system_owned returns 409. ON DELETE
+// CASCADE on gamification_badge_awards.badge_id means existing
+// awards of this badge are also wiped — the client should surface a
+// confirmation before calling.
+func (h *GamificationHandler) DeleteBadge(c *fiber.Ctx) error {
+	idRaw, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return responses.BadRequest(c, "invalid badge id")
+	}
+	row, err := h.badgeRepo.FindByID(c.Context(), uint(idRaw))
+	if err != nil {
+		return responses.InternalError(c, "could not load badge")
+	}
+	if row == nil {
+		return responses.NotFound(c, "badge")
+	}
+	scopeType, scopeID := resolveScope(c)
+	tenantID := callerAccountID(c)
+	if row.TenantID != tenantID || row.ScopeType != scopeType || row.ScopeID != scopeID {
+		return responses.Error(c, fiber.StatusForbidden, "badge is not in the requested scope")
+	}
+	if row.SystemOwned {
+		return responses.Error(c, fiber.StatusConflict, "system badges cannot be deleted")
+	}
+	if err := h.badgeRepo.Delete(c.Context(), row.ID); err != nil {
+		return responses.InternalError(c, "could not delete badge")
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// earnedBadgeJSON is the projection returned by the per-user list — a
+// flattened join of badge_award + badge metadata so the frontend renders
+// the grid without a follow-up fetch.
+type earnedBadgeJSON struct {
+	AwardID         uint   `json:"award_id"`
+	AwardedAt       string `json:"awarded_at"`
+	EvidenceEventID *uint  `json:"evidence_event_id,omitempty"`
+	AwardedBy       *uint  `json:"awarded_by,omitempty"`
+	BadgeID         uint   `json:"badge_id"`
+	Code            string `json:"code"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	Icon            string `json:"icon"`
+	ImageURL        string `json:"image_url"`
+	Color           string `json:"color"`
+}
+
+// ListUserBadges handles GET /api/v1/users/:id/badges. Self-or-admin.
+// Returns earned badges joined with badge metadata, most recent first.
+// Empty array (200) for users with no awards.
+func (h *GamificationHandler) ListUserBadges(c *fiber.Ctx) error {
+	pathID, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return responses.BadRequest(c, "invalid user id")
+	}
+	targetUserID := uint(pathID)
+
+	callerID, ok := c.Locals("user_id").(uint)
+	if !ok || callerID == 0 {
+		return responses.Unauthorized(c)
+	}
+	isAdmin, _ := c.Locals("is_admin").(bool)
+	if callerID != targetUserID && !isAdmin {
+		return responses.Error(c, fiber.StatusForbidden, "you can only view your own badges")
+	}
+
+	awards, err := h.badgeAwardRepo.ListForUser(c.Context(), targetUserID)
+	if err != nil {
+		return responses.InternalError(c, "could not fetch badges")
+	}
+
+	out := make([]earnedBadgeJSON, 0, len(awards))
+	for i := range awards {
+		a := &awards[i]
+		badge, ferr := h.badgeRepo.FindByID(c.Context(), a.BadgeID)
+		if ferr != nil || badge == nil {
+			// Award row points at a deleted badge — minimal entry so the
+			// frontend doesn't choke. ON DELETE CASCADE wipes these, so
+			// this branch is mostly defensive.
+			out = append(out, earnedBadgeJSON{
+				AwardID:         a.ID,
+				AwardedAt:       a.AwardedAt.UTC().Format(time.RFC3339),
+				EvidenceEventID: a.EvidenceEventID,
+				AwardedBy:       a.AwardedBy,
+				BadgeID:         a.BadgeID,
+			})
+			continue
+		}
+		out = append(out, earnedBadgeJSON{
+			AwardID:         a.ID,
+			AwardedAt:       a.AwardedAt.UTC().Format(time.RFC3339),
+			EvidenceEventID: a.EvidenceEventID,
+			AwardedBy:       a.AwardedBy,
+			BadgeID:         badge.ID,
+			Code:            badge.Code,
+			Name:            badge.Name,
+			Description:     badge.Description,
+			Icon:            badge.Icon,
+			ImageURL:        badge.ImageURL,
+			Color:           badge.Color,
+		})
+	}
+	return c.JSON(fiber.Map{"user_id": targetUserID, "badges": out})
+}
+
+// AwardBadgeToUser handles POST /api/v1/users/:user_id/badges. Admin /
+// instructor only (router-level middleware). Body: {badge_id}. Idempotent
+// — re-awarding the same badge is a 200 with created=false.
+//
+// Wave 2 surface is intentionally minimal: admins manually grant by ID.
+// Wave 2 W2-E lets rule authors use the AwardBadge effect; once that
+// ships, this endpoint stays as the manual-grant fallback.
+func (h *GamificationHandler) AwardBadgeToUser(c *fiber.Ctx) error {
+	pathID, err := strconv.ParseUint(c.Params("user_id"), 10, 64)
+	if err != nil {
+		return responses.BadRequest(c, "invalid user_id")
+	}
+	targetUserID := uint(pathID)
+
+	var in struct {
+		BadgeID uint `json:"badge_id"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return responses.BadRequest(c, "invalid request body")
+	}
+	if in.BadgeID == 0 {
+		return responses.BadRequest(c, "badge_id is required")
+	}
+
+	badge, err := h.badgeRepo.FindByID(c.Context(), in.BadgeID)
+	if err != nil {
+		return responses.InternalError(c, "could not load badge")
+	}
+	if badge == nil {
+		return responses.NotFound(c, "badge")
+	}
+	// Tenant guard — admins can only award badges that belong to their
+	// tenant. (The middleware-set is_admin doesn't carry tenant info
+	// yet; this check uses callerAccountID for the same single-tenant
+	// fallback the rest of W2-B/C uses.)
+	if badge.TenantID != callerAccountID(c) {
+		return responses.Error(c, fiber.StatusForbidden, "badge is not in your tenant")
+	}
+
+	awarderID, _ := c.Locals("user_id").(uint)
+	award := &models.GamificationBadgeAward{
+		UserID:    targetUserID,
+		BadgeID:   badge.ID,
+		AwardedBy: &awarderID,
+	}
+	created, err := h.badgeAwardRepo.Award(c.Context(), award)
+	if err != nil {
+		return responses.InternalError(c, "could not award badge")
+	}
+	status := fiber.StatusCreated
+	if !created {
+		status = fiber.StatusOK // idempotent — already held
+	}
+	return c.Status(status).JSON(fiber.Map{
+		"award_id":  award.ID,
+		"badge_id":  badge.ID,
+		"user_id":   targetUserID,
+		"created":   created,
+	})
+}
+
+// RevokeBadgeFromUser handles DELETE /api/v1/users/:user_id/badges/:badge_id.
+// Admin / instructor only (router-level middleware). Idempotent — the
+// repo's Revoke returns nil when no award exists.
+func (h *GamificationHandler) RevokeBadgeFromUser(c *fiber.Ctx) error {
+	uidRaw, err := strconv.ParseUint(c.Params("user_id"), 10, 64)
+	if err != nil {
+		return responses.BadRequest(c, "invalid user_id")
+	}
+	bidRaw, err := strconv.ParseUint(c.Params("badge_id"), 10, 64)
+	if err != nil {
+		return responses.BadRequest(c, "invalid badge_id")
+	}
+	if err := h.badgeAwardRepo.Revoke(c.Context(), uint(uidRaw), uint(bidRaw)); err != nil {
+		return responses.InternalError(c, "could not revoke badge")
+	}
+	return c.SendStatus(fiber.StatusNoContent)
 }

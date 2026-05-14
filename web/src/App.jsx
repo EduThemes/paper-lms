@@ -63,6 +63,8 @@ const PortfolioEditorPage = React.lazy(() => import('./pages/PortfolioEditorPage
 const PortfolioPublicPage = React.lazy(() => import('./pages/PortfolioPublicPage'));
 const FERPAPage = React.lazy(() => import('./pages/FERPAPage'));
 const GamificationCurrenciesPage = React.lazy(() => import('./pages/GamificationCurrenciesPage'));
+const GamificationBadgesPage = React.lazy(() => import('./pages/GamificationBadgesPage'));
+const MyBadgesPage = React.lazy(() => import('./pages/MyBadgesPage'));
 const ObserverDashboardPage = React.lazy(() => import('./pages/ObserverDashboardPage'));
 const AdminHomePage = React.lazy(() => import('./pages/AdminHomePage'));
 const AdminCoursesPage = React.lazy(() => import('./pages/AdminCoursesPage'));
@@ -195,6 +197,7 @@ const App = () => {
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="audit_log" element={<AuditLogPage />} />
           <Route path="gamification/currencies" element={<GamificationCurrenciesPage />} />
+          <Route path="gamification/badges" element={<GamificationBadgesPage />} />
           <Route path="accommodations" element={<AccommodationsPage />} />
           <Route path="attendance" element={<AttendancePage />} />
           <Route path="question_banks" element={<QuestionBanksPage />} />
@@ -391,6 +394,22 @@ const App = () => {
           element={
             <ProtectedRoute>
               <GamificationCurrenciesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/gamification/badges"
+          element={
+            <ProtectedRoute>
+              <GamificationBadgesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/profile/badges"
+          element={
+            <ProtectedRoute>
+              <MyBadgesPage />
             </ProtectedRoute>
           }
         />

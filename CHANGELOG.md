@@ -6,6 +6,135 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Phase 6 / Wave 2 Sprint W2-D — internal-only badges
+
+Lands the badge primitive: admins / instructors author badges, manually
+award (or rule-fire via a future recipe) to learners, learners see them
+on a per-user grid. Default `internal_only=true` per SYNTHESIS §5 —
+K-12 has no production OB 3.0 wallet for under-13 learners, so badges
+stay server-side. The column stakes out W5's OB 3.0 export pivot;
+flipping per-badge in a later sprint is the explicit consent gate.
+
+Backend
+- **Migration 000041** — two tables:
+  - `gamification_badges` — author-side definition. UNIQUE
+    `(tenant_id, scope_type, scope_id, code)` so rules can reference
+    by `code` portably (same pattern as `gamification_currency_types`).
+    `internal_only boolean default TRUE`, `system_owned boolean
+    default FALSE`, `audience_level` informational column for future
+    Wave 3 audience-filter rules.
+  - `gamification_badge_awards` — issuance ledger with
+    `UNIQUE (user_id, badge_id)`. `evidence_event_id` nullable
+    (rule-fired awards set it; manual grants don't). ON DELETE
+    CASCADE from badges so wiping a badge wipes its awards.
+- **Models** — `GamificationBadge` + `GamificationBadgeAward`. No
+  `default:` GORM tags on the bools (W2-A lesson — `db.Save`-on-Update
+  + raw-INSERT-on-Create avoids the elision class).
+- **Repositories** — `GamificationBadgeRepository` (Create uses
+  `INSERT ... ON CONFLICT ON CONSTRAINT uniq_gam_badge_scope_code
+  DO NOTHING RETURNING ...` → translates `sql.ErrNoRows` to
+  `repository.ErrBadgeDuplicate`; handler maps to 409) +
+  `GamificationBadgeAwardRepository` with idempotent `Award` (returns
+  `created bool` so a future W2-E hook can fan out a `badge.earned`
+  event only on first-time-only edges) and `Revoke`.
+- **`AwardBadge` effect** — new `effects.Effect` implementation. Same
+  scope-walk resolver (`ResolveBadgeByCode`) as `AwardCurrency`,
+  idempotent issuance via the repo's `Award`, audit trail includes
+  `first_time` so a re-fire is logged as a dedupe rather than a silent
+  no-op. Registered in the effect factory; `EffectDeps` gains
+  `Badge` + `BadgeAward` fields. **Out of scope** for W2-D: emitting
+  a `badge.earned` xAPI event so badges chain into the rules engine
+  — that hook lands in W2-E when the recipe builder gives rule
+  authors a concrete consumer (avoids an effects→emitter import-cycle
+  that would need an interface indirection to break for one
+  not-yet-used hook).
+- **HTTP API** — mirrors W2-B currency CRUD:
+  - `GET /api/v1/gamification/badges` (any auth)
+  - `POST/PATCH/DELETE /api/v1/gamification/badges[/:id]` (admin)
+  - `POST/PATCH/DELETE /api/v1/courses/:course_id/gamification/badges[/:id]` (instructor)
+  - `GET /api/v1/users/:id/badges` (self-or-admin)
+  - `POST /api/v1/users/:user_id/badges` (admin manual award, idempotent
+    — 201 on first, 200 on re-award)
+  - `DELETE /api/v1/users/:user_id/badges/:badge_id` (admin revoke)
+  - Same scope-guard / system_owned / code-immutability rules as
+    W2-B's currency surface. Duplicate-code POST returns 409
+    atomically.
+
+Wave 2 correctness fix (closes selfOrAdmin gap on existing routes)
+- W2-A's `GET /users/:id/wallet` and `GET /users/:id/wallet/transactions`
+  read `is_admin` from Locals but had no middleware to populate it.
+  Admins fell through to the handler's 403 branch when viewing
+  *another* user's wallet — Michael's wallet from the admin session
+  returned 403 instead of 200. Fixed by adding `selfOrAdmin`
+  middleware to those routes (and the new W2-D
+  `GET /users/:id/badges`). The handler's own self-or-admin check
+  remains as defense-in-depth.
+
+Frontend
+- **`api.gamification.{listBadges, createBadge, updateBadge,
+  deleteBadge, listUserBadges, awardBadge, revokeBadge}`** added,
+  `courseId` option for scope-switching mirrors W2-B's currency API.
+- **`<BadgeIcon>`** — paper-aesthetic circular medallion. Two render
+  modes: image_url-overrides-icon, or lucide glyph on a tinted ring.
+  No bright gradient orbs — grayscale-eink-friendly.
+- **`<BadgeEditor>`** Radix dialog. Same layout as W2-B's
+  `<CurrencyEditor>` so admins get a consistent authoring UX. Live
+  preview at the top of the form. Curated icon palette (14 lucide
+  names) + 8-swatch color palette + hex input. `internal_only` is
+  defaulted ON with a help message explaining the W5 OB 3.0
+  consent gate.
+- **`<BadgesList>`** — admin/instructor table; scope-filtered client-
+  side; create/edit/delete actions; `window.confirm` warns that
+  DELETE cascades to awards.
+- **Pages**:
+  - `GamificationBadgesPage` at `/admin/gamification/badges` (admin)
+    and `/courses/:courseId/gamification/badges` (instructor).
+  - `MyBadgesPage` at `/profile/badges` — grid of earned badges
+    with medallion + name + description + earned-date. Empty state
+    explains how badges are earned so a fresh learner sees a useful
+    page.
+- **Discovery surfaces**:
+  - `AdminNav` "Gamification" group gains a **Badges** entry next to
+    Currencies.
+  - `<WalletDrawer>` footer gains a **My badges** link alongside the
+    existing **Privacy settings** link (the drawer is the canonical
+    learner-facing gamification surface).
+
+Tests
+- `award_badge_test.go` (new): happy path, idempotency
+  (`first_time=false` on second fire — pinned in EffectResult
+  Detail), course→site scope fallback, course-scoped takes
+  precedence over site, badge-not-found, empty-Code, missing-deps.
+- `factory_test.go` updated: `AwardBadge` moved from "unknown" to
+  "registered"; the unknown-kind test now uses `ReleaseContent` (a
+  truly-not-yet-registered effect).
+- `gamification_test.go` gains 14 W2-D handler tests covering
+  site/course-scope create, atomic 409 on duplicate, bad inputs,
+  PATCH happy + scope mismatch + system-owned-delete-409 +
+  custom-row-delete-204, per-user list happy + forbidden,
+  manual-award-created + manual-award-idempotent + bad-input +
+  tenant-mismatch, revoke, list-all-tenant-badges.
+- `MyBadgesPage.test.jsx` (new): empty-state copy, multiple-card
+  render, inline error surfacing.
+- Local `mockGamBadgeRepo` + `mockGamBadgeAwardRepo` added next to
+  the existing wallet/currency mocks; existing `setupGamificationHandler`
+  call-sites updated to discard the new return values.
+- Backend `./internal/...` clean. Frontend: 104 tests (up from 101;
+  +3 for `MyBadgesPage`).
+
+Verified end-to-end via live Postgres + browser: admin minted "First
+Quiz" badge, awarded to Michael (user 2), Michael logged in, navigated
+to `/profile/badges`, saw the medallion with name + description + date.
+
+Out of scope for W2-D (deferred):
+- Image upload pipeline (admin pastes a URL today; integrated upload
+  via the existing FilesPage path arrives when an admin asks).
+- `badge.earned` xAPI emission for chaining → **W2-E** (recipe
+  builder is the first concrete consumer; deferred to avoid an
+  unused interface indirection).
+- OB 3.0 export → **Wave 5** (the `internal_only` column is the
+  staked-out toggle).
+
 ### Phase 6 / Wave 2 Sprint W2-C — per-learner leaderboard opt-out
 
 Ships the privacy primitive that lets a learner remove themselves from

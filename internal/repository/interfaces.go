@@ -15,6 +15,12 @@ import (
 // to a 409 without a two-query pre-check race window.
 var ErrCurrencyDuplicate = errors.New("currency with this code already exists in this scope")
 
+// ErrBadgeDuplicate is the W2-D analog of ErrCurrencyDuplicate for the
+// (tenant_id, scope_type, scope_id, code) uniqueness constraint on
+// gamification_badges. Same atomic INSERT ... ON CONFLICT DO NOTHING
+// pattern, same handler→409 translation.
+var ErrBadgeDuplicate = errors.New("badge with this code already exists in this scope")
+
 type PaginationParams struct {
 	Page    int
 	PerPage int
@@ -864,6 +870,35 @@ type GamificationCurrencyTypeRepository interface {
 	Delete(ctx context.Context, id uint) error
 	ListByTenant(ctx context.Context, tenantID uint) ([]models.GamificationCurrencyType, error)
 	ListInTopbar(ctx context.Context, tenantID uint) ([]models.GamificationCurrencyType, error)
+}
+
+// GamificationBadgeRepository persists admin/instructor-authored badge
+// definitions. Create returns ErrBadgeDuplicate when the
+// (tenant_id, scope_type, scope_id, code) tuple is already taken — the
+// translation is atomic at the SQL layer (INSERT ... ON CONFLICT
+// DO NOTHING RETURNING).
+type GamificationBadgeRepository interface {
+	Create(ctx context.Context, badge *models.GamificationBadge) error
+	FindByID(ctx context.Context, id uint) (*models.GamificationBadge, error)
+	FindByCode(ctx context.Context, tenantID uint, scopeType models.GamificationScopeType, scopeID uint, code string) (*models.GamificationBadge, error)
+	Update(ctx context.Context, badge *models.GamificationBadge) error
+	Delete(ctx context.Context, id uint) error
+	ListByTenant(ctx context.Context, tenantID uint) ([]models.GamificationBadge, error)
+}
+
+// GamificationBadgeAwardRepository persists (user, badge) issuances.
+// Award is idempotent (atomic via the uniq_gam_badge_award constraint);
+// double-awarding the same badge to the same user is a no-op.
+type GamificationBadgeAwardRepository interface {
+	// Award inserts a (user, badge) row. If the user already holds the
+	// badge, the call is a no-op (no error, no duplicate row, no update
+	// to AwardedAt). The bool return tells the caller whether a new
+	// award actually happened — useful for any future "first time only"
+	// emit hook.
+	Award(ctx context.Context, award *models.GamificationBadgeAward) (created bool, err error)
+	Revoke(ctx context.Context, userID, badgeID uint) error
+	ListForUser(ctx context.Context, userID uint) ([]models.GamificationBadgeAward, error)
+	FindByUserAndBadge(ctx context.Context, userID, badgeID uint) (*models.GamificationBadgeAward, error)
 }
 
 type GamificationWalletRepository interface {

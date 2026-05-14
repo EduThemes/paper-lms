@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { Settings, X } from 'lucide-react';
+import { Award, Settings, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { CurrencyIcon } from './currencyIcon';
 
@@ -176,7 +176,16 @@ export default function WalletDrawer({ userId, balance, open, onOpenChange }) {
             )}
           </div>
 
-          <footer className="px-5 py-3 border-t border-surface-raised">
+          <footer className="px-5 py-3 border-t border-surface-raised flex items-center gap-4">
+            <DialogPrimitive.Close asChild>
+              <Link
+                to="/profile/badges"
+                className="inline-flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary"
+              >
+                <Award className="w-3.5 h-3.5" />
+                My badges
+              </Link>
+            </DialogPrimitive.Close>
             <DialogPrimitive.Close asChild>
               <Link
                 to="/profile/gamification"

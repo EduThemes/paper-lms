@@ -242,6 +242,8 @@ func main() {
 	gamificationCurrencyTypeRepo := postgres.NewGamificationCurrencyTypeRepository(database)
 	gamificationWalletRepo := postgres.NewGamificationWalletRepository(database)
 	gamificationFerpaTagRepo := postgres.NewGamificationFerpaFieldTagRepository(database)
+	gamificationBadgeRepo := postgres.NewGamificationBadgeRepository(database)
+	gamificationBadgeAwardRepo := postgres.NewGamificationBadgeAwardRepository(database)
 	contentViewRepo := postgres.NewContentViewRepository(database)
 
 	gamificationEmitter := gamification.NewEmitter(gamification.EmitterDeps{
@@ -258,6 +260,8 @@ func main() {
 			Effects: gamificationEffects.EffectDeps{
 				Wallet:       gamificationWalletRepo,
 				CurrencyType: gamificationCurrencyTypeRepo,
+				Badge:        gamificationBadgeRepo,
+				BadgeAward:   gamificationBadgeAwardRepo,
 			},
 		},
 		Events:    gamificationEventRepo,
@@ -512,7 +516,7 @@ func main() {
 	// render upserts content_views and fans out to the ViewedContent
 	// callback that fires gamification rules.
 	pageHandler.SetContentViewService(contentViewService)
-	gamificationHandler := handlers.NewGamificationHandler(gamificationWalletRepo, gamificationCurrencyTypeRepo, userRepo)
+	gamificationHandler := handlers.NewGamificationHandler(gamificationWalletRepo, gamificationCurrencyTypeRepo, userRepo, gamificationBadgeRepo, gamificationBadgeAwardRepo)
 	assignmentHandler := handlers.NewAssignmentHandler(assignmentService)
 	assignmentGroupHandler := handlers.NewAssignmentGroupHandler(assignmentGroupService)
 	submissionHandler := handlers.NewSubmissionHandler(submissionService, submissionCommentRepo, attachmentRepo, userRepo, assignmentRepo, notificationDeliveryService, observerService, outcomeAlignmentRepo, learningOutcomeService)
