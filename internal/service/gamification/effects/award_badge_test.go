@@ -221,3 +221,106 @@ func TestAwardBadge_MissingDeps(t *testing.T) {
 		t.Fatalf("expected error when deps missing")
 	}
 }
+
+// ----------------------------------------------------------------------
+// W2-E.1 — chained badge.earned emit.
+// ----------------------------------------------------------------------
+
+// fakeBadgeEmitter counts EmitBadgeEarned calls so the tests below can
+// assert "emitted once on first award, zero times on dedup'd second".
+type fakeBadgeEmitter struct {
+	calls   int
+	lastTID uint
+	lastUID uint
+	lastBID uint
+}
+
+func (f *fakeBadgeEmitter) EmitBadgeEarned(
+	_ context.Context,
+	tenantID, actorID, badgeID uint,
+	_ models.GamificationScopeType,
+	_ uint,
+	_ *uint,
+) error {
+	f.calls++
+	f.lastTID = tenantID
+	f.lastUID = actorID
+	f.lastBID = badgeID
+	return nil
+}
+
+func TestAwardBadge_EmitsBadgeEarnedOnFirstAward(t *testing.T) {
+	repo := &fakeBadgeRepo{rows: []models.GamificationBadge{
+		{ID: 100, TenantID: 1, ScopeType: models.ScopeSite, ScopeID: 1, Code: "first_quiz"},
+	}}
+	awards := &fakeBadgeAwardRepo{}
+	emit := &fakeBadgeEmitter{}
+
+	res, err := effects.AwardBadge{Code: "first_quiz"}.Apply(
+		context.Background(),
+		effects.EffectDeps{Badge: repo, BadgeAward: awards, BadgeEmit: emit},
+		effects.TriggeringContext{ActorID: 42, TenantID: 1, ScopeType: models.ScopeSite, ScopeID: 1, RuleID: 7},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if emit.calls != 1 {
+		t.Fatalf("EmitBadgeEarned calls = %d, want 1 on first award", emit.calls)
+	}
+	if emit.lastUID != 42 || emit.lastBID != 100 || emit.lastTID != 1 {
+		t.Errorf("emit args = (tenant=%d, user=%d, badge=%d); want (1, 42, 100)",
+			emit.lastTID, emit.lastUID, emit.lastBID)
+	}
+	if res.Detail["chain_emit"] != "badge.earned" {
+		t.Errorf("Detail.chain_emit = %v, want \"badge.earned\"", res.Detail["chain_emit"])
+	}
+}
+
+func TestAwardBadge_DoesNotEmitOnDedup(t *testing.T) {
+	// Second fire of the same (user, badge) returns created=false from
+	// the award repo; the effect must skip EmitBadgeEarned on that hop.
+	// This is the recursion bound for badge.earned rules.
+	repo := &fakeBadgeRepo{rows: []models.GamificationBadge{
+		{ID: 100, TenantID: 1, ScopeType: models.ScopeSite, ScopeID: 1, Code: "first_quiz"},
+	}}
+	awards := &fakeBadgeAwardRepo{}
+	emit := &fakeBadgeEmitter{}
+
+	eff := effects.AwardBadge{Code: "first_quiz"}
+	deps := effects.EffectDeps{Badge: repo, BadgeAward: awards, BadgeEmit: emit}
+	trig := effects.TriggeringContext{ActorID: 42, TenantID: 1, ScopeType: models.ScopeSite, ScopeID: 1, RuleID: 7}
+
+	if _, err := eff.Apply(context.Background(), deps, trig); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+	if _, err := eff.Apply(context.Background(), deps, trig); err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+	if emit.calls != 1 {
+		t.Fatalf("EmitBadgeEarned calls = %d after 2 applies, want 1 (first only)", emit.calls)
+	}
+}
+
+func TestAwardBadge_NilEmitter_AwardSucceeds(t *testing.T) {
+	// Existing W2-D unit tests don't pass an emitter; that path must
+	// still work — issue the badge, skip the chain emit silently.
+	repo := &fakeBadgeRepo{rows: []models.GamificationBadge{
+		{ID: 100, TenantID: 1, ScopeType: models.ScopeSite, ScopeID: 1, Code: "first_quiz"},
+	}}
+	awards := &fakeBadgeAwardRepo{}
+
+	res, err := effects.AwardBadge{Code: "first_quiz"}.Apply(
+		context.Background(),
+		effects.EffectDeps{Badge: repo, BadgeAward: awards}, // BadgeEmit nil
+		effects.TriggeringContext{ActorID: 42, TenantID: 1, ScopeType: models.ScopeSite, ScopeID: 1, RuleID: 7},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, has := res.Detail["chain_emit"]; has {
+		t.Errorf("Detail.chain_emit should be absent when BadgeEmit is nil; got %v", res.Detail["chain_emit"])
+	}
+	if len(awards.awards) != 1 {
+		t.Fatalf("badge should still be awarded when emitter is nil; got %d awards", len(awards.awards))
+	}
+}

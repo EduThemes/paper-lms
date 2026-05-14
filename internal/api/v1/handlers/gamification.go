@@ -14,28 +14,34 @@ import (
 	"github.com/EduThemes/paper-lms/internal/repository"
 )
 
-// GamificationHandler exposes the Phase 6 / Wave 1 read-side REST API for the
-// gamification engine: per-user wallet balances and per-tenant currency type
-// metadata. Write paths (rule-fired AwardCurrency, manual grants) live in the
-// dispatcher / effect package, not here.
+// GamificationHandler exposes the Phase 6 REST API surface for the
+// gamification engine: per-user wallet balances, per-tenant currency
+// metadata, badge CRUD, gamification preferences, and (W2-E.1) the
+// recipe-builder write API + vocabulary discovery endpoint. Write paths
+// for *runtime* rule firing (AwardCurrency, AwardBadge) live in the
+// dispatcher / effect package; these handlers are for *authoring* the
+// rules themselves.
 type GamificationHandler struct {
-	walletRepo      repository.GamificationWalletRepository
-	currencyRepo    repository.GamificationCurrencyTypeRepository
-	userRepo        repository.UserRepository
-	badgeRepo       repository.GamificationBadgeRepository
-	badgeAwardRepo  repository.GamificationBadgeAwardRepository
+	walletRepo     repository.GamificationWalletRepository
+	currencyRepo   repository.GamificationCurrencyTypeRepository
+	userRepo       repository.UserRepository
+	badgeRepo      repository.GamificationBadgeRepository
+	badgeAwardRepo repository.GamificationBadgeAwardRepository
+	ruleRepo       repository.GamificationRuleRepository
 }
 
-// NewGamificationHandler wires the read-side handlers.
+// NewGamificationHandler wires the handlers.
 //
 //   - userRepo: W2-C (leaderboard opt-out toggle lives on users.leaderboard_opt_out)
 //   - badgeRepo + badgeAwardRepo: W2-D (badge CRUD + manual award)
+//   - ruleRepo: W2-E.1 (recipe-builder CRUD)
 func NewGamificationHandler(
 	walletRepo repository.GamificationWalletRepository,
 	currencyRepo repository.GamificationCurrencyTypeRepository,
 	userRepo repository.UserRepository,
 	badgeRepo repository.GamificationBadgeRepository,
 	badgeAwardRepo repository.GamificationBadgeAwardRepository,
+	ruleRepo repository.GamificationRuleRepository,
 ) *GamificationHandler {
 	return &GamificationHandler{
 		walletRepo:     walletRepo,
@@ -43,6 +49,7 @@ func NewGamificationHandler(
 		userRepo:       userRepo,
 		badgeRepo:      badgeRepo,
 		badgeAwardRepo: badgeAwardRepo,
+		ruleRepo:       ruleRepo,
 	}
 }
 

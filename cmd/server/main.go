@@ -262,11 +262,18 @@ func main() {
 				CurrencyType: gamificationCurrencyTypeRepo,
 				Badge:        gamificationBadgeRepo,
 				BadgeAward:   gamificationBadgeAwardRepo,
+				// BadgeEmit is wired below via SetBadgeEmitter: the
+				// emitter itself is the chain-emit sink (it satisfies
+				// effects.BadgeEarnedEmitter), but it can't reference
+				// itself inside its own constructor literal.
 			},
 		},
 		Events:    gamificationEventRepo,
 		FerpaTags: gamificationFerpaTagRepo,
 	})
+	// W2-E.1: close the badge.earned chain so AwardBadge can fire a
+	// downstream event on first-time awards.
+	gamificationEmitter.SetBadgeEmitter(gamificationEmitter)
 
 	// Initialize services
 	userService := service.NewUserService(userRepo)
@@ -516,7 +523,7 @@ func main() {
 	// render upserts content_views and fans out to the ViewedContent
 	// callback that fires gamification rules.
 	pageHandler.SetContentViewService(contentViewService)
-	gamificationHandler := handlers.NewGamificationHandler(gamificationWalletRepo, gamificationCurrencyTypeRepo, userRepo, gamificationBadgeRepo, gamificationBadgeAwardRepo)
+	gamificationHandler := handlers.NewGamificationHandler(gamificationWalletRepo, gamificationCurrencyTypeRepo, userRepo, gamificationBadgeRepo, gamificationBadgeAwardRepo, gamificationRuleRepo)
 	assignmentHandler := handlers.NewAssignmentHandler(assignmentService)
 	assignmentGroupHandler := handlers.NewAssignmentGroupHandler(assignmentGroupService)
 	submissionHandler := handlers.NewSubmissionHandler(submissionService, submissionCommentRepo, attachmentRepo, userRepo, assignmentRepo, notificationDeliveryService, observerService, outcomeAlignmentRepo, learningOutcomeService)

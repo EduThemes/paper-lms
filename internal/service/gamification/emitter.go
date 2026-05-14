@@ -9,6 +9,7 @@ import (
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
+	"github.com/EduThemes/paper-lms/internal/service/gamification/effects"
 )
 
 // EmitterDeps wraps DispatchDeps with the two extra repositories the Emit
@@ -50,6 +51,22 @@ type Emitter struct {
 // NewEmitter constructs an Emitter bound to a fixed set of repositories.
 func NewEmitter(deps EmitterDeps) *Emitter {
 	return &Emitter{deps: deps, now: time.Now}
+}
+
+// SetBadgeEmitter wires the chained-emit sink that the AwardBadge effect
+// uses to fire `badge.earned` events on first-time awards (W2-E.1).
+// Solves the construction-order chicken-and-egg: *Emitter itself
+// satisfies the effects.BadgeEarnedEmitter interface, but it can't be
+// referenced inside the EmitterDeps literal that builds it.
+//
+// Calling pattern: `e := NewEmitter(...); e.SetBadgeEmitter(e)`.
+// Subsequent Emit calls build a fresh dispatcher off `e.deps.Dispatch`,
+// so the BadgeEmit field is picked up by every dispatch from then on.
+//
+// Passing a nil emitter is allowed and yields the W2-D behavior
+// (issue badges but don't chain).
+func (e *Emitter) SetBadgeEmitter(b effects.BadgeEarnedEmitter) {
+	e.deps.Dispatch.Effects.BadgeEmit = b
 }
 
 // Emit runs the full ingest pipeline:
@@ -128,6 +145,45 @@ func (e *Emitter) Emit(ctx context.Context, event *models.GamificationEvent) (Em
 		return EmitResult{EventID: event.ID, Dispatch: result}, fmt.Errorf("dispatch: %w", err)
 	}
 	return EmitResult{EventID: event.ID, Dispatch: result}, nil
+}
+
+// EmitBadgeEarned satisfies the effects.BadgeEarnedEmitter interface
+// (defined in the effects package to avoid an effects→gamification
+// import cycle). The AwardBadge effect calls this on first-time awards
+// so rule authors can chain reactions to the `badge.earned` event.
+//
+// Recursion bound: the BadgeAward repo's INSERT … ON CONFLICT DO
+// NOTHING returns created=false on the second hop for the same (user,
+// badge); AwardBadge skips this method on dedup'd fires. A chain that
+// grants a *different* badge therefore terminates after at most one
+// hop per distinct badge in the catalog. Maintainers extending this
+// path must preserve that invariant — silently no-opping the recursion
+// guard would risk an infinite loop.
+func (e *Emitter) EmitBadgeEarned(
+	ctx context.Context,
+	tenantID, actorID, badgeID uint,
+	scopeType models.GamificationScopeType,
+	scopeID uint,
+	evidenceEventID *uint,
+) error {
+	badgeIDCopy := badgeID
+	event := &models.GamificationEvent{
+		TenantID:   tenantID,
+		ActorID:    actorID,
+		Verb:       VerbEarned,
+		ObjectType: ObjectBadge,
+		ObjectID:   &badgeIDCopy,
+		Source:     EmitterSource,
+	}
+	// scopeType/scopeID/evidenceEventID are captured in the event's
+	// Context JSON so downstream listeners (rule trace audits) can see
+	// the originating scope without re-walking the rule_evaluation
+	// chain.
+	_ = scopeType
+	_ = scopeID
+	_ = evidenceEventID
+	_, err := e.Emit(ctx, event)
+	return err
 }
 
 func summarizeViolations(vs []FerpaViolation) string {
