@@ -1,7 +1,12 @@
 import React from 'react';
-import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
+import { render as rtlRender, screen, waitFor, fireEvent, act } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import CurrencyPills from '../CurrencyPills';
 import { api } from '../../../services/api';
+
+// WalletDrawer renders a <Link to="/profile/gamification"> in its
+// footer (W2-C), so the component tree needs a router context.
+const render = (ui, opts) => rtlRender(ui, { wrapper: MemoryRouter, ...opts });
 
 vi.mock('../../../services/api', () => ({
   api: {

@@ -6,6 +6,228 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Phase 6 / Wave 2 Sprint W2-C — per-learner leaderboard opt-out
+
+Ships the privacy primitive that lets a learner remove themselves from
+public leaderboard surfaces without losing XP / gems / mastery / awards.
+Genuine whitespace vs Brightspace's admin-only `MaskUsernames` toggle,
+which lacks per-learner control (SYNTHESIS §5).
+
+The first leaderboard surface lands in Wave 3. Shipping the column +
+backend filter helper + frontend toggle now means Wave 3 starts from a
+state where every leaderboard query path can call
+`UserRepository.FilterPublicLeaderboardCandidates` against the existing
+opt-out set, rather than retrofitting the privacy guard later.
+
+Backend
+- **Migration 000040** — `ALTER TABLE users ADD COLUMN
+  leaderboard_opt_out BOOLEAN NOT NULL DEFAULT FALSE` + partial index
+  on `(id) WHERE leaderboard_opt_out` for the (typically small)
+  opted-out subset.
+- **`User.LeaderboardOptOut`** added to the domain model. No `default:`
+  GORM tag, by deliberate W2-A/W2-B lessons — `UserRepo.Update` uses
+  `db.Save` so all columns are written, and the migration carries the
+  SQL DEFAULT FALSE.
+- **`UserRepository.FilterPublicLeaderboardCandidates(ctx,
+  candidateIDs)`** new interface method + Postgres impl. Returns the
+  subset that has NOT opted out. Order is not preserved (caller has
+  ranking from its own leaderboard query; this is set-membership).
+- **`GET /api/v1/users/self/gamification_preferences`** + **`PUT`**.
+  Self-only — the handler reads `user_id` from Locals and never
+  accepts another user's id in the path. PATCH body uses pointer
+  semantics so `{}` is a no-op (additive update, never a wipe).
+  Writing `leaderboard_opt_out=true` does NOT zero the learner's
+  wallet / awards / mastery (SYNTHESIS §5: visibility control, not
+  awards reset).
+
+Frontend
+- **`<GamificationPreferencesPage>`** at `/profile/gamification`.
+  Single toggle today: "Hide me from public leaderboards" with helper
+  text that puts the no-progress-loss contract in bold: *"Your XP,
+  gems, mastery points, and badges are not affected."* Optimistic UI
+  with revert-on-failure.
+- **`api.gamification.{getMyPreferences, updateMyPreferences}`** added.
+- **`<WalletDrawer>` footer** gains a small "⚙ Privacy settings" link
+  to `/profile/gamification`. Closes the drawer on click (Radix
+  `DialogPrimitive.Close asChild`). The drawer is the only learner-
+  facing gamification surface today, so its footer is the natural
+  discovery point for the toggle. A future "Profile settings" nav
+  cluster can promote this to a top-level entry; until then, the
+  drawer link is the entry path.
+
+Tests
+- **`internal/repository/postgres/user_test.go`** (new) — integration
+  test against `PARITY_DB_URL` exercising all five
+  `FilterPublicLeaderboardCandidates` scenarios: empty input, all
+  opted-in, all opted-out, mixed set, non-existent IDs.
+- **`gamification_test.go`** gains 6 W2-C handler tests: happy path,
+  default-false on a fresh user, toggle-on, toggle-off (the bool-
+  default class again — pinned for the User.LeaderboardOptOut path),
+  omitted-field-is-noop, unauthenticated→401.
+- **`GamificationPreferencesPage.test.jsx`** (new): renders OFF for
+  fresh learner, renders ON for opted-out, toggles fire the API,
+  optimistic revert on failure, copy contract is present.
+- Backend `./internal/...` clean. Frontend: 101 tests pass (up from 96;
+  +5 for the new page).
+- Shared `MockUserRepository` extended with the new method;
+  `CurrencyPills.test.jsx` wrapped in `MemoryRouter` because the
+  W2-C wallet drawer footer link needs a router context.
+
+End-to-end verified against live Postgres: GET returns false → PUT
+true → GET returns true → PUT false → GET returns false.
+
+Out of scope for W2-C (deferred to W2-D / Wave 3):
+- A dedicated "Profile settings" nav cluster — drawer-footer link is
+  sufficient until W2-D / W2-E grow more learner prefs.
+- Wave 3 leaderboard surfaces — the filter helper is in place and
+  parity-tested so any leaderboard query path can adopt it without
+  schema or repo changes.
+
+### Phase 6 / Wave 2 Sprint W2-B follow-up — admin nav entry + plural-label clarity
+
+Closes the discoverability gap on the currency editor: it was reachable
+only by typing `/admin/gamification/currencies` directly. Also makes the
+singular/plural distinction in the editor self-explanatory.
+
+- `AdminNav` gains a new "Gamification" group inside the "More…"
+  popover with a "Currencies" entry (Coins lucide icon) pointing at
+  `/admin/gamification/currencies`. Placed at the end of the
+  secondary-groups list because it's not yet a daily-frequent surface;
+  the group will grow to "Recipes" / "Badges" / "Leaderboards" in
+  W2-D/E and may promote to a top-level nav entry once that happens.
+- `CurrencyEditor` renames "Display label" → "Display label (singular)"
+  and adds one-line hints under both that field and "Plural label"
+  showing exactly when each form is rendered (`"You earned 1 Coin"` vs
+  `"You earned 4 Coins"`). The backend has always stored both forms;
+  the W2-A `WalletDrawer` header already uses the plural for non-1
+  balances. The W2-D notification surface will pick singular vs plural
+  off `amount === 1` at render time.
+
+### Phase 6 / Wave 2 Sprint W2-B review follow-up — race-safe duplicate detection
+
+`/review` on PR #13 flagged the only real risk: the original
+`CreateCurrency` ran `FindByCode` then `Create` non-atomically. Two
+concurrent admins minting the same code could both pass the pre-check;
+one would then surface the unique-constraint hit as a generic 500.
+
+Closed by collapsing duplicate detection into a single atomic statement:
+
+- `GamificationCurrencyTypeRepo.Create` now uses
+  `INSERT … ON CONFLICT ON CONSTRAINT uniq_gam_currency_scope_code DO
+  NOTHING RETURNING id, created_at, updated_at`. Conflict → zero rows →
+  `sql.ErrNoRows` on the Scan → translated to a new typed sentinel
+  `repository.ErrCurrencyDuplicate`.
+- `CreateCurrency` handler drops the `FindByCode` pre-check entirely
+  and switches its conflict path to `errors.Is(err,
+  repository.ErrCurrencyDuplicate) → 409`. One DB round-trip per POST
+  instead of two; race-free under any interleaving.
+- `TestCreateCurrency_Duplicate_Returns409` rewritten to assert via
+  the sentinel rather than a stubbed `FindByCode` hit. Other Create
+  tests dropped their now-unused `FindByCode` mocks.
+- Smoke-verified end-to-end against live Postgres: two back-to-back
+  POSTs of the same code returned `201 Created` then `409 Conflict`
+  with the user-friendly message.
+
+### Phase 6 / Wave 2 Sprint W2-B — currency-create write API + editor UI
+
+Closes the teacher→learner authoring loop opened by W2-A: tenant admins
+can mint site-wide currencies and course instructors can mint
+course-scoped currencies, all through a single dialog editor reused by
+both surfaces. Wallets and topbar pills pick up the new currencies
+immediately via the existing `wallet:refresh` window event.
+
+Backend
+- New CRUD endpoints on `internal/api/v1/handlers/gamification.go`:
+  - Site scope (admin): `POST/PATCH/DELETE /api/v1/gamification/currencies[/:id]`
+  - Course scope (instructor): `POST/PATCH/DELETE /api/v1/courses/:course_id/gamification/currencies[/:id]`
+  Authorization is enforced by router-level middleware
+  (`RequireAdmin` / `RequireInstructor`); the handler reads scope from
+  the URL pattern via `resolveScope`.
+- Server-side validation: `code` must match `^[a-z][a-z0-9_]{1,31}$`
+  (2–32 chars, starts with a letter, lowercase). 2-char minimum
+  accommodates the seeded `xp`. `color` must be a 6-digit hex or
+  empty. `display_label` required, max 64 chars. `description` max
+  500 chars.
+- Scope guards: PATCH and DELETE re-load the row and 403 if the
+  route-derived scope doesn't match the row's stored
+  `(tenant_id, scope_type, scope_id)`. An instructor on course A
+  cannot touch a currency on course B or at site scope, even by
+  guessing IDs.
+- system_owned invariants: POST always sets `system_owned=false`
+  (incoming `system_owned: true` is silently ignored). PATCH allows
+  every field except `code` (immutable post-create — rules reference
+  currencies by code, renaming would break authored content). DELETE
+  on a `system_owned=true` row returns 409 Conflict.
+- Duplicate detection on POST returns 409 with a useful message
+  instead of letting the `uniq_gam_currency_scope_code` unique
+  constraint surface as 500.
+- Currency-list response (`GET /currencies`) now includes
+  `scope_type` + `scope_id` so the frontend can client-side filter
+  for the scope it's mounted on.
+
+Also closes a Wave 1 correctness regression that the same bool-default
+class (caught for the seeder in W2-A) leaves open in the runtime
+`Create` path:
+- `internal/repository/postgres/gamification_currency_type.go::Create`
+  rewritten to use a raw parameterized INSERT, same pattern as the
+  W2-A seed fix. Without it, instructor-created custom currencies
+  with `Monotonic: false` or `VisibleInTopbar: false` would silently
+  inherit the SQL column DEFAULT TRUE — corrupting spendable
+  semantics for shop currencies and violating FERPA visibility for
+  instructor-only accounting currencies.
+- `Update` already uses `db.Save` which writes all columns including
+  zero-valued bools; no change needed there. Verified end-to-end in
+  the browser: a fresh "coins" currency edited to flip
+  `visible_in_topbar`, `visible_to_student`, and `monotonic` all
+  to `false` persists correctly through the PATCH.
+
+Frontend
+- `api.gamification.{createCurrency, updateCurrency, deleteCurrency}`
+  added to the shared namespace. All three accept an optional
+  `{ courseId }` to switch between admin (site) and instructor
+  (course) surfaces.
+- `<CurrencyEditor>` (Radix dialog) — single component handles both
+  create and edit. Form state hydrates from the row on open.
+  - Code field is disabled in edit mode regardless of `system_owned`
+    (rules reference by code; renaming would break them). System
+    rows additionally show a lock icon and helper text
+    ("System currency — code is referenced by rules and cannot
+    change.").
+  - 14-icon palette using the shared `CurrencyIcon` resolver +
+    8-swatch color palette + free-form hex input. Custom hex is
+    validated client-side against `^(#[0-9A-Fa-f]{6})?$`.
+  - Behavior checkboxes (Spendable / Monotonic / Visible to student /
+    Show in top bar) with one-line hints.
+- `<CurrencyList>` table with create / edit / delete actions. Filters
+  rows by scope client-side (so an instructor on course 99 only sees
+  course-99 rows). Delete confirms before firing; warns that wallet
+  balances are kept (the currency_type_id is still referenced from
+  `gamification_wallet_balances`) but the currency stops being
+  addressable by name. After every successful write, dispatches
+  `wallet:refresh` so mounted `<CurrencyPills>` instances re-fetch.
+- New `GamificationCurrenciesPage` mounted at:
+  - `/admin/gamification/currencies` (admin site scope)
+  - `/courses/:courseId/gamification/currencies` (instructor course scope)
+  Scope is inferred from `useParams().courseId` presence.
+
+Tests
+- `gamification_test.go` gains 13 new handler tests covering: site/
+  course scope create happy paths, bad-code regex, bad-color hex,
+  empty-label, duplicate→409, forced `system_owned=false`, rename
+  system row (code stays unchanged), toggle `visible_in_topbar=false`
+  (pins the bool-default class), scope-mismatch→403, not-found,
+  system-owned-delete→409, custom-row-delete→204.
+- `CurrencyList.test.jsx` exercises scope filtering, system-owned
+  delete-button-disabled, the create flow, and that the courseId is
+  threaded correctly into the API call.
+- Full backend `./internal/...` suite green. Frontend: 96 tests pass
+  (up from 91; +5 for `CurrencyList.test.jsx`).
+
+Out of scope for W2-B (deferred to later sprints):
+- Per-learner leaderboard opt-out — Sprint W2-C.
+- Badge schema + effect + admin UI — Sprint W2-D.
+- Recipe builder UI — Sprint W2-E.
+
 ### Phase 6 / Wave 2 Sprint W2-A — top-bar currency pills + wallet drawer
 
 Wave 2 opens with the smallest-viable visible loop: a horizontal

@@ -62,6 +62,7 @@ const PortfoliosPage = React.lazy(() => import('./pages/PortfoliosPage'));
 const PortfolioEditorPage = React.lazy(() => import('./pages/PortfolioEditorPage'));
 const PortfolioPublicPage = React.lazy(() => import('./pages/PortfolioPublicPage'));
 const FERPAPage = React.lazy(() => import('./pages/FERPAPage'));
+const GamificationCurrenciesPage = React.lazy(() => import('./pages/GamificationCurrenciesPage'));
 const ObserverDashboardPage = React.lazy(() => import('./pages/ObserverDashboardPage'));
 const AdminHomePage = React.lazy(() => import('./pages/AdminHomePage'));
 const AdminCoursesPage = React.lazy(() => import('./pages/AdminCoursesPage'));
@@ -83,6 +84,7 @@ const AppointmentGroupEditorPage = React.lazy(() => import('./pages/AppointmentG
 const OutcomeProficiencyPage = React.lazy(() => import('./pages/OutcomeProficiencyPage'));
 const MasteryGradebookPage = React.lazy(() => import('./pages/MasteryGradebookPage'));
 const ReadingPreferencesPage = React.lazy(() => import('./pages/ReadingPreferencesPage'));
+const GamificationPreferencesPage = React.lazy(() => import('./pages/GamificationPreferencesPage'));
 // Smart Search, Commons
 const SmartSearchPage = React.lazy(() => import('./pages/SmartSearchPage'));
 const CommonsPage = React.lazy(() => import('./pages/CommonsPage'));
@@ -192,6 +194,7 @@ const App = () => {
           <Route path="conferences" element={<ConferencesPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="audit_log" element={<AuditLogPage />} />
+          <Route path="gamification/currencies" element={<GamificationCurrenciesPage />} />
           <Route path="accommodations" element={<AccommodationsPage />} />
           <Route path="attendance" element={<AttendancePage />} />
           <Route path="question_banks" element={<QuestionBanksPage />} />
@@ -384,6 +387,14 @@ const App = () => {
           }
         />
         <Route
+          path="/admin/gamification/currencies"
+          element={
+            <ProtectedRoute>
+              <GamificationCurrenciesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/observer"
           element={
             <ProtectedRoute>
@@ -396,6 +407,14 @@ const App = () => {
           element={
             <ProtectedRoute>
               <ReadingPreferencesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/profile/gamification"
+          element={
+            <ProtectedRoute>
+              <GamificationPreferencesPage />
             </ProtectedRoute>
           }
         />
