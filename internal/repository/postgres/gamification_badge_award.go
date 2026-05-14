@@ -33,11 +33,8 @@ func (r *GamificationBadgeAwardRepo) Award(ctx context.Context, award *models.Ga
 			(?, ?, COALESCE(?, now()), ?, ?)
 		ON CONFLICT ON CONSTRAINT uniq_gam_badge_award DO NOTHING
 		RETURNING id, awarded_at`
-	var awardedAt = award.AwardedAt
-	if awardedAt.IsZero() {
-		// Pass nil to COALESCE → DB now() so the timestamp is server-side.
-		awardedAt = awardedAt // sentinel; we pass nil interface below
-	}
+	// Pass nil to COALESCE when AwardedAt is zero so the DB stamps `now()`
+	// server-side; otherwise pass the caller's explicit timestamp.
 	var awardedAtArg any
 	if !award.AwardedAt.IsZero() {
 		awardedAtArg = award.AwardedAt

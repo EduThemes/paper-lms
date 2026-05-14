@@ -2651,5 +2651,59 @@ export const api = {
         method: 'DELETE',
       });
     },
+
+    // W2-E.1: recipe-builder CRUD + the vocabulary discovery endpoint
+    // the editor introspects at mount time. courseId toggles between
+    // admin (site) and instructor (course) write surfaces exactly the
+    // way currency + badge CRUD does. The UI components built in
+    // W2-E.2/E.3 consume this surface.
+    listRules: async ({ courseId, page = 1, perPage = 50 } = {}) => {
+      const path = courseId
+        ? `/courses/${courseId}/gamification/rules`
+        : `/gamification/rules`;
+      const qs = new URLSearchParams({ page, per_page: perPage }).toString();
+      const { data } = await request(`${path}?${qs}`);
+      return data;
+    },
+    getRule: async (id, { courseId } = {}) => {
+      const path = courseId
+        ? `/courses/${courseId}/gamification/rules/${id}`
+        : `/gamification/rules/${id}`;
+      const { data } = await request(path);
+      return data;
+    },
+    createRule: async (body, { courseId } = {}) => {
+      const path = courseId
+        ? `/courses/${courseId}/gamification/rules`
+        : `/gamification/rules`;
+      const { data } = await request(path, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      return data;
+    },
+    updateRule: async (id, patch, { courseId } = {}) => {
+      const path = courseId
+        ? `/courses/${courseId}/gamification/rules/${id}`
+        : `/gamification/rules/${id}`;
+      const { data } = await request(path, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      });
+      return data;
+    },
+    deleteRule: async (id, { courseId } = {}) => {
+      const path = courseId
+        ? `/courses/${courseId}/gamification/rules/${id}`
+        : `/gamification/rules/${id}`;
+      await requestRaw(path, { method: 'DELETE' });
+    },
+    // Vocabulary discovery: static catalog of triggers / predicates /
+    // effects / enums the recipe builder UI introspects to render
+    // inline editors per kind. Authenticated, no admin gate.
+    getVocabulary: async () => {
+      const { data } = await request('/gamification/vocabulary');
+      return data;
+    },
   },
 };

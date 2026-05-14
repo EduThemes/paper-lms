@@ -1119,5 +1119,24 @@ func (r *Router) Register(app *fiber.App) {
 		// instructor-flow lands when course-scope role check matures.
 		protected.Post("/users/:user_id/badges", admin, r.gamificationHandler.AwardBadgeToUser)
 		protected.Delete("/users/:user_id/badges/:badge_id", admin, r.gamificationHandler.RevokeBadgeFromUser)
+
+		// W2-E.1 — recipe-builder write API + vocabulary discovery.
+		// Vocabulary endpoint is open to any authenticated user (the
+		// recipe builder UI mounts it before knowing whether the user
+		// can save) — write surface is admin / instructor split exactly
+		// the same way currency + badge CRUD is.
+		gam.Get("/vocabulary", r.gamificationHandler.GetVocabulary)
+		gam.Get("/rules", admin, r.gamificationHandler.ListRules)
+		gam.Get("/rules/:id", admin, r.gamificationHandler.GetRule)
+		gam.Post("/rules", admin, r.gamificationHandler.CreateRule)
+		gam.Patch("/rules/:id", admin, r.gamificationHandler.PatchRule)
+		gam.Delete("/rules/:id", admin, r.gamificationHandler.DeleteRule)
+		// Course-scoped instructor surface for rules. Same handler,
+		// scope inferred from :course_id (resolveScope).
+		protected.Get("/courses/:course_id/gamification/rules", instructor, r.gamificationHandler.ListRules)
+		protected.Get("/courses/:course_id/gamification/rules/:id", instructor, r.gamificationHandler.GetRule)
+		protected.Post("/courses/:course_id/gamification/rules", instructor, r.gamificationHandler.CreateRule)
+		protected.Patch("/courses/:course_id/gamification/rules/:id", instructor, r.gamificationHandler.PatchRule)
+		protected.Delete("/courses/:course_id/gamification/rules/:id", instructor, r.gamificationHandler.DeleteRule)
 	}
 }

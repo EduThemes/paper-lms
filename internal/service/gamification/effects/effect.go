@@ -46,6 +46,33 @@ type EffectDeps struct {
 	// dispatcher wiring that doesn't ship badges yet can leave them nil.
 	Badge      repository.GamificationBadgeRepository
 	BadgeAward repository.GamificationBadgeAwardRepository
+	// W2-E.1: optional sink for the chained `badge.earned` event the
+	// AwardBadge effect emits on first-time awards. Nil-safe — leaving
+	// this nil yields the W2-D behavior (issue the badge but don't
+	// chain). Implemented by `*gamification.Emitter` (the interface
+	// lives here so effects doesn't import gamification — that would
+	// be a cycle, since gamification dispatches into effects).
+	BadgeEmit BadgeEarnedEmitter
+}
+
+// BadgeEarnedEmitter is the one-method interface AwardBadge uses to chain
+// a `badge.earned` event back through the rules engine. The gamification
+// package provides the concrete implementation via `*Emitter`; structural
+// satisfaction is verified at the wiring site in `cmd/server/main.go`.
+//
+// The recursion bound is enforced at the BadgeAward repo: a second award
+// for the same (user, badge) returns created=false, so AwardBadge skips
+// the chain emit on the dedup'd fire. A badge.earned rule that grants a
+// *different* badge therefore terminates after at most one hop per
+// distinct badge in the catalog.
+type BadgeEarnedEmitter interface {
+	EmitBadgeEarned(
+		ctx context.Context,
+		tenantID, actorID, badgeID uint,
+		scopeType models.GamificationScopeType,
+		scopeID uint,
+		evidenceEventID *uint,
+	) error
 }
 
 // TriggeringContext is everything an effect needs to know about the event

@@ -202,7 +202,12 @@ func setupGamificationHandler(callerID uint, isAdmin bool) (*fiber.App, *mockGam
 	userRepo := new(mocks.MockUserRepository)
 	badgeRepo := new(mockGamBadgeRepo)
 	badgeAwardRepo := new(mockGamBadgeAwardRepo)
-	h := handlers.NewGamificationHandler(walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo)
+	// ruleRepo (W2-E.1) — wired so the handler constructor stays
+	// satisfied. Existing W2-A..W2-D tests don't exercise rule paths,
+	// so an inert mock is fine here. Rule-specific tests live in
+	// gamification_rules_test.go with their own focused harness.
+	ruleRepo := new(mockGamRuleRepo)
+	h := handlers.NewGamificationHandler(walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo, ruleRepo)
 
 	app := testutil.SetupTestApp()
 	app.Use(func(c *fiber.Ctx) error {

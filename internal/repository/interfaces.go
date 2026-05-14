@@ -829,6 +829,11 @@ type GamificationRuleRepository interface {
 	// The dispatch loop (Wave 1 task 10) walks up the org tree itself.
 	ListEnabledByScope(ctx context.Context, scopeType models.GamificationScopeType, scopeID uint) ([]models.GamificationRule, error)
 	ListByTenantID(ctx context.Context, tenantID uint, params PaginationParams) (*PaginatedResult[models.GamificationRule], error)
+	// ListByScope returns every rule (enabled OR disabled) at a precise
+	// (tenant, scope_type, scope_id) tuple. Backs the W2-E.1 recipe
+	// builder list view — admin sees site rules, instructor sees their
+	// own course/section rules, neither sees the other's slice.
+	ListByScope(ctx context.Context, tenantID uint, scopeType models.GamificationScopeType, scopeID uint, params PaginationParams) (*PaginatedResult[models.GamificationRule], error)
 
 	// RecordEvaluation appends an audit row. The (rule_id, user_id, evaluated_at)
 	// tuple is uniquely indexed; a same-microsecond duplicate is a bug, not a retry.

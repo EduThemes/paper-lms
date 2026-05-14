@@ -58,6 +58,9 @@ func (f *fakeRuleRepo) ListEnabledByScope(context.Context, models.GamificationSc
 func (f *fakeRuleRepo) ListByTenantID(context.Context, uint, repository.PaginationParams) (*repository.PaginatedResult[models.GamificationRule], error) {
 	panic("fakeRuleRepo.ListByTenantID: not expected to be called")
 }
+func (f *fakeRuleRepo) ListByScope(context.Context, uint, models.GamificationScopeType, uint, repository.PaginationParams) (*repository.PaginatedResult[models.GamificationRule], error) {
+	panic("fakeRuleRepo.ListByScope: not expected to be called")
+}
 func (f *fakeRuleRepo) RecordEvaluation(context.Context, *models.GamificationRuleEvaluation) error {
 	panic("fakeRuleRepo.RecordEvaluation: not expected to be called")
 }
