@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   Home, BookOpen, Users, Flag, Sliders, MoreHorizontal,
   FileText, GraduationCap, ClipboardCheck, Upload, KeyRound,
-  Shield, UserCog, RefreshCw, Key, Bell, Code, Coins, Award,
+  Shield, UserCog, RefreshCw, Key, Bell, Code, Coins, Award, Sparkles,
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
@@ -59,8 +59,9 @@ const secondaryGroups = [
   {
     label: 'Gamification',
     items: [
-      { to: '/admin/gamification/currencies', icon: Coins, label: 'Currencies' },
-      { to: '/admin/gamification/badges',     icon: Award, label: 'Badges' },
+      { to: '/admin/gamification/currencies', icon: Coins,    label: 'Currencies' },
+      { to: '/admin/gamification/badges',     icon: Award,    label: 'Badges' },
+      { to: '/admin/gamification/recipes',    icon: Sparkles, label: 'Recipes' },
     ],
   },
 ];

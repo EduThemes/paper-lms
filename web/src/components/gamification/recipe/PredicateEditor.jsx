@@ -1,4 +1,5 @@
 import React from 'react';
+import { CurrencyPicker, BadgePicker } from './EntityPickers';
 
 // PredicateEditor — switch on predicate kind, render a per-kind inline
 // form. Each editor reads + writes a plain JSON object that round-
@@ -94,13 +95,14 @@ function OutcomeMasteryFields({ value, vocab, onChange }) {
 }
 
 function CurrencyThresholdFields({ value, onChange }) {
-  // Code is a free-text input in E.2 — E.3 swaps in the currency
-  // dropdown (populated from listCurrencies()) when the effects
-  // palette gets the same picker for AwardCurrency. Keeping them in
-  // sync there avoids a half-built picker pair landing here first.
   return (
     <Row>
-      <StringField label="Currency code" name="code" required value={value} onChange={onChange} />
+      <CurrencyPicker
+        value={value.code}
+        onChange={(code) => onChange({ ...value, code })}
+        required
+        label="Currency"
+      />
       <IntField label="Min amount" name="min_amount" required value={value} onChange={onChange} />
     </Row>
   );
@@ -109,7 +111,13 @@ function CurrencyThresholdFields({ value, onChange }) {
 function EarnedBadgeFields({ value, onChange }) {
   return (
     <Row>
-      <UintField label="Badge ID" name="badge_id" required value={value} onChange={onChange} />
+      <BadgePicker
+        value={value.badge_id}
+        onChange={(id) => onChange({ ...value, badge_id: id })}
+        required
+        returnId
+        label="Badge"
+      />
     </Row>
   );
 }

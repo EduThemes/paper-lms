@@ -4,33 +4,35 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useGamificationVocabulary } from '../../../hooks/useGamificationVocabulary';
 import TriggerPicker from './TriggerPicker';
 import ConditionNode from './ConditionNode';
+import EffectsPalette from './EffectsPalette';
 
 // RecipeEditor — top-level recipe authoring dialog.
 //
-// Wire-up convention (W2-E.2 ships the composer; W2-E.3 wires save):
 //   <RecipeEditor
 //     open
 //     onOpenChange={…}
 //     recipe={existingRow}        // omit for create
-//     onSave={async (body) => …}  // POST/PATCH the rule (E.3)
+//     onSave={async (body) => …}  // POST/PATCH the rule
 //     saving={…}
 //     saveError={…}
 //   />
 //
-// The on-disk shape produced by this editor matches what the W2-E.1
-// rule write API expects in the request body:
+// Body shape matches what the W2-E.1 rule write API expects:
 //
 //   {
 //     name, description, audience_level, enabled,
-//     trigger_event:  { kind, ...kind-specific },
-//     condition_set:  { kind: "ConditionSet", op, threshold?, children },
-//     effects:        []   // populated by EffectsPalette in W2-E.3
+//     trigger_event:    { kind, ...kind-specific },
+//     condition_set:    { kind:"ConditionSet", op, threshold?, children },
+//     effects:          [ { kind, ...kind-specific }, ... ],
+//     cooldown_seconds: int | null,
+//     max_per_window:   { window, count } | null,
 //   }
 //
-// The Uncanny Automator vertical-stepped layout: WHEN → IF → THEN.
-// THEN (effects) is rendered as a deliberately-empty placeholder in
-// W2-E.2 so the visual rhythm is locked in even though only WHEN/IF
-// are interactive in this PR.
+// For PATCH the server also accepts `clear_cooldown` /
+// `clear_max_per_window` boolean flags — we emit them when the user
+// has explicitly nulled a field so the patch path can distinguish
+// "leave it alone" from "remove the limit." On Create those flags
+// are harmless extras the server ignores.
 
 const DEFAULT_TRIGGER = { kind: 'OnEvent' };
 const DEFAULT_CONDITION = { kind: 'ConditionSet', op: 'AND', children: [] };
@@ -52,7 +54,13 @@ export default function RecipeEditor({
   const [enabled, setEnabled] = useState(true);
   const [trigger, setTrigger] = useState(DEFAULT_TRIGGER);
   const [condition, setCondition] = useState(DEFAULT_CONDITION);
-  const [effects, setEffects] = useState([]); // W2-E.3 owns this
+  const [effects, setEffects] = useState([]);
+  // Optional rate-limit fields. `null` = "not set" (server-side NULL).
+  // Numeric 0 would mean "no rate limit applies in practice"; the
+  // distinction matters because PATCH needs `clear_cooldown` to drop
+  // a previously-set value.
+  const [cooldownSeconds, setCooldownSeconds] = useState(null);
+  const [maxPerWindow, setMaxPerWindow] = useState(null); // {window, count} | null
 
   useEffect(() => {
     if (!open) return;
@@ -64,6 +72,8 @@ export default function RecipeEditor({
       setTrigger(parseJSON(recipe.trigger_event, DEFAULT_TRIGGER));
       setCondition(parseJSON(recipe.condition_set, DEFAULT_CONDITION));
       setEffects(parseJSON(recipe.effects, []));
+      setCooldownSeconds(recipe.cooldown_seconds ?? null);
+      setMaxPerWindow(parseJSON(recipe.max_per_window, null));
     } else {
       setName('');
       setDescription('');
@@ -72,6 +82,8 @@ export default function RecipeEditor({
       setTrigger(DEFAULT_TRIGGER);
       setCondition(DEFAULT_CONDITION);
       setEffects([]);
+      setCooldownSeconds(null);
+      setMaxPerWindow(null);
     }
   }, [open, recipe]);
 
@@ -83,7 +95,7 @@ export default function RecipeEditor({
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!formValid || !onSave) return;
-    onSave({
+    const body = {
       name: name.trim(),
       description: description.trim(),
       audience_level: audienceLevel,
@@ -91,8 +103,21 @@ export default function RecipeEditor({
       trigger_event: trigger,
       condition_set: condition,
       effects,
-    });
+    };
+    if (cooldownSeconds != null && cooldownSeconds > 0) {
+      body.cooldown_seconds = cooldownSeconds;
+    } else if (isEdit && recipe?.cooldown_seconds != null) {
+      body.clear_cooldown = true;
+    }
+    if (maxPerWindow && maxPerWindow.window && maxPerWindow.count > 0) {
+      body.max_per_window = maxPerWindow;
+    } else if (isEdit && recipe?.max_per_window) {
+      body.clear_max_per_window = true;
+    }
+    onSave(body);
   };
+
+  const windowKinds = vocab?.windows || ['day', 'week', 'lifetime'];
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -184,9 +209,73 @@ export default function RecipeEditor({
 
             <section className="space-y-2">
               <div className="text-xs font-medium uppercase tracking-wide text-text-tertiary">Then</div>
-              <div className="rounded-md border border-dashed border-surface-raised bg-surface-1 p-3 text-xs text-text-tertiary">
-                Effects palette lands in W2-E.3 (drag-to-reorder list of AwardCurrency / AwardBadge).
-                Effects authored in the current draft: <span className="font-mono">{effects.length}</span>.
+              <EffectsPalette value={effects} onChange={setEffects} />
+            </section>
+
+            <section className="space-y-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-text-tertiary">Rate limit (optional)</div>
+              <div className="grid grid-cols-3 gap-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-medium text-text-secondary">Cooldown seconds</span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={cooldownSeconds ?? ''}
+                    placeholder="None"
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      setCooldownSeconds(raw === '' ? null : Number(raw));
+                    }}
+                    className="px-2.5 py-1.5 rounded-md border border-surface-raised bg-surface-1 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-brand-400/60"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-medium text-text-secondary">Max per window</span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={maxPerWindow?.count ?? ''}
+                    placeholder="None"
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === '') {
+                        setMaxPerWindow(null);
+                      } else {
+                        setMaxPerWindow({
+                          window: maxPerWindow?.window || 'day',
+                          count: Number(raw),
+                        });
+                      }
+                    }}
+                    className="px-2.5 py-1.5 rounded-md border border-surface-raised bg-surface-1 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-brand-400/60"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-medium text-text-secondary">Window</span>
+                  <select
+                    value={maxPerWindow?.window || ''}
+                    onChange={(e) => {
+                      const w = e.target.value;
+                      if (!w) {
+                        setMaxPerWindow(null);
+                      } else {
+                        setMaxPerWindow({
+                          window: w,
+                          count: maxPerWindow?.count || 1,
+                        });
+                      }
+                    }}
+                    disabled={!maxPerWindow}
+                    className="px-2.5 py-1.5 rounded-md border border-surface-raised bg-surface-1 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-brand-400/60 disabled:opacity-60"
+                  >
+                    <option value="">—</option>
+                    {windowKinds.map((w) => (
+                      <option key={w} value={w}>{w}</option>
+                    ))}
+                  </select>
+                </label>
               </div>
             </section>
 
