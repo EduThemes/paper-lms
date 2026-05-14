@@ -40,6 +40,29 @@ func TestSeedSystemCurrenciesForTenant(t *testing.T) {
 		t.Fatalf("expected 4 system currencies, got %d", len(rows))
 	}
 	wantCodes := []string{"xp", "gems", "mastery_points", "reputation"}
+	// Per SYNTHESIS §2 and §4-currency design: lock down both bool fields
+	// the seed needs to write as `false` against SQL DEFAULT TRUE columns.
+	// History: GORM's `default:` tag silently elided these zero-valued
+	// inserts, flipping mastery_points into the topbar (FERPA breach) and
+	// gems into the monotonic-currency set (breaks spendable semantics).
+	wantTopbar := map[string]bool{
+		"xp":             true,
+		"gems":           true,
+		"mastery_points": false,
+		"reputation":     true,
+	}
+	wantMonotonic := map[string]bool{
+		"xp":             true,
+		"gems":           false,
+		"mastery_points": true,
+		"reputation":     true,
+	}
+	wantSpendable := map[string]bool{
+		"xp":             false,
+		"gems":           true,
+		"mastery_points": false,
+		"reputation":     false,
+	}
 	for i, want := range wantCodes {
 		if rows[i].Code != want {
 			t.Errorf("row %d Code = %q, want %q", i, rows[i].Code, want)
@@ -49,6 +72,15 @@ func TestSeedSystemCurrenciesForTenant(t *testing.T) {
 		}
 		if rows[i].ScopeType != models.ScopeSite || rows[i].ScopeID != 1 {
 			t.Errorf("row %d scope = %s/%d, want site/1", i, rows[i].ScopeType, rows[i].ScopeID)
+		}
+		if got, want := rows[i].VisibleInTopbar, wantTopbar[rows[i].Code]; got != want {
+			t.Errorf("row %s VisibleInTopbar = %v, want %v (FERPA contract)", rows[i].Code, got, want)
+		}
+		if got, want := rows[i].Monotonic, wantMonotonic[rows[i].Code]; got != want {
+			t.Errorf("row %s Monotonic = %v, want %v", rows[i].Code, got, want)
+		}
+		if got, want := rows[i].Spendable, wantSpendable[rows[i].Code]; got != want {
+			t.Errorf("row %s Spendable = %v, want %v", rows[i].Code, got, want)
 		}
 	}
 }

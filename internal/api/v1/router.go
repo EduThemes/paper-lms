@@ -1077,5 +1077,6 @@ func (r *Router) Register(app *fiber.App) {
 		gam := protected.Group("/gamification")
 		gam.Get("/currencies", r.gamificationHandler.ListCurrencies)
 		protected.Get("/users/:id/wallet", r.gamificationHandler.GetUserWallet)
+		protected.Get("/users/:id/wallet/transactions", r.gamificationHandler.ListUserWalletTransactions)
 	}
 }
