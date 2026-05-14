@@ -31,16 +31,35 @@ vi.mock('../../../../services/api', () => ({
   api: {
     gamification: {
       getVocabulary: vi.fn(),
+      // Pickers in W2-E.3 hit these endpoints; mocked here so the
+      // predicate + effect editors that consume them don't blow up.
+      listCurrencies: vi.fn(),
+      listBadges: vi.fn(),
     },
   },
 }));
 
 import { api } from '../../../../services/api';
 
+const CURRENCIES = {
+  currencies: [
+    { id: 11, scope_type: 'site', scope_id: 1, code: 'xp', display_label: 'XP' },
+    { id: 12, scope_type: 'site', scope_id: 1, code: 'gems', display_label: 'Gems' },
+  ],
+};
+const BADGES = {
+  badges: [
+    { id: 5, scope_type: 'site', code: 'first_quiz', name: 'First Quiz' },
+    { id: 7, scope_type: 'site', code: 'streak_3', name: 'Three-Day Streak' },
+  ],
+};
+
 beforeEach(() => {
   _resetVocabularyCache();
   vi.clearAllMocks();
   api.gamification.getVocabulary.mockResolvedValue(VOCAB);
+  api.gamification.listCurrencies.mockResolvedValue(CURRENCIES);
+  api.gamification.listBadges.mockResolvedValue(BADGES);
 });
 
 describe('RecipeEditor', () => {
@@ -53,8 +72,8 @@ describe('RecipeEditor', () => {
     expect(screen.getByText('When')).toBeInTheDocument();
     expect(screen.getByText('If')).toBeInTheDocument();
     expect(screen.getByText('Then')).toBeInTheDocument();
-    // THEN placeholder explicitly calls out W2-E.3 ownership.
-    expect(screen.getByText(/Effects palette lands in W2-E\.3/i)).toBeInTheDocument();
+    // Empty-effects empty state is rendered by EffectsPalette.
+    expect(screen.getByText(/No effects yet/i)).toBeInTheDocument();
   });
 
   it('emits a well-formed save payload with a default AND ConditionSet root', async () => {
@@ -191,10 +210,15 @@ describe('ConditionNode (via RecipeEditor)', () => {
 
     fireEvent.change(threshold, { target: { value: '2' } });
 
-    // Add two atomic children so threshold is meaningful.
+    // Add two atomic children so threshold is meaningful. EarnedBadge
+    // uses BadgePicker (W2-E.3) — wait for the picker to finish
+    // loading before selecting an option.
     const addMenu = screen.getByLabelText('Add condition');
     fireEvent.change(addMenu, { target: { value: 'EarnedBadge' } });
-    fireEvent.change(screen.getByLabelText(/Badge ID/i), { target: { value: '5' } });
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: /First Quiz/i })).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByLabelText(/^Badge/), { target: { value: '5' } });
 
     const addMenu2 = screen.getByLabelText('Add condition');
     fireEvent.change(addMenu2, { target: { value: 'ReputationThreshold' } });
@@ -253,7 +277,10 @@ describe('ConditionNode (via RecipeEditor)', () => {
     const menus = screen.getAllByLabelText('Add condition');
     expect(menus.length).toBe(2);
     fireEvent.change(menus[0], { target: { value: 'EarnedBadge' } });
-    fireEvent.change(screen.getByLabelText(/Badge ID/i), { target: { value: '7' } });
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: /Three-Day Streak/i })).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByLabelText(/^Badge/), { target: { value: '7' } });
 
     fireEvent.click(screen.getByRole('button', { name: /Create recipe/i }));
     const body = onSave.mock.calls[0][0];
@@ -291,8 +318,11 @@ describe('Edit mode pre-populates from an existing recipe', () => {
     // Op radio reflects existing OR.
     const orRadio = screen.getByRole('radio', { name: 'OR' });
     expect(orRadio).toHaveAttribute('aria-checked', 'true');
-    // Effect count is reflected in the placeholder block.
-    expect(screen.getByText(/Effects authored in the current draft/i).parentElement.textContent).toMatch(/\b1\b/);
+    // EffectsPalette renders one AwardCurrency row (one of the
+    // matched elements is the <option> in the AddEffectMenu, the
+    // other is the row header).
+    expect(screen.getAllByText('AwardCurrency').length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Drag handle for effect 1')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Save changes/i }));
     const body = onSave.mock.calls[0][0];
