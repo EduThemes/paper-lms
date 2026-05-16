@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type Account struct {
 	ID              uint      `json:"id" gorm:"primaryKey"`
@@ -42,4 +46,22 @@ type Account struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// BeforeCreate mirrors the SQL DEFAULTs from migrations 000046 and 000055
+// in Go. The DB columns have NOT NULL + DEFAULT, but GORM serializes empty
+// strings as '' rather than omitting them, which (for MFAPolicy) trips the
+// accounts_mfa_policy_check CHECK constraint. The GORM `default:` tag is
+// intentionally NOT used on these two fields per CLAUDE.md "Phase 7
+// patterns" (parity-test friendliness for policy-bearing TEXT columns);
+// the hook is the bridge that keeps test-and-production code paths from
+// having to remember the default value at every Create call site.
+func (a *Account) BeforeCreate(tx *gorm.DB) error {
+	if a.MFAPolicy == "" {
+		a.MFAPolicy = "off"
+	}
+	if a.DefaultLocale == "" {
+		a.DefaultLocale = "en"
+	}
+	return nil
 }

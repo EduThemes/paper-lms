@@ -38,7 +38,12 @@ jobs:
         run: npm run build
 
       - name: Start static server
-        run: npx serve dist -l 5174 &
+        # -s (--single) rewrites every non-asset request to /index.html so
+        # client-side SPA routes (e.g. /courses/1/gradebook) actually
+        # return the React shell instead of a 404. Without this, axe
+        # audits a serve-default 404 page on every route after `/login`,
+        # which trivially fails document-title / html-has-lang / viewport.
+        run: npx serve dist -l 5174 -s &
 
       - name: Wait for server
         run: npx --yes wait-on http://localhost:5174 -t 30000
