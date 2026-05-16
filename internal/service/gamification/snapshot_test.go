@@ -187,6 +187,7 @@ func TestLoadSnapshot_Wallet(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
+	seedTenantAccount(t, g, testTenantID)
 	if err := gamification.SeedSystemCurrenciesForTenant(ctx, g, testTenantID); err != nil {
 		t.Fatalf("seed currencies: %v", err)
 	}

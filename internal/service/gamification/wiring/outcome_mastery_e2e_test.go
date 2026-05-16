@@ -70,7 +70,8 @@ func TestCreateResult_TriggersMasteryRuleOnFirstTransitionOnly(t *testing.T) {
 		t.Fatalf("create outcome: %v", err)
 	}
 
-	const learnerID uint = 7777
+	learner := seedTestUser(t, g, account.ID, "mastery-e2e-learner@example.test")
+	learnerID := learner.ID
 
 	// Seed system currencies so the AwardCurrency effect can resolve xp.
 	if err := gamification.SeedSystemCurrenciesForTenant(ctx, g, account.ID); err != nil {

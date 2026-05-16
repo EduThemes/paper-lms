@@ -59,13 +59,14 @@ func TestCompletedQuizEmitCallback_HappyPath(t *testing.T) {
 		t.Fatalf("create quiz: %v", err)
 	}
 
+	learner := seedTestUser(t, g, account.ID, "quiz-learner@example.test")
 	// QuizSubmission: complete, scored 80, finished one hour ago.
 	score := 80.0
 	finishedAt := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
 	startedAt := finishedAt.Add(-15 * time.Minute)
 	qs := models.QuizSubmission{
 		QuizID:          quiz.ID,
-		UserID:          42,
+		UserID:          learner.ID,
 		Attempt:         1,
 		Score:           &score,
 		StartedAt:       &startedAt,

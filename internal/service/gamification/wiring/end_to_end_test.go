@@ -50,7 +50,8 @@ func TestGradeSubmission_TriggersRuleViaCallback(t *testing.T) {
 		t.Fatalf("create assignment: %v", err)
 	}
 
-	const learnerID uint = 1001
+	learner := seedTestUser(t, g, account.ID, "e2e-learner@example.test")
+	learnerID := learner.ID
 
 	// Pre-existing submission (Grade() updates rather than creates).
 	zeroScore := 0.0

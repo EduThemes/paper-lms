@@ -50,11 +50,12 @@ func TestGradedSubmissionEmitCallback_HappyPath(t *testing.T) {
 	if err := g.Create(&assignment).Error; err != nil {
 		t.Fatalf("create assignment: %v", err)
 	}
+	learner := seedTestUser(t, g, account.ID, "submission-learner@example.test")
 	score := 87.5
 	gradedAt := time.Now().Add(-1 * time.Minute).UTC().Truncate(time.Second)
 	submission := models.Submission{
 		AssignmentID:  assignment.ID,
-		UserID:        4242,
+		UserID:        learner.ID,
 		Score:         &score,
 		GradedAt:      &gradedAt,
 		WorkflowState: "graded",

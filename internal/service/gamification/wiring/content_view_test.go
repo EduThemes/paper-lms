@@ -74,12 +74,14 @@ func setupViewFixture(t *testing.T) viewFixture {
 	// the gamification.Emitter needs against this scratch GORM connection.
 	emitter := buildEmitter(t, g)
 
+	learner := seedTestUser(t, g, account.ID, "viewer@example.test")
+
 	return viewFixture{
 		db:       g,
 		tenantID: account.ID,
 		courseID: course.ID,
 		pageID:   page.ID,
-		userID:   77,
+		userID:   learner.ID,
 		emitter:  emitter,
 		pageRepo: postgres.NewPageRepository(g),
 		crsRepo:  postgres.NewCourseRepository(g),
