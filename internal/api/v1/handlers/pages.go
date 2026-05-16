@@ -108,7 +108,7 @@ func (h *PageHandler) GetPage(c *fiber.Ctx) error {
 
 	// Try as numeric ID first
 	if id, err := strconv.Atoi(urlOrID); err == nil {
-		page, err := h.pageService.GetByID(c.Context(), uint(id))
+		page, err := h.pageService.GetByID(c.Context(), uint(id), callerAccountID(c))
 		if err != nil {
 			return responses.NotFound(c, "page")
 		}
@@ -189,7 +189,7 @@ func (h *PageHandler) UpdatePage(c *fiber.Ctx) error {
 
 	var page *models.WikiPage
 	if id, err := strconv.Atoi(urlOrID); err == nil {
-		page, err = h.pageService.GetByID(c.Context(), uint(id))
+		page, err = h.pageService.GetByID(c.Context(), uint(id), callerAccountID(c))
 		if err != nil {
 			return responses.NotFound(c, "page")
 		}
@@ -259,7 +259,7 @@ func (h *PageHandler) DeletePage(c *fiber.Ctx) error {
 
 	var page *models.WikiPage
 	if id, err := strconv.Atoi(urlOrID); err == nil {
-		page, err = h.pageService.GetByID(c.Context(), uint(id))
+		page, err = h.pageService.GetByID(c.Context(), uint(id), callerAccountID(c))
 		if err != nil {
 			return responses.NotFound(c, "page")
 		}

@@ -89,7 +89,7 @@ func (h *ModuleItemHandler) CreateModuleItem(c *fiber.Ctx) error {
 	if input.ModuleItem.Type == "Page" && h.pageService != nil {
 		if input.ModuleItem.ContentID != nil {
 			// Look up existing page to get its slug
-			if page, err := h.pageService.GetByID(c.Context(), *input.ModuleItem.ContentID); err == nil {
+			if page, err := h.pageService.GetByID(c.Context(), *input.ModuleItem.ContentID, callerAccountID(c)); err == nil {
 				pageSlug = page.URL
 			}
 		} else if input.ModuleItem.PageURL != "" {

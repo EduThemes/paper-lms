@@ -104,7 +104,7 @@ func TestPageGetByID(t *testing.T) {
 
 	repo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(expected, nil)
 
-	result, err := svc.GetByID(context.Background(), 1)
+	result, err := svc.GetByID(context.Background(), 1, 0)
 
 	assert.NoError(t, err)
 	assert.Equal(t, expected.ID, result.ID)
@@ -199,7 +199,7 @@ func TestPageGetByID_NotFound(t *testing.T) {
 
 	repo.On("FindByID", mock.Anything, uint(999), uint(0)).Return(nil, errors.New("record not found"))
 
-	result, err := svc.GetByID(context.Background(), 999)
+	result, err := svc.GetByID(context.Background(), 999, 0)
 
 	assert.Error(t, err)
 	assert.Nil(t, result)

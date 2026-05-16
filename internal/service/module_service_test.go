@@ -103,7 +103,7 @@ func TestModuleGetByID(t *testing.T) {
 
 	moduleRepo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(expected, nil)
 
-	result, err := svc.GetByID(context.Background(), 1)
+	result, err := svc.GetByID(context.Background(), 1, 0)
 
 	assert.NoError(t, err)
 	assert.Equal(t, expected.ID, result.ID)

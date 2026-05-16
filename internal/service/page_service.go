@@ -31,8 +31,10 @@ func (s *PageService) Create(ctx context.Context, page *models.WikiPage) error {
 	return s.repo.Create(ctx, page)
 }
 
-func (s *PageService) GetByID(ctx context.Context, id uint) (*models.WikiPage, error) {
-	return s.repo.FindByID(ctx, id, 0)
+// GetByID is the public read path. Sprint 2.3 threaded accountID
+// through from the handler; pass 0 from internal callers.
+func (s *PageService) GetByID(ctx context.Context, id, accountID uint) (*models.WikiPage, error) {
+	return s.repo.FindByID(ctx, id, accountID)
 }
 
 func (s *PageService) GetByURL(ctx context.Context, courseID uint, url string) (*models.WikiPage, error) {

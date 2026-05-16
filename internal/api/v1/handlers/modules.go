@@ -117,7 +117,7 @@ func (h *ModuleHandler) GetModule(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid module ID")
 	}
 
-	module, err := h.moduleService.GetByID(c.Context(), uint(id))
+	module, err := h.moduleService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "module")
 	}
@@ -168,7 +168,7 @@ func (h *ModuleHandler) UpdateModule(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid module ID")
 	}
 
-	module, err := h.moduleService.GetByID(c.Context(), uint(id))
+	module, err := h.moduleService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "module")
 	}
