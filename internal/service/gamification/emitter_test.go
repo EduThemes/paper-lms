@@ -74,12 +74,29 @@ func setupEmitterFixture(t *testing.T, cooldownSeconds *int) emitterFixture {
 		t.Fatalf("create assignment: %v", err)
 	}
 
+	// User — 13.2 added submissions_user_id_fkey, so the submission
+	// below needs a real user row. User.BeforeCreate (13.x.9) fills in
+	// WebauthnUserHandle + AccountID defaults.
+	user := models.User{
+		Name:    "Emitter Test User",
+		Email:   "emitter@example.test",
+		LoginID: "emitter@example.test",
+		Role:    "user",
+		AccountID: tenantID,
+	}
+	if err := user.HashPassword("placeholder"); err != nil {
+		t.Fatalf("hash pw: %v", err)
+	}
+	if err := g.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
 	// User submitted with score 95.
 	score := 95.0
 	submittedAt := time.Now()
 	sub := models.Submission{
 		AssignmentID:  assignment.ID,
-		UserID:        42,
+		UserID:        user.ID,
 		SubmittedAt:   &submittedAt,
 		Score:         &score,
 		WorkflowState: "graded",
@@ -163,7 +180,7 @@ func setupEmitterFixture(t *testing.T, cooldownSeconds *int) emitterFixture {
 	return emitterFixture{
 		db:           g,
 		tenantID:     tenantID,
-		userID:       42,
+		userID:       user.ID,
 		assignmentID: assignment.ID,
 		ruleID:       rule.ID,
 		xpCurrencyID: xp.ID,

@@ -228,6 +228,14 @@ func AutoMigrate(db *gorm.DB) error {
 		// Phase 6 Wave 1 Sprint C: per-user content-view aggregates that
 		// the ViewedContent predicate reads at rule-evaluation time.
 		&models.ContentView{},
+		// Phase 6 Wave 2 + Wave 3 / Phase 7 — gamification tables that
+		// landed in the SQL chain (000041 badges, 000045 leaderboard
+		// snapshots) but were left off the GORM AutoMigrate set. The
+		// schemagen parity test (TestSchemaParity_Wave3) is the watchdog
+		// that catches this drift.
+		&models.GamificationBadge{},
+		&models.GamificationBadgeAward{},
+		&models.GamificationLeaderboardSnapshot{},
 	)
 }
 
