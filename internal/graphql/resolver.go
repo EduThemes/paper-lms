@@ -40,7 +40,11 @@ func NewResolver(
 }
 
 // Resolve parses and executes a GraphQL query, returning a Response.
-func (r *Resolver) Resolve(ctx context.Context, userID uint, query string, variables map[string]interface{}) *Response {
+// Resolve is the top-level entry point. accountID lands in the ctx via
+// WithAccountID so nested resolvers can call AccountIDFromContext rather
+// than threading the value through every signature. Sprint 2.4 plumbing.
+func (r *Resolver) Resolve(ctx context.Context, userID, accountID uint, query string, variables map[string]interface{}) *Response {
+	ctx = WithAccountID(ctx, accountID)
 	fields, err := ParseQuery(query)
 	if err != nil {
 		return &Response{
@@ -118,7 +122,7 @@ func (r *Resolver) resolveCourse(ctx context.Context, args map[string]interface{
 		return nil, fmt.Errorf("course requires 'id' argument: %w", err)
 	}
 
-	course, err := r.courseService.GetByID(ctx, id, 0)
+	course, err := r.courseService.GetByID(ctx, id, AccountIDFromContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("course not found: %w", err)
 	}
@@ -158,7 +162,7 @@ func (r *Resolver) resolveAssignment(ctx context.Context, args map[string]interf
 		return nil, fmt.Errorf("assignment requires 'id' argument: %w", err)
 	}
 
-	assignment, err := r.assignmentService.GetByID(ctx, id, 0)
+	assignment, err := r.assignmentService.GetByID(ctx, id, AccountIDFromContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("assignment not found: %w", err)
 	}

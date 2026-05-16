@@ -18,7 +18,9 @@ func NewGraphQLHandler(resolver *graphql.Resolver) *GraphQLHandler {
 // HandleQuery handles POST requests to the GraphQL endpoint.
 // It expects a JSON body with query, variables, and operationName fields.
 func (h *GraphQLHandler) HandleQuery(c *fiber.Ctx) error {
-	// Get authenticated user ID from context
+	// Get authenticated user ID + tenant ID from context. accountID is
+	// threaded through to resolvers via graphql.WithAccountID so
+	// service.GetByID calls can filter at the SQL boundary.
 	userID, ok := c.Locals("user_id").(uint)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(graphql.Response{
@@ -27,6 +29,7 @@ func (h *GraphQLHandler) HandleQuery(c *fiber.Ctx) error {
 			},
 		})
 	}
+	accountID, _ := c.Locals("account_id").(uint)
 
 	// Parse the GraphQL request
 	var req graphql.Request
@@ -47,7 +50,7 @@ func (h *GraphQLHandler) HandleQuery(c *fiber.Ctx) error {
 	}
 
 	// Execute the query
-	resp := h.resolver.Resolve(c.Context(), userID, req.Query, req.Variables)
+	resp := h.resolver.Resolve(c.Context(), userID, accountID, req.Query, req.Variables)
 
 	// Return the response with appropriate status code
 	if resp.Data == nil && len(resp.Errors) > 0 {
