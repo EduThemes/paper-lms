@@ -10,10 +10,11 @@ import (
 
 type AnalyticsHandler struct {
 	analyticsService *service.AnalyticsService
+	auditService     *service.AuditService
 }
 
-func NewAnalyticsHandler(analyticsService *service.AnalyticsService) *AnalyticsHandler {
-	return &AnalyticsHandler{analyticsService: analyticsService}
+func NewAnalyticsHandler(analyticsService *service.AnalyticsService, auditService *service.AuditService) *AnalyticsHandler {
+	return &AnalyticsHandler{analyticsService: analyticsService, auditService: auditService}
 }
 
 func pageViewToJSON(pv *models.PageView) fiber.Map {
@@ -74,6 +75,10 @@ func (h *AnalyticsHandler) GetStudentSummaries(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not fetch student summaries")
 	}
 
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "student_summaries", "courses", uint(courseID), c.IP(), c.Get("User-Agent"))
+	}
+
 	return c.JSON(summaries)
 }
 
@@ -94,6 +99,10 @@ func (h *AnalyticsHandler) GetStudentActivity(c *fiber.Ctx) error {
 		return responses.NotFound(c, "student enrollment")
 	}
 
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, uint(userID), "read", "student_activity", "courses", uint(courseID), c.IP(), c.Get("User-Agent"))
+	}
+
 	return c.JSON(activity)
 }
 
@@ -112,6 +121,10 @@ func (h *AnalyticsHandler) GetStudentAssignments(c *fiber.Ctx) error {
 	assignments, err := h.analyticsService.GetStudentAssignments(c.Context(), uint(courseID), uint(userID))
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch student assignments")
+	}
+
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, uint(userID), "read", "student_assignments", "courses", uint(courseID), c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(assignments)

@@ -648,7 +648,7 @@ func main() {
 	// handlers
 	discussionHandler := handlers.NewDiscussionHandler(discussionService)
 	discussionEntryHandler := handlers.NewDiscussionEntryHandler(discussionService)
-	fileHandler := handlers.NewFileHandler(fileService, enrollmentRepo)
+	fileHandler := handlers.NewFileHandler(fileService, enrollmentRepo, auditService)
 	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo)
 	folderHandler := handlers.NewFolderHandler(fileService, authz)
 	sisImportHandler := handlers.NewSISImportHandler(sisImportService)
@@ -668,7 +668,7 @@ func main() {
 	// handlers
 	contentMigrationHandler := handlers.NewContentMigrationHandler(contentMigrationService)
 	learningOutcomeHandler := handlers.NewLearningOutcomeHandler(learningOutcomeService, outcomeAlignmentRepo)
-	speedGraderHandler := handlers.NewSpeedGraderHandler(speedGraderService)
+	speedGraderHandler := handlers.NewSpeedGraderHandler(speedGraderService, auditService)
 	// handlers
 	groupHandler := handlers.NewGroupHandler(groupService, authz)
 	blueprintHandler := handlers.NewBlueprintHandler(blueprintService)
@@ -676,7 +676,7 @@ func main() {
 	// handlers
 	collaborationHandler := handlers.NewCollaborationHandler(collaborationService, authz)
 	conferenceHandler := handlers.NewConferenceHandler(conferenceService, authz)
-	analyticsHandler := handlers.NewAnalyticsHandler(analyticsService)
+	analyticsHandler := handlers.NewAnalyticsHandler(analyticsService, auditService)
 	observerHandler := handlers.NewObserverHandler(observerService, pairingCodeService, auditService)
 	// handlers
 	graphqlResolver := graphql.NewResolver(courseService, assignmentService, userService, enrollmentService, moduleService, submissionService)
@@ -704,14 +704,14 @@ func main() {
 	attendanceHandler := handlers.NewAttendanceHandler(attendanceService, auditService)
 	portfolioHandler := handlers.NewPortfolioHandler(portfolioService, authz)
 	courseHomeHandler := handlers.NewCourseHomeHandler(courseHomeService)
-	peerReviewHandler := handlers.NewPeerReviewHandler(peerReviewService)
+	peerReviewHandler := handlers.NewPeerReviewHandler(peerReviewService, auditService)
 	questionBankHandler := handlers.NewQuestionBankHandler(questionBankService)
 	quizQuestionGroupHandler := handlers.NewQuizQuestionGroupHandler(quizService)
 	quizStatisticsHandler := handlers.NewQuizStatisticsHandler(quizService)
 	setupHandler := handlers.NewSetupHandler(userService, accountRepo, userRepo, cfg.JWTSecret, cfg.Environment)
 	// P3 Feature handlers
 	featureFlagHandler := handlers.NewFeatureFlagHandler(featureFlagService, enrollmentRepo, userRepo)
-	customGradebookColumnHandler := handlers.NewCustomGradebookColumnHandler(customGradebookColumnService)
+	customGradebookColumnHandler := handlers.NewCustomGradebookColumnHandler(customGradebookColumnService, auditService)
 	masteryPathHandler := handlers.NewMasteryPathHandler(masteryPathService)
 	appointmentGroupHandler := handlers.NewAppointmentGroupHandler(appointmentGroupService, authz)
 	outcomeProficiencyHandler := handlers.NewOutcomeProficiencyHandler(outcomeProficiencyService, masteryGradebookService)

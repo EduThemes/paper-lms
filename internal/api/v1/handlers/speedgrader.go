@@ -13,11 +13,12 @@ import (
 // SpeedGraderHandler handles SpeedGrader-related API endpoints.
 type SpeedGraderHandler struct {
 	speedGraderService *service.SpeedGraderService
+	auditService       *service.AuditService
 }
 
 // NewSpeedGraderHandler creates a new SpeedGraderHandler.
-func NewSpeedGraderHandler(speedGraderService *service.SpeedGraderService) *SpeedGraderHandler {
-	return &SpeedGraderHandler{speedGraderService: speedGraderService}
+func NewSpeedGraderHandler(speedGraderService *service.SpeedGraderService, auditService *service.AuditService) *SpeedGraderHandler {
+	return &SpeedGraderHandler{speedGraderService: speedGraderService, auditService: auditService}
 }
 
 func speedGraderSubmissionJSON(sub *models.Submission) fiber.Map {
@@ -68,6 +69,10 @@ func (h *SpeedGraderHandler) GetSpeedGraderData(c *fiber.Ctx) error {
 	data, err := h.speedGraderService.GetSpeedGraderData(c.Context(), uint(courseID), uint(assignmentID))
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch SpeedGrader data")
+	}
+
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "speedgrader_bulk", "assignments", uint(assignmentID), c.IP(), c.Get("User-Agent"))
 	}
 
 	// Use the full user name map (includes teachers, TAs, and students)
@@ -140,6 +145,10 @@ func (h *SpeedGraderHandler) GetStudentSubmission(c *fiber.Ctx) error {
 	data, err := h.speedGraderService.GetStudentSubmission(c.Context(), uint(assignmentID), uint(userID))
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch student submission")
+	}
+
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, uint(userID), "read", "speedgrader_submission", "assignments", uint(assignmentID), c.IP(), c.Get("User-Agent"))
 	}
 
 	commentsJSON := make([]fiber.Map, len(data.Comments))

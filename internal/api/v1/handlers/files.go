@@ -18,10 +18,11 @@ import (
 type FileHandler struct {
 	fileService    *service.FileService
 	enrollmentRepo repository.EnrollmentRepository
+	auditService   *service.AuditService
 }
 
-func NewFileHandler(fileService *service.FileService, enrollmentRepo repository.EnrollmentRepository) *FileHandler {
-	return &FileHandler{fileService: fileService, enrollmentRepo: enrollmentRepo}
+func NewFileHandler(fileService *service.FileService, enrollmentRepo repository.EnrollmentRepository, auditService *service.AuditService) *FileHandler {
+	return &FileHandler{fileService: fileService, enrollmentRepo: enrollmentRepo, auditService: auditService}
 }
 
 func attachmentToJSON(a *models.Attachment) fiber.Map {
@@ -118,6 +119,10 @@ func (h *FileHandler) GetFile(c *fiber.Ctx) error {
 		return responses.NotFound(c, "file")
 	}
 
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil && attachment.UserID != 0 && attachment.UserID != callerID {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, attachment.UserID, "read", "file_metadata", "attachments", attachment.ID, c.IP(), c.Get("User-Agent"))
+	}
+
 	return c.JSON(attachmentToJSON(attachment))
 }
 
@@ -152,6 +157,10 @@ func (h *FileHandler) DownloadFile(c *fiber.Ctx) error {
 		if enrollment == nil || enrollment.WorkflowState != "active" {
 			return responses.Error(c, fiber.StatusForbidden, "You do not have access to this file")
 		}
+	}
+
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil && attachment.UserID != 0 && attachment.UserID != callerID {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, attachment.UserID, "download", "file_download", "attachments", attachment.ID, c.IP(), c.Get("User-Agent"))
 	}
 
 	// Sanitize filename for Content-Disposition to prevent header injection
