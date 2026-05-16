@@ -398,6 +398,29 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 	})
 }
 
+// ChangePassword lets a logged-in user rotate their own password. Requires
+// the current password to defend against session-theft → account-takeover.
+func (h *UserHandler) ChangePassword(c *fiber.Ctx) error {
+	userID, err := getUserID(c)
+	if err != nil {
+		return err
+	}
+	var input struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := c.BodyParser(&input); err != nil {
+		return responses.BadRequest(c, "Invalid input")
+	}
+	if input.CurrentPassword == "" || input.NewPassword == "" {
+		return responses.BadRequest(c, "current_password and new_password are required")
+	}
+	if err := h.userService.ChangePassword(c.Context(), userID, input.CurrentPassword, input.NewPassword); err != nil {
+		return responses.BadRequest(c, err.Error())
+	}
+	return c.JSON(fiber.Map{"changed": true})
+}
+
 // UpdateUserRole sets a user's role. Admin-only at the route level.
 func (h *UserHandler) UpdateUserRole(c *fiber.Ctx) error {
 	id, err := c.ParamsInt("id")

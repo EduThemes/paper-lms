@@ -138,3 +138,31 @@ func (s *UserService) ResetPassword(ctx context.Context, token, newPassword stri
 	user.ResetTokenExpiresAt = nil
 	return s.repo.Update(ctx, user)
 }
+
+// ChangePassword verifies the current password and sets a new one for a
+// logged-in user. The current-password check defends against an attacker
+// with a stolen session: a session alone shouldn't be enough to pivot to
+// permanent account takeover via password change.
+func (s *UserService) ChangePassword(ctx context.Context, userID uint, currentPassword, newPassword string) error {
+	if len(newPassword) < 8 {
+		return errors.New("password must be at least 8 characters")
+	}
+
+	user, err := s.repo.FindByID(ctx, userID)
+	if err != nil {
+		return errors.New("user not found")
+	}
+
+	if err := user.CheckPassword(currentPassword); err != nil {
+		return errors.New("current password is incorrect")
+	}
+
+	if currentPassword == newPassword {
+		return errors.New("new password must differ from current password")
+	}
+
+	if err := user.HashPassword(newPassword); err != nil {
+		return err
+	}
+	return s.repo.Update(ctx, user)
+}

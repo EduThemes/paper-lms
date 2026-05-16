@@ -95,6 +95,7 @@ const MFAVerifyPage = React.lazy(() => import('./pages/MFAVerifyPage'));
 // Phase 10-B — passkey enrollment + management.
 const PasskeyEnrollPage = React.lazy(() => import('./pages/PasskeyEnrollPage'));
 const PasskeyListPage = React.lazy(() => import('./pages/PasskeyListPage'));
+const AccountSettingsPage = React.lazy(() => import('./pages/AccountSettingsPage'));
 // Smart Search, Commons
 const SmartSearchPage = React.lazy(() => import('./pages/SmartSearchPage'));
 const CommonsPage = React.lazy(() => import('./pages/CommonsPage'));
@@ -474,6 +475,14 @@ const App = () => {
           element={
             <ProtectedRoute>
               <GamificationPreferencesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/profile/settings"
+          element={
+            <ProtectedRoute>
+              <AccountSettingsPage />
             </ProtectedRoute>
           }
         />

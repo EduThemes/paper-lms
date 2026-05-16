@@ -119,6 +119,22 @@ export const api = {
     return data;
   },
 
+  changePassword: async (currentPassword, newPassword) => {
+    const { data } = await request('/users/self/change_password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
+    return data;
+  },
+
+  updateSelf: async (userId, payload) => {
+    const { data } = await request(`/users/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ user: payload }),
+    });
+    return data;
+  },
+
   register: async (name, email, password) => {
     const { data } = await request('/register', {
       method: 'POST',

@@ -393,6 +393,7 @@ func (r *Router) Register(app *fiber.App) {
 
 	// Users (self access or admin)
 	protected.Get("/users/self", r.userHandler.GetSelf)
+	protected.Post("/users/self/change_password", r.userHandler.ChangePassword)
 	protected.Get("/users", admin, r.userHandler.ListUsers)
 	protected.Get("/users/:id", selfOrAdmin, r.userHandler.GetUser)
 	protected.Get("/users/:id/profile", selfOrAdmin, r.userHandler.GetUserProfile)
