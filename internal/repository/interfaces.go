@@ -301,7 +301,9 @@ type DiscussionEntryRatingRepository interface {
 
 type FolderRepository interface {
 	Create(ctx context.Context, folder *models.Folder) error
-	FindByID(ctx context.Context, id uint) (*models.Folder, error)
+	// 13.1.D — tenant scope via polymorphic context_type/context_id.
+	// accountID==0 means "no scope" (background jobs, IMSCC import).
+	FindByID(ctx context.Context, id, accountID uint) (*models.Folder, error)
 	Update(ctx context.Context, folder *models.Folder) error
 	Delete(ctx context.Context, id uint) error
 	ListByContext(ctx context.Context, contextType string, contextID uint, parentFolderID *uint, params PaginationParams) (*PaginatedResult[models.Folder], error)
@@ -310,7 +312,8 @@ type FolderRepository interface {
 
 type AttachmentRepository interface {
 	Create(ctx context.Context, attachment *models.Attachment) error
-	FindByID(ctx context.Context, id uint) (*models.Attachment, error)
+	// 13.1.D — tenant scope via parent folder's context (inherit-via-parent).
+	FindByID(ctx context.Context, id, accountID uint) (*models.Attachment, error)
 	Update(ctx context.Context, attachment *models.Attachment) error
 	Delete(ctx context.Context, id uint) error
 	ListByContext(ctx context.Context, contextType string, contextID uint, params PaginationParams) (*PaginatedResult[models.Attachment], error)
@@ -615,7 +618,8 @@ type BlueprintMigrationRepository interface {
 
 type OneRosterConnectionRepository interface {
 	Create(ctx context.Context, conn *models.OneRosterConnection) error
-	FindByID(ctx context.Context, id uint) (*models.OneRosterConnection, error)
+	// 13.1.D — direct account_id column.
+	FindByID(ctx context.Context, id, accountID uint) (*models.OneRosterConnection, error)
 	Update(ctx context.Context, conn *models.OneRosterConnection) error
 	Delete(ctx context.Context, id uint) error
 	ListByAccountID(ctx context.Context, accountID uint, params PaginationParams) (*PaginatedResult[models.OneRosterConnection], error)
@@ -688,7 +692,10 @@ type PortfolioReflectionRepository interface {
 
 type PortfolioTemplateRepository interface {
 	Create(ctx context.Context, template *models.PortfolioTemplate) error
-	FindByID(ctx context.Context, id uint) (*models.PortfolioTemplate, error)
+	// 13.1.D — direct account_id column. Note: portfolio templates ARE
+	// account-scoped (admin-curated). User portfolios live in
+	// PortfolioRepository and stay user-scoped (private, owner-only).
+	FindByID(ctx context.Context, id, accountID uint) (*models.PortfolioTemplate, error)
 	Update(ctx context.Context, template *models.PortfolioTemplate) error
 	ListPublic(ctx context.Context, params PaginationParams) (*PaginatedResult[models.PortfolioTemplate], error)
 	ListByAccountID(ctx context.Context, accountID uint, params PaginationParams) (*PaginatedResult[models.PortfolioTemplate], error)

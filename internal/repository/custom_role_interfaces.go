@@ -10,7 +10,8 @@ import (
 
 type CustomRoleRepository interface {
 	Create(ctx context.Context, role *models.CustomRole) error
-	FindByID(ctx context.Context, id uint) (*models.CustomRole, error)
+	// 13.1.D — direct account_id column.
+	FindByID(ctx context.Context, id, accountID uint) (*models.CustomRole, error)
 	Update(ctx context.Context, role *models.CustomRole) error
 	Delete(ctx context.Context, id uint) error
 	ListByAccountID(ctx context.Context, accountID uint, params PaginationParams) (*PaginatedResult[models.CustomRole], error)
@@ -21,7 +22,8 @@ type CustomRoleRepository interface {
 
 type RoleOverrideRepository interface {
 	Create(ctx context.Context, override *models.RoleOverride) error
-	FindByID(ctx context.Context, id uint) (*models.RoleOverride, error)
+	// 13.1.D — inherit-via-parent: tenant scope through custom_roles.account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.RoleOverride, error)
 	Update(ctx context.Context, override *models.RoleOverride) error
 	Delete(ctx context.Context, id uint) error
 	ListByRoleID(ctx context.Context, roleID uint) ([]models.RoleOverride, error)

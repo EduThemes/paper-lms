@@ -20,19 +20,41 @@ func (r *pageViewRepo) Create(ctx context.Context, pageView *models.PageView) er
 	return r.db.WithContext(ctx).Create(pageView).Error
 }
 
-func (r *pageViewRepo) FindByID(ctx context.Context, id uint) (*models.PageView, error) {
+// pageViewTenantFilter is the polymorphic tenant filter for page_views.
+// PageViews can attach to any contextable entity (Course, Account, Group,
+// User). Apply identical branch logic to FindByID and ListByUserID so
+// the high-volume read path stays predictable. accountID==0 disables.
+const pageViewTenantFilter = `
+	(context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))
+	OR (context_type = 'Account' AND context_id = ?)
+	OR (context_type = 'Group' AND context_id IN (
+		SELECT g.id FROM groups g
+		WHERE (g.context_type = 'Course' AND g.context_id IN (SELECT id FROM courses WHERE account_id = ?))
+		   OR (g.context_type = 'Account' AND g.context_id = ?)
+	))
+	OR (context_type = 'User' AND context_id IN (SELECT id FROM users WHERE account_id = ?))
+`
+
+func (r *pageViewRepo) FindByID(ctx context.Context, id, accountID uint) (*models.PageView, error) {
 	var pageView models.PageView
-	if err := r.db.WithContext(ctx).First(&pageView, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		q = q.Where(pageViewTenantFilter, accountID, accountID, accountID, accountID, accountID)
+	}
+	if err := q.First(&pageView, id).Error; err != nil {
 		return nil, err
 	}
 	return &pageView, nil
 }
 
-func (r *pageViewRepo) ListByUserID(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.PageView], error) {
+func (r *pageViewRepo) ListByUserID(ctx context.Context, userID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.PageView], error) {
 	var pageViews []models.PageView
 	var count int64
 
 	query := r.db.WithContext(ctx).Model(&models.PageView{}).Where("user_id = ?", userID)
+	if accountID != 0 {
+		query = query.Where(pageViewTenantFilter, accountID, accountID, accountID, accountID, accountID)
+	}
 	query.Count(&count)
 
 	offset := (params.Page - 1) * params.PerPage

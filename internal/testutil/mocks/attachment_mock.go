@@ -18,8 +18,8 @@ func (m *MockAttachmentRepository) Create(ctx context.Context, attachment *model
 	return args.Error(0)
 }
 
-func (m *MockAttachmentRepository) FindByID(ctx context.Context, id uint) (*models.Attachment, error) {
-	args := m.Called(ctx, id)
+func (m *MockAttachmentRepository) FindByID(ctx context.Context, id, accountID uint) (*models.Attachment, error) {
+	args := m.Called(ctx, id, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

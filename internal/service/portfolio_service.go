@@ -348,8 +348,8 @@ func (s *PortfolioService) ListComments(ctx context.Context, portfolioID uint, p
 // Templates
 // ---------------------------------------------------------------------------
 
-func (s *PortfolioService) CreateFromTemplate(ctx context.Context, templateID uint, userID uint) (*models.Portfolio, error) {
-	tmpl, err := s.templateRepo.FindByID(ctx, templateID)
+func (s *PortfolioService) CreateFromTemplate(ctx context.Context, templateID, accountID uint, userID uint) (*models.Portfolio, error) {
+	tmpl, err := s.templateRepo.FindByID(ctx, templateID, accountID)
 	if err != nil {
 		return nil, errors.New("template not found")
 	}

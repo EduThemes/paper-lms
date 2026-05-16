@@ -1025,7 +1025,7 @@ func (h *PortfolioHandler) CreateFromTemplate(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "user_id is required")
 	}
 
-	portfolio, err := h.portfolioService.CreateFromTemplate(c.Context(), uint(templateID), input.UserID)
+	portfolio, err := h.portfolioService.CreateFromTemplate(c.Context(), uint(templateID), callerAccountID(c), input.UserID)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}

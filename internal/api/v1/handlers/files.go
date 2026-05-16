@@ -113,7 +113,7 @@ func (h *FileHandler) GetFile(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid file ID")
 	}
 
-	attachment, err := h.fileService.GetAttachment(c.Context(), uint(id))
+	attachment, err := h.fileService.GetAttachment(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "file")
 	}
@@ -140,7 +140,7 @@ func (h *FileHandler) DownloadFile(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid file ID")
 	}
 
-	attachment, err := h.fileService.GetAttachment(c.Context(), uint(id))
+	attachment, err := h.fileService.GetAttachment(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "file")
 	}
@@ -169,7 +169,7 @@ func (h *FileHandler) DownloadFile(c *fiber.Ctx) error {
 
 	// For S3 backend, redirect to presigned URL instead of proxying
 	if _, isS3 := backend.(*storage.S3Backend); isS3 {
-		downloadURL, err := h.fileService.GetFileURL(c.Context(), uint(id))
+		downloadURL, err := h.fileService.GetFileURL(c.Context(), uint(id), callerAccountID(c))
 		if err != nil {
 			return responses.InternalError(c, "Could not generate download URL")
 		}

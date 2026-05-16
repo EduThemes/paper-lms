@@ -214,7 +214,7 @@ func (h *SubmissionHandler) CreateSubmission(c *fiber.Ctx) error {
 	if len(input.Submission.FileIDs) > 0 {
 		var attachments []map[string]interface{}
 		for _, fid := range input.Submission.FileIDs {
-			att, err := h.attachmentRepo.FindByID(c.Context(), fid)
+			att, err := h.attachmentRepo.FindByID(c.Context(), fid, callerAccountID(c))
 			if err != nil {
 				return responses.BadRequest(c, fmt.Sprintf("File ID %d not found", fid))
 			}

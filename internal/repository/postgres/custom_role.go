@@ -21,9 +21,13 @@ func (r *customRoleRepo) Create(ctx context.Context, role *models.CustomRole) er
 	return r.db.WithContext(ctx).Create(role).Error
 }
 
-func (r *customRoleRepo) FindByID(ctx context.Context, id uint) (*models.CustomRole, error) {
+func (r *customRoleRepo) FindByID(ctx context.Context, id, accountID uint) (*models.CustomRole, error) {
 	var role models.CustomRole
-	if err := r.db.WithContext(ctx).First(&role, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		q = q.Where("account_id = ?", accountID)
+	}
+	if err := q.First(&role, id).Error; err != nil {
 		return nil, err
 	}
 	return &role, nil

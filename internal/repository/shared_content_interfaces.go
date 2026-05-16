@@ -20,7 +20,8 @@ type SharedContentFilters struct {
 // can be wired without touching the shared interface file.
 type SharedContentRepository interface {
 	Create(ctx context.Context, item *models.SharedContent) error
-	FindByID(ctx context.Context, id uint) (*models.SharedContent, error)
+	// 13.1.D — direct account_id column.
+	FindByID(ctx context.Context, id, accountID uint) (*models.SharedContent, error)
 	Update(ctx context.Context, item *models.SharedContent) error
 	Delete(ctx context.Context, id uint) error
 	ListByAccount(ctx context.Context, accountID uint, filters SharedContentFilters, params PaginationParams) (*PaginatedResult[models.SharedContent], error)

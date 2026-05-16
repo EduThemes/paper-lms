@@ -207,9 +207,10 @@ func (s *CommonsService) Browse(ctx context.Context, accountID uint, filters rep
 	return s.sharedRepo.ListByAccount(ctx, accountID, filters, params)
 }
 
-// Get returns a single Commons item by ID.
-func (s *CommonsService) Get(ctx context.Context, id uint) (*models.SharedContent, error) {
-	return s.sharedRepo.FindByID(ctx, id)
+// Get returns a single Commons item by ID, scoped to the caller's tenant.
+// accountID==0 disables the tenant scope (privileged internal callers).
+func (s *CommonsService) Get(ctx context.Context, id, accountID uint) (*models.SharedContent, error) {
+	return s.sharedRepo.FindByID(ctx, id, accountID)
 }
 
 // CommonsImportResult summarizes what a Commons import created in the
@@ -225,8 +226,8 @@ type CommonsImportResult struct {
 // Import clones the snapshotted resource(s) into the target course. It
 // re-creates rows via the standard repository constructors so all the
 // existing validation and indexing applies. Download count is bumped.
-func (s *CommonsService) Import(ctx context.Context, userID, targetCourseID, sharedContentID uint) (*CommonsImportResult, error) {
-	item, err := s.sharedRepo.FindByID(ctx, sharedContentID)
+func (s *CommonsService) Import(ctx context.Context, userID, targetCourseID, sharedContentID, accountID uint) (*CommonsImportResult, error) {
+	item, err := s.sharedRepo.FindByID(ctx, sharedContentID, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("commons item not found: %w", err)
 	}
@@ -398,8 +399,8 @@ func (s *CommonsService) Import(ctx context.Context, userID, targetCourseID, sha
 }
 
 // ToggleFavorite flips the caller's favorite for a Commons item.
-func (s *CommonsService) ToggleFavorite(ctx context.Context, userID, sharedContentID uint) (bool, error) {
-	if _, err := s.sharedRepo.FindByID(ctx, sharedContentID); err != nil {
+func (s *CommonsService) ToggleFavorite(ctx context.Context, userID, sharedContentID, accountID uint) (bool, error) {
+	if _, err := s.sharedRepo.FindByID(ctx, sharedContentID, accountID); err != nil {
 		return false, err
 	}
 	return s.sharedRepo.ToggleFavorite(ctx, sharedContentID, userID)

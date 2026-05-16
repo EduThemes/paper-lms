@@ -22,9 +22,13 @@ func (r *roleOverrideRepo) Create(ctx context.Context, override *models.RoleOver
 	return r.db.WithContext(ctx).Create(override).Error
 }
 
-func (r *roleOverrideRepo) FindByID(ctx context.Context, id uint) (*models.RoleOverride, error) {
+func (r *roleOverrideRepo) FindByID(ctx context.Context, id, accountID uint) (*models.RoleOverride, error) {
 	var override models.RoleOverride
-	if err := r.db.WithContext(ctx).First(&override, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		q = q.Where("account_id = ?", accountID)
+	}
+	if err := q.First(&override, id).Error; err != nil {
 		return nil, err
 	}
 	return &override, nil

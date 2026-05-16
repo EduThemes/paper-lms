@@ -208,7 +208,7 @@ func (h *AnalyticsHandler) ListUserPageViews(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.analyticsService.GetUserPageViews(c.Context(), userID, params)
+	result, err := h.analyticsService.GetUserPageViews(c.Context(), userID, callerAccountID(c), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch page views")
 	}

@@ -27,9 +27,13 @@ func (r *sharedContentRepo) Create(ctx context.Context, item *models.SharedConte
 	return r.db.WithContext(ctx).Create(item).Error
 }
 
-func (r *sharedContentRepo) FindByID(ctx context.Context, id uint) (*models.SharedContent, error) {
+func (r *sharedContentRepo) FindByID(ctx context.Context, id, accountID uint) (*models.SharedContent, error) {
 	var item models.SharedContent
-	if err := r.db.WithContext(ctx).First(&item, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		q = q.Where("account_id = ?", accountID)
+	}
+	if err := q.First(&item, id).Error; err != nil {
 		return nil, err
 	}
 	return &item, nil

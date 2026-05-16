@@ -20,9 +20,24 @@ func (r *folderRepo) Create(ctx context.Context, folder *models.Folder) error {
 	return r.db.WithContext(ctx).Create(folder).Error
 }
 
-func (r *folderRepo) FindByID(ctx context.Context, id uint) (*models.Folder, error) {
+func (r *folderRepo) FindByID(ctx context.Context, id, accountID uint) (*models.Folder, error) {
 	var folder models.Folder
-	if err := r.db.WithContext(ctx).First(&folder, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Folders are polymorphic on (context_type, context_id). Branch the
+		// tenant filter on context_type.
+		q = q.Where(`
+			(context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))
+			OR (context_type = 'Account' AND context_id = ?)
+			OR (context_type = 'Group' AND context_id IN (
+				SELECT g.id FROM groups g
+				WHERE (g.context_type = 'Course' AND g.context_id IN (SELECT id FROM courses WHERE account_id = ?))
+				   OR (g.context_type = 'Account' AND g.context_id = ?)
+			))
+			OR (context_type = 'User' AND context_id IN (SELECT id FROM users WHERE account_id = ?))
+		`, accountID, accountID, accountID, accountID, accountID)
+	}
+	if err := q.First(&folder, id).Error; err != nil {
 		return nil, err
 	}
 	return &folder, nil

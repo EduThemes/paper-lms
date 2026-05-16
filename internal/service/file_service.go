@@ -147,8 +147,10 @@ func (s *FileService) CreateFolder(ctx context.Context, folder *models.Folder) e
 	return s.folderRepo.Create(ctx, folder)
 }
 
-func (s *FileService) GetFolder(ctx context.Context, id uint) (*models.Folder, error) {
-	return s.folderRepo.FindByID(ctx, id)
+// GetFolder retrieves a folder, scoped to the caller's tenant.
+// accountID==0 disables the tenant scope (background jobs, IMSCC import).
+func (s *FileService) GetFolder(ctx context.Context, id, accountID uint) (*models.Folder, error) {
+	return s.folderRepo.FindByID(ctx, id, accountID)
 }
 
 func (s *FileService) UpdateFolder(ctx context.Context, folder *models.Folder) error {
@@ -163,8 +165,8 @@ func (s *FileService) ListFolders(ctx context.Context, contextType string, conte
 	return s.folderRepo.ListByContext(ctx, contextType, contextID, parentFolderID, params)
 }
 
-func (s *FileService) ListSubfolders(ctx context.Context, folderID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Folder], error) {
-	folder, err := s.folderRepo.FindByID(ctx, folderID)
+func (s *FileService) ListSubfolders(ctx context.Context, folderID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Folder], error) {
+	folder, err := s.folderRepo.FindByID(ctx, folderID, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -278,8 +280,10 @@ func (s *FileService) uploadFile(ctx context.Context, attachment *models.Attachm
 	return s.attachmentRepo.Create(ctx, attachment)
 }
 
-func (s *FileService) GetAttachment(ctx context.Context, id uint) (*models.Attachment, error) {
-	return s.attachmentRepo.FindByID(ctx, id)
+// GetAttachment retrieves an attachment, scoped to the caller's tenant.
+// accountID==0 disables the tenant scope (background jobs, IMSCC import).
+func (s *FileService) GetAttachment(ctx context.Context, id, accountID uint) (*models.Attachment, error) {
+	return s.attachmentRepo.FindByID(ctx, id, accountID)
 }
 
 func (s *FileService) DeleteAttachment(ctx context.Context, id uint) error {
@@ -297,8 +301,8 @@ func (s *FileService) ListFilesByFolder(ctx context.Context, folderID uint, para
 // GetFilePath returns the storage key for the given attachment.
 // For local storage, this resolves to a filesystem path.
 // For S3, this is the object key used with StorageBackend().Get().
-func (s *FileService) GetFilePath(ctx context.Context, id uint) (string, error) {
-	attachment, err := s.attachmentRepo.FindByID(ctx, id)
+func (s *FileService) GetFilePath(ctx context.Context, id, accountID uint) (string, error) {
+	attachment, err := s.attachmentRepo.FindByID(ctx, id, accountID)
 	if err != nil {
 		return "", err
 	}
@@ -307,8 +311,8 @@ func (s *FileService) GetFilePath(ctx context.Context, id uint) (string, error) 
 
 // GetFileURL returns a download URL for the given attachment.
 // For local storage, returns the file path. For S3, returns a presigned URL.
-func (s *FileService) GetFileURL(ctx context.Context, id uint) (string, error) {
-	attachment, err := s.attachmentRepo.FindByID(ctx, id)
+func (s *FileService) GetFileURL(ctx context.Context, id, accountID uint) (string, error) {
+	attachment, err := s.attachmentRepo.FindByID(ctx, id, accountID)
 	if err != nil {
 		return "", err
 	}

@@ -271,9 +271,15 @@ func (r *portfolioTemplateRepo) Create(ctx context.Context, template *models.Por
 	return r.db.WithContext(ctx).Create(template).Error
 }
 
-func (r *portfolioTemplateRepo) FindByID(ctx context.Context, id uint) (*models.PortfolioTemplate, error) {
+func (r *portfolioTemplateRepo) FindByID(ctx context.Context, id, accountID uint) (*models.PortfolioTemplate, error) {
 	var tmpl models.PortfolioTemplate
-	if err := r.db.WithContext(ctx).First(&tmpl, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Templates are tenant-scoped, BUT a public template (is_public=true)
+		// is intentionally cross-tenant readable for discoverability.
+		q = q.Where("account_id = ? OR is_public = ?", accountID, true)
+	}
+	if err := q.First(&tmpl, id).Error; err != nil {
 		return nil, err
 	}
 	return &tmpl, nil

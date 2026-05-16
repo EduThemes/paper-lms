@@ -122,7 +122,7 @@ func (h *CommonsHandler) Get(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid commons ID")
 	}
-	item, err := h.commonsService.Get(c.Context(), uint(id))
+	item, err := h.commonsService.Get(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "commons item")
 	}
@@ -190,7 +190,7 @@ func (h *CommonsHandler) Import(c *fiber.Ctx) error {
 	}
 	userID, _ := c.Locals("user_id").(uint)
 
-	result, err := h.commonsService.Import(c.Context(), userID, uint(courseID), uint(id))
+	result, err := h.commonsService.Import(c.Context(), userID, uint(courseID), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
@@ -207,7 +207,7 @@ func (h *CommonsHandler) Favorite(c *fiber.Ctx) error {
 	if userID == 0 {
 		return responses.Unauthorized(c)
 	}
-	favorited, err := h.commonsService.ToggleFavorite(c.Context(), userID, uint(id))
+	favorited, err := h.commonsService.ToggleFavorite(c.Context(), userID, uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
