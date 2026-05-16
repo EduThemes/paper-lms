@@ -130,7 +130,7 @@ func TestGetCourse_Success(t *testing.T) {
 		WorkflowState: "available",
 		DefaultView:   "modules",
 	}
-	mockCourseRepo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(course, nil)
+	mockCourseRepo.On("FindByID", mock.Anything, uint(1), uint(1)).Return(course, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/courses/1", nil)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -148,7 +148,7 @@ func TestGetCourse_Success(t *testing.T) {
 func TestGetCourse_NotFound(t *testing.T) {
 	app, mockCourseRepo, _, _ := setupCourseHandler()
 
-	mockCourseRepo.On("FindByID", mock.Anything, uint(999), uint(0)).Return(nil, errors.New("not found"))
+	mockCourseRepo.On("FindByID", mock.Anything, uint(999), uint(1)).Return(nil, errors.New("not found"))
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/courses/999", nil)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
@@ -248,7 +248,7 @@ func TestUpdateCourse(t *testing.T) {
 		WorkflowState: "available",
 		DefaultView:   "modules",
 	}
-	mockCourseRepo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(course, nil)
+	mockCourseRepo.On("FindByID", mock.Anything, uint(1), uint(1)).Return(course, nil)
 	mockCourseRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.Course")).Return(nil)
 
 	newName := "New Name"
@@ -271,7 +271,7 @@ func TestUpdateCourse(t *testing.T) {
 func TestUpdateCourse_NotFound(t *testing.T) {
 	app, mockCourseRepo, _, _ := setupCourseHandler()
 
-	mockCourseRepo.On("FindByID", mock.Anything, uint(999), uint(0)).Return(nil, errors.New("not found"))
+	mockCourseRepo.On("FindByID", mock.Anything, uint(999), uint(1)).Return(nil, errors.New("not found"))
 
 	body := testutil.JSONBody(map[string]interface{}{
 		"course": map[string]string{

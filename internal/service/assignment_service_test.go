@@ -124,7 +124,7 @@ func TestAssignmentGetByID(t *testing.T) {
 
 	mockRepo.On("FindByID", ctx, uint(3), uint(0)).Return(expected, nil)
 
-	result, err := svc.GetByID(ctx, 3)
+	result, err := svc.GetByID(ctx, 3, 0)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -141,7 +141,7 @@ func TestAssignmentGetByID_NotFound(t *testing.T) {
 
 	mockRepo.On("FindByID", ctx, uint(999), uint(0)).Return(nil, errors.New("record not found"))
 
-	result, err := svc.GetByID(ctx, 999)
+	result, err := svc.GetByID(ctx, 999, 0)
 
 	assert.Nil(t, result)
 	assert.EqualError(t, err, "record not found")

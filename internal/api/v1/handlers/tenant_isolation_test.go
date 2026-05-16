@@ -195,10 +195,10 @@ func TestTenantIsolation_GetCourse(t *testing.T) {
 	// FileService which DO pass tenant through.
 	//
 	// Test captures current LEAK behavior so the gap surfaces in CI.
-	runMatrix(t, "GET /courses/:id (KNOWN LEAK — CourseService passes accountID=0)", []matrixCase{
+	runMatrix(t, "GET /courses/:id (Wave F: tenant-scoped via CourseService.GetByID)", []matrixCase{
 		{tenantA, resInA, http.StatusOK, "tenantA caller, tenantA resource"},
-		{tenantA, resInB, http.StatusOK, "tenantA caller, tenantB resource (LEAK — should be 404)"},
-		{tenantB, resInA, http.StatusOK, "tenantB caller, tenantA resource (LEAK — should be 404)"},
+		{tenantA, resInB, http.StatusNotFound, "tenantA caller, tenantB resource"},
+		{tenantB, resInA, http.StatusNotFound, "tenantB caller, tenantA resource"},
 		{tenantB, resInB, http.StatusOK, "tenantB caller, tenantB resource"},
 	}, statusFn)
 }
@@ -232,10 +232,10 @@ func TestTenantIsolation_GetAssignment(t *testing.T) {
 	// AssignmentRepository.FindByID accepts accountID (Wave B.1) but
 	// nothing passes the caller's tenant through. Same fix pattern
 	// as Course above.
-	runMatrix(t, "GET /assignments/:id (KNOWN LEAK — AssignmentService passes accountID=0)", []matrixCase{
+	runMatrix(t, "GET /assignments/:id (Wave F: tenant-scoped via AssignmentService.GetByID)", []matrixCase{
 		{tenantA, resInA, http.StatusOK, "tenantA caller, tenantA resource"},
-		{tenantA, resInB, http.StatusOK, "tenantA caller, tenantB resource (LEAK — should be 404)"},
-		{tenantB, resInA, http.StatusOK, "tenantB caller, tenantA resource (LEAK — should be 404)"},
+		{tenantA, resInB, http.StatusNotFound, "tenantA caller, tenantB resource"},
+		{tenantB, resInA, http.StatusNotFound, "tenantB caller, tenantA resource"},
 		{tenantB, resInB, http.StatusOK, "tenantB caller, tenantB resource"},
 	}, statusFn)
 }
@@ -326,10 +326,10 @@ func TestTenantIsolation_GetDiscussionTopic(t *testing.T) {
 	// DiscussionTopicRepository.FindByID accepts accountID (Wave B.2)
 	// but the handler->service path drops it. Same fix pattern as
 	// Course/Assignment.
-	runMatrix(t, "GET /discussion_topics/:id (KNOWN LEAK — DiscussionService passes accountID=0)", []matrixCase{
+	runMatrix(t, "GET /discussion_topics/:id (Wave F: tenant-scoped via DiscussionService.GetTopic)", []matrixCase{
 		{tenantA, resInA, http.StatusOK, "tenantA caller, tenantA resource"},
-		{tenantA, resInB, http.StatusOK, "tenantA caller, tenantB resource (LEAK — should be 404)"},
-		{tenantB, resInA, http.StatusOK, "tenantB caller, tenantA resource (LEAK — should be 404)"},
+		{tenantA, resInB, http.StatusNotFound, "tenantA caller, tenantB resource"},
+		{tenantB, resInA, http.StatusNotFound, "tenantB caller, tenantA resource"},
 		{tenantB, resInB, http.StatusOK, "tenantB caller, tenantB resource"},
 	}, statusFn)
 }

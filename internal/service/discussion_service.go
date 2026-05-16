@@ -77,8 +77,9 @@ func (s *DiscussionService) CreateTopic(ctx context.Context, topic *models.Discu
 	return s.topicRepo.Create(ctx, topic)
 }
 
-func (s *DiscussionService) GetTopic(ctx context.Context, id uint) (*models.DiscussionTopic, error) {
-	return s.topicRepo.FindByID(ctx, id, 0)
+// GetTopic — Wave F. See CourseService.GetByID for the accountID contract.
+func (s *DiscussionService) GetTopic(ctx context.Context, id, accountID uint) (*models.DiscussionTopic, error) {
+	return s.topicRepo.FindByID(ctx, id, accountID)
 }
 
 func (s *DiscussionService) UpdateTopic(ctx context.Context, topic *models.DiscussionTopic) error {

@@ -90,7 +90,7 @@ func (h *SyllabusHandler) GetSyllabus(c *fiber.Ctx) error {
 	userID, _ := c.Locals("user_id").(uint)
 
 	// 1. Fetch the course
-	course, err := h.courseService.GetByID(c.Context(), uint(courseID))
+	course, err := h.courseService.GetByID(c.Context(), uint(courseID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "course")
 	}

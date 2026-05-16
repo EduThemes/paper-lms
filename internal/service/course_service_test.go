@@ -175,7 +175,7 @@ func TestCourseGetByID(t *testing.T) {
 
 	mockCourseRepo.On("FindByID", ctx, uint(5), uint(0)).Return(expectedCourse, nil)
 
-	result, err := svc.GetByID(ctx, 5)
+	result, err := svc.GetByID(ctx, 5, 0)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)

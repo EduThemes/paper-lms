@@ -26,8 +26,9 @@ func (s *AssignmentService) Create(ctx context.Context, assignment *models.Assig
 	return s.repo.Create(ctx, assignment)
 }
 
-func (s *AssignmentService) GetByID(ctx context.Context, id uint) (*models.Assignment, error) {
-	return s.repo.FindByID(ctx, id, 0)
+// GetByID — Wave F. See CourseService.GetByID for the accountID contract.
+func (s *AssignmentService) GetByID(ctx context.Context, id, accountID uint) (*models.Assignment, error) {
+	return s.repo.FindByID(ctx, id, accountID)
 }
 
 func (s *AssignmentService) Update(ctx context.Context, assignment *models.Assignment) error {

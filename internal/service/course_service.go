@@ -56,8 +56,13 @@ func (s *CourseService) Create(ctx context.Context, course *models.Course, creat
 	return s.enrollmentRepo.Create(ctx, enrollment)
 }
 
-func (s *CourseService) GetByID(ctx context.Context, id uint) (*models.Course, error) {
-	return s.courseRepo.FindByID(ctx, id, 0)
+// GetByID resolves a course by id, scoped to the caller's tenant.
+// accountID==0 means "no tenant scope" (internal/background callers
+// that have already validated tenant ownership upstream, e.g. the
+// gamification wiring or seed scripts). Handler callers MUST pass
+// callerAccountID(c) — Wave F.
+func (s *CourseService) GetByID(ctx context.Context, id, accountID uint) (*models.Course, error) {
+	return s.courseRepo.FindByID(ctx, id, accountID)
 }
 
 func (s *CourseService) Update(ctx context.Context, course *models.Course) error {
