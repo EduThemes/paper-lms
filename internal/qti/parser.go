@@ -67,7 +67,6 @@ func (d *defaultImporter) ImportQTIFile(ctx context.Context, qtiPath string, cou
 // we honor whichever is referenced and tag the result with the
 // majority dialect.
 func importBundle(b *imsccBundle) (*ImportResult, error) {
-	resetStimuli()
 	result := &ImportResult{
 		Quizzes:   []QuizImport{},
 		ItemBanks: []ItemBankImport{},
@@ -146,9 +145,10 @@ func importBundle(b *imsccBundle) (*ImportResult, error) {
 
 	for _, tf := range testFiles {
 		data, _, _ := b.resolvePath(tf)
-		quiz, warnings, errs := parseNewQuizzesAssessmentTest(tf, data, itemByHref, b)
+		quiz, stimuli, warnings, errs := parseNewQuizzesAssessmentTest(tf, data, itemByHref, b)
 		result.Warnings = append(result.Warnings, warnings...)
 		result.Errors = append(result.Errors, errs...)
+		result.Stimuli = append(result.Stimuli, stimuli...)
 		if quiz != nil {
 			result.Quizzes = append(result.Quizzes, *quiz)
 			result.Dialect = DialectNewQuizzes
@@ -181,9 +181,6 @@ func importBundle(b *imsccBundle) (*ImportResult, error) {
 	if result.Dialect == "" {
 		result.Dialect = DialectUnknown
 	}
-
-	// Promote any stimuli collected during NQ section walks.
-	result.Stimuli = append(result.Stimuli, collectedStimuli()...)
 
 	return result, nil
 }
@@ -323,11 +320,12 @@ func parseClassicBank(filename string, data []byte) (*ItemBankImport, []ImportWa
 }
 
 // parseNewQuizzesAssessmentTest parses an <assessmentTest> file and its
-// referenced items. Returns one QuizImport.
-func parseNewQuizzesAssessmentTest(filename string, data []byte, itemByHref map[string][]byte, b *imsccBundle) (*QuizImport, []ImportWarning, []ImportError) {
+// referenced items. Returns one QuizImport plus any stimuli collected
+// from rubricBlocks during the section walk.
+func parseNewQuizzesAssessmentTest(filename string, data []byte, itemByHref map[string][]byte, b *imsccBundle) (*QuizImport, []StimulusImport, []ImportWarning, []ImportError) {
 	var test nqAssessmentTest
 	if err := xmlUnmarshal(data, &test); err != nil {
-		return nil, nil, []ImportError{{
+		return nil, nil, nil, []ImportError{{
 			Source: filename, Code: "xml_parse_error", Message: err.Error(),
 		}}
 	}
@@ -338,6 +336,7 @@ func parseNewQuizzesAssessmentTest(filename string, data []byte, itemByHref map[
 	}
 	warnings := []ImportWarning{}
 	errs := []ImportError{}
+	stimuli := []StimulusImport{}
 	position := 0
 
 	// Walk sections (incl. nested for stimulus groups).
@@ -390,13 +389,7 @@ func parseNewQuizzesAssessmentTest(filename string, data []byte, itemByHref map[
 	var collectStimuli func(sec nqAssessmentSection)
 	collectStimuli = func(sec nqAssessmentSection) {
 		if sec.RubricBlock != nil && strings.TrimSpace(sec.RubricBlock.Content) != "" {
-			// Emit as a stimulus on the result. We have to bubble it
-			// up to the bundle-level result though — defer to the
-			// caller via a side channel. The simplest approach: stash
-			// in the QuizImport and let importBundle promote them.
-			// For now, we don't have a slot on QuizImport, so we use
-			// a package-level helper.
-			_ = appendStimulus(StimulusImport{
+			stimuli = append(stimuli, StimulusImport{
 				Identifier: sec.Identifier,
 				Title:      sec.Title,
 				Content:    wrapTipTap(sec.RubricBlock.Content),
@@ -414,35 +407,12 @@ func parseNewQuizzesAssessmentTest(filename string, data []byte, itemByHref map[
 		}
 	}
 
-	return q, warnings, errs
-}
-
-// --- stimulus collection via package-level slot ---
-//
-// We avoid plumbing a *ImportResult through walkSection by using a
-// goroutine-unsafe package variable; the importer is sequential so this
-// is fine. The variable is cleared at the start of importBundle.
-var pendingStimuli []StimulusImport
-
-func appendStimulus(s StimulusImport) error {
-	pendingStimuli = append(pendingStimuli, s)
-	return nil
-}
-
-func resetStimuli() {
-	pendingStimuli = nil
-}
-
-func collectedStimuli() []StimulusImport {
-	out := pendingStimuli
-	pendingStimuli = nil
-	return out
+	return q, stimuli, warnings, errs
 }
 
 // --- standalone-file paths (used when no .imscc) ---
 
 func importStandaloneClassic(filename string, data []byte) (*ImportResult, error) {
-	resetStimuli()
 	quizzes, warnings, errs := parseClassicAssessmentFile(filename, data)
 	return &ImportResult{
 		Quizzes:  quizzes,
@@ -453,7 +423,6 @@ func importStandaloneClassic(filename string, data []byte) (*ImportResult, error
 }
 
 func importStandaloneNewQuizzes(filename string, data []byte) (*ImportResult, error) {
-	resetStimuli()
 	q, warnings, perr := parseNewQuizzesItem(filename, data, 0)
 	result := &ImportResult{
 		Dialect:  DialectNewQuizzes,
