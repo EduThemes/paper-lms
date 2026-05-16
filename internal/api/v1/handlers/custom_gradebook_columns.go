@@ -10,11 +10,12 @@ import (
 // CustomGradebookColumnHandler exposes Canvas-compatible custom gradebook
 // column endpoints. Instructor-only RBAC is applied at the route level.
 type CustomGradebookColumnHandler struct {
-	service *service.CustomGradebookColumnService
+	service      *service.CustomGradebookColumnService
+	auditService *service.AuditService
 }
 
-func NewCustomGradebookColumnHandler(svc *service.CustomGradebookColumnService) *CustomGradebookColumnHandler {
-	return &CustomGradebookColumnHandler{service: svc}
+func NewCustomGradebookColumnHandler(svc *service.CustomGradebookColumnService, auditService *service.AuditService) *CustomGradebookColumnHandler {
+	return &CustomGradebookColumnHandler{service: svc, auditService: auditService}
 }
 
 func customColumnToJSON(c *models.CustomGradebookColumn) fiber.Map {
@@ -173,6 +174,9 @@ func (h *CustomGradebookColumnHandler) ListData(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "custom_gradebook_column_bulk", "custom_gradebook_columns", uint(colID), c.IP(), c.Get("User-Agent"))
+	}
 	out := make([]fiber.Map, len(data))
 	for i := range data {
 		out[i] = customColumnDatumToJSON(&data[i])
@@ -204,6 +208,9 @@ func (h *CustomGradebookColumnHandler) SetCell(c *fiber.Ctx) error {
 	d, err := h.service.SetCell(c.Context(), uint(courseID), uint(colID), uint(userID), input.Content)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
+	}
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, uint(userID), "write", "custom_gradebook_column_cell", "custom_gradebook_columns", uint(colID), c.IP(), c.Get("User-Agent"))
 	}
 	return c.JSON(customColumnDatumToJSON(d))
 }

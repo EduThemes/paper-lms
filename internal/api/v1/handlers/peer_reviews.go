@@ -8,10 +8,11 @@ import (
 
 type PeerReviewHandler struct {
 	peerReviewService *service.PeerReviewService
+	auditService      *service.AuditService
 }
 
-func NewPeerReviewHandler(peerReviewService *service.PeerReviewService) *PeerReviewHandler {
-	return &PeerReviewHandler{peerReviewService: peerReviewService}
+func NewPeerReviewHandler(peerReviewService *service.PeerReviewService, auditService *service.AuditService) *PeerReviewHandler {
+	return &PeerReviewHandler{peerReviewService: peerReviewService, auditService: auditService}
 }
 
 func (h *PeerReviewHandler) AssignPeerReviews(c *fiber.Ctx) error {
@@ -48,6 +49,10 @@ func (h *PeerReviewHandler) ListPeerReviews(c *fiber.Ctx) error {
 	reviews, err := h.peerReviewService.ListByAssignment(c.Context(), uint(assignmentID))
 	if err != nil {
 		return responses.InternalError(c, "Could not list peer reviews")
+	}
+
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "peer_reviews_bulk", "assignments", uint(assignmentID), c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(reviews)
