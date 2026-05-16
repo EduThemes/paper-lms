@@ -128,10 +128,20 @@ ALTER TABLE gamification_badge_awards
     ADD CONSTRAINT fk_gam_badge_awards_awarded_by
     FOREIGN KEY (awarded_by) REFERENCES users(id) ON DELETE SET NULL;
 
--- gamification_leaderboard_snapshots.tenant_id → accounts(id)
-ALTER TABLE gamification_leaderboard_snapshots
-    ADD CONSTRAINT fk_gam_snapshots_tenant
-    FOREIGN KEY (tenant_id) REFERENCES accounts(id) ON DELETE CASCADE;
+-- NOTE (2026-05-16, 13.x.1): a previous draft of this migration added
+--
+--     ALTER TABLE gamification_leaderboard_snapshots
+--         ADD CONSTRAINT fk_gam_snapshots_tenant
+--         FOREIGN KEY (tenant_id) REFERENCES accounts(id) ON DELETE CASCADE;
+--
+-- but 000045_leaderboard_snapshots.up.sql never creates a `tenant_id`
+-- column — the table is keyed by (scope_type, scope_id) where scope_id
+-- already encodes the tenant for tenant-scoped rows. The FK was
+-- aspirational from the 2026-05-15 audit pattern ("tenant_id FK on every
+-- gamification table") and incompatible with the actual snapshot shape.
+-- Removed to unblock the migration chain. Phase 14.6 (rename gamification
+-- tenant_id -> account_id) may revisit and either add account_id to 000045
+-- or formally exempt snapshots from the per-table tenant FK rule.
 
 -- Note on scope_id: deliberately NOT FK'd. The (scope_type, scope_id)
 -- pair is polymorphic by design (F1.3 verdict — defensible
