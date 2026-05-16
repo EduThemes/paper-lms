@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -130,6 +131,22 @@ func main() {
 			}
 		}
 		cancel()
+	}
+
+	// Wave C.4 (13.6.A) — optional Redis-backed rate-limit Store. The
+	// per-pod in-memory map in ratelimit.go is single-pod by design;
+	// multi-replica deploys swap in this shared backend so a request
+	// rotated across pods can't bypass the budget. Unset REDIS_URL =
+	// legacy in-memory behavior. Init failure logs + falls back to the
+	// in-memory store so the server still comes up.
+	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
+		rs, err := middleware.NewRedisStore(redisURL)
+		if err != nil {
+			log.Printf("warning: REDIS_URL set but Redis init failed: %v — falling back to in-memory rate limiter", err)
+		} else {
+			middleware.SetStore(rs)
+			slog.Info("rate limiter backed by Redis", "url_host", parseHostFromRedisURL(redisURL))
+		}
 	}
 
 	// Initialize repositories
@@ -982,5 +999,17 @@ func main() {
 		cancel()
 		log.Fatalf("server exited: %v", err)
 	}
+}
+
+// parseHostFromRedisURL strips userinfo from a Redis URL so we can log
+// the host without leaking credentials. Returns the raw string when the
+// URL fails to parse — better to log a noisy field than to crash on a
+// log statement.
+func parseHostFromRedisURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "unparsed"
+	}
+	return u.Host
 }
 
