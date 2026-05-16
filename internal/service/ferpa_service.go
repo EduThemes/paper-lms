@@ -25,6 +25,20 @@ type FERPAService struct {
 	// SetExportDataDeps so the existing constructor stays small.
 	userRepo       repository.UserRepository
 	enrollmentRepo repository.EnrollmentRepository
+
+	// Optional dep for ProcessDeletion's dependent-table PII walk
+	// (Phase 13.3 full). Wired via SetUserDeletionService so the
+	// existing constructor stays unchanged. If nil, ProcessDeletion
+	// falls back to the partial behavior (user-row anonymization only).
+	userDeletionService *UserDeletionService
+}
+
+// SetUserDeletionService wires the dependent-table PII walker used by
+// ProcessDeletion. Safe to call multiple times. If never called,
+// ProcessDeletion runs the partial Phase 13.3 behavior (anonymize the
+// users row, log a TODO note in the deletion log).
+func (s *FERPAService) SetUserDeletionService(d *UserDeletionService) {
+	s.userDeletionService = d
 }
 
 // SetExportDataDeps wires the repos used by BuildExportZip. Safe to
@@ -178,6 +192,20 @@ func (s *FERPAService) ProcessDeletion(ctx context.Context, requestID uint) erro
 		}
 	}
 
+	// Phase 13.3 full — walk dependent tables and null PII columns.
+	// Wired via SetUserDeletionService; falls back to the partial
+	// behavior if not wired.
+	var dependentRows map[string]int
+	var dependentErr string
+	if s.userDeletionService != nil {
+		touched, err := s.userDeletionService.EraseDependents(ctx, request.UserID)
+		if err != nil {
+			dependentErr = err.Error()
+		} else {
+			dependentRows = touched
+		}
+	}
+
 	deletionLog := map[string]interface{}{
 		"request_id":          requestID,
 		"user_id":             request.UserID,
@@ -186,7 +214,15 @@ func (s *FERPAService) ProcessDeletion(ctx context.Context, requestID uint) erro
 		"data_scope":          request.DataScope,
 		"status":              "completed",
 		"anonymized_user_row": anonRows,
-		"note":                "submissions, conversation_messages, audit_log are retained by policy; PII fields on those rows will be nulled when 13.2 FK migration + dedicated UserDeletionService land.",
+	}
+	if dependentRows != nil {
+		deletionLog["dependent_rows_touched"] = dependentRows
+	}
+	if dependentErr != "" {
+		deletionLog["dependent_walk_error"] = dependentErr
+	}
+	if s.userDeletionService == nil {
+		deletionLog["note"] = "UserDeletionService not wired; dependent-table PII fields retained. Wire SetUserDeletionService in main.go to enable 13.3 full."
 	}
 
 	logBytes, _ := json.Marshal(deletionLog)

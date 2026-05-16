@@ -473,6 +473,12 @@ func main() {
 	// 12.8 — wire user/enrollment repos so BuildExportZip can assemble
 	// the right-of-access ZIP.
 	ferpaService.SetExportDataDeps(userRepo, enrollmentRepo)
+	// 13.3 full — wire the dependent-table PII walker so
+	// ProcessDeletion erases submission bodies, comments, conversation
+	// messages, discussion entries, attendance notes, and notification
+	// delivery metadata in addition to anonymizing the users row.
+	userDeletionService := service.NewUserDeletionService(database)
+	ferpaService.SetUserDeletionService(userDeletionService)
 	accommodationService := service.NewAccommodationService(studentAccommodationRepo, accommodationApplicationRepo)
 	// Wire accommodation service into quiz engine for IEP/504 time extensions
 	service.WithAccommodationService(accommodationService)(quizService)
