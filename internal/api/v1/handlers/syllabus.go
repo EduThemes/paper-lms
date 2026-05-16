@@ -158,7 +158,7 @@ func (h *SyllabusHandler) GetSyllabus(c *fiber.Ctx) error {
 	submissionByAssignment := make(map[uint]string) // assignment_id -> status
 	if isStudent && userID > 0 {
 		for _, a := range assignmentsResult.Items {
-			sub, subErr := h.submissionService.GetByAssignmentAndUser(c.Context(), a.ID, userID)
+			sub, subErr := h.submissionService.GetByAssignmentAndUser(c.Context(), a.ID, userID, callerAccountID(c))
 			if subErr != nil {
 				// No submission found
 				now := time.Now()

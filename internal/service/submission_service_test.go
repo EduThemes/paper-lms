@@ -25,7 +25,7 @@ func TestCreate_NewSubmission(t *testing.T) {
 
 	assignmentRepo.On("FindByID", mock.Anything, uint(1), uint(0)).
 		Return(&models.Assignment{ID: 1, CourseID: 1, Name: "HW1"}, nil)
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(10)).
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(10), uint(0)).
 		Return(nil, errors.New("not found"))
 	submissionRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.Submission")).
 		Return(nil)
@@ -119,7 +119,7 @@ func TestCreate_LateSubmission(t *testing.T) {
 
 	assignmentRepo.On("FindByID", mock.Anything, uint(1), uint(0)).
 		Return(&models.Assignment{ID: 1, CourseID: 1, Name: "HW1", DueAt: &pastDue}, nil)
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(10)).
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(10), uint(0)).
 		Return(nil, errors.New("not found"))
 	submissionRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.Submission")).
 		Return(nil)
@@ -150,7 +150,7 @@ func TestCreate_OnTimeSubmission(t *testing.T) {
 
 	assignmentRepo.On("FindByID", mock.Anything, uint(1), uint(0)).
 		Return(&models.Assignment{ID: 1, CourseID: 1, Name: "HW1", DueAt: &futureDue}, nil)
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(10)).
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(10), uint(0)).
 		Return(nil, errors.New("not found"))
 	submissionRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.Submission")).
 		Return(nil)
@@ -179,7 +179,7 @@ func TestCreate_NoDueDate(t *testing.T) {
 
 	assignmentRepo.On("FindByID", mock.Anything, uint(1), uint(0)).
 		Return(&models.Assignment{ID: 1, CourseID: 1, Name: "HW1", DueAt: nil}, nil)
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(10)).
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(10), uint(0)).
 		Return(nil, errors.New("not found"))
 	submissionRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.Submission")).
 		Return(nil)
@@ -220,7 +220,7 @@ func TestCreate_ResubmissionIncrementsAttempt(t *testing.T) {
 
 	assignmentRepo.On("FindByID", mock.Anything, uint(1), uint(0)).
 		Return(&models.Assignment{ID: 1, CourseID: 1, Name: "HW1"}, nil)
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(10)).
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(10), uint(0)).
 		Return(existingSub, nil)
 	submissionRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.Submission")).
 		Return(nil)
@@ -259,7 +259,7 @@ func TestGetByAssignmentAndUser(t *testing.T) {
 	assignmentRepo := new(mocks.MockAssignmentRepository)
 	enrollmentRepo := new(mocks.MockEnrollmentRepository)
 
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(10), uint(20)).
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(10), uint(20), uint(0)).
 		Return(expected, nil)
 
 	latePolicyRepo := new(mocks.MockLatePolicyRepository)
@@ -267,7 +267,7 @@ func TestGetByAssignmentAndUser(t *testing.T) {
 	gradingPeriodGroupRepo := new(mocks.MockGradingPeriodGroupRepository)
 	gradingPeriodRepo := new(mocks.MockGradingPeriodRepository)
 	svc := service.NewSubmissionService(submissionRepo, assignmentRepo, enrollmentRepo, latePolicyRepo, courseRepo, gradingPeriodGroupRepo, gradingPeriodRepo, nil)
-	result, err := svc.GetByAssignmentAndUser(context.Background(), 10, 20)
+	result, err := svc.GetByAssignmentAndUser(context.Background(), 10, 20, 0)
 
 	assert.NoError(t, err)
 	assert.Equal(t, expected, result)
@@ -321,7 +321,7 @@ func TestGrade_Success(t *testing.T) {
 	// Mock for grading period check (no due date → no period enforcement)
 	assignmentRepo.On("FindByID", mock.Anything, uint(10), uint(0)).
 		Return(&models.Assignment{ID: 10, CourseID: 1, Name: "HW1"}, nil)
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(10), uint(20)).
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(10), uint(20), uint(0)).
 		Return(existing, nil)
 	submissionRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.Submission")).
 		Return(nil)
@@ -357,7 +357,7 @@ func TestGrade_InvalidGrade(t *testing.T) {
 	assignmentRepo := new(mocks.MockAssignmentRepository)
 	enrollmentRepo := new(mocks.MockEnrollmentRepository)
 
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(10), uint(20)).
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(10), uint(20), uint(0)).
 		Return(existing, nil)
 
 	latePolicyRepo := new(mocks.MockLatePolicyRepository)
@@ -381,7 +381,7 @@ func TestGrade_NotFound_CreatesSubmission(t *testing.T) {
 	assignmentRepo.On("FindByID", mock.Anything, uint(10), uint(0)).
 		Return(&models.Assignment{ID: 10, CourseID: 1, Name: "HW1"}, nil)
 	// No existing submission — Grade() should create one
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(10), uint(20)).
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(10), uint(20), uint(0)).
 		Return(nil, errors.New("record not found"))
 	submissionRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.Submission")).
 		Return(nil)

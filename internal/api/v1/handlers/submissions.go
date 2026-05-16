@@ -178,7 +178,7 @@ func (h *SubmissionHandler) GetSubmission(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid user ID")
 	}
 
-	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID))
+	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "submission")
 	}
@@ -334,7 +334,7 @@ func (h *SubmissionHandler) UpdateSubmission(c *fiber.Ctx) error {
 
 	// Handle excused update
 	if input.Submission.Excused != nil {
-		submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID))
+		submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c))
 		if err != nil {
 			return responses.NotFound(c, "submission")
 		}
@@ -376,7 +376,7 @@ func (h *SubmissionHandler) CreateSubmissionComment(c *fiber.Ctx) error {
 	}
 
 	// Find the submission to get its ID
-	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID))
+	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "submission")
 	}
@@ -410,7 +410,7 @@ func (h *SubmissionHandler) ListSubmissionComments(c *fiber.Ctx) error {
 	}
 
 	// Find the submission to get its ID
-	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID))
+	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "submission")
 	}

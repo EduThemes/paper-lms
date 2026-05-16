@@ -34,9 +34,17 @@ func (r *submissionRepo) FindByID(ctx context.Context, id, accountID uint) (*mod
 	return &submission, nil
 }
 
-func (r *submissionRepo) FindByAssignmentAndUser(ctx context.Context, assignmentID, userID uint) (*models.Submission, error) {
+func (r *submissionRepo) FindByAssignmentAndUser(ctx context.Context, assignmentID, userID, accountID uint) (*models.Submission, error) {
 	var submission models.Submission
-	if err := r.db.WithContext(ctx).Where("assignment_id = ? AND user_id = ?", assignmentID, userID).First(&submission).Error; err != nil {
+	q := r.db.WithContext(ctx).Where("assignment_id = ? AND user_id = ?", assignmentID, userID)
+	if accountID != 0 {
+		// Scope through assignment->course->account_id; matches FindByID's
+		// 2-level subquery pattern. A cross-tenant assignment_id with a
+		// matching user_id will fail this lookup with no row returned (404
+		// at the handler), not 403, preserving the existence-leak contract.
+		q = q.Where("assignment_id IN (SELECT id FROM assignments WHERE course_id IN (SELECT id FROM courses WHERE account_id = ?))", accountID)
+	}
+	if err := q.First(&submission).Error; err != nil {
 		return nil, err
 	}
 	return &submission, nil

@@ -78,7 +78,7 @@ func TestCreateSubmission_Success(t *testing.T) {
 	assignmentRepo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(assignment, nil)
 
 	// No existing submission for this user+assignment.
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(1)).Return(nil, errors.New("not found"))
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(1), uint(0)).Return(nil, errors.New("not found"))
 	submissionRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.Submission")).Return(nil)
 
 	body := testutil.JSONBody(map[string]interface{}{
@@ -181,7 +181,8 @@ func TestGetSubmission_Success(t *testing.T) {
 		WorkflowState:  "submitted",
 	}
 
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(1)).Return(submission, nil)
+	// GetSubmission threads callerAccountID(c)=1 from the test's authStub.
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(1), uint(1)).Return(submission, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/courses/1/assignments/1/submissions/1", nil)
 
@@ -198,7 +199,7 @@ func TestGetSubmission_Success(t *testing.T) {
 func TestGetSubmission_NotFound(t *testing.T) {
 	app, submissionRepo, _, _, _, _ := setupSubmissionTest()
 
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(999)).Return(nil, errors.New("not found"))
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(999), uint(1)).Return(nil, errors.New("not found"))
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/courses/1/assignments/1/submissions/999", nil)
 
@@ -231,7 +232,7 @@ func TestUpdateSubmission_Grade(t *testing.T) {
 	// Grade calls isGradingPeriodClosed → assignmentRepo.FindByID (returns no DueAt, so period check skips)
 	assignmentRepo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(&models.Assignment{ID: 1, CourseID: 1, Name: "Essay 1"}, nil)
 	// Grade calls FindByAssignmentAndUser, then Update.
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2)).Return(submission, nil)
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2), uint(0)).Return(submission, nil)
 	submissionRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.Submission")).Return(nil)
 
 	body := testutil.JSONBody(map[string]interface{}{
@@ -264,7 +265,8 @@ func TestCreateSubmissionComment(t *testing.T) {
 		WorkflowState:  "submitted",
 	}
 
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2)).Return(submission, nil)
+	// CreateSubmissionComment threads callerAccountID(c)=1 from the test's authStub.
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2), uint(1)).Return(submission, nil)
 	commentRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.SubmissionComment")).Return(nil)
 	userRepo.On("FindByID", mock.Anything, uint(1)).Return(&models.User{ID: 1, Name: "Test Teacher"}, nil)
 
@@ -300,7 +302,8 @@ func TestListSubmissionComments(t *testing.T) {
 		WorkflowState:  "submitted",
 	}
 
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2)).Return(submission, nil)
+	// ListSubmissionComments threads callerAccountID(c)=1.
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2), uint(1)).Return(submission, nil)
 
 	comments := []models.SubmissionComment{
 		{ID: 1, SubmissionID: 1, AuthorID: 1, Comment: "Good job!"},

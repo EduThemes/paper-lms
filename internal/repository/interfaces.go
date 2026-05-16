@@ -169,7 +169,9 @@ type SubmissionRepository interface {
 	// 13.1.D — tenant scope via parent assignment->course. 0 means no tenant scope (internal callers only).
 	FindByID(ctx context.Context, id, accountID uint) (*models.Submission, error)
 	FindByIDs(ctx context.Context, ids []uint) ([]models.Submission, error)
-	FindByAssignmentAndUser(ctx context.Context, assignmentID, userID uint) (*models.Submission, error)
+	// 13.x.2.1 — tenant-scoped via parent assignment->course->account_id.
+	// 0 means no tenant scope (internal callers only).
+	FindByAssignmentAndUser(ctx context.Context, assignmentID, userID, accountID uint) (*models.Submission, error)
 	FindByAssignmentAndUserIDs(ctx context.Context, assignmentID uint, userIDs []uint) ([]models.Submission, error)
 	// ListByUserAndAssignmentIDs is the snapshot loader's targeted read:
 	// pulls one user's submissions for a small set of assignments at once,

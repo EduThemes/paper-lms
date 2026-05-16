@@ -245,13 +245,12 @@ func TestTenantIsolation_GetAssignment(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTenantIsolation_GetSubmission(t *testing.T) {
-	// SubmissionRepository.FindByAssignmentAndUser does NOT accept an
-	// accountID arg in its current signature. The handler reads the
-	// submission via SubmissionService.GetByAssignmentAndUser which
-	// routes to that signature-less call. Until the signature is
-	// widened to accept accountID and the handler is updated to pass
-	// `callerAccountID(c)`, the cross-tenant cases cannot be enforced
-	// at the repo boundary — the route is an open leak.
+	// 13.x.2.1 (2026-05-16): SubmissionRepository.FindByAssignmentAndUser
+	// now accepts accountID; SubmissionService.GetByAssignmentAndUser
+	// threads it from the handler via callerAccountID(c). The repo
+	// rejects a cross-tenant (assignment_id, user_id) pair with
+	// gorm.ErrRecordNotFound → the service returns the error → the
+	// handler returns 404. Previously a LEAK; now enforced.
 	statusFn := func(callerAccount, resourceID uint) int {
 		submissionRepo := new(mocks.MockSubmissionRepository)
 		assignmentRepo := new(mocks.MockAssignmentRepository)
@@ -264,10 +263,24 @@ func TestTenantIsolation_GetSubmission(t *testing.T) {
 		gpgRepo := new(mocks.MockGradingPeriodGroupRepository)
 		gpRepo := new(mocks.MockGradingPeriodRepository)
 
-		// Submission is always returnable — there's no accountID in
-		// the call signature to filter on. This captures the LEAK.
-		submissionRepo.On("FindByAssignmentAndUser", mock.Anything, resourceID, mock.AnythingOfType("uint")).
-			Return(&models.Submission{ID: 1, AssignmentID: resourceID, UserID: userInA, WorkflowState: "submitted"}, nil)
+		// Simulate the repo's tenant filter: the resource (assignment) is
+		// owned by resInA → tenantA, resInB → tenantB. If the caller's
+		// accountID matches the resource's owner, the row is returned;
+		// otherwise the repo returns a not-found error, which the handler
+		// surfaces as 404.
+		var expectedTenant uint
+		if resourceID == resInA {
+			expectedTenant = tenantA
+		} else {
+			expectedTenant = tenantB
+		}
+		if callerAccount == expectedTenant {
+			submissionRepo.On("FindByAssignmentAndUser", mock.Anything, resourceID, mock.AnythingOfType("uint"), callerAccount).
+				Return(&models.Submission{ID: 1, AssignmentID: resourceID, UserID: userInA, WorkflowState: "submitted"}, nil)
+		} else {
+			submissionRepo.On("FindByAssignmentAndUser", mock.Anything, resourceID, mock.AnythingOfType("uint"), callerAccount).
+				Return(nil, errors.New("record not found"))
+		}
 
 		svc := service.NewSubmissionService(submissionRepo, assignmentRepo, enrollmentRepo, latePolicyRepo, courseRepo, gpgRepo, gpRepo, nil)
 		h := handlers.NewSubmissionHandler(svc, commentRepo, attachmentRepo, userRepo, assignmentRepo, nil, nil, nil, nil, nil)
@@ -280,17 +293,12 @@ func TestTenantIsolation_GetSubmission(t *testing.T) {
 		return resp.StatusCode
 	}
 
-	// Document the leak as a known failure of the cross-tenant
-	// matrix: SubmissionRepository.FindByAssignmentAndUser has no
-	// accountID arg, so the repo can't filter and the handler can't
-	// pass through callerAccountID(c). All 4 cases return 200.
-	// Asserting the LEAK here so the test surfaces the gap rather
-	// than hiding it; the integration team flips these to 404 once
-	// the signature is widened.
-	runMatrix(t, "GET /submissions/:user_id (KNOWN LEAK — repo signature lacks accountID)", []matrixCase{
+	// LEAK closed: cross-tenant cases now return 404, matching the
+	// 13.1.E existence-leak contract.
+	runMatrix(t, "GET /submissions/:user_id (13.x.2.1 — enforced)", []matrixCase{
 		{tenantA, resInA, http.StatusOK, "tenantA caller, tenantA resource"},
-		{tenantA, resInB, http.StatusOK, "tenantA caller, tenantB resource (LEAK — should be 404)"},
-		{tenantB, resInA, http.StatusOK, "tenantB caller, tenantA resource (LEAK — should be 404)"},
+		{tenantA, resInB, http.StatusNotFound, "tenantA caller, tenantB resource"},
+		{tenantB, resInA, http.StatusNotFound, "tenantB caller, tenantA resource"},
 		{tenantB, resInB, http.StatusOK, "tenantB caller, tenantB resource"},
 	}, statusFn)
 }

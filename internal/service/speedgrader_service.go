@@ -146,7 +146,9 @@ func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, a
 // GetStudentSubmission returns a single student's submission with comments
 // for the given assignment.
 func (s *SpeedGraderService) GetStudentSubmission(ctx context.Context, assignmentID, userID uint) (*SpeedGraderStudentSubmission, error) {
-	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID)
+	// accountID=0: SpeedGrader's tenant scope is verified at the handler when
+	// it loads the parent assignment; this read trusts that upstream check.
+	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, 0)
 	if err != nil {
 		return &SpeedGraderStudentSubmission{
 			Submission: nil,

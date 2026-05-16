@@ -27,8 +27,8 @@ func (m *MockSubmissionRepository) FindByID(ctx context.Context, id, accountID u
 	return args.Get(0).(*models.Submission), args.Error(1)
 }
 
-func (m *MockSubmissionRepository) FindByAssignmentAndUser(ctx context.Context, assignmentID, userID uint) (*models.Submission, error) {
-	args := m.Called(ctx, assignmentID, userID)
+func (m *MockSubmissionRepository) FindByAssignmentAndUser(ctx context.Context, assignmentID, userID, accountID uint) (*models.Submission, error) {
+	args := m.Called(ctx, assignmentID, userID, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

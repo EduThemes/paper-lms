@@ -63,7 +63,7 @@ func TestGetSubmission_FiresLogPIIAccess(t *testing.T) {
 		Attempt:        1,
 		WorkflowState:  "submitted",
 	}
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(123)).Return(submission, nil)
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(123), uint(1)).Return(submission, nil)
 
 	// The audit lock: the handler must Create exactly one PIIAccessLog
 	// with accessor=7 (the caller) and student=123 (the submission's
