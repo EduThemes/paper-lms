@@ -64,6 +64,16 @@ type User struct {
 	// never used; every real-world TOTP code lands in a window > 0.
 	TOTPLastUsedWindow int64 `json:"-" gorm:"not null;default:0"`
 
+	// RequiresParentalConsent (Phase 13.4 / Wave C.2) — set true at
+	// signup when the tenant is coppa_strict and the user's age
+	// verification indicates is_under_13 and the registration request
+	// did NOT carry a verified parental_consent_token. Migration 000056
+	// adds the column with DEFAULT false; existing users are not gated.
+	// The login path SHOULD refuse to mint a session while this flag
+	// is true (wired separately — this column is the gate, the login
+	// enforcement is a Phase 13.4 follow-up).
+	RequiresParentalConsent bool `json:"requires_parental_consent" gorm:"not null;default:false"`
+
 	ResetToken          string     `json:"-"`
 	ResetTokenExpiresAt *time.Time `json:"-"`
 	CreatedAt           time.Time  `json:"created_at"`

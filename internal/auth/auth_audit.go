@@ -110,6 +110,18 @@ func (a *AuthAudit) AccountLinkedViaFederation(ctx context.Context, userID uint,
 	}, meta)
 }
 
+// RegistrationCompleted (Phase 13.4 / Wave C.2) fires when a public
+// signup creates a new user row. status is one of "active" or
+// "pending_parental_consent" — the latter when the tenant is
+// coppa_strict and the registrant is under 13 without a verified
+// parental_consent_token. Pipeline integration deferred; the handler
+// calls this directly for audit symmetry with the login path.
+func (a *AuthAudit) RegistrationCompleted(ctx context.Context, userID uint, status string, meta RequestMeta) {
+	a.emit(ctx, "auth.registration_completed", userID, "User", userID, "user_registered", map[string]string{
+		"status": status,
+	}, meta)
+}
+
 func (a *AuthAudit) emit(ctx context.Context, eventType string, userID uint, contextType string, contextID uint, action string, payload map[string]string, meta RequestMeta) {
 	if a.svc == nil {
 		// Defensive: tests sometimes wire a nil audit service. Don't

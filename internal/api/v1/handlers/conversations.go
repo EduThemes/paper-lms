@@ -5,16 +5,81 @@ import (
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
 
 type ConversationHandler struct {
 	conversationService *service.ConversationService
 	userService         *service.UserService
+	// accountRepo + enrollmentRepo drive the 13.4 COPPA gate on
+	// CreateConversation. Both nil-safe: a nil accountRepo skips the
+	// gate (development fallback / older tests). Production wires both.
+	accountRepo    repository.AccountRepository
+	enrollmentRepo repository.EnrollmentRepository
 }
 
-func NewConversationHandler(conversationService *service.ConversationService, userService *service.UserService) *ConversationHandler {
-	return &ConversationHandler{conversationService: conversationService, userService: userService}
+func NewConversationHandler(conversationService *service.ConversationService, userService *service.UserService, accountRepo repository.AccountRepository, enrollmentRepo repository.EnrollmentRepository) *ConversationHandler {
+	return &ConversationHandler{
+		conversationService: conversationService,
+		userService:         userService,
+		accountRepo:         accountRepo,
+		enrollmentRepo:      enrollmentRepo,
+	}
+}
+
+// isCOPPATenant returns true when the account is in a privacy mode that
+// requires the conversation gate: explicit CoppaStrict OR K-12 tenant
+// modes (k5, m68). Mirrors the ai_assist.go gate.
+func isCOPPATenant(account *models.Account) bool {
+	if account == nil {
+		return false
+	}
+	return account.CoppaStrict || string(account.TenantMode) == "k5" || string(account.TenantMode) == "m68"
+}
+
+// senderIsTeacherInSharedCourseWithAll returns true when the sender holds
+// a Teacher/TA enrollment in at least one course where every recipient
+// is also enrolled (any role). Used to gate student-to-student DMs in
+// COPPA tenants.
+func (h *ConversationHandler) senderIsTeacherInSharedCourseWithAll(c *fiber.Ctx, senderID uint, recipients []uint) bool {
+	if h.enrollmentRepo == nil {
+		// Fail-closed: the gate is on, but we can't verify. Reject the
+		// DM rather than leak past the policy.
+		return false
+	}
+	senderEnrollments, err := h.enrollmentRepo.ListByUserID(c.Context(), senderID)
+	if err != nil {
+		return false
+	}
+	// Collect the courses where sender is a teacher/TA.
+	teacherCourses := make(map[uint]bool)
+	for _, e := range senderEnrollments {
+		if e.Type == "TeacherEnrollment" || e.Type == "TaEnrollment" {
+			teacherCourses[e.CourseID] = true
+		}
+	}
+	if len(teacherCourses) == 0 {
+		return false
+	}
+	// For every recipient, check they share at least one of those courses.
+	for _, rid := range recipients {
+		recipientEnrollments, err := h.enrollmentRepo.ListByUserID(c.Context(), rid)
+		if err != nil {
+			return false
+		}
+		shared := false
+		for _, e := range recipientEnrollments {
+			if teacherCourses[e.CourseID] {
+				shared = true
+				break
+			}
+		}
+		if !shared {
+			return false
+		}
+	}
+	return true
 }
 
 func conversationToJSON(c *models.Conversation) fiber.Map {
@@ -130,6 +195,24 @@ func (h *ConversationHandler) CreateConversation(c *fiber.Ctx) error {
 	}
 
 	userID, _ := c.Locals("user_id").(uint)
+
+	// 13.4 — COPPA gate. In tenants with coppa_strict=true OR
+	// tenant_mode in {k5,m68}, student-to-student DMs are a non-starter
+	// without parental consent. The narrow exception is teacher-led
+	// communication: the sender must be a teacher/TA in a course where
+	// every recipient is enrolled. Anything else is refused outright.
+	if h.accountRepo != nil {
+		accountID, _ := c.Locals("account_id").(uint)
+		if accountID > 0 {
+			if account, err := h.accountRepo.FindByID(c.Context(), accountID); err == nil && account != nil {
+				if isCOPPATenant(account) {
+					if !h.senderIsTeacherInSharedCourseWithAll(c, userID, input.Conversation.Recipients) {
+						return responses.Error(c, fiber.StatusForbidden, "Direct messages between students require parental consent in this school's privacy mode.")
+					}
+				}
+			}
+		}
+	}
 
 	conv := &models.Conversation{
 		Subject:         input.Conversation.Subject,

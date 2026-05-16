@@ -11,6 +11,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/auth"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
+	"github.com/EduThemes/paper-lms/internal/repository/postgres"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
 
@@ -26,10 +27,30 @@ type UserHandler struct {
 	// uniformly with the federated paths. nil-safe: when not wired
 	// the handler falls back to the pre-9-PRE direct-mint flow.
 	loginPipeline *auth.LoginPipeline
+
+	// Phase 13.4 (Wave C.2) — COPPA signup gate dependencies. All
+	// nil-safe: a nil accountRepo skips the gate entirely (the older
+	// development path and existing tests still work). Production
+	// wires the full set.
+	accountRepo         repository.AccountRepository
+	ageVerifyRepo       postgres.AgeVerificationRepository
+	parentalConsentRepo postgres.ParentalConsentRepository
+	authAudit           *auth.AuthAudit
 }
 
 func NewUserHandler(userService *service.UserService, jwtSecret string, environment string, tokenBlacklist *service.TokenBlacklist, auditService *service.AuditService, loginPipeline *auth.LoginPipeline) *UserHandler {
 	return &UserHandler{userService: userService, jwtSecret: jwtSecret, environment: environment, tokenBlacklist: tokenBlacklist, auditService: auditService, loginPipeline: loginPipeline}
+}
+
+// WithCOPPADeps wires the Phase 13.4 signup gate. Optional builder
+// method so the existing NewUserHandler call sites (and tests) keep
+// working without a six-arg explosion. Returns the handler for chaining.
+func (h *UserHandler) WithCOPPADeps(accountRepo repository.AccountRepository, ageVerifyRepo postgres.AgeVerificationRepository, parentalConsentRepo postgres.ParentalConsentRepository, authAudit *auth.AuthAudit) *UserHandler {
+	h.accountRepo = accountRepo
+	h.ageVerifyRepo = ageVerifyRepo
+	h.parentalConsentRepo = parentalConsentRepo
+	h.authAudit = authAudit
+	return h
 }
 
 // setAuthCookie sets an httpOnly secure cookie with the JWT token.
@@ -66,9 +87,16 @@ type loginRequest struct {
 }
 
 type registerRequest struct {
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Name                  string `json:"name"`
+	Email                 string `json:"email"`
+	Password              string `json:"password"`
+	// ParentalConsentToken (Phase 13.4 / Wave C.2) carries the token a
+	// parent received via email after a prior consent request. When
+	// the signup tenant is coppa_strict and the user's age verification
+	// indicates is_under_13, this token MUST be present and valid
+	// (status="granted", consent_type="data_collection"); otherwise
+	// the new row is created in pending_parental_consent state.
+	ParentalConsentToken  string `json:"parental_consent_token"`
 }
 
 func (h *UserHandler) Login(c *fiber.Ctx) error {
@@ -163,6 +191,55 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 		return responses.BadRequest(c, err.Error())
 	}
 
+	// Phase 13.4 (Wave C.2) — COPPA signup gate. When the tenant is
+	// coppa_strict AND the user's age verification indicates is_under_13,
+	// require a valid parental_consent_token. Without it, mark the user
+	// as pending_parental_consent (no auto-login) and return 201 with a
+	// message instructing the user that a parent must verify.
+	//
+	// The user row is already created at this point (because the older
+	// Register flow ran first and we re-use the same email-uniqueness
+	// path). We then update the requires_parental_consent flag in-place
+	// before issuing — or withholding — the session token.
+	meta := auth.RequestMeta{IPAddress: c.IP(), UserAgent: c.Get("User-Agent")}
+	if h.accountRepo != nil && user.AccountID > 0 {
+		if account, accErr := h.accountRepo.FindByID(c.Context(), user.AccountID); accErr == nil && account != nil && account.CoppaStrict {
+			isUnder13 := false
+			if h.ageVerifyRepo != nil {
+				if av, avErr := h.ageVerifyRepo.FindByUserID(c.Context(), user.ID); avErr == nil && av != nil {
+					isUnder13 = av.IsUnder13
+				}
+			}
+			if isUnder13 {
+				tokenValid := false
+				if h.parentalConsentRepo != nil && input.ParentalConsentToken != "" {
+					if consent, cErr := h.parentalConsentRepo.FindByToken(c.Context(), input.ParentalConsentToken); cErr == nil && consent != nil {
+						if consent.Status == "granted" && consent.ConsentedAt != nil {
+							tokenValid = true
+						}
+					}
+				}
+				if !tokenValid {
+					// Mark the row as pending; the user cannot be auto-logged-in.
+					user.RequiresParentalConsent = true
+					_ = h.userService.Update(c.Context(), user)
+					if h.authAudit != nil {
+						h.authAudit.RegistrationCompleted(c.Context(), user.ID, "pending_parental_consent", meta)
+					}
+					return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+						"message": "Account created in pending state. A parent must verify the consent token before this account can be used.",
+						"user": fiber.Map{
+							"id":                       user.ID,
+							"name":                     user.Name,
+							"email":                    user.Email,
+							"requires_parental_consent": true,
+						},
+					})
+				}
+			}
+		}
+	}
+
 	token, err := auth.GenerateToken(user, h.jwtSecret)
 	if err != nil {
 		return responses.InternalError(c, "Could not generate token")
@@ -170,6 +247,14 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 
 	// Set httpOnly cookie for browser-based auth
 	h.setAuthCookie(c, token)
+
+	// Phase 13.4 (Wave C.2) — audit symmetry with the login path.
+	// Pipeline extension to cover Register is the cleaner long-term
+	// fix; firing the audit event manually here closes the gap with
+	// minimal blast radius.
+	if h.authAudit != nil {
+		h.authAudit.RegistrationCompleted(c.Context(), user.ID, "active", meta)
+	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"token": token,

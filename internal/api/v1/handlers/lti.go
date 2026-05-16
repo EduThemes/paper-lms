@@ -10,6 +10,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
+	"github.com/EduThemes/paper-lms/internal/repository/postgres"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
 
@@ -19,6 +20,11 @@ type LTIHandler struct {
 	nrpsService *service.LTINRPSService
 	toolRepo    repository.ContextExternalToolRepository
 	configRepo  repository.LTIToolConfigurationRepository
+	// 13.4 (Wave C.2) — COPPA gate dependencies. All nil-safe; nil
+	// repos skip the gate (development fallback). Production wires all.
+	userRepo            repository.UserRepository
+	accountRepo         repository.AccountRepository
+	parentalConsentRepo postgres.ParentalConsentRepository
 }
 
 func NewLTIHandler(
@@ -27,14 +33,65 @@ func NewLTIHandler(
 	nrpsService *service.LTINRPSService,
 	toolRepo repository.ContextExternalToolRepository,
 	configRepo repository.LTIToolConfigurationRepository,
+	userRepo repository.UserRepository,
+	accountRepo repository.AccountRepository,
+	parentalConsentRepo postgres.ParentalConsentRepository,
 ) *LTIHandler {
 	return &LTIHandler{
-		ltiService:  ltiService,
-		agsService:  agsService,
-		nrpsService: nrpsService,
-		toolRepo:    toolRepo,
-		configRepo:  configRepo,
+		ltiService:          ltiService,
+		agsService:          agsService,
+		nrpsService:         nrpsService,
+		toolRepo:            toolRepo,
+		configRepo:          configRepo,
+		userRepo:            userRepo,
+		accountRepo:         accountRepo,
+		parentalConsentRepo: parentalConsentRepo,
 	}
+}
+
+// gateLTILaunchForCOPPA enforces the 13.4 LTI parental-consent gate.
+// Returns true (and writes a 403) when the launch is denied; false when
+// the launch may proceed. Nil-safe: if the COPPA dependencies aren't
+// wired, the gate is bypassed (development / older test paths).
+//
+// Rule (locked 2026-05-15): in tenants with CoppaStrict=true OR
+// tenant_mode in {k5,m68}, the calling user MUST have a granted
+// ParentalConsent row with consent_type = "third_party_sharing". Without
+// it, LTI tool launches (which dispatch student data to third-party
+// vendors) are refused.
+func (h *LTIHandler) gateLTILaunchForCOPPA(c *fiber.Ctx, userID uint) bool {
+	if h.accountRepo == nil || h.userRepo == nil {
+		return false
+	}
+	user, err := h.userRepo.FindByID(c.Context(), userID)
+	if err != nil || user == nil {
+		// Unknown user — let the downstream launch fail naturally.
+		return false
+	}
+	account, err := h.accountRepo.FindByID(c.Context(), user.AccountID)
+	if err != nil || account == nil {
+		return false
+	}
+	if !isCOPPATenant(account) {
+		return false
+	}
+	// COPPA tenant: require granted third_party_sharing consent.
+	if h.parentalConsentRepo == nil {
+		_ = responses.Error(c, fiber.StatusForbidden, "LTI tool launch requires parental consent for third-party data sharing.")
+		return true
+	}
+	consents, err := h.parentalConsentRepo.FindByStudentID(c.Context(), userID)
+	if err != nil {
+		_ = responses.Error(c, fiber.StatusForbidden, "LTI tool launch requires parental consent for third-party data sharing.")
+		return true
+	}
+	for _, cn := range consents {
+		if cn.ConsentType == "third_party_sharing" && cn.Status == "granted" {
+			return false
+		}
+	}
+	_ = responses.Error(c, fiber.StatusForbidden, "LTI tool launch requires parental consent for third-party data sharing.")
+	return true
 }
 
 // --------------------------------------------------------------------------
@@ -97,6 +154,15 @@ func (h *LTIHandler) OIDCLogin(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "target_link_uri is required")
 	}
 
+	// 13.4 (Wave C.2) — COPPA gate on the initiation step too. Refusing
+	// at /oidc/login avoids round-tripping the user's identity to the
+	// tool's OIDC endpoint before we decide to refuse.
+	if userID, parseErr := strconv.ParseUint(loginHint, 10, 64); parseErr == nil {
+		if h.gateLTILaunchForCOPPA(c, uint(userID)) {
+			return nil
+		}
+	}
+
 	redirectURL, err := h.ltiService.InitiateLogin(
 		c.Context(),
 		clientID,
@@ -157,6 +223,12 @@ func (h *LTIHandler) Launch(c *fiber.Ctx) error {
 	userID, err := strconv.ParseUint(loginHint, 10, 64)
 	if err != nil {
 		return responses.BadRequest(c, "Invalid login_hint")
+	}
+
+	// 13.4 (Wave C.2) — COPPA gate. K-12 tenant + no granted
+	// third_party_sharing parental consent = refused.
+	if h.gateLTILaunchForCOPPA(c, uint(userID)) {
+		return nil
 	}
 
 	// Parse the LTI message hint to extract course ID and resource link ID.
@@ -317,6 +389,11 @@ func (h *LTIHandler) LaunchDirect(c *fiber.Ctx) error {
 	userID, err := strconv.ParseUint(loginHint, 10, 64)
 	if err != nil {
 		return responses.BadRequest(c, "Invalid login_hint")
+	}
+
+	// 13.4 (Wave C.2) — COPPA gate.
+	if h.gateLTILaunchForCOPPA(c, uint(userID)) {
+		return nil
 	}
 
 	// Parse the message hint to extract course ID, resource link ID, and developer key ID

@@ -603,7 +603,8 @@ func main() {
 	passkeyHandler := handlers.NewPasskeyHandler(passkeyEngine, userRepo, userWebauthnCredRepo, loginPipeline, authAudit, cfg.JWTSecret)
 
 	// Initialize handlers
-	userHandler := handlers.NewUserHandler(userService, cfg.JWTSecret, cfg.Environment, tokenBlacklist, auditService, loginPipeline)
+	userHandler := handlers.NewUserHandler(userService, cfg.JWTSecret, cfg.Environment, tokenBlacklist, auditService, loginPipeline).
+		WithCOPPADeps(accountRepo, ageVerificationRepo, parentalConsentRepo, authAudit)
 	accountHandler := handlers.NewAccountHandler(accountRepo)
 	courseHandler := handlers.NewCourseHandler(courseService, enrollmentService)
 	sectionHandler := handlers.NewSectionHandler(sectionRepo)
@@ -626,7 +627,7 @@ func main() {
 	accessTokenHandler := handlers.NewAccessTokenHandler(accessTokenService)
 	oauth2Handler := handlers.NewOAuth2Handler(oauth2Service, devKeyService, accessTokenService, userService)
 	externalToolHandler := handlers.NewExternalToolHandler(externalToolService, devKeyService)
-	ltiHandler := handlers.NewLTIHandler(ltiService, agsService, nrpsService, externalToolRepo, ltiConfigRepo)
+	ltiHandler := handlers.NewLTIHandler(ltiService, agsService, nrpsService, externalToolRepo, ltiConfigRepo, userRepo, accountRepo, parentalConsentRepo)
 	// handlers
 	discussionHandler := handlers.NewDiscussionHandler(discussionService)
 	discussionEntryHandler := handlers.NewDiscussionEntryHandler(discussionService)
@@ -645,7 +646,7 @@ func main() {
 	latePolicyHandler := handlers.NewLatePolicyHandler(latePolicyService)
 	// handlers
 	calendarEventHandler := handlers.NewCalendarEventHandler(calendarService, authz)
-	conversationHandler := handlers.NewConversationHandler(conversationService, userService)
+	conversationHandler := handlers.NewConversationHandler(conversationService, userService, accountRepo, enrollmentRepo)
 	notificationHandler := handlers.NewNotificationHandler(notificationService)
 	// handlers
 	contentMigrationHandler := handlers.NewContentMigrationHandler(contentMigrationService)
