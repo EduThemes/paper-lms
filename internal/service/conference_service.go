@@ -50,8 +50,10 @@ func (s *ConferenceService) Create(ctx context.Context, conference *models.Confe
 	return s.confRepo.Create(ctx, conference)
 }
 
-func (s *ConferenceService) GetByID(ctx context.Context, id uint) (*models.Conference, error) {
-	conference, err := s.confRepo.FindByID(ctx, id, 0)
+// GetByID is the public read path. Sprint 2.3 threaded accountID
+// through from the handler; pass 0 from internal callers.
+func (s *ConferenceService) GetByID(ctx context.Context, id, accountID uint) (*models.Conference, error) {
+	conference, err := s.confRepo.FindByID(ctx, id, accountID)
 	if err != nil {
 		return nil, errors.New("conference not found")
 	}
