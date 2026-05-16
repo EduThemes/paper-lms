@@ -347,11 +347,11 @@ func TestTenantIsolation_GetDiscussionTopic(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTenantIsolation_GetConversation(t *testing.T) {
-	// Conversations are gated by participant membership, NOT
-	// directly by account_id. requireParticipant returns 403 to
-	// non-participants — which is the FERPA-meaningful existence
-	// leak vs the 404 contract. This test captures that behavior so
-	// the gap is visible in CI.
+	// 13.x.2.2 (2026-05-16): conversations are gated by participant
+	// membership, NOT directly by account_id. requireParticipant now
+	// returns 404 to non-participants (was 403 pre-13.x.2.2) so the
+	// existence of a conversation in another tenant is not leaked
+	// across the boundary — matches the 13.1.E contract.
 	statusFn := func(callerAccount, resourceID uint) int {
 		convRepo := new(mocks.MockConversationRepository)
 		partRepo := new(mocks.MockConversationParticipantRepository)
@@ -391,10 +391,10 @@ func TestTenantIsolation_GetConversation(t *testing.T) {
 		return resp.StatusCode
 	}
 
-	runMatrix(t, "GET /conversations/:id (returns 403 not 404 on cross-tenant — existence leak)", []matrixCase{
+	runMatrix(t, "GET /conversations/:id (13.x.2.2 — 404 not 403 on cross-tenant)", []matrixCase{
 		{tenantA, resInA, http.StatusOK, "tenantA caller, tenantA resource"},
-		{tenantA, resInB, http.StatusForbidden, "tenantA caller, tenantB resource (LEAKS via 403)"},
-		{tenantB, resInA, http.StatusForbidden, "tenantB caller, tenantA resource (LEAKS via 403)"},
+		{tenantA, resInB, http.StatusNotFound, "tenantA caller, tenantB resource"},
+		{tenantB, resInA, http.StatusNotFound, "tenantB caller, tenantA resource"},
 		{tenantB, resInB, http.StatusOK, "tenantB caller, tenantB resource"},
 	}, statusFn)
 }

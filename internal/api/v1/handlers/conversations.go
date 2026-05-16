@@ -110,18 +110,21 @@ func conversationMessageToJSON(m *models.ConversationMessage) fiber.Map {
 }
 
 // requireParticipant checks the authenticated user is a participant of the conversation.
+// Non-participants get 404, not 403 — surfacing a 403 leaks the existence of the
+// conversation across the tenant boundary and violates the 13.1.E contract. The
+// not-found shape is also consistent with cross-tenant FindByID misses elsewhere.
 func (h *ConversationHandler) requireParticipant(c *fiber.Ctx, conversationID uint) error {
 	userID, _ := c.Locals("user_id").(uint)
 	participants, err := h.conversationService.GetParticipants(c.Context(), conversationID)
 	if err != nil {
-		return responses.Error(c, fiber.StatusForbidden, "Could not verify conversation access")
+		return responses.NotFound(c, "conversation")
 	}
 	for _, p := range participants {
 		if p.UserID == userID {
 			return nil
 		}
 	}
-	return responses.Error(c, fiber.StatusForbidden, "You are not a participant in this conversation")
+	return responses.NotFound(c, "conversation")
 }
 
 func (h *ConversationHandler) resolveParticipants(c *fiber.Ctx, conversationID uint) []fiber.Map {
