@@ -36,7 +36,7 @@ func setupConversationHandler(callerID, accountID uint) (
 
 	conversationService := service.NewConversationService(convRepo, partRepo, msgRepo)
 	userService := service.NewUserService(userRepo)
-	h := handlers.NewConversationHandler(conversationService, userService, accountRepo, enrollRepo)
+	h := handlers.NewConversationHandler(conversationService, userService, accountRepo, enrollRepo, nil)
 
 	app := testutil.SetupTestApp()
 	app.Use(func(c *fiber.Ctx) error {
