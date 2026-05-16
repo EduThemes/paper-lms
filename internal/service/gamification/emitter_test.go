@@ -57,12 +57,19 @@ func setupEmitterFixture(t *testing.T, cooldownSeconds *int) emitterFixture {
 		t.Fatalf("look up xp currency: %v", err)
 	}
 
+	// Course row — 13.2 added assignments_course_id_fkey, so an
+	// orphan course_id breaks the assignment insert below.
+	course := models.Course{Name: "Test Course", AccountID: tenantID, WorkflowState: "available"}
+	if err := g.Create(&course).Error; err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+
 	// Assignment row — only the submission predicate reads it (indirectly,
 	// by id), but ListByUserAndAssignmentIDs walks the submissions table.
 	// We still create a real Assignment so the FK is satisfied if any
 	// later check needs it.
 	pointsPossible := 100.0
-	assignment := models.Assignment{Name: "Reading 1", CourseID: 1, WorkflowState: "published", PointsPossible: &pointsPossible}
+	assignment := models.Assignment{Name: "Reading 1", CourseID: course.ID, WorkflowState: "published", PointsPossible: &pointsPossible}
 	if err := g.Create(&assignment).Error; err != nil {
 		t.Fatalf("create assignment: %v", err)
 	}

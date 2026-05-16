@@ -38,6 +38,16 @@ func TestFilterPublicLeaderboardCandidates(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewUserRepository(g)
 
+	// Seed the root account so users.account_id FK (000052) resolves —
+	// User.BeforeCreate defaults AccountID to 1 when unset.
+	if err := g.Exec(
+		`INSERT INTO accounts (id, name, workflow_state, mfa_policy, default_locale, tenant_mode, max_upload_size_mb)
+		 VALUES (1, 'Root', 'active', 'off', 'en', 'higher_ed', 500)
+		 ON CONFLICT (id) DO NOTHING`,
+	).Error; err != nil {
+		t.Fatalf("seed root account: %v", err)
+	}
+
 	// Seed 4 users: two opted in (5, 6), two opted out (7, 8).
 	for _, u := range []models.User{
 		{ID: 5, Name: "In Alice", LoginID: "alice@in.test", Email: "alice@in.test", PasswordHash: "x", Role: "user", LeaderboardOptOut: false},

@@ -72,9 +72,13 @@ func TestLoadSnapshot_Assignments(t *testing.T) {
 	defer cleanup()
 
 	user := seedUser(t, g, "snap-assign@example.com")
+	course := models.Course{Name: "Snapshot Course", AccountID: user.AccountID, WorkflowState: "available"}
+	if err := g.Create(&course).Error; err != nil {
+		t.Fatalf("create course: %v", err)
+	}
 
 	assignment := models.Assignment{
-		CourseID:      1,
+		CourseID:      course.ID,
 		Name:          "Snapshot Test Assignment",
 		WorkflowState: "published",
 	}
@@ -330,9 +334,12 @@ func TestLoadSnapshot_QuizAttempts(t *testing.T) {
 
 // seedUser inserts a minimal users row and returns the persisted record.
 // The unique login_id is derived from the supplied email so multiple
-// users in one test don't collide.
+// users in one test don't collide. Also ensures a parent account row
+// exists so the users.account_id FK (added in migration 000052) holds.
+// User.BeforeCreate defaults AccountID to 1 when unset.
 func seedUser(t *testing.T, g *gorm.DB, email string) models.User {
 	t.Helper()
+	ensureRootAccount(t, g)
 	user := models.User{
 		Name:    "Snap Test " + email,
 		Email:   email,
@@ -346,4 +353,28 @@ func seedUser(t *testing.T, g *gorm.DB, email string) models.User {
 		t.Fatalf("create user: %v", err)
 	}
 	return user
+}
+
+// ensureRootAccount inserts an accounts row with id=1 if one is not
+// already present. The BeforeCreate hook on User defaults AccountID=1
+// for any seed that doesn't set it; that FK target needs to exist.
+func ensureRootAccount(t *testing.T, g *gorm.DB) {
+	t.Helper()
+	var n int64
+	if err := g.Model(&models.Account{}).Where("id = ?", 1).Count(&n).Error; err != nil {
+		t.Fatalf("count root account: %v", err)
+	}
+	if n > 0 {
+		return
+	}
+	// Use raw SQL so the id=1 collides with the FK target deterministically,
+	// even on a database where the bigserial sequence would otherwise start
+	// elsewhere.
+	if err := g.Exec(
+		`INSERT INTO accounts (id, name, workflow_state, mfa_policy, default_locale, tenant_mode, max_upload_size_mb)
+		 VALUES (1, 'Root', 'active', 'off', 'en', 'higher_ed', 500)
+		 ON CONFLICT (id) DO NOTHING`,
+	).Error; err != nil {
+		t.Fatalf("seed root account: %v", err)
+	}
 }

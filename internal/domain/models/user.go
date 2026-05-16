@@ -1,7 +1,10 @@
 package models
 
 import (
+	"crypto/rand"
 	"time"
+
+	"gorm.io/gorm"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -78,6 +81,30 @@ type User struct {
 	ResetTokenExpiresAt *time.Time `json:"-"`
 	CreatedAt           time.Time  `json:"created_at"`
 	UpdatedAt           time.Time  `json:"updated_at"`
+}
+
+// BeforeCreate mirrors the SQL DEFAULTs from migrations 000046 and 000052
+// in Go. WebauthnUserHandle is NOT NULL with DB DEFAULT gen_random_bytes(64),
+// but GORMs INSERT serializes empty []byte as NULL (not omitted) so the
+// DB DEFAULT never fires. AccountID is NOT NULL with FK to accounts(id);
+// test fixtures that bypass UserService.Register need a sensible default
+// so they land on the seeded tenant rather than 0.
+//
+// UserService.Register sets both fields explicitly — this hook is the
+// belt-and-suspenders for raw gorm.Create calls in tests + admin import
+// paths that may forget.
+func (u *User) BeforeCreate(tx *gorm.DB) error {
+	if len(u.WebauthnUserHandle) == 0 {
+		buf := make([]byte, 64)
+		if _, err := rand.Read(buf); err != nil {
+			return err
+		}
+		u.WebauthnUserHandle = buf
+	}
+	if u.AccountID == 0 {
+		u.AccountID = 1
+	}
+	return nil
 }
 
 func (u *User) HashPassword(password string) error {
