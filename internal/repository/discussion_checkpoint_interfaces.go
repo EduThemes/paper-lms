@@ -10,10 +10,12 @@ import (
 // checkpoints (multi-deadline thread participation requirements).
 type DiscussionCheckpointRepository interface {
 	Create(ctx context.Context, checkpoint *models.DiscussionCheckpoint) error
-	FindByID(ctx context.Context, id uint) (*models.DiscussionCheckpoint, error)
+	// FindByID — 13.1.D: tenant-scoped via the checkpoint → topic →
+	// course chain. accountID==0 means "no scope" (internal callers only).
+	FindByID(ctx context.Context, id, accountID uint) (*models.DiscussionCheckpoint, error)
 	Update(ctx context.Context, checkpoint *models.DiscussionCheckpoint) error
 	Delete(ctx context.Context, id uint) error
-	ListByTopicID(ctx context.Context, topicID uint) ([]models.DiscussionCheckpoint, error)
+	ListByTopicID(ctx context.Context, topicID, accountID uint) ([]models.DiscussionCheckpoint, error)
 	DeleteByTopicID(ctx context.Context, topicID uint) error
 }
 

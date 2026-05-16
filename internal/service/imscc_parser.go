@@ -1672,7 +1672,7 @@ func (p *IMSCCParser) rewriteAllBodies(ctx context.Context, courseID uint, resul
 				record("quiz_question", qq.ID, p.quizQuestionRepo.Update(ctx, qq))
 			}
 		case "DiscussionTopic":
-			d, err := p.discussionTopicRepo.FindByID(ctx, e.ID)
+			d, err := p.discussionTopicRepo.FindByID(ctx, e.ID, 0)
 			if err != nil {
 				continue
 			}

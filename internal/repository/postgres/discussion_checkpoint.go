@@ -23,9 +23,18 @@ func (r *discussionCheckpointRepo) Create(ctx context.Context, c *models.Discuss
 	return r.db.WithContext(ctx).Create(c).Error
 }
 
-func (r *discussionCheckpointRepo) FindByID(ctx context.Context, id uint) (*models.DiscussionCheckpoint, error) {
+func (r *discussionCheckpointRepo) FindByID(ctx context.Context, id, accountID uint) (*models.DiscussionCheckpoint, error) {
 	var cp models.DiscussionCheckpoint
-	if err := r.db.WithContext(ctx).First(&cp, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Scope through checkpoint → topic → course → account.
+		q = q.Where(`discussion_topic_id IN (
+			SELECT id FROM discussion_topics WHERE course_id IN (
+				SELECT id FROM courses WHERE account_id = ?
+			)
+		)`, accountID)
+	}
+	if err := q.First(&cp, id).Error; err != nil {
 		return nil, err
 	}
 	return &cp, nil
@@ -42,10 +51,18 @@ func (r *discussionCheckpointRepo) Delete(ctx context.Context, id uint) error {
 		Update("workflow_state", "deleted").Error
 }
 
-func (r *discussionCheckpointRepo) ListByTopicID(ctx context.Context, topicID uint) ([]models.DiscussionCheckpoint, error) {
+func (r *discussionCheckpointRepo) ListByTopicID(ctx context.Context, topicID, accountID uint) ([]models.DiscussionCheckpoint, error) {
 	var checkpoints []models.DiscussionCheckpoint
-	if err := r.db.WithContext(ctx).
-		Where("discussion_topic_id = ? AND workflow_state != ?", topicID, "deleted").
+	q := r.db.WithContext(ctx).
+		Where("discussion_topic_id = ? AND workflow_state != ?", topicID, "deleted")
+	if accountID != 0 {
+		q = q.Where(`discussion_topic_id IN (
+			SELECT id FROM discussion_topics WHERE course_id IN (
+				SELECT id FROM courses WHERE account_id = ?
+			)
+		)`, accountID)
+	}
+	if err := q.
 		Order("checkpoint_type ASC, due_at ASC").
 		Find(&checkpoints).Error; err != nil {
 		return nil, err

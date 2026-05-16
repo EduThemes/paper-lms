@@ -302,7 +302,7 @@ func (s *BatchService) cloneQuizzes(ctx context.Context, sourceCourseID, destCou
 
 func (s *BatchService) cloneDiscussions(ctx context.Context, sourceCourseID, destCourseID uint, idMap map[uint]uint) error {
 	allParams := repository.PaginationParams{Page: 1, PerPage: 1000}
-	result, err := s.discussionTopicRepo.ListByCourseID(ctx, sourceCourseID, allParams)
+	result, err := s.discussionTopicRepo.ListByCourseID(ctx, sourceCourseID, 0, allParams)
 	if err != nil {
 		return err
 	}

@@ -78,7 +78,7 @@ func (s *DiscussionService) CreateTopic(ctx context.Context, topic *models.Discu
 }
 
 func (s *DiscussionService) GetTopic(ctx context.Context, id uint) (*models.DiscussionTopic, error) {
-	return s.topicRepo.FindByID(ctx, id)
+	return s.topicRepo.FindByID(ctx, id, 0)
 }
 
 func (s *DiscussionService) UpdateTopic(ctx context.Context, topic *models.DiscussionTopic) error {
@@ -90,7 +90,7 @@ func (s *DiscussionService) DeleteTopic(ctx context.Context, id uint) error {
 }
 
 func (s *DiscussionService) ListTopics(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionTopic], error) {
-	return s.topicRepo.ListByCourseID(ctx, courseID, params)
+	return s.topicRepo.ListByCourseID(ctx, courseID, 0, params)
 }
 
 // Entry methods
@@ -110,7 +110,7 @@ func (s *DiscussionService) CreateEntry(ctx context.Context, entry *models.Discu
 }
 
 func (s *DiscussionService) GetEntry(ctx context.Context, id uint) (*models.DiscussionEntry, error) {
-	return s.entryRepo.FindByID(ctx, id)
+	return s.entryRepo.FindByID(ctx, id, 0)
 }
 
 func (s *DiscussionService) UpdateEntry(ctx context.Context, entry *models.DiscussionEntry) error {
@@ -122,11 +122,11 @@ func (s *DiscussionService) DeleteEntry(ctx context.Context, id uint) error {
 }
 
 func (s *DiscussionService) ListEntries(ctx context.Context, topicID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionEntry], error) {
-	return s.entryRepo.ListByTopicID(ctx, topicID, params)
+	return s.entryRepo.ListByTopicID(ctx, topicID, 0, params)
 }
 
 func (s *DiscussionService) ListReplies(ctx context.Context, entryID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionEntry], error) {
-	return s.entryRepo.ListReplies(ctx, entryID, params)
+	return s.entryRepo.ListReplies(ctx, entryID, 0, params)
 }
 
 // Full view with nested tree
@@ -151,12 +151,12 @@ type DiscussionFullView struct {
 }
 
 func (s *DiscussionService) GetFullView(ctx context.Context, topicID uint) (*DiscussionFullView, error) {
-	topic, err := s.topicRepo.FindByID(ctx, topicID)
+	topic, err := s.topicRepo.FindByID(ctx, topicID, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	allEntries, err := s.entryRepo.ListAllByTopicID(ctx, topicID)
+	allEntries, err := s.entryRepo.ListAllByTopicID(ctx, topicID, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +229,7 @@ func (s *DiscussionService) RateEntry(ctx context.Context, entryID uint, userID 
 		return err
 	}
 
-	entry, err := s.entryRepo.FindByID(ctx, entryID)
+	entry, err := s.entryRepo.FindByID(ctx, entryID, 0)
 	if err != nil {
 		return err
 	}

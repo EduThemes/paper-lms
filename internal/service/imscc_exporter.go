@@ -531,7 +531,7 @@ func (e *IMSCCExporter) ExportCourse(ctx context.Context, courseID uint, outputD
 	}
 
 	// --- Export Discussion Topics ---
-	discussions, err := e.discussionTopicRepo.ListByCourseID(ctx, courseID, largePage)
+	discussions, err := e.discussionTopicRepo.ListByCourseID(ctx, courseID, 0, largePage)
 	if err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("failed to list discussions: %v", err))
 	} else {

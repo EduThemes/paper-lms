@@ -172,7 +172,7 @@ func (s *CommonsService) buildSnapshot(ctx context.Context, course *models.Cours
 		}
 		bundle["module"] = m
 	case "discussion_topic":
-		d, err := s.discussionRepo.FindByID(ctx, resourceID)
+		d, err := s.discussionRepo.FindByID(ctx, resourceID, 0)
 		if err != nil {
 			return nil, fmt.Errorf("discussion topic not found: %w", err)
 		}
@@ -194,7 +194,7 @@ func (s *CommonsService) buildSnapshot(ctx context.Context, course *models.Cours
 		if mods, err := s.moduleRepo.ListByCourseID(ctx, course.ID, params); err == nil {
 			bundle["modules"] = mods.Items
 		}
-		if discussions, err := s.discussionRepo.ListByCourseID(ctx, course.ID, params); err == nil {
+		if discussions, err := s.discussionRepo.ListByCourseID(ctx, course.ID, 0, params); err == nil {
 			bundle["discussion_topics"] = discussions.Items
 		}
 	}
