@@ -136,7 +136,7 @@ func (h *ConferenceHandler) GetConference(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid conference ID")
 	}
 
-	conference, err := h.conferenceService.GetByID(c.Context(), uint(id))
+	conference, err := h.conferenceService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "conference")
 	}
@@ -159,7 +159,7 @@ func (h *ConferenceHandler) UpdateConference(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid conference ID")
 	}
 
-	conference, err := h.conferenceService.GetByID(c.Context(), uint(id))
+	conference, err := h.conferenceService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "conference")
 	}
@@ -221,7 +221,7 @@ func (h *ConferenceHandler) DeleteConference(c *fiber.Ctx) error {
 	}
 
 	// Fetch first to check authorization
-	conference, err := h.conferenceService.GetByID(c.Context(), uint(id))
+	conference, err := h.conferenceService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "conference")
 	}
@@ -249,7 +249,7 @@ func (h *ConferenceHandler) JoinConference(c *fiber.Ctx) error {
 	}
 
 	// Fetch to check authorization
-	conference, err := h.conferenceService.GetByID(c.Context(), uint(id))
+	conference, err := h.conferenceService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "conference")
 	}
@@ -283,7 +283,7 @@ func (h *ConferenceHandler) EndConference(c *fiber.Ctx) error {
 	}
 
 	// Fetch first to check authorization
-	conf, err := h.conferenceService.GetByID(c.Context(), uint(id))
+	conf, err := h.conferenceService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "conference")
 	}
@@ -312,7 +312,7 @@ func (h *ConferenceHandler) GetRecordings(c *fiber.Ctx) error {
 	}
 
 	// Fetch to check authorization
-	conference, err := h.conferenceService.GetByID(c.Context(), uint(id))
+	conference, err := h.conferenceService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "conference")
 	}
@@ -344,7 +344,7 @@ func (h *ConferenceHandler) GetParticipants(c *fiber.Ctx) error {
 	}
 
 	// Fetch to check authorization
-	conference, err := h.conferenceService.GetByID(c.Context(), uint(id))
+	conference, err := h.conferenceService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "conference")
 	}

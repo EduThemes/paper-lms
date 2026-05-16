@@ -36,8 +36,11 @@ func (s *CollaborationService) Create(ctx context.Context, collaboration *models
 	return s.collabRepo.Create(ctx, collaboration)
 }
 
-func (s *CollaborationService) GetByID(ctx context.Context, id uint) (*models.Collaboration, error) {
-	collaboration, err := s.collabRepo.FindByID(ctx, id, 0)
+// GetByID is the public read path. Sprint 2.3 threaded accountID through
+// from the handler; pass 0 from internal callers where the tenant was
+// verified upstream.
+func (s *CollaborationService) GetByID(ctx context.Context, id, accountID uint) (*models.Collaboration, error) {
+	collaboration, err := s.collabRepo.FindByID(ctx, id, accountID)
 	if err != nil {
 		return nil, errors.New("collaboration not found")
 	}

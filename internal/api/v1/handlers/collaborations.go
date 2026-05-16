@@ -111,7 +111,7 @@ func (h *CollaborationHandler) GetCollaboration(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid collaboration ID")
 	}
 
-	collaboration, err := h.collaborationService.GetByID(c.Context(), uint(id))
+	collaboration, err := h.collaborationService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "collaboration")
 	}
@@ -134,7 +134,7 @@ func (h *CollaborationHandler) UpdateCollaboration(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid collaboration ID")
 	}
 
-	collaboration, err := h.collaborationService.GetByID(c.Context(), uint(id))
+	collaboration, err := h.collaborationService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "collaboration")
 	}
@@ -196,7 +196,7 @@ func (h *CollaborationHandler) DeleteCollaboration(c *fiber.Ctx) error {
 	}
 
 	// Fetch first to check authorization
-	collaboration, err := h.collaborationService.GetByID(c.Context(), uint(id))
+	collaboration, err := h.collaborationService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "collaboration")
 	}

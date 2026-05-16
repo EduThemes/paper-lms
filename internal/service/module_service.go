@@ -41,8 +41,10 @@ func (s *ModuleService) Create(ctx context.Context, module *models.ContextModule
 	return s.moduleRepo.Create(ctx, module)
 }
 
-func (s *ModuleService) GetByID(ctx context.Context, id uint) (*models.ContextModule, error) {
-	return s.moduleRepo.FindByID(ctx, id, 0)
+// GetByID is the public read path. Sprint 2.3 threaded accountID
+// through from the handler; pass 0 from internal callers.
+func (s *ModuleService) GetByID(ctx context.Context, id, accountID uint) (*models.ContextModule, error) {
+	return s.moduleRepo.FindByID(ctx, id, accountID)
 }
 
 func (s *ModuleService) Update(ctx context.Context, module *models.ContextModule) error {
