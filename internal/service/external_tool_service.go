@@ -61,8 +61,8 @@ func (s *ExternalToolService) Create(ctx context.Context, tool *models.ContextEx
 }
 
 // GetByID retrieves an external tool by its primary key ID.
-func (s *ExternalToolService) GetByID(ctx context.Context, id uint) (*models.ContextExternalTool, error) {
-	tool, err := s.toolRepo.FindByID(ctx, id)
+func (s *ExternalToolService) GetByID(ctx context.Context, id, accountID uint) (*models.ContextExternalTool, error) {
+	tool, err := s.toolRepo.FindByID(ctx, id, accountID)
 	if err != nil {
 		return nil, errors.New("external tool not found")
 	}
@@ -70,9 +70,9 @@ func (s *ExternalToolService) GetByID(ctx context.Context, id uint) (*models.Con
 }
 
 // Update modifies an existing external tool installation.
-func (s *ExternalToolService) Update(ctx context.Context, tool *models.ContextExternalTool) error {
+func (s *ExternalToolService) Update(ctx context.Context, tool *models.ContextExternalTool, accountID uint) error {
 	// Verify the tool exists
-	_, err := s.toolRepo.FindByID(ctx, tool.ID)
+	_, err := s.toolRepo.FindByID(ctx, tool.ID, accountID)
 	if err != nil {
 		return errors.New("external tool not found")
 	}
@@ -81,8 +81,8 @@ func (s *ExternalToolService) Update(ctx context.Context, tool *models.ContextEx
 }
 
 // Delete performs a soft delete by setting workflow_state to "deleted".
-func (s *ExternalToolService) Delete(ctx context.Context, id uint) error {
-	tool, err := s.toolRepo.FindByID(ctx, id)
+func (s *ExternalToolService) Delete(ctx context.Context, id, accountID uint) error {
+	tool, err := s.toolRepo.FindByID(ctx, id, accountID)
 	if err != nil {
 		return errors.New("external tool not found")
 	}

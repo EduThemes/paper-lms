@@ -47,8 +47,8 @@ func (s *GroupService) CreateCategory(ctx context.Context, category *models.Grou
 	return s.catRepo.Create(ctx, category)
 }
 
-func (s *GroupService) GetCategory(ctx context.Context, id uint) (*models.GroupCategory, error) {
-	return s.catRepo.FindByID(ctx, id)
+func (s *GroupService) GetCategory(ctx context.Context, id, accountID uint) (*models.GroupCategory, error) {
+	return s.catRepo.FindByID(ctx, id, accountID)
 }
 
 func (s *GroupService) UpdateCategory(ctx context.Context, category *models.GroupCategory) error {
@@ -88,16 +88,16 @@ func (s *GroupService) CreateGroup(ctx context.Context, group *models.Group) err
 	if group.ContextType == "" {
 		group.ContextType = "Course"
 	}
-	// Verify category exists
-	_, err := s.catRepo.FindByID(ctx, group.GroupCategoryID)
+	// Verify category exists (internal lookup, tenant gate enforced by caller).
+	_, err := s.catRepo.FindByID(ctx, group.GroupCategoryID, 0)
 	if err != nil {
 		return errors.New("group category not found")
 	}
 	return s.groupRepo.Create(ctx, group)
 }
 
-func (s *GroupService) GetGroup(ctx context.Context, id uint) (*models.Group, error) {
-	return s.groupRepo.FindByID(ctx, id)
+func (s *GroupService) GetGroup(ctx context.Context, id, accountID uint) (*models.Group, error) {
+	return s.groupRepo.FindByID(ctx, id, accountID)
 }
 
 func (s *GroupService) UpdateGroup(ctx context.Context, group *models.Group) error {
@@ -136,8 +136,8 @@ func (s *GroupService) AddMember(ctx context.Context, membership *models.GroupMe
 		return errors.New("user is already a member of this group")
 	}
 
-	// Check max_membership
-	group, err := s.groupRepo.FindByID(ctx, membership.GroupID)
+	// Check max_membership (internal lookup, tenant gate enforced by caller).
+	group, err := s.groupRepo.FindByID(ctx, membership.GroupID, 0)
 	if err != nil {
 		return errors.New("group not found")
 	}
@@ -170,6 +170,6 @@ func (s *GroupService) ListMembers(ctx context.Context, groupID uint, params rep
 	return s.membershipRepo.ListByGroupID(ctx, groupID, params)
 }
 
-func (s *GroupService) GetMembership(ctx context.Context, id uint) (*models.GroupMembership, error) {
-	return s.membershipRepo.FindByID(ctx, id)
+func (s *GroupService) GetMembership(ctx context.Context, id, accountID uint) (*models.GroupMembership, error) {
+	return s.membershipRepo.FindByID(ctx, id, accountID)
 }

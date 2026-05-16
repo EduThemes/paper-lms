@@ -121,7 +121,7 @@ func (h *CoursePaceHandler) GetCoursePace(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid course pace ID")
 	}
 
-	pace, err := h.coursePaceService.GetByID(c.Context(), uint(paceID))
+	pace, err := h.coursePaceService.GetByID(c.Context(), uint(paceID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "course pace")
 	}
@@ -135,7 +135,7 @@ func (h *CoursePaceHandler) UpdateCoursePace(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid course pace ID")
 	}
 
-	pace, err := h.coursePaceService.GetByID(c.Context(), uint(paceID))
+	pace, err := h.coursePaceService.GetByID(c.Context(), uint(paceID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "course pace")
 	}
@@ -192,7 +192,7 @@ func (h *CoursePaceHandler) PublishCoursePace(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid course pace ID")
 	}
 
-	pace, err := h.coursePaceService.PublishPace(c.Context(), uint(paceID))
+	pace, err := h.coursePaceService.PublishPace(c.Context(), uint(paceID), callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not publish course pace")
 	}
@@ -264,7 +264,7 @@ func (h *CoursePaceHandler) GetTimeline(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid course pace ID")
 	}
 
-	timeline, err := h.coursePaceService.ComputeTimeline(c.Context(), uint(paceID))
+	timeline, err := h.coursePaceService.ComputeTimeline(c.Context(), uint(paceID), callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not compute timeline")
 	}

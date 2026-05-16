@@ -20,7 +20,7 @@ func NewGroupHandler(groupService *service.GroupService, authz *ResourceAuthoriz
 // getCourseIDFromCategory fetches a group category and returns its CourseID.
 // Returns 0 if the category has no associated course.
 func (h *GroupHandler) getCourseIDFromCategory(c *fiber.Ctx, categoryID uint) (uint, error) {
-	category, err := h.groupService.GetCategory(c.Context(), categoryID)
+	category, err := h.groupService.GetCategory(c.Context(), categoryID, callerAccountID(c))
 	if err != nil {
 		return 0, err
 	}
@@ -33,7 +33,7 @@ func (h *GroupHandler) getCourseIDFromCategory(c *fiber.Ctx, categoryID uint) (u
 // getCourseIDFromGroup fetches a group, then its category, to resolve the CourseID.
 // Returns 0 if the category has no associated course.
 func (h *GroupHandler) getCourseIDFromGroup(c *fiber.Ctx, groupID uint) (uint, error) {
-	group, err := h.groupService.GetGroup(c.Context(), groupID)
+	group, err := h.groupService.GetGroup(c.Context(), groupID, callerAccountID(c))
 	if err != nil {
 		return 0, err
 	}
@@ -166,7 +166,7 @@ func (h *GroupHandler) GetGroupCategory(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid category ID")
 	}
 
-	category, err := h.groupService.GetCategory(c.Context(), uint(id))
+	category, err := h.groupService.GetCategory(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "group category")
 	}
@@ -187,7 +187,7 @@ func (h *GroupHandler) UpdateGroupCategory(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid category ID")
 	}
 
-	category, err := h.groupService.GetCategory(c.Context(), uint(id))
+	category, err := h.groupService.GetCategory(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "group category")
 	}
@@ -243,7 +243,7 @@ func (h *GroupHandler) DeleteGroupCategory(c *fiber.Ctx) error {
 	}
 
 	// Fetch first to check authorization
-	category, err := h.groupService.GetCategory(c.Context(), uint(id))
+	category, err := h.groupService.GetCategory(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "group category")
 	}
@@ -355,7 +355,7 @@ func (h *GroupHandler) GetGroup(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid group ID")
 	}
 
-	group, err := h.groupService.GetGroup(c.Context(), uint(id))
+	group, err := h.groupService.GetGroup(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "group")
 	}
@@ -377,7 +377,7 @@ func (h *GroupHandler) UpdateGroup(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid group ID")
 	}
 
-	group, err := h.groupService.GetGroup(c.Context(), uint(id))
+	group, err := h.groupService.GetGroup(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "group")
 	}
@@ -434,7 +434,7 @@ func (h *GroupHandler) DeleteGroup(c *fiber.Ctx) error {
 	}
 
 	// Fetch first to check authorization
-	group, err := h.groupService.GetGroup(c.Context(), uint(id))
+	group, err := h.groupService.GetGroup(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "group")
 	}
@@ -549,7 +549,7 @@ func (h *GroupHandler) UpdateGroupMembership(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid membership ID")
 	}
 
-	membership, err := h.groupService.GetMembership(c.Context(), uint(membershipID))
+	membership, err := h.groupService.GetMembership(c.Context(), uint(membershipID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "group membership")
 	}
@@ -594,7 +594,7 @@ func (h *GroupHandler) DeleteGroupMembership(c *fiber.Ctx) error {
 	}
 
 	// Fetch first to check authorization
-	membership, err := h.groupService.GetMembership(c.Context(), uint(membershipID))
+	membership, err := h.groupService.GetMembership(c.Context(), uint(membershipID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "group membership")
 	}

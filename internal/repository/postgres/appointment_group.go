@@ -22,9 +22,14 @@ func (r *appointmentGroupRepo) Create(ctx context.Context, group *models.Appoint
 	return r.db.WithContext(ctx).Create(group).Error
 }
 
-func (r *appointmentGroupRepo) FindByID(ctx context.Context, id uint) (*models.AppointmentGroup, error) {
+func (r *appointmentGroupRepo) FindByID(ctx context.Context, id, accountID uint) (*models.AppointmentGroup, error) {
 	var g models.AppointmentGroup
-	if err := r.db.WithContext(ctx).First(&g, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Scope through parent course's account_id.
+		q = q.Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID)
+	}
+	if err := q.First(&g, id).Error; err != nil {
 		return nil, err
 	}
 	return &g, nil
@@ -77,9 +82,14 @@ func (r *appointmentSlotRepo) Create(ctx context.Context, slot *models.Appointme
 	return r.db.WithContext(ctx).Create(slot).Error
 }
 
-func (r *appointmentSlotRepo) FindByID(ctx context.Context, id uint) (*models.AppointmentSlot, error) {
+func (r *appointmentSlotRepo) FindByID(ctx context.Context, id, accountID uint) (*models.AppointmentSlot, error) {
 	var s models.AppointmentSlot
-	if err := r.db.WithContext(ctx).First(&s, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Scope through slot→group→course→account_id.
+		q = q.Where("group_id IN (SELECT id FROM appointment_groups WHERE course_id IN (SELECT id FROM courses WHERE account_id = ?))", accountID)
+	}
+	if err := q.First(&s, id).Error; err != nil {
 		return nil, err
 	}
 	return &s, nil
@@ -120,9 +130,20 @@ func (r *appointmentReservationRepo) Create(ctx context.Context, res *models.App
 	return r.db.WithContext(ctx).Create(res).Error
 }
 
-func (r *appointmentReservationRepo) FindByID(ctx context.Context, id uint) (*models.AppointmentReservation, error) {
+func (r *appointmentReservationRepo) FindByID(ctx context.Context, id, accountID uint) (*models.AppointmentReservation, error) {
 	var rv models.AppointmentReservation
-	if err := r.db.WithContext(ctx).First(&rv, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Deep scope: reservation→slot→group→course→account_id.
+		q = q.Where(`slot_id IN (
+			SELECT id FROM appointment_slots WHERE group_id IN (
+				SELECT id FROM appointment_groups WHERE course_id IN (
+					SELECT id FROM courses WHERE account_id = ?
+				)
+			)
+		)`, accountID)
+	}
+	if err := q.First(&rv, id).Error; err != nil {
 		return nil, err
 	}
 	return &rv, nil

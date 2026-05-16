@@ -18,8 +18,8 @@ func (m *MockGroupMembershipRepository) Create(ctx context.Context, membership *
 	return args.Error(0)
 }
 
-func (m *MockGroupMembershipRepository) FindByID(ctx context.Context, id uint) (*models.GroupMembership, error) {
-	args := m.Called(ctx, id)
+func (m *MockGroupMembershipRepository) FindByID(ctx context.Context, id, accountID uint) (*models.GroupMembership, error) {
+	args := m.Called(ctx, id, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

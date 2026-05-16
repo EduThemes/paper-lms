@@ -33,8 +33,8 @@ func (s *CalendarService) Create(ctx context.Context, event *models.CalendarEven
 	return s.repo.Create(ctx, event)
 }
 
-func (s *CalendarService) GetByID(ctx context.Context, id uint) (*models.CalendarEvent, error) {
-	return s.repo.FindByID(ctx, id)
+func (s *CalendarService) GetByID(ctx context.Context, id, accountID uint) (*models.CalendarEvent, error) {
+	return s.repo.FindByID(ctx, id, accountID)
 }
 
 func (s *CalendarService) Update(ctx context.Context, event *models.CalendarEvent) error {

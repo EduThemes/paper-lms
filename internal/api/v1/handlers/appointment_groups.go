@@ -110,7 +110,7 @@ func (h *AppointmentGroupHandler) Get(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid appointment group ID")
 	}
-	g, err := h.svc.GetGroup(c.Context(), uint(id))
+	g, err := h.svc.GetGroup(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "appointment group")
 	}
@@ -200,7 +200,7 @@ func (h *AppointmentGroupHandler) Update(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid appointment group ID")
 	}
-	g, err := h.svc.GetGroup(c.Context(), uint(id))
+	g, err := h.svc.GetGroup(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "appointment group")
 	}
@@ -244,7 +244,7 @@ func (h *AppointmentGroupHandler) Delete(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid appointment group ID")
 	}
-	g, err := h.svc.GetGroup(c.Context(), uint(id))
+	g, err := h.svc.GetGroup(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "appointment group")
 	}
@@ -264,7 +264,7 @@ func (h *AppointmentGroupHandler) ListSlots(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid appointment group ID")
 	}
-	g, err := h.svc.GetGroup(c.Context(), uint(id))
+	g, err := h.svc.GetGroup(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "appointment group")
 	}
@@ -297,7 +297,7 @@ func (h *AppointmentGroupHandler) ListReservations(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid slot ID")
 	}
-	g, err := h.svc.GetGroup(c.Context(), uint(id))
+	g, err := h.svc.GetGroup(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "appointment group")
 	}
@@ -305,7 +305,7 @@ func (h *AppointmentGroupHandler) ListReservations(c *fiber.Ctx) error {
 	if err := h.authz.RequireCourseInstructor(c, g.CourseID); err != nil {
 		return err
 	}
-	slot, err := h.svc.GetSlot(c.Context(), uint(slotID))
+	slot, err := h.svc.GetSlot(c.Context(), uint(slotID), callerAccountID(c))
 	if err != nil || slot.GroupID != uint(id) {
 		return responses.NotFound(c, "slot")
 	}
@@ -329,7 +329,7 @@ func (h *AppointmentGroupHandler) Reserve(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid slot ID")
 	}
-	g, err := h.svc.GetGroup(c.Context(), uint(id))
+	g, err := h.svc.GetGroup(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "appointment group")
 	}
@@ -372,11 +372,11 @@ func (h *AppointmentGroupHandler) CancelReservation(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid reservation ID")
 	}
-	g, err := h.svc.GetGroup(c.Context(), uint(id))
+	g, err := h.svc.GetGroup(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "appointment group")
 	}
-	res, err := h.svc.GetReservation(c.Context(), uint(resID))
+	res, err := h.svc.GetReservation(c.Context(), uint(resID), callerAccountID(c))
 	if err != nil || res.SlotID != uint(slotID) || res.GroupID != uint(id) {
 		return responses.NotFound(c, "reservation")
 	}

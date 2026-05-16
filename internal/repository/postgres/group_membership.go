@@ -20,9 +20,20 @@ func (r *groupMembershipRepo) Create(ctx context.Context, membership *models.Gro
 	return r.db.WithContext(ctx).Create(membership).Error
 }
 
-func (r *groupMembershipRepo) FindByID(ctx context.Context, id uint) (*models.GroupMembership, error) {
+func (r *groupMembershipRepo) FindByID(ctx context.Context, id, accountID uint) (*models.GroupMembership, error) {
 	var membership models.GroupMembership
-	if err := r.db.WithContext(ctx).Preload("User").First(&membership, id).Error; err != nil {
+	q := r.db.WithContext(ctx).Preload("User")
+	if accountID != 0 {
+		// Scope through parent group (which is itself dual-scope:
+		// context_type='Account'→context_id IS account_id;
+		// context_type='Course'→context_id→courses.account_id).
+		q = q.Where(`group_id IN (
+			SELECT id FROM groups WHERE
+				(context_type = 'Account' AND context_id = ?)
+				OR (context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))
+		)`, accountID, accountID)
+	}
+	if err := q.First(&membership, id).Error; err != nil {
 		return nil, err
 	}
 	return &membership, nil

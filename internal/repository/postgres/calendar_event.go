@@ -21,9 +21,27 @@ func (r *calendarEventRepo) Create(ctx context.Context, event *models.CalendarEv
 	return r.db.WithContext(ctx).Create(event).Error
 }
 
-func (r *calendarEventRepo) FindByID(ctx context.Context, id uint) (*models.CalendarEvent, error) {
+func (r *calendarEventRepo) FindByID(ctx context.Context, id, accountID uint) (*models.CalendarEvent, error) {
 	var event models.CalendarEvent
-	if err := r.db.WithContext(ctx).First(&event, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Context-polymorphic tenant scope:
+		//  Course → context_id→courses.account_id
+		//  Account → context_id IS account_id
+		//  Group → context_id→groups (which is itself dual-scope)
+		//  User → context_id→users.account_id
+		q = q.Where(`
+			(context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))
+			OR (context_type = 'Account' AND context_id = ?)
+			OR (context_type = 'User' AND context_id IN (SELECT id FROM users WHERE account_id = ?))
+			OR (context_type = 'Group' AND context_id IN (
+				SELECT id FROM groups WHERE
+					(context_type = 'Account' AND context_id = ?)
+					OR (context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))
+			))
+		`, accountID, accountID, accountID, accountID, accountID)
+	}
+	if err := q.First(&event, id).Error; err != nil {
 		return nil, err
 	}
 	return &event, nil

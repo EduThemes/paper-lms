@@ -20,9 +20,19 @@ func (r *groupRepo) Create(ctx context.Context, group *models.Group) error {
 	return r.db.WithContext(ctx).Create(group).Error
 }
 
-func (r *groupRepo) FindByID(ctx context.Context, id uint) (*models.Group, error) {
+func (r *groupRepo) FindByID(ctx context.Context, id, accountID uint) (*models.Group, error) {
 	var group models.Group
-	if err := r.db.WithContext(ctx).First(&group, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Polymorphic dual-scope:
+		//  - context_type='Account' → context_id IS the account_id
+		//  - context_type='Course'  → context_id→courses.account_id
+		q = q.Where(`
+			(context_type = 'Account' AND context_id = ?)
+			OR (context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))
+		`, accountID, accountID)
+	}
+	if err := q.First(&group, id).Error; err != nil {
 		return nil, err
 	}
 	return &group, nil

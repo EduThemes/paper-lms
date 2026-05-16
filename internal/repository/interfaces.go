@@ -228,7 +228,9 @@ type LTIToolConfigurationRepository interface {
 
 type ContextExternalToolRepository interface {
 	Create(ctx context.Context, tool *models.ContextExternalTool) error
-	FindByID(ctx context.Context, id uint) (*models.ContextExternalTool, error)
+	// FindByID — 13.1.D: context-polymorphic tenant scope.
+	// context_type='Course' → JOIN courses; context_type='Account' → direct.
+	FindByID(ctx context.Context, id, accountID uint) (*models.ContextExternalTool, error)
 	Update(ctx context.Context, tool *models.ContextExternalTool) error
 	Delete(ctx context.Context, id uint) error
 	ListByContext(ctx context.Context, contextType string, contextID uint, params PaginationParams) (*PaginatedResult[models.ContextExternalTool], error)
@@ -451,7 +453,9 @@ type LatePolicyRepository interface {
 
 type CalendarEventRepository interface {
 	Create(ctx context.Context, event *models.CalendarEvent) error
-	FindByID(ctx context.Context, id uint) (*models.CalendarEvent, error)
+	// FindByID — 13.1.D: context-polymorphic tenant scope.
+	// User/Course/Group/Account context_type each filter through their tenant key.
+	FindByID(ctx context.Context, id, accountID uint) (*models.CalendarEvent, error)
 	Update(ctx context.Context, event *models.CalendarEvent) error
 	Delete(ctx context.Context, id uint) error
 	ListByContext(ctx context.Context, contextType string, contextID uint, params PaginationParams) (*PaginatedResult[models.CalendarEvent], error)

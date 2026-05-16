@@ -74,7 +74,7 @@ func (h *ExternalToolHandler) GetExternalTool(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid external tool ID")
 	}
 
-	tool, err := h.toolService.GetByID(c.Context(), uint(id))
+	tool, err := h.toolService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "external tool")
 	}
@@ -148,7 +148,7 @@ func (h *ExternalToolHandler) UpdateExternalTool(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid external tool ID")
 	}
 
-	tool, err := h.toolService.GetByID(c.Context(), uint(id))
+	tool, err := h.toolService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "external tool")
 	}
@@ -208,7 +208,7 @@ func (h *ExternalToolHandler) UpdateExternalTool(c *fiber.Ctx) error {
 		tool.WorkflowState = state
 	}
 
-	if err := h.toolService.Update(c.Context(), tool); err != nil {
+	if err := h.toolService.Update(c.Context(), tool, callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not update external tool")
 	}
 
@@ -223,7 +223,7 @@ func (h *ExternalToolHandler) DeleteExternalTool(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid external tool ID")
 	}
 
-	if err := h.toolService.Delete(c.Context(), uint(id)); err != nil {
+	if err := h.toolService.Delete(c.Context(), uint(id), callerAccountID(c)); err != nil {
 		return responses.NotFound(c, "external tool")
 	}
 

@@ -10,7 +10,8 @@ import (
 
 type CoursePaceRepository interface {
 	Create(ctx context.Context, pace *models.CoursePace) error
-	FindByID(ctx context.Context, id uint) (*models.CoursePace, error)
+	// FindByID — 13.1.D: tenant scope via parent course's account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.CoursePace, error)
 	Update(ctx context.Context, pace *models.CoursePace) error
 	Delete(ctx context.Context, id uint) error
 	FindByCourseID(ctx context.Context, courseID uint) (*models.CoursePace, error)
@@ -21,7 +22,8 @@ type CoursePaceRepository interface {
 
 type CoursePaceModuleItemRepository interface {
 	Create(ctx context.Context, item *models.CoursePaceModuleItem) error
-	FindByID(ctx context.Context, id uint) (*models.CoursePaceModuleItem, error)
+	// FindByID — 13.1.D: tenant scope via pace→course→account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.CoursePaceModuleItem, error)
 	Update(ctx context.Context, item *models.CoursePaceModuleItem) error
 	Delete(ctx context.Context, id uint) error
 	ListByPaceID(ctx context.Context, paceID uint) ([]models.CoursePaceModuleItem, error)
