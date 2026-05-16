@@ -66,11 +66,16 @@ type AuthenticationProvider struct {
 	//   * Microsoft Entra ID:  https://login.microsoftonline.com/{tenant}/v2.0
 	//   * Apple Sign-In:       https://appleid.apple.com
 	//   * Generic OIDC:        whatever the admin supplies
-	OIDCIssuerURL              string         `json:"oidc_issuer_url,omitempty"`
-	OIDCClientID               string         `json:"oidc_client_id,omitempty"`
-	OIDCClientSecretEncrypted  []byte         `json:"-"` // AES-256-GCM via internal/auth/secretbox
-	OIDCScopes                 pq.StringArray `json:"oidc_scopes,omitempty" gorm:"type:text[]"`
-	OIDCPreset                 string         `json:"oidc_preset,omitempty"` // "google" | "microsoft" | "apple" | "generic"
+	// gorm `column:` tags are load-bearing — GORM's PascalCase-to-
+	// snake_case naming strategy converts `OIDCIssuerURL` to
+	// `o_id_c_issuer_url`, which doesn't match the migration column
+	// names (`oidc_issuer_url`). Without explicit `column:` tags,
+	// GORM INSERT fails with `column "o_id_c_issuer_url" does not exist`.
+	OIDCIssuerURL              string         `json:"oidc_issuer_url,omitempty" gorm:"column:oidc_issuer_url"`
+	OIDCClientID               string         `json:"oidc_client_id,omitempty" gorm:"column:oidc_client_id"`
+	OIDCClientSecretEncrypted  []byte         `json:"-" gorm:"column:oidc_client_secret_encrypted"` // AES-256-GCM via internal/auth/secretbox
+	OIDCScopes                 pq.StringArray `json:"oidc_scopes,omitempty" gorm:"type:text[];column:oidc_scopes"`
+	OIDCPreset                 string         `json:"oidc_preset,omitempty" gorm:"column:oidc_preset"` // "google" | "microsoft" | "apple" | "generic"
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
