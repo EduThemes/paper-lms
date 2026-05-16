@@ -291,7 +291,7 @@ func (h *SubmissionHandler) UpdateSubmission(c *fiber.Ctx) error {
 
 		// Auto-create outcome results for aligned outcomes
 		if h.outcomeAlignmentRepo != nil && h.outcomeService != nil && submission.Score != nil {
-			if alignments, aErr := h.outcomeAlignmentRepo.ListByAssignmentID(c.Context(), uint(assignmentID)); aErr == nil {
+			if alignments, aErr := h.outcomeAlignmentRepo.ListByAssignmentID(c.Context(), uint(assignmentID), callerAccountID(c)); aErr == nil {
 				for _, alignment := range alignments {
 					possible := 100.0
 					if assignment, aErr := h.assignmentRepo.FindByID(c.Context(), uint(assignmentID), callerAccountID(c)); aErr == nil && assignment.PointsPossible != nil {
