@@ -14,6 +14,7 @@ import AdminNav from './AdminNav';
 import NotificationBell from './NotificationBell';
 import MobileBottomNav from './MobileBottomNav';
 import ThemeToggle from './ThemeToggle';
+import LanguageSwitcher from './LanguageSwitcher';
 import CurrencyPills from './gamification/CurrencyPills';
 import BrandLogo from './brand/BrandLogo';
 
@@ -291,6 +292,7 @@ const Layout = ({ children }) => {
       <div className="border-t border-white/10 py-2 space-y-1 flex flex-col items-center w-full">
         <NotificationBell />
         <ThemeToggle />
+        <LanguageSwitcher />
         <div className="relative group flex items-center justify-center w-10 h-10">
           <div className="w-8 h-8 rounded-full bg-text-tertiary flex items-center justify-center">
             <User className="w-4 h-4 text-chrome-sidebar-fg" />

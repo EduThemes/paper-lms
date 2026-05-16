@@ -12,6 +12,7 @@ import {
   List,
   LayoutGrid,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
 import RichContentViewer, { sanitizeHTML } from '../components/RichContentViewer';
@@ -36,6 +37,7 @@ const LEGACY_INLINE_TYPES = new Set([
 const lsKey = (submissionId) => `paper.quiz.${submissionId}`;
 
 const QuizTakePage = () => {
+  const { t } = useTranslation();
   const { courseId, quizId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const focusMode = searchParams.get('focus') === '1';
@@ -365,7 +367,7 @@ const QuizTakePage = () => {
     return wrap(
       <div className="flex items-center justify-center py-12 gap-2 text-text-tertiary">
         <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-        Loading quiz...
+        {t('quizTakePage.loadingQuiz')}
       </div>
     );
   }
@@ -373,7 +375,7 @@ const QuizTakePage = () => {
     return wrap(
       <div className="text-center py-12">
         <p className="text-accent-danger mb-3">{error}</p>
-        <button onClick={() => window.location.reload()} className="text-brand-600 hover:text-brand-800 text-sm font-medium">Try Again</button>
+        <button onClick={() => window.location.reload()} className="text-brand-600 hover:text-brand-800 text-sm font-medium">{t('common.tryAgain')}</button>
       </div>
     );
   }
@@ -383,7 +385,7 @@ const QuizTakePage = () => {
       <div className="max-w-2xl mx-auto">
         <div className="bg-surface-0 rounded-lg shadow p-8 text-center">
           <CheckCircle className="w-16 h-16 text-accent-success mx-auto mb-4" />
-          <h2 className="text-2xl font-bold mb-2">Quiz Submitted</h2>
+          <h2 className="text-2xl font-bold mb-2">{t('quizTakePage.quizComplete')}</h2>
           {submission?.score !== null && submission?.score !== undefined && (
             <p className="text-lg text-text-secondary mb-4">
               Score: <span className="font-semibold">{submission.score}</span>
@@ -596,14 +598,14 @@ const QuizTakePage = () => {
                 className="flex items-center gap-1 px-4 py-2 bg-surface-2 rounded hover:bg-border-default disabled:opacity-50 text-sm font-medium"
               >
                 <ChevronLeft className="w-4 h-4" />
-                Previous
+                {t('quizTakePage.previous')}
               </button>
               {currentIdx < questions.length - 1 ? (
                 <button
                   onClick={goNext}
                   className="flex items-center gap-1 px-4 py-2 bg-surface-2 rounded hover:bg-border-default text-sm font-medium"
                 >
-                  Next
+                  {t('quizTakePage.next')}
                   <ChevronRight className="w-4 h-4" />
                 </button>
               ) : (
@@ -612,7 +614,7 @@ const QuizTakePage = () => {
                   disabled={submitting}
                   className="px-6 py-2 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50 text-sm font-semibold"
                 >
-                  {submitting ? 'Submitting...' : 'Submit Quiz'}
+                  {submitting ? t('quizTakePage.submitting') : t('quizTakePage.submitQuiz')}
                 </button>
               )}
             </div>

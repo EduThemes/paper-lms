@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Calendar, Plus, Trash2, Edit2, Download, ChevronLeft, ChevronRight, X, Grid, List } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import useIsTeacher from '../hooks/useIsTeacher';
@@ -100,6 +101,7 @@ const CalendarGrid = ({ events, currentDate, onEventClick, onDayClick }) => {
 };
 
 const CalendarPage = () => {
+  const { t } = useTranslation();
   const { courseId } = useParams();
   const { user } = useAuth();
   const [events, setEvents] = useState([]);
@@ -333,13 +335,13 @@ const CalendarPage = () => {
       <div className="mb-6">
         {courseId && (
           <Link to={`/courses/${courseId}`} className="text-brand-600 hover:underline text-sm">
-            &larr; Back to Course
+            &larr; {t('course.backToCourse')}
           </Link>
         )}
         <div className="flex items-center justify-between mt-2">
           <h2 className="text-2xl font-bold text-text-primary flex items-center gap-2">
             <Calendar className="w-6 h-6" />
-            Calendar
+            {t('calendarPage.title')}
           </h2>
           <div className="flex items-center space-x-2">
             {/* View toggle */}
@@ -372,7 +374,7 @@ const CalendarPage = () => {
               className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
             >
               {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              <span>{showForm ? 'Cancel' : 'New Event'}</span>
+              <span>{showForm ? t('common.cancel') : t('calendarPage.newEvent')}</span>
             </button>
             )}
           </div>
@@ -554,7 +556,7 @@ const CalendarPage = () => {
           onClick={goToToday}
           className="text-sm text-brand-600 hover:text-brand-800 font-medium"
         >
-          Today
+          {t('calendarPage.today')}
         </button>
       </div>
 

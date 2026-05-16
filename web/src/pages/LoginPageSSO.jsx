@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../services/api';
 import BrandLogo from '../components/brand/BrandLogo';
@@ -139,6 +140,7 @@ const PaperLogo = () => (
 /* ─── Main Component ─── */
 
 const LoginPageSSO = () => {
+  const { t } = useTranslation();
   const [error, setError] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
   const [isRegister, setIsRegister] = useState(false);
@@ -313,7 +315,7 @@ const LoginPageSSO = () => {
     const email = formData.get('email');
     try {
       await api.requestPasswordReset(email);
-      setSuccessMsg('If an account exists with that email, a password reset link has been sent. Check your email or contact your administrator.');
+      setSuccessMsg(t('loginPage.passwordResetSentHint'));
     } catch (err) {
       setError(err.message);
     }
@@ -328,12 +330,12 @@ const LoginPageSSO = () => {
     const newPassword = formData.get('new_password');
     const confirmPassword = formData.get('confirm_password');
     if (newPassword !== confirmPassword) {
-      setError('Passwords do not match');
+      setError(t('loginPage.passwordsDoNotMatch'));
       return;
     }
     try {
       await api.resetPassword(token, newPassword);
-      setSuccessMsg('Password has been reset successfully. You can now log in.');
+      setSuccessMsg(t('loginPage.passwordResetSuccess'));
       setView('login');
       setResetToken('');
     } catch (err) {
@@ -368,9 +370,9 @@ const LoginPageSSO = () => {
         <div className="bg-surface-0 rounded-2xl shadow-xl p-8">
           <PaperLogo />
           <p className="text-center text-text-tertiary text-sm mb-6">
-            {view === 'forgotPassword' ? 'Reset your password' :
-             view === 'resetPassword' ? 'Set a new password' :
-             isRegister ? 'Create your account' : 'Sign in to continue'}
+            {view === 'forgotPassword' ? t('loginPage.resetYourPassword') :
+             view === 'resetPassword' ? t('loginPage.setNewPassword') :
+             isRegister ? t('loginPage.createYourAccount') : t('loginPage.signInToContinue')}
           </p>
 
           {/* ── Passkey Sign-in (Phase 10-B) ── */}
@@ -396,7 +398,7 @@ const LoginPageSSO = () => {
 
           {/* ── SSO Provider Buttons ── */}
           {view === 'login' && !isRegister && providers.length > 0 && (
-            <div className="space-y-3 mb-6" role="group" aria-label="Single sign-on options">
+            <div className="space-y-3 mb-6" role="group" aria-label={t('loginPage.ssoOptions')}>
               {providers.map((provider) => {
                 const style = getProviderStyle(provider);
                 const IconComponent = style.icon;
@@ -437,7 +439,7 @@ const LoginPageSSO = () => {
                 <div className="w-full border-t border-border-default" />
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="bg-surface-0 px-4 text-text-disabled">or sign in with email</span>
+                <span className="bg-surface-0 px-4 text-text-disabled">{t('loginPage.orSignInWithEmail')}</span>
               </div>
             </div>
           )}
@@ -445,7 +447,7 @@ const LoginPageSSO = () => {
           {/* ── Loading SSO providers ── */}
           {view === 'login' && !isRegister && providersLoading && (
             <div className="flex justify-center mb-4">
-              <div className="h-5 w-5 border-2 border-brand-600 border-t-transparent rounded-full animate-spin" aria-label="Loading sign-in options" role="status" />
+              <div className="h-5 w-5 border-2 border-brand-600 border-t-transparent rounded-full animate-spin" aria-label={t('loginPage.loadingSignInOptions')} role="status" />
             </div>
           )}
 
@@ -475,13 +477,13 @@ const LoginPageSSO = () => {
           {view === 'forgotPassword' && (
             <>
               <p className="text-sm text-text-tertiary mb-4 text-center">
-                Enter your email address and we'll send you instructions to reset your password.
+                {t('loginPage.forgotInstruction')}
               </p>
               <form onSubmit={handleForgotPassword} noValidate>
                 <div className="space-y-4">
                   <div>
                     <label htmlFor="reset-email" className="block text-sm font-medium text-text-secondary mb-1">
-                      Email Address
+                      {t('loginPage.emailAddress')}
                     </label>
                     <input
                       id="reset-email"
@@ -489,7 +491,7 @@ const LoginPageSSO = () => {
                       name="email"
                       autoComplete="email"
                       className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-disabled focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
-                      placeholder="you@school.edu"
+                      placeholder={t('loginPage.emailPlaceholder')}
                       required
                       aria-required="true"
                     />
@@ -498,13 +500,13 @@ const LoginPageSSO = () => {
                     type="submit"
                     className="w-full bg-brand-600 text-white py-2.5 px-4 rounded-lg font-medium hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 transition-colors"
                   >
-                    Request Password Reset
+                    {t('loginPage.requestPasswordReset')}
                   </button>
                 </div>
               </form>
               <p className="mt-5 text-center text-sm text-text-tertiary">
                 <button type="button" onClick={goToLogin} className="text-brand-600 font-medium hover:underline focus:outline-none focus:underline">
-                  Back to sign in
+                  {t('loginPage.backToSignIn')}
                 </button>
               </p>
             </>
@@ -517,7 +519,7 @@ const LoginPageSSO = () => {
                 <div className="space-y-4">
                   <div>
                     <label htmlFor="reset-token" className="block text-sm font-medium text-text-secondary mb-1">
-                      Reset Token
+                      {t('loginPage.resetToken')}
                     </label>
                     <input
                       id="reset-token"
@@ -525,14 +527,14 @@ const LoginPageSSO = () => {
                       name="token"
                       defaultValue={resetToken}
                       className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-disabled focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors font-mono text-sm"
-                      placeholder="Paste your reset token"
+                      placeholder={t('loginPage.resetTokenPlaceholder')}
                       required
                       aria-required="true"
                     />
                   </div>
                   <div>
                     <label htmlFor="new-password" className="block text-sm font-medium text-text-secondary mb-1">
-                      New Password
+                      {t('loginPage.newPassword')}
                     </label>
                     <input
                       id="new-password"
@@ -540,7 +542,7 @@ const LoginPageSSO = () => {
                       name="new_password"
                       autoComplete="new-password"
                       className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-disabled focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
-                      placeholder="At least 8 characters"
+                      placeholder={t('loginPage.newPasswordPlaceholder')}
                       required
                       aria-required="true"
                       minLength={8}
@@ -548,7 +550,7 @@ const LoginPageSSO = () => {
                   </div>
                   <div>
                     <label htmlFor="confirm-password" className="block text-sm font-medium text-text-secondary mb-1">
-                      Confirm Password
+                      {t('loginPage.confirmPassword')}
                     </label>
                     <input
                       id="confirm-password"
@@ -556,7 +558,7 @@ const LoginPageSSO = () => {
                       name="confirm_password"
                       autoComplete="new-password"
                       className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-disabled focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
-                      placeholder="Re-enter your new password"
+                      placeholder={t('loginPage.confirmPasswordPlaceholder')}
                       required
                       aria-required="true"
                       minLength={8}
@@ -566,13 +568,13 @@ const LoginPageSSO = () => {
                     type="submit"
                     className="w-full bg-brand-600 text-white py-2.5 px-4 rounded-lg font-medium hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 transition-colors"
                   >
-                    Reset Password
+                    {t('loginPage.resetPasswordButton')}
                   </button>
                 </div>
               </form>
               <p className="mt-5 text-center text-sm text-text-tertiary">
                 <button type="button" onClick={goToLogin} className="text-brand-600 font-medium hover:underline focus:outline-none focus:underline">
-                  Back to sign in
+                  {t('loginPage.backToSignIn')}
                 </button>
               </p>
             </>
@@ -586,7 +588,7 @@ const LoginPageSSO = () => {
                   {isRegister && (
                     <div>
                       <label htmlFor="sso-name" className="block text-sm font-medium text-text-secondary mb-1">
-                        Full Name
+                        {t('loginPage.fullName')}
                       </label>
                       <input
                         id="sso-name"
@@ -594,7 +596,7 @@ const LoginPageSSO = () => {
                         name="name"
                         autoComplete="name"
                         className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-disabled focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
-                        placeholder="Jane Doe"
+                        placeholder={t('loginPage.fullNamePlaceholder')}
                         required
                         aria-required="true"
                       />
@@ -602,7 +604,7 @@ const LoginPageSSO = () => {
                   )}
                   <div>
                     <label htmlFor="sso-email" className="block text-sm font-medium text-text-secondary mb-1">
-                      Email Address
+                      {t('loginPage.emailAddress')}
                     </label>
                     <input
                       id="sso-email"
@@ -610,14 +612,14 @@ const LoginPageSSO = () => {
                       name="email"
                       autoComplete="email"
                       className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-disabled focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
-                      placeholder="you@school.edu"
+                      placeholder={t('loginPage.emailPlaceholder')}
                       required
                       aria-required="true"
                     />
                   </div>
                   <div>
                     <label htmlFor="sso-password" className="block text-sm font-medium text-text-secondary mb-1">
-                      Password
+                      {t('loginPage.password')}
                     </label>
                     <input
                       id="sso-password"
@@ -625,7 +627,7 @@ const LoginPageSSO = () => {
                       name="password"
                       autoComplete={isRegister ? 'new-password' : 'current-password'}
                       className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-disabled focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
-                      placeholder="Enter your password"
+                      placeholder={t('loginPage.passwordPlaceholder')}
                       required
                       aria-required="true"
                     />
@@ -637,7 +639,7 @@ const LoginPageSSO = () => {
                         onClick={goToForgotPassword}
                         className="text-sm text-brand-600 hover:underline focus:outline-none focus:underline"
                       >
-                        Forgot password?
+                        {t('loginPage.forgotPassword')}
                       </button>
                     </div>
                   )}
@@ -645,20 +647,20 @@ const LoginPageSSO = () => {
                     type="submit"
                     className="w-full bg-brand-600 text-white py-2.5 px-4 rounded-lg font-medium hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 transition-colors"
                   >
-                    {isRegister ? 'Create Account' : 'Log In'}
+                    {isRegister ? t('loginPage.createAccount') : t('loginPage.logIn')}
                   </button>
                 </div>
               </form>
 
               {/* ── Toggle Register / Login ── */}
               <p className="mt-5 text-center text-sm text-text-tertiary">
-                {isRegister ? 'Already have an account? ' : "Don't have an account? "}
+                {isRegister ? t('loginPage.alreadyHaveAccount') : t('loginPage.noAccount')}
                 <button
                   type="button"
                   onClick={toggleMode}
                   className="text-brand-600 font-medium hover:underline focus:outline-none focus:underline"
                 >
-                  {isRegister ? 'Sign in' : 'Register'}
+                  {isRegister ? t('loginPage.signIn') : t('loginPage.register')}
                 </button>
               </p>
             </>
@@ -667,16 +669,16 @@ const LoginPageSSO = () => {
           {/* ── COPPA Notice ── */}
           <div className="mt-6 pt-5 border-t border-border-subtle">
             <p className="text-xs text-text-disabled text-center leading-relaxed">
-              By signing in, you agree to our{' '}
+              {t('loginPage.coppaNoticeIntro')}{' '}
               <a href="/privacy" className="text-brand-500 hover:underline focus:underline focus:outline-none">
-                Privacy Policy
+                {t('loginPage.privacyPolicy')}
               </a>{' '}
-              and{' '}
+              {t('loginPage.and')}{' '}
               <a href="/terms" className="text-brand-500 hover:underline focus:underline focus:outline-none">
-                Terms of Service
+                {t('loginPage.termsOfService')}
               </a>.
               <br />
-              Students under 13 require parental consent.
+              {t('loginPage.coppaNotice')}
             </p>
           </div>
         </div>

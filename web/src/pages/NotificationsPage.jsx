@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { Bell, Check, CheckCheck } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
 
@@ -15,6 +16,7 @@ const NOTIFICATION_ICONS = {
 };
 
 const NotificationsPage = () => {
+  const { t } = useTranslation();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -84,7 +86,7 @@ const NotificationsPage = () => {
       <Layout>
         <div className="flex items-center justify-center py-12 gap-2 text-text-tertiary">
           <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-          Loading notifications...
+          {t('notificationsPage.loading')}
         </div>
       </Layout>
     );
@@ -94,15 +96,15 @@ const NotificationsPage = () => {
     <Layout>
       <div className="mb-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-text-primary">Notifications</h2>
+          <h2 className="text-2xl font-bold text-text-primary">{t('notificationsPage.title')}</h2>
           <div className="flex items-center gap-3">
             <select
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               className="border border-border-strong rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
-              <option value="all">All</option>
-              <option value="unread">Unread only</option>
+              <option value="all">{t('notificationsPage.all')}</option>
+              <option value="unread">{t('notificationsPage.unreadOnly')}</option>
             </select>
             {unreadCount > 0 && (
               <button
@@ -110,20 +112,20 @@ const NotificationsPage = () => {
                 className="inline-flex items-center gap-1.5 text-sm text-brand-600 hover:text-brand-800 font-medium"
               >
                 <CheckCheck className="w-4 h-4" />
-                Mark all read
+                {t('notificationsPage.markAllRead')}
               </button>
             )}
           </div>
         </div>
         {unreadCount > 0 && (
-          <p className="text-sm text-text-tertiary mt-1">{unreadCount} unread</p>
+          <p className="text-sm text-text-tertiary mt-1">{t('notificationsPage.unreadCount', { count: unreadCount })}</p>
         )}
       </div>
 
       {error && (
         <div className="bg-accent-danger/10 border border-accent-danger/30 text-accent-danger rounded-md p-3 mb-4 text-sm">
           {error}
-          <button onClick={() => { setError(null); fetchNotifications(); }} className="ml-2 text-accent-danger hover:text-accent-danger font-bold">Try Again</button>
+          <button onClick={() => { setError(null); fetchNotifications(); }} className="ml-2 text-accent-danger hover:text-accent-danger font-bold">{t('common.tryAgain')}</button>
         </div>
       )}
 
@@ -131,10 +133,10 @@ const NotificationsPage = () => {
         <div className="bg-surface-0 rounded-lg shadow p-12 text-center">
           <Bell className="w-12 h-12 text-gray-300 mx-auto mb-3" />
           <p className="text-text-tertiary text-lg mb-1">
-            {filter === 'unread' ? 'No unread notifications' : 'No notifications yet'}
+            {filter === 'unread' ? t('notificationsPage.noUnreadNotifications') : t('notificationsPage.noNotifications')}
           </p>
           <p className="text-text-disabled text-sm">
-            You'll see notifications here when something happens in your courses.
+            {t('notificationsPage.emptyHint')}
           </p>
         </div>
       ) : (
@@ -174,7 +176,7 @@ const NotificationsPage = () => {
                       <button
                         onClick={() => handleMarkAsRead(n.id)}
                         className="p-1.5 text-text-disabled hover:text-brand-600 hover:bg-brand-50 rounded flex-shrink-0"
-                        title="Mark as read"
+                        title={t('notificationsPage.markAsRead')}
                       >
                         <Check className="w-4 h-4" />
                       </button>

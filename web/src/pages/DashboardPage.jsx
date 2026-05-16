@@ -12,6 +12,7 @@ import {
   ArrowRight,
   Sparkles,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
@@ -478,27 +479,31 @@ const DashboardSkeleton = () => (
   </div>
 );
 
-const EmptyDashboard = () => (
-  <Card className="mx-auto max-w-xl text-center">
-    <CardContent className="space-y-4 px-6 py-12">
-      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-        <BookOpen className="h-6 w-6" />
-      </div>
-      <div>
-        <h2 className="text-lg font-semibold text-foreground">Welcome to Paper LMS</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          You are not enrolled in any courses yet. Browse the catalog to get started.
-        </p>
-      </div>
-      <Button asChild>
-        <Link to="/courses">Browse course catalog</Link>
-      </Button>
-    </CardContent>
-  </Card>
-);
+const EmptyDashboard = () => {
+  const { t } = useTranslation();
+  return (
+    <Card className="mx-auto max-w-xl text-center">
+      <CardContent className="space-y-4 px-6 py-12">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <BookOpen className="h-6 w-6" />
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">{t('dashboardPage.welcomeToPaperLms')}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t('dashboardPage.notEnrolledYet')}
+          </p>
+        </div>
+        <Button asChild>
+          <Link to="/courses">{t('dashboardPage.browseCatalog')}</Link>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+};
 
 const DashboardPage = () => {
-  useDocumentTitle('Dashboard');
+  const { t } = useTranslation();
+  useDocumentTitle(t('dashboard.title'));
   const { user } = useAuth();
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);

@@ -1,7 +1,22 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
+import i18n from 'i18next';
 import { api } from '../services/api';
 
 const AuthContext = createContext(null);
+
+// Apply the account's default_locale only if the user has NOT made an explicit choice
+// (localStorage 'paperlms_locale' / legacy 'i18nextLng' takes priority over the account default).
+const applyAccountDefaultLocale = (data) => {
+  if (!data) return;
+  const explicit = typeof localStorage !== 'undefined'
+    ? (localStorage.getItem('paperlms_locale') || localStorage.getItem('i18nextLng'))
+    : null;
+  if (explicit) return;
+  const acctLocale = data?.account?.default_locale || data?.account_default_locale;
+  if (acctLocale && acctLocale !== i18n.language) {
+    i18n.changeLanguage(acctLocale);
+  }
+};
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -13,6 +28,7 @@ export const AuthProvider = ({ children }) => {
     api.getSelf()
       .then((data) => {
         setUser(data);
+        applyAccountDefaultLocale(data);
       })
       .catch(() => {
         // Not authenticated or token expired — clear any stale localStorage
@@ -50,6 +66,7 @@ export const AuthProvider = ({ children }) => {
     // policy requires the user to enroll before continuing. Caller
     // routes to /mfa/enroll based on this flag.
     setUser(data.user);
+    applyAccountDefaultLocale(data.user);
     return data;
   };
 

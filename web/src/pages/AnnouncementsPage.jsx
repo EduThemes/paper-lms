@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Megaphone, AlertTriangle, Clock, CheckCircle, Eye, Users, Plus, Edit2, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
@@ -11,6 +12,7 @@ import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { Skeleton } from '@/components/ui/skeleton';
 
 const AnnouncementsPage = () => {
+  const { t } = useTranslation();
   const { courseId } = useParams();
   const { user } = useAuth();
   const [announcements, setAnnouncements] = useState([]);
@@ -228,7 +230,7 @@ const AnnouncementsPage = () => {
     return (
       <Layout>
         <CourseNav />
-        <div className="space-y-3 p-6" role="status" aria-label="Loading announcements">
+        <div className="space-y-3 p-6" role="status" aria-label={t('announcementsPage.loading')}>
           <Skeleton className="h-9 w-48" />
           <Skeleton className="h-12 w-full" />
           {Array.from({ length: 6 }).map((_, i) => (
@@ -260,7 +262,7 @@ const AnnouncementsPage = () => {
         <div className="flex items-center justify-between mt-2">
           <div className="flex items-center space-x-2">
             <Megaphone className="w-6 h-6 text-text-secondary" aria-hidden="true" />
-            <h2 className="text-2xl font-bold text-text-primary">Announcements</h2>
+            <h2 className="text-2xl font-bold text-text-primary">{t('announcementsPage.title')}</h2>
           </div>
           {isInstructor && (
             <button
@@ -275,7 +277,7 @@ const AnnouncementsPage = () => {
               aria-controls="announcement-form"
             >
               <Plus className="w-4 h-4" aria-hidden="true" />
-              <span>{showForm ? 'Cancel' : 'New Announcement'}</span>
+              <span>{showForm ? t('common.cancel') : t('announcementsPage.newAnnouncement')}</span>
             </button>
           )}
         </div>
@@ -426,7 +428,7 @@ const AnnouncementsPage = () => {
       <div className="space-y-4" role="feed" aria-label="Announcements list">
         {announcements.length === 0 ? (
           <div className="bg-surface-0 rounded-lg shadow p-6 text-center text-text-tertiary">
-            No announcements yet.
+            {t('announcementsPage.noAnnouncements')}
           </div>
         ) : (
           announcements.map((announcement) => (

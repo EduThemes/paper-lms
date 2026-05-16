@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { FileText, Clock, CheckCircle, AlertCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 
 const QuizSubmissionsPage = () => {
+  const { t } = useTranslation();
   const { courseId, quizId } = useParams();
   const [quiz, setQuiz] = useState(null);
   const [submissions, setSubmissions] = useState([]);
@@ -66,13 +68,13 @@ const QuizSubmissionsPage = () => {
   if (loading) {
     return <Layout><div className="flex items-center justify-center py-12 gap-2 text-text-tertiary">
   <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-  Loading submissions...
+  {t('quizSubmissionsPage.loading')}
 </div></Layout>;
   }
   if (error) {
     return <Layout><div className="text-center py-12">
   <p className="text-accent-danger mb-3">{error}</p>
-  <button onClick={() => window.location.reload()} className="text-brand-600 hover:text-brand-800 text-sm font-medium">Try Again</button>
+  <button onClick={() => window.location.reload()} className="text-brand-600 hover:text-brand-800 text-sm font-medium">{t('common.tryAgain')}</button>
 </div></Layout>;
   }
 
@@ -80,7 +82,7 @@ const QuizSubmissionsPage = () => {
     <Layout>
       <CourseNav />
       <div className="mb-6">
-        <Link to={`/courses/${courseId}`} className="text-brand-600 hover:underline text-sm">← Back to Course</Link>
+        <Link to={`/courses/${courseId}`} className="text-brand-600 hover:underline text-sm">← {t('course.backToCourse')}</Link>
         <h2 className="text-2xl font-bold mt-2">{quiz?.title} - Submissions</h2>
         <p className="text-text-tertiary">
           {quiz?.points_possible ? `${quiz.points_possible} points` : 'Ungraded'}
@@ -104,7 +106,7 @@ const QuizSubmissionsPage = () => {
           <tbody className="divide-y">
             {submissions.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-text-tertiary">No submissions yet.</td>
+                <td colSpan={7} className="px-4 py-8 text-center text-text-tertiary">{t('quizSubmissionsPage.noSubmissions')}</td>
               </tr>
             ) : (
               submissions.map(sub => (

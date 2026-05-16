@@ -24,6 +24,7 @@ import {
   Activity,
   CalendarClock,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import useIsTeacher from '../hooks/useIsTeacher';
@@ -457,8 +458,10 @@ const SetupChecklistCard = ({ courseId, items, completedCount, totalCount }) => 
   );
 };
 
-const CourseLandingSkeleton = () => (
-  <div className="space-y-6" aria-busy="true" aria-label="Loading course">
+const CourseLandingSkeleton = () => {
+  const { t } = useTranslation();
+  return (
+  <div className="space-y-6" aria-busy="true" aria-label={t('coursePage.loadingCourse')}>
     <Skeleton className="h-48 w-full rounded-card" />
     <div className="flex flex-wrap gap-2">
       {Array.from({ length: 6 }).map((_, i) => (
@@ -476,7 +479,8 @@ const CourseLandingSkeleton = () => (
       </div>
     </div>
   </div>
-);
+  );
+};
 
 const ModuleList = ({ courseId, modules }) => {
   const [expandedModules, setExpandedModules] = useState({});
