@@ -60,7 +60,7 @@ func NewSpeedGraderService(
 // submissions and comments.
 func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, assignmentID uint) (*SpeedGraderData, error) {
 	// Fetch assignment
-	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID)
+	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("assignment not found: %w", err)
 	}

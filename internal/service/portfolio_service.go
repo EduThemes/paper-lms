@@ -257,7 +257,7 @@ func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uin
 
 		// Look up the assignment name for the artifact title
 		artifactTitle := fmt.Sprintf("Submission #%d", submissionID)
-		assignment, assignErr := s.assignmentRepo.FindByID(ctx, submission.AssignmentID)
+		assignment, assignErr := s.assignmentRepo.FindByID(ctx, submission.AssignmentID, 0)
 		if assignErr == nil {
 			artifactTitle = assignment.Name
 		}

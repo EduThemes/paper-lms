@@ -13,14 +13,14 @@ import (
 	"encoding/xml"
 	"fmt"
 	"hash"
-	"io"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/EduThemes/paper-lms/internal/domain/models"
+
 	"github.com/EduThemes/paper-lms/internal/repository"
 )
 
@@ -45,18 +45,26 @@ type SAMLConfig struct {
 }
 
 // SAMLHandler implements SAML 2.0 Service Provider functionality.
+//
+// Sprint 10-C: loginPipeline is the convergence point for the
+// post-credential flow (JIT provisioning, email auto-link, MFA gate,
+// audit log). Before 10-C this file owned its own inline JIT block;
+// signature verification stayed put, only the post-credential JIT
+// changed.
 type SAMLHandler struct {
 	config           SAMLConfig
 	userRepo         repository.UserRepository
 	authProviderRepo repository.AuthenticationProviderRepository
+	loginPipeline    *LoginPipeline
 }
 
 // NewSAMLHandler creates a new SAMLHandler with the given configuration and repositories.
-func NewSAMLHandler(config SAMLConfig, userRepo repository.UserRepository, authProviderRepo repository.AuthenticationProviderRepository) *SAMLHandler {
+func NewSAMLHandler(config SAMLConfig, userRepo repository.UserRepository, authProviderRepo repository.AuthenticationProviderRepository, loginPipeline *LoginPipeline) *SAMLHandler {
 	return &SAMLHandler{
 		config:           config,
 		userRepo:         userRepo,
 		authProviderRepo: authProviderRepo,
+		loginPipeline:    loginPipeline,
 	}
 }
 
@@ -454,75 +462,110 @@ func (h *SAMLHandler) HandleACS(c *fiber.Ctx) error {
 		displayName = email
 	}
 
-	// Look up or JIT provision user
-	user, err := h.userRepo.FindByEmail(c.Context(), email)
-	if err != nil {
-		// User not found, try by login ID
-		user, err = h.userRepo.FindByLoginID(c.Context(), email)
+	// Sprint 10-C: post-credential flow goes through the pipeline.
+	// JIT provisioning, email auto-link (only when EmailVerified=true,
+	// which it always is for SAML — the IdP attested via signed
+	// assertion), audit-log, and the MFA gate all live there.
+	//
+	// ProviderID: looked up by ACS URL or RelayState in the future;
+	// for now the SAML config carries one global IDP, so we identify
+	// it by the IDP entity ID (matched at provider-load time). When
+	// the SAML handler grows multi-IDP support, this field will be
+	// resolved from the RelayState's `provider_id` query param.
+	providerID := h.resolveProviderID(c)
+	outcome := SSOOutcome{
+		ProviderID:      providerID,
+		ProviderType:    "saml",
+		ExternalSubject: nameID, // NameID is the IdP-stable identifier
+		Email:           email,
+		EmailVerified:   true, // SAML IdP attests via signed assertion
+		Name:            displayName,
+		Attributes: map[string]any{
+			"name_id":      nameID,
+			"display_name": displayName,
+			"first_name":   firstName,
+			"last_name":    lastName,
+			"email":        email,
+		},
 	}
+	meta := RequestMeta{IPAddress: c.IP(), UserAgent: c.Get("User-Agent")}
+	result, err := h.loginPipeline.Execute(c.Context(), outcome, meta)
 	if err != nil {
-		// JIT provisioning: create a new user
-		user = &models.User{
-			Name:    displayName,
-			LoginID: email,
-			Email:   email,
-		}
-		if firstName != "" && lastName != "" {
-			user.SortableName = lastName + ", " + firstName
-			user.ShortName = firstName
-		}
-		// Set a random password hash since SSO users authenticate externally
-		if hashErr := user.HashPassword(generateRandomPassword()); hashErr != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"errors": []fiber.Map{{"message": "Failed to provision user"}},
-			})
-		}
-		if createErr := h.userRepo.Create(c.Context(), user); createErr != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"errors": []fiber.Map{{"message": "Failed to create user: " + createErr.Error()}},
-			})
-		}
-	} else {
-		// Update user attributes from SAML if they changed
-		updated := false
-		if displayName != "" && user.Name != displayName {
-			user.Name = displayName
-			updated = true
-		}
-		if firstName != "" && lastName != "" {
-			sortable := lastName + ", " + firstName
-			if user.SortableName != sortable {
-				user.SortableName = sortable
-				user.ShortName = firstName
-				updated = true
-			}
-		}
-		if updated {
-			_ = h.userRepo.Update(c.Context(), user)
-		}
-	}
-
-	// Generate JWT
-	token, err := GenerateToken(user, h.config.JWTSecret)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"errors": []fiber.Map{{"message": "Failed to generate authentication token"}},
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"errors": []fiber.Map{{"message": "SAML login failed: " + err.Error()}},
 		})
 	}
 
-	// Redirect to frontend with token
+	// Where to land the browser. RelayState wins if the IdP echoed
+	// one back (the SP can stash a deep link there before kicking off
+	// the AuthnRequest); otherwise the SPA root.
 	relayState := c.FormValue("RelayState")
 	redirectTarget := h.config.FrontendURL
 	if relayState != "" {
 		redirectTarget = relayState
 	}
 
-	separator := "?"
-	if strings.Contains(redirectTarget, "?") {
-		separator = "&"
+	// Pending-MFA: redirect to /mfa/verify with the token. The route
+	// is on the SPA, so we tack the token onto the SPA URL.
+	if result.PendingToken != "" {
+		sep := "?"
+		if strings.Contains(redirectTarget, "?") {
+			sep = "&"
+		}
+		return c.Redirect(redirectTarget+"/mfa/verify"+sep+"t="+url.QueryEscape(result.PendingToken), fiber.StatusFound)
 	}
 
-	return c.Redirect(redirectTarget+separator+"token="+url.QueryEscape(token), fiber.StatusFound)
+	// Real session — set the cookie that the rest of the app reads.
+	c.Cookie(&fiber.Cookie{
+		Name:     "paper_session",
+		Value:    result.Token,
+		Path:     "/",
+		HTTPOnly: true,
+		SameSite: "Lax",
+		MaxAge:   86400,
+		Expires:  time.Now().Add(24 * time.Hour),
+	})
+	if result.MustEnroll {
+		// Tenant policy requires MFA but the user hasn't enrolled —
+		// land them on the enrollment flow.
+		return c.Redirect(redirectTarget+"/mfa/enroll", fiber.StatusFound)
+	}
+	return c.Redirect(redirectTarget, fiber.StatusFound)
+}
+
+// resolveProviderID returns the authentication_providers row id this
+// SAML response should be attributed to. The pre-10-C handler didn't
+// thread provider_id through the SAML flow at all — multi-IDP
+// support is a future enhancement. For now we look up the single
+// active SAML provider on account 1; if there are several, the
+// first one wins. Callers that need precise routing should pre-set
+// RelayState with the provider_id encoded.
+func (h *SAMLHandler) resolveProviderID(c *fiber.Ctx) uint {
+	// If a provider_id query/form param is set (e.g. via RelayState
+	// the SP carved out earlier), honor it.
+	if raw := c.Query("provider_id"); raw != "" {
+		if id, err := strconv.ParseUint(raw, 10, 64); err == nil {
+			return uint(id)
+		}
+	}
+	if raw := c.FormValue("provider_id"); raw != "" {
+		if id, err := strconv.ParseUint(raw, 10, 64); err == nil {
+			return uint(id)
+		}
+	}
+	// Fallback: pick the first active SAML provider on account 1.
+	// Returns 0 if none — pipeline.resolveUser refuses to JIT when
+	// ProviderID is 0, so that's a safe failure mode.
+	page, err := h.authProviderRepo.ListByAccountID(c.Context(), 1, repository.PaginationParams{Page: 1, PerPage: 100})
+	if err != nil || page == nil {
+		return 0
+	}
+	for _, p := range page.Items {
+		if p.AuthType == "saml" && p.WorkflowState == "active" {
+			return p.ID
+		}
+	}
+	return 0
 }
 
 // extractSAMLAttributes flattens attribute statements into a simple string map.
@@ -722,11 +765,3 @@ func extractSignatureComponents(xmlData []byte) ([]byte, []byte, []byte, string,
 	return sigValue, digestValue, signedInfo, algorithm, nil
 }
 
-// generateRandomPassword creates a random 32-byte password for SSO-provisioned users.
-func generateRandomPassword() string {
-	b := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, b); err != nil {
-		return "sso-managed-account-no-password-login"
-	}
-	return base64.URLEncoding.EncodeToString(b)
-}

@@ -3,6 +3,9 @@
 /server
 /paper-lms
 /paper-lms-server
+/encrypt-ldap-passwords
+/leaderboard-snapshot
+/seedtestdata
 /bin/
 
 # Environment

@@ -2705,5 +2705,40 @@ export const api = {
       const { data } = await request('/gamification/vocabulary');
       return data;
     },
+
+    // W3-A: course leaderboard. W3-B widened access to students with
+    // server-side pseudonym substitution; 7-B added `offsetWeeks` for
+    // historical-window reads against the snapshot table. offsetWeeks
+    // = 0 (default) returns the live current-window response; >= 1
+    // returns the snapshotted previous-N-th window (404 if missing).
+    getCourseLeaderboard: async (courseId, { currency, limit = 50, offset = 0, offsetWeeks = 0 } = {}) => {
+      const params = new URLSearchParams();
+      if (currency) params.set('currency', currency);
+      params.set('limit', String(limit));
+      params.set('offset', String(offset));
+      if (offsetWeeks > 0) params.set('offset_weeks', String(offsetWeeks));
+      const { data } = await request(`/courses/${courseId}/leaderboard?${params}`);
+      return data;
+    },
+
+    // W3-B: pseudonym pool catalog for the picker UI. Server gates
+    // 403 when policy.LearnerCanSwitch=false (K-5/M68 tenants), so the
+    // picker is naturally hidden in those tenant modes.
+    getPseudonymPools: async (courseId) => {
+      const { data } = await request(`/courses/${courseId}/gamification/pseudonym_pools`);
+      return data;
+    },
+
+    // W3-B: learner-self pseudonym switcher. Body shapes:
+    //   { pool_code, name }              → pick a specific generable name
+    //   { pool_code, regenerate: true }  → server rolls a fresh deterministic name
+    //   { pool_code: "first_name" }      → use legal first-name token (HigherEd+ only)
+    updateMyPseudonym: async (courseId, body) => {
+      const { data } = await request(`/courses/${courseId}/enrollments/self/pseudonym`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
+      return data;
+    },
   },
 };

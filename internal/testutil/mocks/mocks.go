@@ -157,12 +157,16 @@ func (m *FnAssignmentGroupRepository) ListByCourseID(ctx context.Context, course
 
 // FnEnrollmentRepository implements repository.EnrollmentRepository using function fields for testing.
 type FnEnrollmentRepository struct {
-	CreateFn              func(ctx context.Context, enrollment *models.Enrollment) error
-	FindByIDFn            func(ctx context.Context, id uint) (*models.Enrollment, error)
-	UpdateFn              func(ctx context.Context, enrollment *models.Enrollment) error
-	ListByCourseIDFn      func(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Enrollment], error)
-	ListByUserIDFn        func(ctx context.Context, userID uint) ([]models.Enrollment, error)
-	FindByUserAndCourseFn func(ctx context.Context, userID, courseID uint) (*models.Enrollment, error)
+	CreateFn                            func(ctx context.Context, enrollment *models.Enrollment) error
+	FindByIDFn                          func(ctx context.Context, id uint) (*models.Enrollment, error)
+	UpdateFn                            func(ctx context.Context, enrollment *models.Enrollment) error
+	ListByCourseIDFn                    func(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Enrollment], error)
+	ListByUserIDFn                      func(ctx context.Context, userID uint) ([]models.Enrollment, error)
+	FindByUserAndCourseFn               func(ctx context.Context, userID, courseID uint) (*models.Enrollment, error)
+	CountByCourseIDsFn                       func(ctx context.Context, courseIDs []uint) (map[uint]int64, error)
+	ListActiveStudentUserIDsByCourseFn       func(ctx context.Context, courseID uint) ([]uint, error)
+	ListActiveStudentEnrollmentsByCourseFn   func(ctx context.Context, courseID uint) ([]models.Enrollment, error)
+	UpdatePseudonymForSelfFn                 func(ctx context.Context, userID, courseID uint, poolCode, name string) error
 }
 
 func (m *FnEnrollmentRepository) Create(ctx context.Context, enrollment *models.Enrollment) error {
@@ -205,4 +209,32 @@ func (m *FnEnrollmentRepository) FindByUserAndCourse(ctx context.Context, userID
 		return m.FindByUserAndCourseFn(ctx, userID, courseID)
 	}
 	return nil, nil
+}
+
+func (m *FnEnrollmentRepository) CountByCourseIDs(ctx context.Context, courseIDs []uint) (map[uint]int64, error) {
+	if m.CountByCourseIDsFn != nil {
+		return m.CountByCourseIDsFn(ctx, courseIDs)
+	}
+	return nil, nil
+}
+
+func (m *FnEnrollmentRepository) ListActiveStudentUserIDsByCourse(ctx context.Context, courseID uint) ([]uint, error) {
+	if m.ListActiveStudentUserIDsByCourseFn != nil {
+		return m.ListActiveStudentUserIDsByCourseFn(ctx, courseID)
+	}
+	return nil, nil
+}
+
+func (m *FnEnrollmentRepository) ListActiveStudentEnrollmentsByCourse(ctx context.Context, courseID uint) ([]models.Enrollment, error) {
+	if m.ListActiveStudentEnrollmentsByCourseFn != nil {
+		return m.ListActiveStudentEnrollmentsByCourseFn(ctx, courseID)
+	}
+	return nil, nil
+}
+
+func (m *FnEnrollmentRepository) UpdatePseudonymForSelf(ctx context.Context, userID, courseID uint, poolCode, name string) error {
+	if m.UpdatePseudonymForSelfFn != nil {
+		return m.UpdatePseudonymForSelfFn(ctx, userID, courseID, poolCode, name)
+	}
+	return nil
 }

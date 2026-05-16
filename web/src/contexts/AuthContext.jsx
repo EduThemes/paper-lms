@@ -38,7 +38,17 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const data = await api.login(email, password);
-    // Auth is handled by httpOnly cookie set by the server — no localStorage needed
+    // Phase 9-B: when MFA gates this login, the backend returns
+    // {pending_token, mfa_required: true} instead of {token, user}.
+    // Stash the pending token in sessionStorage (NOT localStorage —
+    // clears on tab close) and let the caller route to /mfa/verify.
+    if (data.mfa_required && data.pending_token) {
+      sessionStorage.setItem('mfa_pending_token', data.pending_token);
+      return data;
+    }
+    // Phase 9-B "must enroll" flag: real session issued, but tenant
+    // policy requires the user to enroll before continuing. Caller
+    // routes to /mfa/enroll based on this flag.
     setUser(data.user);
     return data;
   };

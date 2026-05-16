@@ -1,4 +1,4 @@
-.PHONY: build run test lint vet clean docker migrate-up migrate-down migrate-version migrate-baseline migrate-create schema-diff schema-diff-sql stale-cols dev backup restore
+.PHONY: build run test lint vet clean docker migrate-up migrate-down migrate-version migrate-baseline migrate-create schema-diff schema-diff-sql stale-cols dev backup restore dex-up dex-down dex-logs
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS = -ldflags "-X main.Version=$(VERSION)"
@@ -85,6 +85,17 @@ backup:
 
 restore:
 	@./scripts/restore.sh $(BACKUP_FILE)
+
+# Dex (Phase 10-A.7) — local OIDC server for OIDC E2E testing.
+# Only started explicitly; not part of `docker-compose up`.
+dex-up:
+	docker-compose --profile dex up -d dex
+
+dex-down:
+	docker-compose --profile dex down dex
+
+dex-logs:
+	docker-compose --profile dex logs -f dex
 
 # Cleanup
 clean:

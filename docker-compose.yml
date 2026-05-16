@@ -39,5 +39,20 @@ services:
     depends_on:
       - backend
 
+  # Dex (CNCF-graduated OIDC server) — used for OIDC E2E tests
+  # without needing real Google/Microsoft credentials. Only started
+  # explicitly via `make dex-up`; not part of the default `up` set.
+  # Two static users: alice@dex.test / password, bob@dex.test / password.
+  # Client `paper-lms-dev` with secret `dev-secret-not-prod`.
+  # See test/dex/config.yaml for the canonical configuration.
+  dex:
+    image: ghcr.io/dexidp/dex:v2.41.1
+    profiles: ["dex"]
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    ports:
+      - "5556:5556"
+    volumes:
+      - ./test/dex/config.yaml:/etc/dex/config.yaml:ro
+
 volumes:
   pgdata:

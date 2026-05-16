@@ -6,7 +6,29 @@ import puppeteer from 'puppeteer';
 import { AxePuppeteer } from '@axe-core/puppeteer';
 
 const BASE_URL = process.env.AXE_BASE_URL || 'http://localhost:5174';
-const ROUTES = ['/login', '/setup', '/portfolios/public/sample'];
+// 13.12 — expanded route set: anonymous public surfaces + authenticated
+// student-facing pages. SPA-only build serves the same shell for every
+// route; routes the app would redirect (auth-gated) still get axe-
+// crawled so the layout is verified independently.
+const ROUTES = [
+  '/login',
+  '/setup',
+  '/portfolios/public/sample',
+  '/dashboard',
+  '/courses',
+  '/courses/1',
+  '/courses/1/assignments',
+  '/courses/1/assignments/1',
+  '/courses/1/quizzes',
+  '/courses/1/gradebook',
+  '/courses/1/leaderboard',
+  '/courses/1/people',
+  '/inbox',
+  '/calendar',
+  '/users/self/passkeys',
+  '/users/self/mfa/enroll',
+  '/admin/settings',
+];
 const FAIL_IMPACTS = new Set(['critical', 'serious']);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

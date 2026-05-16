@@ -8,14 +8,18 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/golang-jwt/jwt/v5"
+
 	"github.com/EduThemes/paper-lms/internal/config"
-	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 )
 
 // SSOHandler ties together all SSO protocol handlers (SAML, LDAP, CAS) and
 // provides Fiber-compatible HTTP handlers for each authentication flow.
+//
+// Sprint 10-C: every protocol handler funnels through loginPipeline
+// after credential verification. The signature / bind / ticket
+// validation code in each protocol authenticator stays as-is — only
+// the post-credential flow goes through the pipeline.
 type SSOHandler struct {
 	samlHandler      *SAMLHandler
 	ldapAuth         *LDAPAuthenticator
@@ -23,6 +27,7 @@ type SSOHandler struct {
 	userRepo         repository.UserRepository
 	authProviderRepo repository.AuthenticationProviderRepository
 	config           *config.Config
+	loginPipeline    *LoginPipeline
 }
 
 // NewSSOHandler creates a new SSOHandler with all protocol handlers wired up.
@@ -33,6 +38,7 @@ func NewSSOHandler(
 	userRepo repository.UserRepository,
 	authProviderRepo repository.AuthenticationProviderRepository,
 	cfg *config.Config,
+	loginPipeline *LoginPipeline,
 ) *SSOHandler {
 	return &SSOHandler{
 		samlHandler:      samlHandler,
@@ -41,6 +47,7 @@ func NewSSOHandler(
 		userRepo:         userRepo,
 		authProviderRepo: authProviderRepo,
 		config:           cfg,
+		loginPipeline:    loginPipeline,
 	}
 }
 
@@ -171,29 +178,44 @@ func (h *SSOHandler) HandleCASCallback(c *fiber.Ctx) error {
 	}
 	serviceURL := fmt.Sprintf("%s://%s/api/v1/auth/cas/callback?provider_id=%d", scheme, c.Hostname(), provider.ID)
 
-	user, err := h.casAuth.ValidateTicket(c.Context(), provider, ticket, serviceURL)
+	outcome, err := h.casAuth.ValidateTicketOutcome(c.Context(), provider, ticket, serviceURL)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"errors": []fiber.Map{{"message": "CAS authentication failed: " + err.Error()}},
 		})
 	}
 
-	// Generate JWT
-	token, err := generateJWT(user, h.config.JWTSecret)
+	// Sprint 10-C: route post-credential flow through the pipeline.
+	meta := RequestMeta{IPAddress: c.IP(), UserAgent: c.Get("User-Agent")}
+	result, err := h.loginPipeline.Execute(c.Context(), outcome, meta)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"errors": []fiber.Map{{"message": "Failed to generate authentication token"}},
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"errors": []fiber.Map{{"message": "CAS login failed: " + err.Error()}},
 		})
 	}
 
-	// Redirect to frontend with token
 	frontendURL := h.config.FrontendURL
-	separator := "?"
-	if strings.Contains(frontendURL, "?") {
-		separator = "&"
+	if result.PendingToken != "" {
+		sep := "?"
+		if strings.Contains(frontendURL, "?") {
+			sep = "&"
+		}
+		return c.Redirect(frontendURL+"/mfa/verify"+sep+"t="+url.QueryEscape(result.PendingToken), fiber.StatusFound)
 	}
 
-	return c.Redirect(frontendURL+separator+"token="+url.QueryEscape(token), fiber.StatusFound)
+	c.Cookie(&fiber.Cookie{
+		Name:     "paper_session",
+		Value:    result.Token,
+		Path:     "/",
+		HTTPOnly: true,
+		SameSite: "Lax",
+		MaxAge:   86400,
+		Expires:  time.Now().Add(24 * time.Hour),
+	})
+	if result.MustEnroll {
+		return c.Redirect(frontendURL+"/mfa/enroll", fiber.StatusFound)
+	}
+	return c.Redirect(frontendURL, fiber.StatusFound)
 }
 
 // HandleLDAPLogin authenticates a user via LDAP using username/password from the request body.
@@ -242,42 +264,52 @@ func (h *SSOHandler) HandleLDAPLogin(c *fiber.Ctx) error {
 		})
 	}
 
-	user, err := h.ldapAuth.Authenticate(c.Context(), provider, input.Username, input.Password)
+	outcome, err := h.ldapAuth.BuildOutcome(c.Context(), provider, input.Username, input.Password)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"errors": []fiber.Map{{"message": "LDAP authentication failed: " + err.Error()}},
 		})
 	}
 
-	// Generate JWT
-	token, err := generateJWT(user, h.config.JWTSecret)
+	// Sprint 10-C: pipeline handles JIT / auto-link / MFA / audit.
+	meta := RequestMeta{IPAddress: c.IP(), UserAgent: c.Get("User-Agent")}
+	result, err := h.loginPipeline.Execute(c.Context(), outcome, meta)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"errors": []fiber.Map{{"message": "Failed to generate authentication token"}},
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"errors": []fiber.Map{{"message": "LDAP login failed: " + err.Error()}},
 		})
 	}
 
-	return c.JSON(fiber.Map{
-		"token": token,
-		"user": fiber.Map{
-			"id":    user.ID,
-			"name":  user.Name,
-			"email": user.Email,
-		},
-	})
-}
-
-// generateJWT creates a signed JWT token for the authenticated user.
-func generateJWT(user *models.User, jwtSecret string) (string, error) {
-	claims := jwt.MapClaims{
-		"id":    user.ID,
-		"email": user.Email,
-		"name":  user.Name,
-		"role":  user.Role,
-		"exp":   time.Now().Add(24 * time.Hour).Unix(),
-		"iat":   time.Now().Unix(),
+	// LDAP is a POST returning JSON (the frontend's LDAP login UX is
+	// a username/password form, not a redirect flow). Mirror the
+	// shape the local-password login uses so AuthContext can branch
+	// on mfa_required / must_enroll_mfa.
+	if result.PendingToken != "" {
+		return c.JSON(fiber.Map{
+			"mfa_required":  true,
+			"pending_token": result.PendingToken,
+		})
 	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(jwtSecret))
+	c.Cookie(&fiber.Cookie{
+		Name:     "paper_session",
+		Value:    result.Token,
+		Path:     "/",
+		HTTPOnly: true,
+		SameSite: "Lax",
+		MaxAge:   86400,
+		Expires:  time.Now().Add(24 * time.Hour),
+	})
+	resp := fiber.Map{
+		"token": result.Token,
+		"user": fiber.Map{
+			"id":    result.User.ID,
+			"name":  result.User.Name,
+			"email": result.User.Email,
+		},
+	}
+	if result.MustEnroll {
+		resp["must_enroll_mfa"] = true
+	}
+	return c.JSON(resp)
 }
+

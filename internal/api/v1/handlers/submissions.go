@@ -277,7 +277,7 @@ func (h *SubmissionHandler) UpdateSubmission(c *fiber.Ctx) error {
 		// Queue grade-posted notification for the student
 		if h.notificationDeliveryService != nil {
 			assignmentName := fmt.Sprintf("Assignment #%d", assignmentID)
-			if assignment, aErr := h.assignmentRepo.FindByID(c.Context(), uint(assignmentID)); aErr == nil {
+			if assignment, aErr := h.assignmentRepo.FindByID(c.Context(), uint(assignmentID), callerAccountID(c)); aErr == nil {
 				assignmentName = assignment.Name
 			}
 			gradeDisplay := input.Submission.PostedGrade
@@ -294,7 +294,7 @@ func (h *SubmissionHandler) UpdateSubmission(c *fiber.Ctx) error {
 			if alignments, aErr := h.outcomeAlignmentRepo.ListByAssignmentID(c.Context(), uint(assignmentID)); aErr == nil {
 				for _, alignment := range alignments {
 					possible := 100.0
-					if assignment, aErr := h.assignmentRepo.FindByID(c.Context(), uint(assignmentID)); aErr == nil && assignment.PointsPossible != nil {
+					if assignment, aErr := h.assignmentRepo.FindByID(c.Context(), uint(assignmentID), callerAccountID(c)); aErr == nil && assignment.PointsPossible != nil {
 						possible = *assignment.PointsPossible
 					}
 					result := &models.LearningOutcomeResult{

@@ -27,7 +27,7 @@ func (s *AssignmentService) Create(ctx context.Context, assignment *models.Assig
 }
 
 func (s *AssignmentService) GetByID(ctx context.Context, id uint) (*models.Assignment, error) {
-	return s.repo.FindByID(ctx, id)
+	return s.repo.FindByID(ctx, id, 0)
 }
 
 func (s *AssignmentService) Update(ctx context.Context, assignment *models.Assignment) error {

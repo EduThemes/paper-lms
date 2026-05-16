@@ -83,7 +83,7 @@ func RubricAssessmentCreatedEmitCallback(
 		var tenantID uint
 		switch rubric.ContextType {
 		case "Course":
-			course, err := courseRepo.FindByID(ctx, rubric.ContextID)
+			course, err := courseRepo.FindByID(ctx, rubric.ContextID, 0)
 			if err != nil {
 				slog.Error("rubric assessment emit: load course",
 					"assessment_id", assessmentID,

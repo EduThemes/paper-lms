@@ -20,9 +20,13 @@ func (r *pageRepo) Create(ctx context.Context, page *models.WikiPage) error {
 	return r.db.WithContext(ctx).Create(page).Error
 }
 
-func (r *pageRepo) FindByID(ctx context.Context, id uint) (*models.WikiPage, error) {
+func (r *pageRepo) FindByID(ctx context.Context, id, accountID uint) (*models.WikiPage, error) {
 	var page models.WikiPage
-	if err := r.db.WithContext(ctx).First(&page, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		q = q.Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID)
+	}
+	if err := q.First(&page, id).Error; err != nil {
 		return nil, err
 	}
 	return &page, nil

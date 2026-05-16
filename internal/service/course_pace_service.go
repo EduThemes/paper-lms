@@ -108,7 +108,7 @@ func (s *CoursePaceService) applyPaceDates(ctx context.Context, pace *models.Cou
 			continue
 		}
 
-		assignment, err := s.assignmentRepo.FindByID(ctx, *moduleItem.ContentID)
+		assignment, err := s.assignmentRepo.FindByID(ctx, *moduleItem.ContentID, 0)
 		if err != nil || assignment == nil {
 			continue
 		}

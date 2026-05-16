@@ -44,7 +44,7 @@ func EnrolledCourseEmitCallback(
 				"enrollment_id", enrollmentID, "error", err)
 			return
 		}
-		course, err := courseRepo.FindByID(ctx, enrollment.CourseID)
+		course, err := courseRepo.FindByID(ctx, enrollment.CourseID, 0)
 		if err != nil {
 			slog.Error("enrolled course emit: load course",
 				"enrollment_id", enrollmentID, "error", err)

@@ -311,7 +311,7 @@ type exportQTIItemFeedbackFlow struct {
 // ExportCourse generates an IMSCC package for the given course and returns the zip file path.
 func (e *IMSCCExporter) ExportCourse(ctx context.Context, courseID uint, outputDir string) (string, *ExportResult, error) {
 	// Verify the course exists
-	course, err := e.courseRepo.FindByID(ctx, courseID)
+	course, err := e.courseRepo.FindByID(ctx, courseID, 0)
 	if err != nil {
 		return "", nil, fmt.Errorf("course %d not found: %w", courseID, err)
 	}

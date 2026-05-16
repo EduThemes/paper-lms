@@ -8,6 +8,37 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// Store is the storage backend for rate-limit counters. 13.6.A — the
+// production in-memory implementation is single-pod by design; multi-
+// pod deployments swap in a Redis or Postgres-table implementation
+// that keeps state shared across replicas. The Allow contract returns
+// allowed (proceed), remaining (budget), retryAfter (when allowed=false).
+type Store interface {
+	Allow(key string, maxRequests int, window time.Duration) (allowed bool, remaining int, retryAfter time.Duration)
+}
+
+// defaultStore is the package-wide Store used by the rate-limit
+// factories below. main.go can install a Redis-backed store via
+// SetStore at boot. Unset = legacy in-memory behavior.
+var (
+	storeMu      sync.RWMutex
+	defaultStore Store
+)
+
+// SetStore installs the process-wide rate-limit backend. Pass nil to
+// revert to the per-limiter in-memory store (legacy behavior).
+func SetStore(s Store) {
+	storeMu.Lock()
+	defaultStore = s
+	storeMu.Unlock()
+}
+
+func getStore() Store {
+	storeMu.RLock()
+	defer storeMu.RUnlock()
+	return defaultStore
+}
+
 // clientRecord tracks request timestamps for a single client within the sliding window.
 type clientRecord struct {
 	timestamps []time.Time
@@ -15,6 +46,8 @@ type clientRecord struct {
 }
 
 // rateLimiter holds the shared state for one rate-limiting rule.
+// Implements Store on the per-limiter map; SetStore overrides this
+// with a cluster-wide backend when wired.
 type rateLimiter struct {
 	clients     sync.Map // map[string]*clientRecord
 	maxRequests int
@@ -106,13 +139,24 @@ func (rl *rateLimiter) cleanup() {
 
 // RateLimitMiddleware returns a Fiber handler that enforces a sliding-window
 // rate limit of maxRequests per window, keyed by client IP address.
+//
+// If a process-wide Store has been installed via SetStore, that backend
+// is consulted instead of the per-limiter in-memory map — required for
+// multi-pod deploys where each pod's in-memory counter would otherwise
+// let an attacker get N×budget by rotating between replicas.
 func RateLimitMiddleware(maxRequests int, window time.Duration) fiber.Handler {
 	rl := newRateLimiter(maxRequests, window)
 
 	return func(c *fiber.Ctx) error {
 		ip := c.IP()
 
-		allowed, _, retryAfter := rl.allow(ip)
+		var allowed bool
+		var retryAfter time.Duration
+		if s := getStore(); s != nil {
+			allowed, _, retryAfter = s.Allow("ip:"+ip, maxRequests, window)
+		} else {
+			allowed, _, retryAfter = rl.allow(ip)
+		}
 		if !allowed {
 			seconds := int(retryAfter.Seconds()) + 1
 			c.Set("Retry-After", strconv.Itoa(seconds))
@@ -144,7 +188,13 @@ func RateLimitMiddlewareByUser(maxRequests int, window time.Duration) fiber.Hand
 			key = "user:" + strconv.FormatUint(uint64(uid), 10)
 		}
 
-		allowed, _, retryAfter := rl.allow(key)
+		var allowed bool
+		var retryAfter time.Duration
+		if s := getStore(); s != nil {
+			allowed, _, retryAfter = s.Allow(key, maxRequests, window)
+		} else {
+			allowed, _, retryAfter = rl.allow(key)
+		}
 		if !allowed {
 			seconds := int(retryAfter.Seconds()) + 1
 			c.Set("Retry-After", strconv.Itoa(seconds))

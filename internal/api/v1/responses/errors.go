@@ -25,3 +25,7 @@ func InternalError(c *fiber.Ctx, message string) error {
 func Unauthorized(c *fiber.Ctx) error {
 	return Error(c, fiber.StatusUnauthorized, "Unauthorized")
 }
+
+func Forbidden(c *fiber.Ctx, message string) error {
+	return Error(c, fiber.StatusForbidden, message)
+}

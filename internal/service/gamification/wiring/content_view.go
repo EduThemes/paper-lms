@@ -54,7 +54,7 @@ func ViewedContentEmitCallback(
 			return
 		}
 
-		page, err := pageRepo.FindByID(ctx, objectID)
+		page, err := pageRepo.FindByID(ctx, objectID, 0)
 		if err != nil {
 			slog.Error("gamification: load page for view emit",
 				"object_type", objectType,
@@ -72,7 +72,7 @@ func ViewedContentEmitCallback(
 			return
 		}
 
-		course, err := courseRepo.FindByID(ctx, page.CourseID)
+		course, err := courseRepo.FindByID(ctx, page.CourseID, 0)
 		if err != nil {
 			slog.Error("gamification: load course for view emit",
 				"course_id", page.CourseID,

@@ -48,6 +48,7 @@ func setupSubmissionTest() (
 	// Auth middleware stub: set user_id in Locals for all requests.
 	app.Use(func(c *fiber.Ctx) error {
 		c.Locals("user_id", uint(1))
+		c.Locals("account_id", uint(1))
 		return c.Next()
 	})
 
@@ -74,7 +75,7 @@ func TestCreateSubmission_Success(t *testing.T) {
 		CourseID: 1,
 		Name:     "Essay 1",
 	}
-	assignmentRepo.On("FindByID", mock.Anything, uint(1)).Return(assignment, nil)
+	assignmentRepo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(assignment, nil)
 
 	// No existing submission for this user+assignment.
 	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(1)).Return(nil, errors.New("not found"))
@@ -228,7 +229,7 @@ func TestUpdateSubmission_Grade(t *testing.T) {
 	}
 
 	// Grade calls isGradingPeriodClosed → assignmentRepo.FindByID (returns no DueAt, so period check skips)
-	assignmentRepo.On("FindByID", mock.Anything, uint(1)).Return(&models.Assignment{ID: 1, CourseID: 1, Name: "Essay 1"}, nil)
+	assignmentRepo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(&models.Assignment{ID: 1, CourseID: 1, Name: "Essay 1"}, nil)
 	// Grade calls FindByAssignmentAndUser, then Update.
 	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2)).Return(submission, nil)
 	submissionRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.Submission")).Return(nil)

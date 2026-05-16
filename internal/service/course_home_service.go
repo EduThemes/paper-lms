@@ -52,7 +52,7 @@ func NewCourseHomeService(
 }
 
 func (s *CourseHomeService) GetHomeData(ctx context.Context, courseID, userID uint) (*HomeData, error) {
-	course, err := s.courseRepo.FindByID(ctx, courseID)
+	course, err := s.courseRepo.FindByID(ctx, courseID, 0)
 	if err != nil {
 		return nil, err
 	}

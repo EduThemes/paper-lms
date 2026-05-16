@@ -173,7 +173,7 @@ func TestCourseGetByID(t *testing.T) {
 		CourseCode: "BIO101",
 	}
 
-	mockCourseRepo.On("FindByID", ctx, uint(5)).Return(expectedCourse, nil)
+	mockCourseRepo.On("FindByID", ctx, uint(5), uint(0)).Return(expectedCourse, nil)
 
 	result, err := svc.GetByID(ctx, 5)
 
@@ -239,7 +239,7 @@ func TestCourseList(t *testing.T) {
 		PerPage:    10,
 	}
 
-	mockCourseRepo.On("List", ctx, params).Return(expectedResult, nil)
+	mockCourseRepo.On("List", ctx, uint(0), params).Return(expectedResult, nil)
 
 	result, err := svc.List(ctx, params)
 
@@ -269,7 +269,7 @@ func TestCourseListForUser(t *testing.T) {
 		PerPage:    10,
 	}
 
-	mockCourseRepo.On("ListByUserID", ctx, uint(10), params).Return(expectedResult, nil)
+	mockCourseRepo.On("ListByUserID", ctx, uint(10), uint(0), params).Return(expectedResult, nil)
 
 	result, err := svc.ListForUser(ctx, 10, params)
 

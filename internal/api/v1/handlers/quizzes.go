@@ -65,7 +65,7 @@ func (h *QuizHandler) GetQuiz(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
 
-	quiz, err := h.quizRepo.FindByID(c.Context(), uint(id))
+	quiz, err := h.quizRepo.FindByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "quiz")
 	}
@@ -142,7 +142,7 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
 
-	quiz, err := h.quizRepo.FindByID(c.Context(), uint(id))
+	quiz, err := h.quizRepo.FindByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "quiz")
 	}

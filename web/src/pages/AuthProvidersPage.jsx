@@ -13,6 +13,7 @@ const AUTH_TYPES = [
   { value: 'saml', label: 'SAML' },
   { value: 'ldap', label: 'LDAP' },
   { value: 'cas', label: 'CAS' },
+  { value: 'oidc', label: 'OIDC' },
 ];
 
 const EMPTY_FORM = {
@@ -37,6 +38,14 @@ const EMPTY_FORM = {
   cas_login_url: '',
   cas_validate_url: '',
   cas_logout_url: '',
+  // OIDC (Phase 10-A.1)
+  oidc_preset: '',
+  oidc_issuer_url: '',
+  oidc_client_id: '',
+  oidc_client_secret: '',
+  oidc_scopes: ['openid', 'email', 'profile'],
+  oidc_client_secret_configured: false,
+  auto_provision: false,
   // General
   jit_provisioning: false,
 };
@@ -53,6 +62,16 @@ const AuthProvidersPage = () => {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [testingId, setTestingId] = useState(null);
+  const [presets, setPresets] = useState([]);
+
+  useEffect(() => {
+    // Phase 10-A.1 — fetch OIDC presets once. They drive the wizard
+    // cards + the issuer/scope pre-fill on preset selection.
+    fetch(`${API_URL}/auth/oidc/presets`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : { presets: [] }))
+      .then((d) => setPresets(d.presets || []))
+      .catch(() => setPresets([]));
+  }, []);
 
   const fetchProviders = useCallback(async () => {
     try {
@@ -99,6 +118,13 @@ const AuthProvidersPage = () => {
       cas_login_url: provider.cas_login_url || '',
       cas_validate_url: provider.cas_validate_url || '',
       cas_logout_url: provider.cas_logout_url || '',
+      oidc_preset: provider.oidc_preset || '',
+      oidc_issuer_url: provider.oidc_issuer_url || '',
+      oidc_client_id: provider.oidc_client_id || '',
+      oidc_client_secret: '', // never round-trips; empty = "don't change"
+      oidc_scopes: provider.oidc_scopes || ['openid', 'email', 'profile'],
+      oidc_client_secret_configured: !!provider.oidc_client_secret_configured,
+      auto_provision: provider.auto_provision || false,
       jit_provisioning: provider.jit_provisioning || false,
     });
     setEditingId(provider.id);
@@ -204,6 +230,7 @@ const AuthProvidersPage = () => {
       case 'saml': return 'SAML';
       case 'ldap': return 'LDAP';
       case 'cas': return 'CAS';
+      case 'oidc': return 'OIDC';
       default: return type;
     }
   };
@@ -213,8 +240,20 @@ const AuthProvidersPage = () => {
       case 'saml': return 'bg-brand-100 text-brand-800';
       case 'ldap': return 'bg-purple-100 text-purple-800';
       case 'cas': return 'bg-accent-warning/20 text-accent-warning';
+      case 'oidc': return 'bg-emerald-100 text-emerald-800';
       default: return 'bg-surface-2 text-text-primary';
     }
+  };
+
+  const applyOIDCPreset = (code) => {
+    const p = presets.find((x) => x.code === code);
+    if (!p) return;
+    setFormData((fd) => ({
+      ...fd,
+      oidc_preset: p.code,
+      oidc_issuer_url: p.issuer || fd.oidc_issuer_url,
+      oidc_scopes: p.scopes && p.scopes.length ? p.scopes : fd.oidc_scopes,
+    }));
   };
 
   const renderTypeFields = () => {
@@ -412,6 +451,125 @@ const AuthProvidersPage = () => {
             </div>
           </>
         );
+      case 'oidc':
+        return (
+          <>
+            {/* Preset wizard — clicking a card fills issuer + scopes. */}
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-2">
+                Provider preset
+              </label>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {presets.map((p) => (
+                  <button
+                    key={p.code}
+                    type="button"
+                    onClick={() => applyOIDCPreset(p.code)}
+                    className={`text-left px-3 py-2 rounded border text-sm transition-colors ${
+                      formData.oidc_preset === p.code
+                        ? 'border-brand-500 bg-brand-50 text-brand-700'
+                        : 'border-border-default hover:border-border-strong'
+                    }`}
+                    title={p.description}
+                  >
+                    <div className="font-medium">{p.label}</div>
+                  </button>
+                ))}
+              </div>
+              {formData.oidc_preset && (
+                <p className="text-xs text-text-tertiary mt-2">
+                  {presets.find((p) => p.code === formData.oidc_preset)?.description}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-1">
+                Issuer URL <span className="text-accent-danger">*</span>
+              </label>
+              <input
+                type="text"
+                value={formData.oidc_issuer_url}
+                onChange={(e) => setFormData({ ...formData, oidc_issuer_url: e.target.value })}
+                className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                placeholder="https://accounts.google.com"
+              />
+              <p className="text-xs text-text-tertiary mt-1">
+                The OIDC discovery base (.well-known/openid-configuration is appended automatically).
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1">
+                  Client ID <span className="text-accent-danger">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.oidc_client_id}
+                  onChange={(e) => setFormData({ ...formData, oidc_client_id: e.target.value })}
+                  className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                  placeholder="123456-abc.apps.googleusercontent.com"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1">
+                  Client Secret {!editingId && <span className="text-accent-danger">*</span>}
+                </label>
+                <input
+                  type="password"
+                  value={formData.oidc_client_secret}
+                  onChange={(e) => setFormData({ ...formData, oidc_client_secret: e.target.value })}
+                  className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                  placeholder={
+                    editingId && formData.oidc_client_secret_configured
+                      ? '(currently set — type to rotate)'
+                      : 'Paste the secret from your IdP console'
+                  }
+                />
+                <p className="text-xs text-text-tertiary mt-1">
+                  Stored encrypted (AES-256-GCM). Never returned to this form on read.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-1">Scopes</label>
+              <input
+                type="text"
+                value={(formData.oidc_scopes || []).join(' ')}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    oidc_scopes: e.target.value.split(/\s+/).filter(Boolean),
+                  })
+                }
+                className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 font-mono"
+                placeholder="openid email profile"
+              />
+              <p className="text-xs text-text-tertiary mt-1">
+                Space-separated. <code>openid</code> is required.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="oidc_auto_provision"
+                checked={formData.auto_provision}
+                onChange={(e) => setFormData({ ...formData, auto_provision: e.target.checked })}
+                className="rounded border-border-strong text-brand-600 focus:ring-brand-500"
+              />
+              <label htmlFor="oidc_auto_provision" className="text-sm font-medium text-text-secondary">
+                Auto-provision new users on first SSO login
+              </label>
+            </div>
+            <p className="text-xs text-text-tertiary -mt-2">
+              When off, only users that already exist in Paper can sign in via this provider.
+              When on, first-time logins create a new user account.
+            </p>
+          </>
+        );
       default:
         return null;
     }
@@ -423,7 +581,7 @@ const AuthProvidersPage = () => {
         <div>
           <h2 className="text-2xl font-bold text-text-primary">Authentication Providers</h2>
           <p className="text-text-secondary mt-1">
-            Configure SAML, LDAP, and CAS authentication for your institution.
+            Configure SAML, LDAP, CAS, and OIDC authentication for your institution.
           </p>
         </div>
         <button

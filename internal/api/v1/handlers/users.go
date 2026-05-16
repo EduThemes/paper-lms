@@ -20,10 +20,16 @@ type UserHandler struct {
 	jwtSecret      string
 	environment    string
 	tokenBlacklist *service.TokenBlacklist
+	// loginPipeline (Phase 9-PRE) — the local-password Login handler
+	// produces an SSOOutcome and runs it through the pipeline so MFA
+	// policy + audit logging + (future) federation linkage applies
+	// uniformly with the federated paths. nil-safe: when not wired
+	// the handler falls back to the pre-9-PRE direct-mint flow.
+	loginPipeline *auth.LoginPipeline
 }
 
-func NewUserHandler(userService *service.UserService, jwtSecret string, environment string, tokenBlacklist *service.TokenBlacklist, auditService *service.AuditService) *UserHandler {
-	return &UserHandler{userService: userService, jwtSecret: jwtSecret, environment: environment, tokenBlacklist: tokenBlacklist, auditService: auditService}
+func NewUserHandler(userService *service.UserService, jwtSecret string, environment string, tokenBlacklist *service.TokenBlacklist, auditService *service.AuditService, loginPipeline *auth.LoginPipeline) *UserHandler {
+	return &UserHandler{userService: userService, jwtSecret: jwtSecret, environment: environment, tokenBlacklist: tokenBlacklist, auditService: auditService, loginPipeline: loginPipeline}
 }
 
 // setAuthCookie sets an httpOnly secure cookie with the JWT token.
@@ -76,14 +82,60 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		return responses.Error(c, fiber.StatusUnauthorized, "Invalid credentials")
 	}
 
+	// Phase 9-PRE: route through LoginPipeline so MFA policy / audit
+	// logging / future federation linkage applies uniformly. The
+	// pipeline returns either a real session token OR a pending-MFA
+	// token; this handler translates to HTTP.
+	if h.loginPipeline != nil {
+		outcome := auth.SSOOutcome{
+			ProviderType:    "local",
+			ExternalSubject: fmt.Sprintf("%d", user.ID),
+			Email:           user.Email,
+			EmailVerified:   true, // user authenticated against their own row
+			Name:            user.Name,
+		}
+		meta := auth.RequestMeta{IPAddress: c.IP(), UserAgent: c.Get("User-Agent")}
+		result, err := h.loginPipeline.Execute(c.Context(), outcome, meta)
+		if err != nil {
+			return responses.InternalError(c, "Could not complete login")
+		}
+		// MFA gate: pending token returned, real session withheld.
+		if result.PendingToken != "" {
+			return c.JSON(fiber.Map{
+				"pending_token": result.PendingToken,
+				"mfa_required":  true,
+			})
+		}
+		// Token issued. Possibly with a "must enroll" flag.
+		h.setAuthCookie(c, result.Token)
+		body := fiber.Map{
+			"token": result.Token,
+			"user": fiber.Map{
+				"id":            result.User.ID,
+				"name":          result.User.Name,
+				"sortable_name": result.User.SortableName,
+				"short_name":    result.User.ShortName,
+				"login_id":      result.User.LoginID,
+				"email":         result.User.Email,
+				"avatar_url":    result.User.AvatarURL,
+				"locale":        result.User.Locale,
+				"role":          result.User.Role,
+			},
+		}
+		if result.MustEnroll {
+			body["must_enroll_mfa"] = true
+		}
+		return c.JSON(body)
+	}
+
+	// Fallback: pre-9-PRE direct-mint path. Kept so the handler is
+	// safe to wire in stages (pipeline can be added to DI after the
+	// handler is constructed in tests).
 	token, err := auth.GenerateToken(user, h.jwtSecret)
 	if err != nil {
 		return responses.InternalError(c, "Could not generate token")
 	}
-
-	// Set httpOnly cookie for browser-based auth
 	h.setAuthCookie(c, token)
-
 	return c.JSON(fiber.Map{
 		"token": token,
 		"user": fiber.Map{
@@ -359,8 +411,12 @@ func (h *UserHandler) StartMasquerade(c *fiber.Ctx) error {
 		return responses.NotFound(c, "user")
 	}
 
+	// 13.1.B — pass the admin's home tenant so the masquerade token's
+	// admin_account_id claim attributes the impersonation correctly.
+	adminAccountID, _ := c.Locals("account_id").(uint)
+
 	// Generate a masquerade token (target user's identity + admin's ID in masquerade_by claim)
-	token, err := auth.GenerateMasqueradeToken(targetUser, adminUserID, h.jwtSecret)
+	token, err := auth.GenerateMasqueradeToken(targetUser, adminUserID, adminAccountID, h.jwtSecret)
 	if err != nil {
 		return responses.InternalError(c, "Could not generate masquerade token")
 	}

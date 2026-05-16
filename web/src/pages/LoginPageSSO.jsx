@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../services/api';
 import BrandLogo from '../components/brand/BrandLogo';
+import { b64urlToBytes, bytesToB64url } from '../lib/webauthn';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -38,6 +39,13 @@ const ClassLinkIcon = () => (
     <circle cx="12" cy="12" r="12" fill="#2E7D32" />
     <path d="M7 12 L12 7 L17 12 L12 17 Z" fill="#fff" />
     <circle cx="12" cy="12" r="2" fill="#2E7D32" />
+  </svg>
+);
+
+// Apple Sign-In glyph — official Apple-recommended monochrome variant.
+const AppleIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
   </svg>
 );
 
@@ -88,6 +96,16 @@ const PROVIDER_STYLES = {
     hover: 'hover:bg-[#1B5E20]',
     icon: ClassLinkIcon,
     label: 'Sign in with ClassLink',
+  },
+  apple: {
+    // Brand color: Apple Sign-In monochrome (Apple HIG recommends
+    // black bg + white glyph + "Sign in with Apple" wordmark).
+    bg: 'bg-black',
+    border: 'border border-black',
+    text: 'text-white',
+    hover: 'hover:bg-neutral-900',
+    icon: AppleIcon,
+    label: 'Sign in with Apple',
   },
 };
 
@@ -165,8 +183,90 @@ const LoginPageSSO = () => {
     fetchProviders();
   }, []);
 
-  const handleSSOLogin = (providerId) => {
-    window.location.href = `${API_URL}/auth/sso/${providerId}/login`;
+  // Phase 10-B — passkey-as-primary. Click → discoverable login;
+  // the browser dialog offers all passkeys for this site. On
+  // success, server mints a session cookie and we route to /.
+  const passkeySupported = typeof window !== 'undefined' && window.PublicKeyCredential;
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const handlePasskeyLogin = async () => {
+    setError(null);
+    setPasskeyBusy(true);
+    try {
+      const beginRes = await fetch(`${API_URL}/auth/passkey/begin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+      if (!beginRes.ok) throw new Error(`could not start passkey login (${beginRes.status})`);
+      const { options } = await beginRes.json();
+      const publicKey = {
+        ...options.publicKey,
+        challenge: b64urlToBytes(options.publicKey.challenge),
+        allowCredentials: (options.publicKey.allowCredentials || []).map((c) => ({
+          ...c,
+          id: b64urlToBytes(c.id),
+        })),
+      };
+      const cred = await navigator.credentials.get({ publicKey });
+      if (!cred) throw new Error('No credential returned by the authenticator.');
+      const payload = {
+        id: cred.id,
+        rawId: bytesToB64url(cred.rawId),
+        type: cred.type,
+        response: {
+          authenticatorData: bytesToB64url(cred.response.authenticatorData),
+          clientDataJSON: bytesToB64url(cred.response.clientDataJSON),
+          signature: bytesToB64url(cred.response.signature),
+          userHandle: cred.response.userHandle ? bytesToB64url(cred.response.userHandle) : null,
+        },
+        clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {},
+      };
+      const finishRes = await fetch(`${API_URL}/auth/passkey/finish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
+      if (!finishRes.ok) {
+        const body = await finishRes.json().catch(() => ({}));
+        throw new Error(body.errors?.[0]?.message || `passkey login failed (${finishRes.status})`);
+      }
+      // Session cookie is set; the AuthContext will pick up the user
+      // on its next refresh. Navigate to the dashboard.
+      navigate('/');
+      // Hard reload so AuthContext re-reads /users/self.
+      window.location.reload();
+    } catch (err) {
+      setError(err.message || 'Passkey login failed.');
+    } finally {
+      setPasskeyBusy(false);
+    }
+  };
+
+  const handleSSOLogin = (provider) => {
+    // Route by auth_type to the protocol-specific begin endpoint.
+    // The pre-9 codebase had a "/auth/sso/:id/login" placeholder that
+    // never existed server-side — every protocol has its own URL.
+    const id = provider.id;
+    const t = provider.auth_type;
+    if (t === 'saml') {
+      window.location.href = `${API_URL}/auth/saml/login?provider_id=${id}`;
+    } else if (t === 'cas') {
+      window.location.href = `${API_URL}/auth/cas/login?provider_id=${id}`;
+    } else if (t === 'oidc') {
+      window.location.href = `${API_URL}/auth/oidc/login?provider_id=${id}`;
+    } else if (t === 'ldap') {
+      // LDAP login is a POST with credentials; the button should
+      // expand a username/password panel rather than redirect.
+      // For now, route to a stub; LDAP buttons are usually unused
+      // (LDAP is typically the local-password fallback for schools
+      // already running OpenLDAP / AD).
+      window.location.href = `${API_URL}/auth/ldap/login?provider_id=${id}`;
+    } else {
+      // Fallback: best-effort SAML route (the most common SSO type
+      // configured against legacy Canvas-imported providers).
+      window.location.href = `${API_URL}/auth/saml/login?provider_id=${id}`;
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -182,8 +282,22 @@ const LoginPageSSO = () => {
       if (isRegister) {
         const name = formData.get('name');
         await register(name, email, password);
-      } else {
-        await login(email, password);
+        navigate('/');
+        return;
+      }
+      // Phase 9-B: login() returns the raw response. If the tenant
+      // requires MFA, the response is {mfa_required: true, pending_token}
+      // — AuthContext stashes the pending token; we route to the
+      // verify page. If must_enroll_mfa is set, real session was
+      // issued but the user needs to enroll before continuing.
+      const data = await login(email, password);
+      if (data?.mfa_required) {
+        navigate('/mfa/verify');
+        return;
+      }
+      if (data?.must_enroll_mfa) {
+        navigate('/mfa/enroll');
+        return;
       }
       navigate('/');
     } catch (err) {
@@ -259,6 +373,27 @@ const LoginPageSSO = () => {
              isRegister ? 'Create your account' : 'Sign in to continue'}
           </p>
 
+          {/* ── Passkey Sign-in (Phase 10-B) ── */}
+          {view === 'login' && !isRegister && passkeySupported && (
+            <div className="mb-4">
+              <button
+                type="button"
+                onClick={handlePasskeyLogin}
+                disabled={passkeyBusy}
+                className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-lg font-medium text-sm transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 bg-surface-0 border border-border-strong text-text-secondary hover:bg-surface-1 hover:shadow-sm disabled:opacity-50"
+                aria-label="Sign in with a passkey"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="8" cy="11" r="5" />
+                  <path d="M13 11h7" />
+                  <path d="M20 11v3" />
+                  <path d="M17 14v-3" />
+                </svg>
+                <span>{passkeyBusy ? 'Waiting for device…' : 'Sign in with a passkey'}</span>
+              </button>
+            </div>
+          )}
+
           {/* ── SSO Provider Buttons ── */}
           {view === 'login' && !isRegister && providers.length > 0 && (
             <div className="space-y-3 mb-6" role="group" aria-label="Single sign-on options">
@@ -269,7 +404,7 @@ const LoginPageSSO = () => {
                   <button
                     key={provider.id}
                     type="button"
-                    onClick={() => handleSSOLogin(provider.id)}
+                    onClick={() => handleSSOLogin(provider)}
                     className={`
                       w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-lg
                       font-medium text-sm transition-all duration-150

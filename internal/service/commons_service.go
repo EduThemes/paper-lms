@@ -85,7 +85,7 @@ func (s *CommonsService) Publish(ctx context.Context, userID, courseID uint, opt
 		return nil, errors.New("resource_id is required for non-course exports")
 	}
 
-	course, err := s.courseRepo.FindByID(ctx, courseID)
+	course, err := s.courseRepo.FindByID(ctx, courseID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("source course not found: %w", err)
 	}
@@ -148,25 +148,25 @@ func (s *CommonsService) buildSnapshot(ctx context.Context, course *models.Cours
 
 	switch resourceType {
 	case "assignment":
-		a, err := s.assignmentRepo.FindByID(ctx, resourceID)
+		a, err := s.assignmentRepo.FindByID(ctx, resourceID, 0)
 		if err != nil {
 			return nil, fmt.Errorf("assignment not found: %w", err)
 		}
 		bundle["assignment"] = a
 	case "page":
-		p, err := s.pageRepo.FindByID(ctx, resourceID)
+		p, err := s.pageRepo.FindByID(ctx, resourceID, 0)
 		if err != nil {
 			return nil, fmt.Errorf("page not found: %w", err)
 		}
 		bundle["page"] = p
 	case "quiz":
-		q, err := s.quizRepo.FindByID(ctx, resourceID)
+		q, err := s.quizRepo.FindByID(ctx, resourceID, 0)
 		if err != nil {
 			return nil, fmt.Errorf("quiz not found: %w", err)
 		}
 		bundle["quiz"] = q
 	case "module":
-		m, err := s.moduleRepo.FindByID(ctx, resourceID)
+		m, err := s.moduleRepo.FindByID(ctx, resourceID, 0)
 		if err != nil {
 			return nil, fmt.Errorf("module not found: %w", err)
 		}
@@ -230,7 +230,7 @@ func (s *CommonsService) Import(ctx context.Context, userID, targetCourseID, sha
 	if err != nil {
 		return nil, fmt.Errorf("commons item not found: %w", err)
 	}
-	target, err := s.courseRepo.FindByID(ctx, targetCourseID)
+	target, err := s.courseRepo.FindByID(ctx, targetCourseID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("target course not found: %w", err)
 	}

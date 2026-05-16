@@ -104,6 +104,7 @@ func TestQTIImportHandler_PostMultipartIMSCC(t *testing.T) {
 	app := testutil.SetupTestApp()
 	api := app.Group("", func(c *fiber.Ctx) error {
 		c.Locals("user_id", uint(42))
+		c.Locals("account_id", uint(1))
 		return c.Next()
 	})
 	api.Post("/courses/:course_id/qti_import", h.Import)

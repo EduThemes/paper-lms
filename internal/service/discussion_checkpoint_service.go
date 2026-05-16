@@ -65,7 +65,7 @@ func (s *DiscussionCheckpointService) CreateCheckpoints(
 	// If the topic is graded (has an assignment), the checkpoint points
 	// must sum to the assignment's points_possible — Canvas requires this.
 	if topic.AssignmentID != nil {
-		assignment, err := s.assignmentRepo.FindByID(ctx, *topic.AssignmentID)
+		assignment, err := s.assignmentRepo.FindByID(ctx, *topic.AssignmentID, 0)
 		if err != nil {
 			return nil, errors.New("parent assignment not found")
 		}

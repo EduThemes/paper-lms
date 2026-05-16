@@ -33,6 +33,7 @@ func setupItemBankHandler() (
 	app := testutil.SetupTestApp()
 	api := app.Group("", func(c *fiber.Ctx) error {
 		c.Locals("user_id", uint(7))
+		c.Locals("account_id", uint(1))
 		return c.Next()
 	})
 

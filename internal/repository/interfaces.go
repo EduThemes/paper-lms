@@ -63,12 +63,16 @@ type AccountRepository interface {
 
 type CourseRepository interface {
 	Create(ctx context.Context, course *models.Course) error
-	FindByID(ctx context.Context, id uint) (*models.Course, error)
+	// FindByID — 13.1.D: tenant-scoped. accountID==0 means "no scope"
+	// and is permitted only from internal callers that have already
+	// validated tenant ownership upstream (e.g. background workers).
+	// Handler-layer callers MUST pass the caller's account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.Course, error)
 	FindBySISCourseID(ctx context.Context, sisCourseID string) (*models.Course, error)
 	Update(ctx context.Context, course *models.Course) error
 	Delete(ctx context.Context, id uint) error
-	List(ctx context.Context, params PaginationParams) (*PaginatedResult[models.Course], error)
-	ListByUserID(ctx context.Context, userID uint, params PaginationParams) (*PaginatedResult[models.Course], error)
+	List(ctx context.Context, accountID uint, params PaginationParams) (*PaginatedResult[models.Course], error)
+	ListByUserID(ctx context.Context, userID, accountID uint, params PaginationParams) (*PaginatedResult[models.Course], error)
 }
 
 type SectionRepository interface {
@@ -86,11 +90,34 @@ type EnrollmentRepository interface {
 	ListByUserID(ctx context.Context, userID uint) ([]models.Enrollment, error)
 	FindByUserAndCourse(ctx context.Context, userID, courseID uint) (*models.Enrollment, error)
 	CountByCourseIDs(ctx context.Context, courseIDs []uint) (map[uint]int64, error)
+	// ListActiveStudentUserIDsByCourse (W3-A) returns user_ids of active
+	// StudentEnrollment rows for a course — the leaderboard candidate
+	// set. Uses idx_enrollments_course_active (migration 000042).
+	ListActiveStudentUserIDsByCourse(ctx context.Context, courseID uint) ([]uint, error)
+	// ListActiveStudentEnrollmentsByCourse (W3-B) returns full
+	// Enrollment rows for the same set — needed when the caller
+	// also has to read per-enrollment pseudonym fields rather than
+	// just user_ids.
+	ListActiveStudentEnrollmentsByCourse(ctx context.Context, courseID uint) ([]models.Enrollment, error)
+	// UpdatePseudonymForSelf (W3-B) writes a learner-chosen pseudonym
+	// to their enrollment row in the given course. Returns
+	// repository.ErrPseudonymTaken on UNIQUE collision so the handler
+	// can map it to a 409.
+	UpdatePseudonymForSelf(ctx context.Context, userID, courseID uint, poolCode, name string) error
 }
+
+// ErrPseudonymTaken indicates that another active enrollment in the
+// same course already has the requested pseudonym name in the same
+// pool. The handler maps this to 409 so the picker UI can offer the
+// learner a re-roll.
+var ErrPseudonymTaken = errors.New("pseudonym already taken in this course pool")
 
 type ModuleRepository interface {
 	Create(ctx context.Context, module *models.ContextModule) error
-	FindByID(ctx context.Context, id uint) (*models.ContextModule, error)
+	// 13.1.D — accountID scopes the read to a single tenant via the
+	// parent course's account_id. 0 means "no tenant scope" (internal
+	// callers only).
+	FindByID(ctx context.Context, id, accountID uint) (*models.ContextModule, error)
 	Update(ctx context.Context, module *models.ContextModule) error
 	Delete(ctx context.Context, id uint) error
 	ListByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.ContextModule], error)
@@ -110,7 +137,8 @@ type ModuleItemRepository interface {
 
 type PageRepository interface {
 	Create(ctx context.Context, page *models.WikiPage) error
-	FindByID(ctx context.Context, id uint) (*models.WikiPage, error)
+	// 13.1.D — tenant scope via parent course's account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.WikiPage, error)
 	FindByCourseAndURL(ctx context.Context, courseID uint, url string) (*models.WikiPage, error)
 	FindPublicByCourseAndURL(ctx context.Context, courseID uint, url string) (*models.WikiPage, error)
 	Update(ctx context.Context, page *models.WikiPage) error
@@ -120,7 +148,8 @@ type PageRepository interface {
 
 type AssignmentRepository interface {
 	Create(ctx context.Context, assignment *models.Assignment) error
-	FindByID(ctx context.Context, id uint) (*models.Assignment, error)
+	// 13.1.D — tenant scope via parent course's account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.Assignment, error)
 	FindByIDs(ctx context.Context, ids []uint) ([]models.Assignment, error)
 	Update(ctx context.Context, assignment *models.Assignment) error
 	Delete(ctx context.Context, id uint) error
@@ -295,7 +324,8 @@ type SISBatchErrorRepository interface {
 
 type QuizRepository interface {
 	Create(ctx context.Context, quiz *models.Quiz) error
-	FindByID(ctx context.Context, id uint) (*models.Quiz, error)
+	// 13.1.D — tenant scope via parent course's account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.Quiz, error)
 	Update(ctx context.Context, quiz *models.Quiz) error
 	Delete(ctx context.Context, id uint) error
 	ListByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.Quiz], error)
@@ -921,10 +951,99 @@ type GamificationWalletRepository interface {
 	// avoids over-fetching when a user has years of cross-currency
 	// transactions.
 	ListTransactionsForUserAndCurrency(ctx context.Context, userID, currencyTypeID uint, params PaginationParams) (*PaginatedResult[models.GamificationWalletTransaction], error)
+	// RankByCurrency (W3-A) returns candidateUserIDs ranked by
+	// lifetime_earned DESC for a single currency. Ties resolved by
+	// earliest most-recent positive transaction (the earlier-completer
+	// ranks higher; doesn't reward sandbagging). Rows with no balance
+	// row for this currency surface with lifetime_earned = 0 and rank
+	// at the tail.
+	//
+	// Composition note: callers MUST narrow candidateUserIDs through
+	// UserRepository.FilterPublicLeaderboardCandidates first. Opt-out
+	// privacy lives in the user repo; this method is rank-only.
+	RankByCurrency(ctx context.Context, currencyTypeID uint, candidateUserIDs []uint) ([]RankRow, error)
+}
+
+// RankRow is the wallet-repo-level rank tuple. Rank starts at 1.
+// LifetimeEarned == 0 for candidates with no balance row in this currency.
+type RankRow struct {
+	UserID         uint
+	LifetimeEarned int64
+	Rank           int
 }
 
 type GamificationFerpaFieldTagRepository interface {
 	Upsert(ctx context.Context, tag *models.GamificationFerpaFieldTag) error
 	Find(ctx context.Context, objectType, fieldPath string) (*models.GamificationFerpaFieldTag, error)
 	ListByObjectType(ctx context.Context, objectType string) ([]models.GamificationFerpaFieldTag, error)
+}
+
+// UserRecoveryCodeRepository (Phase 9-B) persists single-use TOTP
+// recovery codes. Generated in bulk at MFA enrollment; one row
+// marked used per successful recovery-code login.
+type UserRecoveryCodeRepository interface {
+	CreateBatch(ctx context.Context, userID uint, codeHashes []string) error
+	ListUnusedForUser(ctx context.Context, userID uint) ([]models.UserRecoveryCode, error)
+	MarkUsed(ctx context.Context, id uint) error
+	DeleteAllForUser(ctx context.Context, userID uint) error
+}
+
+// UserWebauthnCredentialRepository (Phase 10-B) persists registered
+// passkey credentials. Lookups happen on (a) credential_id for the
+// assertion path and (b) user_id for the management UI. The
+// assertion path also bumps SignCount + LastUsedAt on every login.
+type UserWebauthnCredentialRepository interface {
+	Create(ctx context.Context, cred *models.UserWebauthnCredential) error
+	FindByCredentialID(ctx context.Context, credentialID []byte) (*models.UserWebauthnCredential, error)
+	FindByID(ctx context.Context, id uint) (*models.UserWebauthnCredential, error)
+	ListForUser(ctx context.Context, userID uint) ([]models.UserWebauthnCredential, error)
+	// UpdateSignCount bumps sign_count and last_used_at after a
+	// successful assertion. Replay-counter regression is the
+	// library's concern, not the repo's — callers pass the verified
+	// new counter through.
+	UpdateSignCount(ctx context.Context, id uint, newSignCount uint32) error
+	UpdateNickname(ctx context.Context, id, userID uint, nickname string) error
+	Delete(ctx context.Context, id, userID uint) error
+}
+
+// FederatedIdentityRepository (Phase 9-PRE) anchors external IdP
+// subjects to local user rows. Every federation handler (SAML, LDAP,
+// CAS, OIDC, future WebAuthn) writes through this surface; the
+// LoginPipeline reads it first when resolving an SSOOutcome to a user.
+//
+// Idempotent Create: re-authenticating with the same (provider,
+// subject) updates last_seen_at but doesn't create a duplicate. The
+// UNIQUE constraint on (provider_id, external_subject) gates it.
+type FederatedIdentityRepository interface {
+	// FindByProviderAndSubject returns the existing federation row or
+	// (nil, nil) when no binding exists. Callers fall back to email
+	// auto-link or JIT provisioning.
+	FindByProviderAndSubject(ctx context.Context, providerID uint, externalSubject string) (*models.FederatedIdentity, error)
+	// Create writes a fresh (user, provider, subject) binding. Caller
+	// has already resolved or created the user_id.
+	Create(ctx context.Context, fi *models.FederatedIdentity) error
+	// TouchLastSeen bumps the last_seen_at timestamp + optionally
+	// refreshes the claims_snapshot when the IdP sent richer data
+	// than what was captured at first-login.
+	TouchLastSeen(ctx context.Context, id uint, claimsSnapshot []byte) error
+	// ListForUser is the "manage your linked accounts" view a user
+	// sees in settings.
+	ListForUser(ctx context.Context, userID uint) ([]models.FederatedIdentity, error)
+}
+
+// GamificationLeaderboardSnapshotRepository persists ranked-window
+// snapshots (Sprint 7-B). Writes are idempotent via ON CONFLICT DO
+// NOTHING on the (scope, currency, window_kind, window_end) UNIQUE
+// constraint — the CLI can be re-run for the same window without
+// duplicating rows.
+type GamificationLeaderboardSnapshotRepository interface {
+	// Upsert inserts the snapshot row, no-op on conflict. Returns
+	// `created=true` only when a new row was actually written so the
+	// CLI can log per-window outcomes accurately.
+	Upsert(ctx context.Context, snap *models.GamificationLeaderboardSnapshot) (created bool, err error)
+	// FindByWindow returns the snapshot for the exact (scope,
+	// currency, kind, end) tuple, or nil if no snapshot exists for
+	// that window. The handler uses this to serve `?offset_weeks=N`
+	// reads; nil triggers a 404 at the handler.
+	FindByWindow(ctx context.Context, scopeType models.GamificationScopeType, scopeID, currencyTypeID uint, kind string, windowEnd time.Time) (*models.GamificationLeaderboardSnapshot, error)
 }

@@ -165,7 +165,7 @@ func (s *LTIAGSService) syncSubmissionScore(ctx context.Context, assignmentID ui
 	if result.ResultScore != nil && result.ResultMaximum != nil && *result.ResultMaximum > 0 {
 		// Scale to assignment's actual points_possible (default 100 if not set)
 		pointsPossible := 100.0
-		if assignment, aErr := s.assignmentRepo.FindByID(ctx, assignmentID); aErr == nil && assignment.PointsPossible != nil && *assignment.PointsPossible > 0 {
+		if assignment, aErr := s.assignmentRepo.FindByID(ctx, assignmentID, 0); aErr == nil && assignment.PointsPossible != nil && *assignment.PointsPossible > 0 {
 			pointsPossible = *assignment.PointsPossible
 		}
 		score := *result.ResultScore / *result.ResultMaximum * pointsPossible

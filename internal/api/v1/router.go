@@ -60,6 +60,9 @@ type Router struct {
 	contentImportHandler *handlers.ContentImportHandler
 	batchHandler         *handlers.BatchHandler
 	ssoHandler           *auth.SSOHandler
+	oidcHandler          *auth.OIDCHandler
+	mfaHandler           *handlers.MFAHandler
+	passkeyHandler       *handlers.PasskeyHandler
 	announcementHandler    *handlers.AnnouncementHandler
 	enrollmentTermHandler  *handlers.EnrollmentTermHandler
 	syllabusHandler        *handlers.SyllabusHandler
@@ -160,6 +163,9 @@ func NewRouter(
 	contentImportHandler *handlers.ContentImportHandler,
 	batchHandler *handlers.BatchHandler,
 	ssoHandler *auth.SSOHandler,
+	oidcHandler *auth.OIDCHandler,
+	mfaHandler *handlers.MFAHandler,
+	passkeyHandler *handlers.PasskeyHandler,
 	announcementHandler *handlers.AnnouncementHandler,
 	enrollmentTermHandler *handlers.EnrollmentTermHandler,
 	syllabusHandler *handlers.SyllabusHandler,
@@ -261,6 +267,9 @@ func NewRouter(
 		contentImportHandler:       contentImportHandler,
 		batchHandler:               batchHandler,
 		ssoHandler:                 ssoHandler,
+		oidcHandler:                oidcHandler,
+		mfaHandler:                 mfaHandler,
+		passkeyHandler:             passkeyHandler,
 		announcementHandler:         announcementHandler,
 		enrollmentTermHandler:       enrollmentTermHandler,
 		syllabusHandler:             syllabusHandler,
@@ -329,13 +338,38 @@ func (r *Router) Register(app *fiber.App) {
 	api.Post("/lti/oidc/login", r.ltiHandler.OIDCLogin)
 	api.Post("/lti/launch", r.ltiHandler.LaunchDirect)
 
-	// Public SSO endpoints (no auth required)
-	api.Get("/auth/saml/login", r.ssoHandler.HandleSAMLLogin)
-	api.Post("/auth/saml/acs", r.ssoHandler.HandleSAMLACS)
+	// Public SSO endpoints (no auth required). 13.6.B — every public
+	// auth route now goes through AuthRateLimit so SAML ACS, OIDC
+	// callbacks, MFA verify, and passkey begin/finish are all rate-
+	// capped per IP. The limiter is still in-memory pending the Redis
+	// backend (13.6.A), so multi-pod deploys split the budget; that's
+	// strictly better than no limit at all.
+	api.Get("/auth/saml/login", authLimit, r.ssoHandler.HandleSAMLLogin)
+	api.Post("/auth/saml/acs", authLimit, r.ssoHandler.HandleSAMLACS)
 	api.Get("/auth/saml/metadata", r.ssoHandler.HandleSAMLMetadata)
-	api.Get("/auth/cas/login", r.ssoHandler.HandleCASLogin)
-	api.Get("/auth/cas/callback", r.ssoHandler.HandleCASCallback)
-	api.Post("/auth/ldap/login", r.ssoHandler.HandleLDAPLogin)
+	api.Get("/auth/cas/login", authLimit, r.ssoHandler.HandleCASLogin)
+	api.Get("/auth/cas/callback", authLimit, r.ssoHandler.HandleCASCallback)
+	api.Post("/auth/ldap/login", authLimit, r.ssoHandler.HandleLDAPLogin)
+	// Phase 9-A — OIDC client mode.
+	if r.oidcHandler != nil {
+		api.Get("/auth/oidc/login", authLimit, r.oidcHandler.BeginLogin)
+		api.Get("/auth/oidc/callback", authLimit, r.oidcHandler.HandleCallback)
+	}
+	// Phase 10-A.1 — OIDC preset catalog (public, informational).
+	api.Get("/auth/oidc/presets", r.authProviderHandler.ListOIDCPresets)
+	// Phase 9-B — TOTP 2FA step-up (no auth required; pending-MFA
+	// token is the credential).
+	if r.mfaHandler != nil {
+		api.Post("/auth/mfa/verify", authLimit, r.mfaHandler.VerifyAtLogin)
+		api.Post("/auth/mfa/recovery", authLimit, r.mfaHandler.UseRecoveryCode)
+	}
+	// Phase 10-B — passkey discoverable login (no auth required; the
+	// passkey IS the credential). Begin/Finish ride on a 75-second
+	// HttpOnly cookie carrying the encrypted ceremony state.
+	if r.passkeyHandler != nil {
+		api.Post("/auth/passkey/begin", authLimit, r.passkeyHandler.BeginLogin)
+		api.Post("/auth/passkey/finish", authLimit, r.passkeyHandler.FinishLogin)
+	}
 
 	// Public page endpoint (no auth required)
 	api.Get("/courses/:course_id/p/:slug", r.pageHandler.GetPublicPage)
@@ -745,6 +779,10 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Post("/users/self/pairing_codes/redeem", r.pairingCodeHandler.Redeem)
 	protected.Get("/users/self/pairing_codes", r.pairingCodeHandler.List)
 	protected.Delete("/users/self/pairing_codes/:id", r.pairingCodeHandler.Revoke)
+	// Teacher-mediated pairing-code mint (item 12.6). Authorization is
+	// inside the handler — a teacher in the student's course OR the
+	// student themselves in an adult-mode tenant.
+	protected.Post("/users/:student_id/observer-pairing-codes", r.pairingCodeHandler.MintForStudent)
 
 	// GraphQL (any authenticated user)
 	protected.Post("/graphql", r.graphqlHandler.HandleQuery)
@@ -861,6 +899,10 @@ func (r *Router) Register(app *fiber.App) {
 	// FERPA Compliance (self/admin)
 	protected.Post("/users/:user_id/data_export", selfOrAdmin, r.ferpaHandler.CreateExportRequest)
 	protected.Get("/users/:user_id/data_export/:id", selfOrAdmin, r.ferpaHandler.GetExportRequest)
+	// Item 12.8 — wires the route that FERPAService.ProcessExport
+	// already advertises as the download URL. Authorization is inside
+	// the handler (requestor / subject / admin).
+	protected.Get("/data_exports/:id/download", r.ferpaHandler.DownloadDataExport)
 	protected.Post("/users/:user_id/data_deletion", selfOrAdmin, r.ferpaHandler.CreateDeletionRequest)
 	protected.Get("/admin/data_deletion_requests", admin, r.ferpaHandler.ListPendingDeletionRequests)
 	protected.Post("/admin/data_deletion_requests/:id/approve", admin, r.ferpaHandler.ApproveDeletionRequest)
@@ -1099,6 +1141,23 @@ func (r *Router) Register(app *fiber.App) {
 		protected.Get("/users/self/gamification_preferences", r.gamificationHandler.GetMyGamificationPreferences)
 		protected.Put("/users/self/gamification_preferences", r.gamificationHandler.UpdateMyGamificationPreferences)
 
+		// Phase 9-B — TOTP MFA self-management (regular session required).
+		if r.mfaHandler != nil {
+			protected.Post("/users/self/mfa/enroll", r.mfaHandler.EnrollMFA)
+			protected.Post("/users/self/mfa/verify-enrollment", r.mfaHandler.VerifyEnrollment)
+			protected.Delete("/users/self/mfa", r.mfaHandler.DisableMFA)
+		}
+
+		// Phase 10-B — passkey self-management (regular session required).
+		// Enroll/list/rename/revoke. Begin/finish login are public (see above).
+		if r.passkeyHandler != nil {
+			protected.Get("/users/self/passkeys", r.passkeyHandler.List)
+			protected.Post("/users/self/passkeys/begin", r.passkeyHandler.BeginRegistration)
+			protected.Post("/users/self/passkeys/finish", r.passkeyHandler.FinishRegistration)
+			protected.Patch("/users/self/passkeys/:id", r.passkeyHandler.Rename)
+			protected.Delete("/users/self/passkeys/:id", r.passkeyHandler.Revoke)
+		}
+
 		// W2-D — Badge CRUD + per-user list + manual award/revoke.
 		gam.Get("/badges", r.gamificationHandler.ListBadges)
 		gam.Post("/badges", admin, r.gamificationHandler.CreateBadge)
@@ -1119,6 +1178,17 @@ func (r *Router) Register(app *fiber.App) {
 		// instructor-flow lands when course-scope role check matures.
 		protected.Post("/users/:user_id/badges", admin, r.gamificationHandler.AwardBadgeToUser)
 		protected.Delete("/users/:user_id/badges/:badge_id", admin, r.gamificationHandler.RevokeBadgeFromUser)
+
+		// W3-A — course leaderboard. W3-B widened access to enrolled
+		// students with server-side pseudonym substitution + tenant-mode
+		// render policy.
+		protected.Get("/courses/:course_id/leaderboard", r.gamificationHandler.GetCourseLeaderboard)
+
+		// W3-B — pseudonym pool discovery + learner-self switch.
+		// Self-only; the handler reads user_id from Locals and never
+		// accepts another user's id in the path.
+		protected.Get("/courses/:course_id/gamification/pseudonym_pools", r.gamificationHandler.GetPseudonymPools)
+		protected.Put("/courses/:course_id/enrollments/self/pseudonym", r.gamificationHandler.UpdatePseudonymForSelf)
 
 		// W2-E.1 — recipe-builder write API + vocabulary discovery.
 		// Vocabulary endpoint is open to any authenticated user (the

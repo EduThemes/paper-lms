@@ -90,8 +90,8 @@ func (m *MockCourseRepository) Create(ctx context.Context, course *models.Course
 	return args.Error(0)
 }
 
-func (m *MockCourseRepository) FindByID(ctx context.Context, id uint) (*models.Course, error) {
-	args := m.Called(ctx, id)
+func (m *MockCourseRepository) FindByID(ctx context.Context, id, accountID uint) (*models.Course, error) {
+	args := m.Called(ctx, id, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -116,16 +116,16 @@ func (m *MockCourseRepository) Delete(ctx context.Context, id uint) error {
 	return args.Error(0)
 }
 
-func (m *MockCourseRepository) List(ctx context.Context, params repository.PaginationParams) (*repository.PaginatedResult[models.Course], error) {
-	args := m.Called(ctx, params)
+func (m *MockCourseRepository) List(ctx context.Context, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Course], error) {
+	args := m.Called(ctx, accountID, params)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*repository.PaginatedResult[models.Course]), args.Error(1)
 }
 
-func (m *MockCourseRepository) ListByUserID(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Course], error) {
-	args := m.Called(ctx, userID, params)
+func (m *MockCourseRepository) ListByUserID(ctx context.Context, userID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Course], error) {
+	args := m.Called(ctx, userID, accountID, params)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -187,6 +187,113 @@ func (m *MockEnrollmentRepository) CountByCourseIDs(ctx context.Context, courseI
 	return args.Get(0).(map[uint]int64), args.Error(1)
 }
 
+func (m *MockEnrollmentRepository) ListActiveStudentUserIDsByCourse(ctx context.Context, courseID uint) ([]uint, error) {
+	args := m.Called(ctx, courseID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]uint), args.Error(1)
+}
+
+func (m *MockEnrollmentRepository) ListActiveStudentEnrollmentsByCourse(ctx context.Context, courseID uint) ([]models.Enrollment, error) {
+	args := m.Called(ctx, courseID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.Enrollment), args.Error(1)
+}
+
+func (m *MockEnrollmentRepository) UpdatePseudonymForSelf(ctx context.Context, userID, courseID uint, poolCode, name string) error {
+	args := m.Called(ctx, userID, courseID, poolCode, name)
+	return args.Error(0)
+}
+
+// MockAccountRepository mocks repository.AccountRepository
+type MockAccountRepository struct {
+	mock.Mock
+}
+
+func (m *MockAccountRepository) Create(ctx context.Context, account *models.Account) error {
+	args := m.Called(ctx, account)
+	return args.Error(0)
+}
+
+func (m *MockAccountRepository) FindByID(ctx context.Context, id uint) (*models.Account, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Account), args.Error(1)
+}
+
+func (m *MockAccountRepository) Update(ctx context.Context, account *models.Account) error {
+	args := m.Called(ctx, account)
+	return args.Error(0)
+}
+
+func (m *MockAccountRepository) List(ctx context.Context, params repository.PaginationParams) (*repository.PaginatedResult[models.Account], error) {
+	args := m.Called(ctx, params)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*repository.PaginatedResult[models.Account]), args.Error(1)
+}
+
+// MockFederatedIdentityRepository mocks the Phase 9-PRE federated
+// identity repo. LoginPipeline tests use it to drive the "user found"
+// vs "user not found" branches; SSO handler tests use it to confirm
+// the binding is created on first login.
+type MockFederatedIdentityRepository struct {
+	mock.Mock
+}
+
+func (m *MockFederatedIdentityRepository) FindByProviderAndSubject(ctx context.Context, providerID uint, externalSubject string) (*models.FederatedIdentity, error) {
+	args := m.Called(ctx, providerID, externalSubject)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.FederatedIdentity), args.Error(1)
+}
+
+func (m *MockFederatedIdentityRepository) Create(ctx context.Context, fi *models.FederatedIdentity) error {
+	args := m.Called(ctx, fi)
+	return args.Error(0)
+}
+
+func (m *MockFederatedIdentityRepository) TouchLastSeen(ctx context.Context, id uint, claimsSnapshot []byte) error {
+	args := m.Called(ctx, id, claimsSnapshot)
+	return args.Error(0)
+}
+
+func (m *MockFederatedIdentityRepository) ListForUser(ctx context.Context, userID uint) ([]models.FederatedIdentity, error) {
+	args := m.Called(ctx, userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.FederatedIdentity), args.Error(1)
+}
+
+// MockGamificationLeaderboardSnapshotRepository mocks the W3-C / 7-B
+// snapshot repo. Handler tests use it to drive the historical-window
+// path; existing W2 tests pass an inert instance via setupGamification-
+// Handler to satisfy the constructor.
+type MockGamificationLeaderboardSnapshotRepository struct {
+	mock.Mock
+}
+
+func (m *MockGamificationLeaderboardSnapshotRepository) Upsert(ctx context.Context, snap *models.GamificationLeaderboardSnapshot) (bool, error) {
+	args := m.Called(ctx, snap)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockGamificationLeaderboardSnapshotRepository) FindByWindow(ctx context.Context, scopeType models.GamificationScopeType, scopeID, currencyTypeID uint, kind string, windowEnd time.Time) (*models.GamificationLeaderboardSnapshot, error) {
+	args := m.Called(ctx, scopeType, scopeID, currencyTypeID, kind, windowEnd)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.GamificationLeaderboardSnapshot), args.Error(1)
+}
+
 // MockSectionRepository mocks repository.SectionRepository
 type MockSectionRepository struct {
 	mock.Mock
@@ -231,8 +338,8 @@ func (m *MockAssignmentRepository) Create(ctx context.Context, assignment *model
 	return args.Error(0)
 }
 
-func (m *MockAssignmentRepository) FindByID(ctx context.Context, id uint) (*models.Assignment, error) {
-	args := m.Called(ctx, id)
+func (m *MockAssignmentRepository) FindByID(ctx context.Context, id, accountID uint) (*models.Assignment, error) {
+	args := m.Called(ctx, id, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -428,8 +535,8 @@ func (m *MockModuleRepository) Create(ctx context.Context, module *models.Contex
 	return args.Error(0)
 }
 
-func (m *MockModuleRepository) FindByID(ctx context.Context, id uint) (*models.ContextModule, error) {
-	args := m.Called(ctx, id)
+func (m *MockModuleRepository) FindByID(ctx context.Context, id, accountID uint) (*models.ContextModule, error) {
+	args := m.Called(ctx, id, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -523,8 +630,8 @@ func (m *MockPageRepository) Create(ctx context.Context, page *models.WikiPage) 
 	return args.Error(0)
 }
 
-func (m *MockPageRepository) FindByID(ctx context.Context, id uint) (*models.WikiPage, error) {
-	args := m.Called(ctx, id)
+func (m *MockPageRepository) FindByID(ctx context.Context, id, accountID uint) (*models.WikiPage, error) {
+	args := m.Called(ctx, id, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -788,8 +895,8 @@ func (m *MockQuizRepository) Create(ctx context.Context, quiz *models.Quiz) erro
 	return args.Error(0)
 }
 
-func (m *MockQuizRepository) FindByID(ctx context.Context, id uint) (*models.Quiz, error) {
-	args := m.Called(ctx, id)
+func (m *MockQuizRepository) FindByID(ctx context.Context, id, accountID uint) (*models.Quiz, error) {
+	args := m.Called(ctx, id, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

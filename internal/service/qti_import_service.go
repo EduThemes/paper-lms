@@ -287,7 +287,7 @@ func (s *QTIImportService) persist(ctx context.Context, result *qti.ImportResult
 // ExportQuiz emits a Canvas-Classic-compatible .imscc zip for the given
 // quiz. Optionally includes referenced item banks.
 func (s *QTIImportService) ExportQuiz(ctx context.Context, quizID uint) ([]byte, error) {
-	quiz, err := s.quizRepo.FindByID(ctx, quizID)
+	quiz, err := s.quizRepo.FindByID(ctx, quizID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("quiz not found: %w", err)
 	}

@@ -24,7 +24,7 @@ func makeAssignments(assignments ...models.Assignment) *repository.PaginatedResu
 // unweightedCourseRepo returns a mock CourseRepository that returns a course with ApplyGroupWeights=false
 func unweightedCourseRepo(courseID uint) *mocks.MockCourseRepository {
 	courseRepo := new(mocks.MockCourseRepository)
-	courseRepo.On("FindByID", mock.Anything, courseID).
+	courseRepo.On("FindByID", mock.Anything, courseID, uint(0)).
 		Return(&models.Course{ID: courseID, ApplyGroupWeights: false}, nil)
 	return courseRepo
 }

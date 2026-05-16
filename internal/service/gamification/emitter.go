@@ -2,10 +2,13 @@ package gamification
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"gorm.io/datatypes"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -167,6 +170,10 @@ func (e *Emitter) EmitBadgeEarned(
 	evidenceEventID *uint,
 ) error {
 	badgeIDCopy := badgeID
+	ctxJSON, err := badgeEarnedContextJSON(scopeType, scopeID, evidenceEventID)
+	if err != nil {
+		return fmt.Errorf("EmitBadgeEarned: encode context: %w", err)
+	}
 	event := &models.GamificationEvent{
 		TenantID:   tenantID,
 		ActorID:    actorID,
@@ -174,16 +181,31 @@ func (e *Emitter) EmitBadgeEarned(
 		ObjectType: ObjectBadge,
 		ObjectID:   &badgeIDCopy,
 		Source:     EmitterSource,
+		Context:    ctxJSON,
 	}
-	// scopeType/scopeID/evidenceEventID are captured in the event's
-	// Context JSON so downstream listeners (rule trace audits) can see
-	// the originating scope without re-walking the rule_evaluation
-	// chain.
-	_ = scopeType
-	_ = scopeID
-	_ = evidenceEventID
-	_, err := e.Emit(ctx, event)
+	_, err = e.Emit(ctx, event)
 	return err
+}
+
+// badgeEarnedContextJSON encodes the originating scope + evidence event id
+// into the event's Context JSON so downstream listeners (rule-trace
+// audits, the W3 awards-page surface) can see why the badge fired without
+// re-walking the rule_evaluation chain. Was previously dropped on the floor
+// via `_ = scopeType / _ = scopeID / _ = evidenceEventID` — the audit's
+// F2.4 finding.
+func badgeEarnedContextJSON(scopeType models.GamificationScopeType, scopeID uint, evidenceEventID *uint) (datatypes.JSON, error) {
+	ctx := map[string]any{
+		"scope_type": string(scopeType),
+		"scope_id":   scopeID,
+	}
+	if evidenceEventID != nil {
+		ctx["evidence_event_id"] = *evidenceEventID
+	}
+	b, err := json.Marshal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return datatypes.JSON(b), nil
 }
 
 func summarizeViolations(vs []FerpaViolation) string {

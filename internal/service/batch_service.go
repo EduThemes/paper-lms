@@ -115,7 +115,7 @@ func (s *BatchService) CloneCourse(
 	includeDiscussions bool,
 ) (*models.Course, error) {
 	// Fetch the source course
-	sourceCourse, err := s.courseRepo.FindByID(ctx, sourceCourseID)
+	sourceCourse, err := s.courseRepo.FindByID(ctx, sourceCourseID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("source course not found: %w", err)
 	}
@@ -600,7 +600,7 @@ func (s *BatchService) BulkEnrollUsers(
 	}
 
 	// Verify the course exists
-	_, err := s.courseRepo.FindByID(ctx, courseID)
+	_, err := s.courseRepo.FindByID(ctx, courseID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("course not found: %w", err)
 	}
@@ -676,7 +676,7 @@ func (s *BatchService) BulkUpdateAssignmentDates(
 			continue
 		}
 
-		assignment, err := s.assignmentRepo.FindByID(ctx, u.AssignmentID)
+		assignment, err := s.assignmentRepo.FindByID(ctx, u.AssignmentID, 0)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("update[%d]: assignment %d not found", i, u.AssignmentID))
 			continue

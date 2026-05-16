@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"strings"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/service"
@@ -8,14 +10,25 @@ import (
 
 type ObserverHandler struct {
 	observerService *service.ObserverService
+	// pairingService gates LinkObservee. Pre-12.6 the route accepted
+	// observee_id directly with no verification (IDOR); now the parent
+	// must redeem a one-shot code minted by the student (adult-mode
+	// tenants) or by a teacher in the student's course (K-12 mode).
+	pairingService *service.PairingCodeService
 }
 
-func NewObserverHandler(observerService *service.ObserverService) *ObserverHandler {
-	return &ObserverHandler{observerService: observerService}
+func NewObserverHandler(observerService *service.ObserverService, pairingService *service.PairingCodeService) *ObserverHandler {
+	return &ObserverHandler{observerService: observerService, pairingService: pairingService}
 }
 
 // LinkObservee handles POST /users/:user_id/observees
-// Body: { "observee_id": <student_user_id> }
+// Body: { "pairing_code": "ABC-123-XYZ" }
+//
+// Audit 2026-05-15 (item 12.6) — closed an IDOR where any caller could
+// pass any minor's user_id as observee_id and instantly link themselves
+// as observer. Now the request body must carry a freshly-minted pairing
+// code; PairingCodeService.Redeem consumes the code and performs the
+// observer-enrollment link inside one transaction.
 func (h *ObserverHandler) LinkObservee(c *fiber.Ctx) error {
 	userID, err := c.ParamsInt("user_id")
 	if err != nil || userID <= 0 {
@@ -23,25 +36,29 @@ func (h *ObserverHandler) LinkObservee(c *fiber.Ctx) error {
 	}
 
 	var input struct {
-		ObserveeID uint `json:"observee_id"`
+		PairingCode string `json:"pairing_code"`
 	}
-
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
-
-	if input.ObserveeID == 0 {
-		return responses.BadRequest(c, "observee_id is required")
+	code := strings.TrimSpace(input.PairingCode)
+	if code == "" {
+		return responses.BadRequest(c, "pairing_code is required")
+	}
+	if h.pairingService == nil {
+		return responses.InternalError(c, "pairing-code service unavailable")
 	}
 
-	if err := h.observerService.LinkObserverToStudent(c.Context(), uint(userID), input.ObserveeID); err != nil {
-		return responses.BadRequest(c, err.Error())
+	pc, rerr := h.pairingService.Redeem(c.Context(), code, uint(userID))
+	if rerr != nil {
+		return responses.BadRequest(c, rerr.Error())
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"id":          input.ObserveeID,
+		"id":          pc.UserID,
 		"observer_id": userID,
-		"observee_id": input.ObserveeID,
+		"observee_id": pc.UserID,
+		"code":        pc.Code,
 	})
 }
 

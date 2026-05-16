@@ -89,6 +89,9 @@ func (f *fakeWalletRepo) ListTransactionsForUser(_ context.Context, _ uint, _ re
 func (f *fakeWalletRepo) ListTransactionsForUserAndCurrency(_ context.Context, _, _ uint, _ repository.PaginationParams) (*repository.PaginatedResult[models.GamificationWalletTransaction], error) {
 	return nil, nil
 }
+func (f *fakeWalletRepo) RankByCurrency(_ context.Context, _ uint, _ []uint) ([]repository.RankRow, error) {
+	return nil, nil
+}
 
 func ptrFloat(f float64) *float64 { return &f }
 

@@ -88,7 +88,7 @@ func NewSubmissionService(
 
 func (s *SubmissionService) Create(ctx context.Context, submission *models.Submission) error {
 	// Validate assignment exists
-	assignment, err := s.assignmentRepo.FindByID(ctx, submission.AssignmentID)
+	assignment, err := s.assignmentRepo.FindByID(ctx, submission.AssignmentID, 0)
 	if err != nil {
 		return errors.New("assignment not found")
 	}
@@ -198,7 +198,7 @@ func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, gra
 	}
 
 	// For group assignments, apply the same grade to all other group members
-	assignment, aErr := s.assignmentRepo.FindByID(ctx, assignmentID)
+	assignment, aErr := s.assignmentRepo.FindByID(ctx, assignmentID, 0)
 	if aErr == nil && assignment.GroupCategoryID != nil && *assignment.GroupCategoryID > 0 {
 		s.gradeGroupMembers(ctx, assignment, userID, graderID, score, gradeStr, &now)
 	}
@@ -314,7 +314,7 @@ func (s *SubmissionService) applyLateDeduction(ctx context.Context, assignmentID
 	}
 
 	// Get the assignment to determine course and due date
-	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID)
+	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, 0)
 	if err != nil || assignment.DueAt == nil {
 		return score
 	}
@@ -371,7 +371,7 @@ func (s *SubmissionService) applyLateDeduction(ctx context.Context, assignmentID
 // isGradingPeriodClosed checks whether the assignment falls within a closed grading period.
 // Returns (true, periodTitle) if closed, (false, "") if open or no grading periods configured.
 func (s *SubmissionService) isGradingPeriodClosed(ctx context.Context, assignmentID uint) (bool, string) {
-	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID)
+	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, 0)
 	if err != nil {
 		return false, ""
 	}
@@ -383,7 +383,7 @@ func (s *SubmissionService) isGradingPeriodClosed(ctx context.Context, assignmen
 		return false, ""
 	}
 
-	course, err := s.courseRepo.FindByID(ctx, assignment.CourseID)
+	course, err := s.courseRepo.FindByID(ctx, assignment.CourseID, 0)
 	if err != nil {
 		return false, ""
 	}

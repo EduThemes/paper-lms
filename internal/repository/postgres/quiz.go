@@ -20,9 +20,13 @@ func (r *quizRepo) Create(ctx context.Context, quiz *models.Quiz) error {
 	return r.db.WithContext(ctx).Create(quiz).Error
 }
 
-func (r *quizRepo) FindByID(ctx context.Context, id uint) (*models.Quiz, error) {
+func (r *quizRepo) FindByID(ctx context.Context, id, accountID uint) (*models.Quiz, error) {
 	var quiz models.Quiz
-	if err := r.db.WithContext(ctx).First(&quiz, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		q = q.Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID)
+	}
+	if err := q.First(&quiz, id).Error; err != nil {
 		return nil, err
 	}
 	return &quiz, nil

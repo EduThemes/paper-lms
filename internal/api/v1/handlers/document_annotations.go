@@ -43,7 +43,7 @@ func (h *DocumentAnnotationHandler) getCourseIDForAnnotation(c *fiber.Ctx, annot
 	if err != nil {
 		return 0, err
 	}
-	assignment, err := h.assignmentRepo.FindByID(c.Context(), submission.AssignmentID)
+	assignment, err := h.assignmentRepo.FindByID(c.Context(), submission.AssignmentID, callerAccountID(c))
 	if err != nil {
 		return 0, err
 	}

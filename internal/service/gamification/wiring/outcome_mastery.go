@@ -103,7 +103,7 @@ func OutcomeMasteryCrossedEmitCallback(
 		var tenantID uint
 		switch outcome.ContextType {
 		case "Course":
-			course, err := courseRepo.FindByID(ctx, outcome.ContextID)
+			course, err := courseRepo.FindByID(ctx, outcome.ContextID, 0)
 			if err != nil {
 				slog.Error("outcome mastery emit: load course for tenancy",
 					"outcome_id", outcomeID,

@@ -332,7 +332,7 @@ func TestQTIImportService_ExportQuiz(t *testing.T) {
 
 	points := 1.0
 	quiz := &models.Quiz{ID: 9, Title: "Export Me", QuizType: "assignment"}
-	quizRepo.On("FindByID", mock.Anything, uint(9)).Return(quiz, nil)
+	quizRepo.On("FindByID", mock.Anything, uint(9), uint(0)).Return(quiz, nil)
 	questionRepo.On("ListByQuizID", mock.Anything, uint(9), mock.Anything).
 		Return(&repoPaginated{Items: []models.QuizQuestion{
 			{

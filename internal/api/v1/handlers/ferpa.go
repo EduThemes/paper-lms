@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -109,6 +110,43 @@ func (h *FERPAHandler) CreateExportRequest(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(dataExportRequestToJSON(request))
+}
+
+// DownloadDataExport handles GET /api/v1/data_exports/:id/download.
+//
+// Pre-12.8 the route was promised by FERPAService.ProcessExport (which
+// sets DownloadURL to /api/v1/data_exports/:id/download) but never
+// existed — every approved export request returned 404 on download.
+// This handler streams the ZIP that BuildExportZip assembles, gated by
+// the requestor-or-subject-or-admin check inside the service.
+func (h *FERPAHandler) DownloadDataExport(c *fiber.Ctx) error {
+	exportID, err := c.ParamsInt("id")
+	if err != nil || exportID <= 0 {
+		return responses.BadRequest(c, "Invalid export request ID")
+	}
+	callerID, _ := c.Locals("user_id").(uint)
+	if callerID == 0 {
+		return responses.Unauthorized(c)
+	}
+	callerIsAdmin, _ := c.Locals("is_admin").(bool)
+
+	zipBytes, berr := h.ferpaService.BuildExportZip(c.Context(), uint(exportID), callerID, callerIsAdmin)
+	if berr != nil {
+		switch berr {
+		case service.ErrExportForbidden:
+			return responses.Forbidden(c, "not authorized to download this export")
+		case service.ErrExportNotReady:
+			return responses.BadRequest(c, "export is not yet completed")
+		case service.ErrExportExpired:
+			return responses.Error(c, fiber.StatusGone, "export download link has expired")
+		}
+		return responses.NotFound(c, "export request")
+	}
+
+	filename := fmt.Sprintf("data-export-%d.zip", exportID)
+	c.Set("Content-Type", "application/zip")
+	c.Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	return c.Send(zipBytes)
 }
 
 // GetExportRequest handles GET /api/v1/users/:user_id/data_export/:id

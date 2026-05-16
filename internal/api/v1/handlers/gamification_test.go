@@ -68,6 +68,14 @@ func (m *mockGamWalletRepo) ListTransactionsForUserAndCurrency(ctx context.Conte
 	return args.Get(0).(*repository.PaginatedResult[models.GamificationWalletTransaction]), args.Error(1)
 }
 
+func (m *mockGamWalletRepo) RankByCurrency(ctx context.Context, currencyTypeID uint, candidateUserIDs []uint) ([]repository.RankRow, error) {
+	args := m.Called(ctx, currencyTypeID, candidateUserIDs)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]repository.RankRow), args.Error(1)
+}
+
 type mockGamCurrencyRepo struct{ mock.Mock }
 
 func (m *mockGamCurrencyRepo) Create(ctx context.Context, c *models.GamificationCurrencyType) error {
@@ -207,12 +215,21 @@ func setupGamificationHandler(callerID uint, isAdmin bool) (*fiber.App, *mockGam
 	// so an inert mock is fine here. Rule-specific tests live in
 	// gamification_rules_test.go with their own focused harness.
 	ruleRepo := new(mockGamRuleRepo)
-	h := handlers.NewGamificationHandler(walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo, ruleRepo)
+	// enrollmentRepo (W3-A) — leaderboard candidate set. Inert here
+	// for the same reason as ruleRepo; leaderboard-specific tests live
+	// in gamification_leaderboards_test.go with their own harness.
+	enrollmentRepo := new(mocks.MockEnrollmentRepository)
+	// accountRepo (W3-B) — tenant_mode lookup for render policy. Inert
+	// for the W2-A..D paths exercised in this file.
+	accountRepo := new(mocks.MockAccountRepository)
+	snapshotRepo := new(mocks.MockGamificationLeaderboardSnapshotRepository)
+	h := handlers.NewGamificationHandler(walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo, ruleRepo, enrollmentRepo, accountRepo, snapshotRepo)
 
 	app := testutil.SetupTestApp()
 	app.Use(func(c *fiber.Ctx) error {
 		c.Locals("user_id", callerID)
 		c.Locals("is_admin", isAdmin)
+		c.Locals("account_id", uint(1))
 		return c.Next()
 	})
 
@@ -244,60 +261,8 @@ func setupGamificationHandler(callerID uint, isAdmin bool) (*fiber.App, *mockGam
 	return app, walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo
 }
 
-func fixtureXP() models.GamificationCurrencyType {
-	return models.GamificationCurrencyType{
-		ID:                 11,
-		TenantID:           1,
-		ScopeType:          models.ScopeSite,
-		ScopeID:            1,
-		Code:               "xp",
-		DisplayLabel:       "XP",
-		DisplayLabelPlural: "XP",
-		Icon:               "zap",
-		Color:              "#F59E0B",
-		DisplayOrder:       1,
-		Spendable:          false,
-		Monotonic:          true,
-		VisibleToStudent:   true,
-		VisibleInTopbar:    true,
-		SystemOwned:        true,
-		Description:        "Experience points",
-	}
-}
-
-func fixtureGems() models.GamificationCurrencyType {
-	return models.GamificationCurrencyType{
-		ID:                 12,
-		TenantID:           1,
-		ScopeType:          models.ScopeSite,
-		ScopeID:            1,
-		Code:               "gems",
-		DisplayLabel:       "Gem",
-		DisplayLabelPlural: "Gems",
-		Icon:               "gem",
-		Color:              "#10B981",
-		DisplayOrder:       2,
-		Spendable:          true,
-		Monotonic:          false,
-		VisibleToStudent:   true,
-		VisibleInTopbar:    true,
-		SystemOwned:        true,
-	}
-}
-
-// fixtureHidden is a non-topbar currency used to verify topbar_only filter.
-func fixtureHidden() models.GamificationCurrencyType {
-	return models.GamificationCurrencyType{
-		ID:               13,
-		TenantID:         1,
-		Code:             "mastery_points",
-		DisplayLabel:     "Mastery",
-		DisplayOrder:     3,
-		VisibleToStudent: true,
-		VisibleInTopbar:  false,
-		SystemOwned:      true,
-	}
-}
+// fixtureXP / fixtureGems / fixtureHidden / fixtureBadge moved to
+// gamification_fixtures_test.go (F2.5 closeout).
 
 // ---------------------------------------------------------------------------
 // GetUserWallet.
@@ -933,20 +898,7 @@ func TestGetMyGamificationPreferences_Unauthenticated(t *testing.T) {
 // W2-D: Badge CRUD + per-user list + manual award/revoke.
 // ---------------------------------------------------------------------------
 
-func fixtureBadge() models.GamificationBadge {
-	return models.GamificationBadge{
-		ID:           50,
-		TenantID:     1,
-		ScopeType:    models.ScopeSite,
-		ScopeID:      1,
-		Code:         "first_quiz",
-		Name:         "First Quiz",
-		Description:  "Pass your first quiz.",
-		Icon:         "trophy",
-		Color:        "#F59E0B",
-		InternalOnly: true,
-	}
-}
+// fixtureBadge moved to gamification_fixtures_test.go (F2.5 closeout).
 
 func TestCreateBadge_HappyPath_SiteScope(t *testing.T) {
 	app, _, _, _, badgeRepo, _ := setupGamificationHandler(7, true)

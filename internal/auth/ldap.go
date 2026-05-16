@@ -12,36 +12,43 @@ import (
 	"unicode/utf8"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
-	"github.com/EduThemes/paper-lms/internal/repository"
 )
 
-// LDAPAuthenticator provides LDAP authentication against an AuthenticationProvider.
-type LDAPAuthenticator struct {
-	userRepo repository.UserRepository
-}
+// LDAPAuthenticator provides LDAP authentication against an
+// AuthenticationProvider.
+//
+// Sprint 10-C: this type no longer carries a UserRepository — the
+// post-credential JIT / auto-link / audit flow moved to
+// LoginPipeline. Callers (SSOHandler.HandleLDAPLogin) receive an
+// SSOOutcome from BuildOutcome and run it through the pipeline.
+type LDAPAuthenticator struct{}
 
 // NewLDAPAuthenticator creates a new LDAPAuthenticator.
-func NewLDAPAuthenticator(userRepo repository.UserRepository) *LDAPAuthenticator {
-	return &LDAPAuthenticator{
-		userRepo: userRepo,
-	}
+func NewLDAPAuthenticator() *LDAPAuthenticator {
+	return &LDAPAuthenticator{}
 }
 
-// Authenticate validates a username/password combination against the LDAP server
-// configured in the given AuthenticationProvider. On success it returns the
-// authenticated (and possibly JIT-provisioned) user.
-func (a *LDAPAuthenticator) Authenticate(ctx context.Context, provider *models.AuthenticationProvider, username, password string) (*models.User, error) {
+// BuildOutcome validates a username/password combination against the
+// LDAP server configured in the given AuthenticationProvider. On
+// success it returns an SSOOutcome that the caller hands to
+// LoginPipeline.Execute for JIT / auto-link / MFA / audit.
+//
+// The LDAP-side work — service-account bind, search filter, user-bind
+// password verification — is byte-identical to the pre-10-C
+// implementation. Only the post-credential block (user lookup +
+// HashPassword + Create) is gone, replaced by the SSOOutcome return.
+func (a *LDAPAuthenticator) BuildOutcome(ctx context.Context, provider *models.AuthenticationProvider, username, password string) (SSOOutcome, error) {
 	if provider.AuthType != "ldap" {
-		return nil, fmt.Errorf("provider is not an LDAP provider")
+		return SSOOutcome{}, fmt.Errorf("provider is not an LDAP provider")
 	}
 	if provider.LDAPHost == "" {
-		return nil, fmt.Errorf("LDAP host is not configured")
+		return SSOOutcome{}, fmt.Errorf("LDAP host is not configured")
 	}
 	if provider.LDAPPort == 0 {
-		return nil, fmt.Errorf("LDAP port is not configured")
+		return SSOOutcome{}, fmt.Errorf("LDAP port is not configured")
 	}
 	if provider.LDAPBase == "" {
-		return nil, fmt.Errorf("LDAP base DN is not configured")
+		return SSOOutcome{}, fmt.Errorf("LDAP base DN is not configured")
 	}
 
 	// Determine the login attribute
@@ -53,14 +60,14 @@ func (a *LDAPAuthenticator) Authenticate(ctx context.Context, provider *models.A
 	// Connect to LDAP server
 	conn, err := a.connect(provider)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to LDAP server: %w", err)
+		return SSOOutcome{}, fmt.Errorf("failed to connect to LDAP server: %w", err)
 	}
 	defer conn.Close()
 
 	// Step 1: Bind with service account (if configured) to search for the user
 	if provider.LDAPBindDN != "" && provider.LDAPBindPassword != "" {
 		if err := ldapBind(conn, provider.LDAPBindDN, provider.LDAPBindPassword); err != nil {
-			return nil, fmt.Errorf("service account bind failed: %w", err)
+			return SSOOutcome{}, fmt.Errorf("service account bind failed: %w", err)
 		}
 	}
 
@@ -74,10 +81,10 @@ func (a *LDAPAuthenticator) Authenticate(ctx context.Context, provider *models.A
 
 	entries, err := ldapSearch(conn, provider.LDAPBase, searchFilter, []string{"dn", "cn", "mail", loginAttr, "givenName", "sn", "displayName"})
 	if err != nil {
-		return nil, fmt.Errorf("LDAP search failed: %w", err)
+		return SSOOutcome{}, fmt.Errorf("LDAP search failed: %w", err)
 	}
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("user not found in LDAP directory")
+		return SSOOutcome{}, fmt.Errorf("user not found in LDAP directory")
 	}
 
 	entry := entries[0]
@@ -88,12 +95,12 @@ func (a *LDAPAuthenticator) Authenticate(ctx context.Context, provider *models.A
 	// bound as the service account.
 	userConn, err := a.connect(provider)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect for user bind: %w", err)
+		return SSOOutcome{}, fmt.Errorf("failed to connect for user bind: %w", err)
 	}
 	defer userConn.Close()
 
 	if err := ldapBind(userConn, userDN, password); err != nil {
-		return nil, fmt.Errorf("invalid credentials")
+		return SSOOutcome{}, fmt.Errorf("invalid credentials")
 	}
 
 	// Step 4: Extract user attributes
@@ -124,47 +131,30 @@ func (a *LDAPAuthenticator) Authenticate(ctx context.Context, provider *models.A
 		loginID = username
 	}
 
-	// Step 5: JIT provision or update user
-	user, findErr := a.userRepo.FindByLoginID(ctx, loginID)
-	if findErr != nil {
-		user, findErr = a.userRepo.FindByEmail(ctx, email)
-	}
-
-	if findErr != nil {
-		// JIT provision: create new user
-		user = &models.User{
-			Name:    displayName,
-			LoginID: loginID,
-			Email:   email,
-		}
-		if givenName != "" && sn != "" {
-			user.SortableName = sn + ", " + givenName
-			user.ShortName = givenName
-		}
-		if err := user.HashPassword(generateRandomPassword()); err != nil {
-			return nil, fmt.Errorf("failed to provision user: %w", err)
-		}
-		if err := a.userRepo.Create(ctx, user); err != nil {
-			return nil, fmt.Errorf("failed to create user: %w", err)
-		}
-	} else {
-		// Update user attributes
-		updated := false
-		if displayName != "" && user.Name != displayName {
-			user.Name = displayName
-			updated = true
-		}
-		if email != "" && user.Email != email {
-			user.Email = email
-			updated = true
-		}
-		if updated {
-			_ = a.userRepo.Update(ctx, user)
-		}
-	}
-
-	return user, nil
+	// Step 5: Build the SSOOutcome. The caller hands this to
+	// LoginPipeline.Execute, which decides whether to JIT-create a
+	// user, auto-link to an existing one by verified email, or
+	// resolve via federated_identities. EmailVerified is true here
+	// because the directory authenticated the user on the bind in
+	// Step 3 — there is no separate "the email belongs to you"
+	// proof to seek.
+	return SSOOutcome{
+		ProviderID:      provider.ID,
+		ProviderType:    "ldap",
+		ExternalSubject: userDN, // DN is the IdP-stable identifier
+		Email:           email,
+		EmailVerified:   true,
+		Name:            displayName,
+		Attributes: map[string]any{
+			"login_id":     loginID,
+			"display_name": displayName,
+			"given_name":   givenName,
+			"sn":           sn,
+			"email":        email,
+		},
+	}, nil
 }
+
 
 // TestConnection verifies connectivity to the LDAP server configured in the
 // given AuthenticationProvider. It attempts to connect and optionally bind with

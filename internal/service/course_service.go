@@ -57,7 +57,7 @@ func (s *CourseService) Create(ctx context.Context, course *models.Course, creat
 }
 
 func (s *CourseService) GetByID(ctx context.Context, id uint) (*models.Course, error) {
-	return s.courseRepo.FindByID(ctx, id)
+	return s.courseRepo.FindByID(ctx, id, 0)
 }
 
 func (s *CourseService) Update(ctx context.Context, course *models.Course) error {
@@ -69,9 +69,9 @@ func (s *CourseService) Delete(ctx context.Context, id uint) error {
 }
 
 func (s *CourseService) List(ctx context.Context, params repository.PaginationParams) (*repository.PaginatedResult[models.Course], error) {
-	return s.courseRepo.List(ctx, params)
+	return s.courseRepo.List(ctx, 0, params)
 }
 
 func (s *CourseService) ListForUser(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Course], error) {
-	return s.courseRepo.ListByUserID(ctx, userID, params)
+	return s.courseRepo.ListByUserID(ctx, userID, 0, params)
 }

@@ -27,7 +27,7 @@ func NewAuthProviderService(repo repository.AuthenticationProviderRepository) *A
 // CreateProvider validates the auth_type and creates a new authentication provider.
 func (s *AuthProviderService) CreateProvider(ctx context.Context, provider *models.AuthenticationProvider) error {
 	if !isValidAuthType(provider.AuthType) {
-		return errors.New("auth_type must be one of: saml, ldap, cas")
+		return errors.New("auth_type must be one of: saml, ldap, cas, oidc")
 	}
 
 	if provider.WorkflowState == "" {
@@ -126,6 +126,27 @@ func (s *AuthProviderService) UpdateProvider(ctx context.Context, id uint, updat
 		existing.WorkflowState = updates.WorkflowState
 	}
 
+	// OIDC fields (Phase 10-A.1). Selective: empty strings leave
+	// existing values intact; an empty ClientSecretEncrypted means
+	// "admin didn't rotate the secret" — keep the stored ciphertext.
+	if updates.OIDCIssuerURL != "" {
+		existing.OIDCIssuerURL = updates.OIDCIssuerURL
+	}
+	if updates.OIDCClientID != "" {
+		existing.OIDCClientID = updates.OIDCClientID
+	}
+	if len(updates.OIDCClientSecretEncrypted) > 0 {
+		existing.OIDCClientSecretEncrypted = updates.OIDCClientSecretEncrypted
+	}
+	if len(updates.OIDCScopes) > 0 {
+		existing.OIDCScopes = updates.OIDCScopes
+	}
+	if updates.OIDCPreset != "" {
+		existing.OIDCPreset = updates.OIDCPreset
+	}
+	// AutoProvision is a boolean — always apply.
+	existing.AutoProvision = updates.AutoProvision
+
 	if err := s.repo.Update(ctx, existing); err != nil {
 		return nil, err
 	}
@@ -192,5 +213,5 @@ func (s *AuthProviderService) TestLDAPConnection(ctx context.Context, id uint) (
 }
 
 func isValidAuthType(authType string) bool {
-	return authType == "saml" || authType == "ldap" || authType == "cas"
+	return authType == "saml" || authType == "ldap" || authType == "cas" || authType == "oidc"
 }

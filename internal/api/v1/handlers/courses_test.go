@@ -33,6 +33,7 @@ func setupCourseHandler() (*fiber.App, *mocks.MockCourseRepository, *mocks.MockE
 	// All course routes require an authenticated user; inject user_id into Locals
 	api := app.Group("", func(c *fiber.Ctx) error {
 		c.Locals("user_id", uint(1))
+		c.Locals("account_id", uint(1))
 		return c.Next()
 	}, middleware.PaginationParams())
 
@@ -129,7 +130,7 @@ func TestGetCourse_Success(t *testing.T) {
 		WorkflowState: "available",
 		DefaultView:   "modules",
 	}
-	mockCourseRepo.On("FindByID", mock.Anything, uint(1)).Return(course, nil)
+	mockCourseRepo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(course, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/courses/1", nil)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -147,7 +148,7 @@ func TestGetCourse_Success(t *testing.T) {
 func TestGetCourse_NotFound(t *testing.T) {
 	app, mockCourseRepo, _, _ := setupCourseHandler()
 
-	mockCourseRepo.On("FindByID", mock.Anything, uint(999)).Return(nil, errors.New("not found"))
+	mockCourseRepo.On("FindByID", mock.Anything, uint(999), uint(0)).Return(nil, errors.New("not found"))
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/courses/999", nil)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
@@ -187,7 +188,7 @@ func TestListCourses_Default(t *testing.T) {
 		Page:       1,
 		PerPage:    10,
 	}
-	mockCourseRepo.On("ListByUserID", mock.Anything, uint(1), repository.PaginationParams{Page: 1, PerPage: 10}).Return(expectedResult, nil)
+	mockCourseRepo.On("ListByUserID", mock.Anything, uint(1), uint(0), repository.PaginationParams{Page: 1, PerPage: 10}).Return(expectedResult, nil)
 	mockEnrollmentRepo.On("CountByCourseIDs", mock.Anything, mock.AnythingOfType("[]uint")).Return(map[uint]int64{1: 25, 2: 30}, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/courses", nil)
@@ -218,7 +219,7 @@ func TestListCourses_WithEnrollmentType(t *testing.T) {
 		Page:       1,
 		PerPage:    10,
 	}
-	mockCourseRepo.On("ListByUserID", mock.Anything, uint(1), repository.PaginationParams{Page: 1, PerPage: 10}).Return(expectedResult, nil)
+	mockCourseRepo.On("ListByUserID", mock.Anything, uint(1), uint(0), repository.PaginationParams{Page: 1, PerPage: 10}).Return(expectedResult, nil)
 	mockEnrollmentRepo.On("CountByCourseIDs", mock.Anything, mock.AnythingOfType("[]uint")).Return(map[uint]int64{1: 15}, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/courses?enrollment_type=TeacherEnrollment", nil)
@@ -247,7 +248,7 @@ func TestUpdateCourse(t *testing.T) {
 		WorkflowState: "available",
 		DefaultView:   "modules",
 	}
-	mockCourseRepo.On("FindByID", mock.Anything, uint(1)).Return(course, nil)
+	mockCourseRepo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(course, nil)
 	mockCourseRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.Course")).Return(nil)
 
 	newName := "New Name"
@@ -270,7 +271,7 @@ func TestUpdateCourse(t *testing.T) {
 func TestUpdateCourse_NotFound(t *testing.T) {
 	app, mockCourseRepo, _, _ := setupCourseHandler()
 
-	mockCourseRepo.On("FindByID", mock.Anything, uint(999)).Return(nil, errors.New("not found"))
+	mockCourseRepo.On("FindByID", mock.Anything, uint(999), uint(0)).Return(nil, errors.New("not found"))
 
 	body := testutil.JSONBody(map[string]interface{}{
 		"course": map[string]string{

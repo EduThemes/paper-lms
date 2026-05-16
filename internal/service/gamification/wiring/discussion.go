@@ -56,7 +56,7 @@ func DiscussionEntryPostedEmitCallback(
 				"entry_id", entryID, "error", err)
 			return
 		}
-		course, err := courseRepo.FindByID(ctx, topic.CourseID)
+		course, err := courseRepo.FindByID(ctx, topic.CourseID, 0)
 		if err != nil {
 			slog.Error("discussion entry posted emit: load course",
 				"entry_id", entryID, "error", err)

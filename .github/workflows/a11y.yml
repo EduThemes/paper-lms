@@ -1,10 +1,16 @@
 name: Accessibility
 
-# Manual trigger only for now — Puppeteer/Chromium download flow needs more
-# work in CI before this can gate every push. Run on demand via the Actions
-# tab or `gh workflow run a11y.yml`. See web/scripts/run-axe.mjs.
+# 13.12 — promoted from workflow_dispatch to pull_request so every PR is
+# gated by the axe audit. The Puppeteer/Chromium download flow now uses
+# the system chromium that ubuntu-latest ships with (PUPPETEER_SKIP_DOWNLOAD=1
+# + PUPPETEER_EXECUTABLE_PATH). Keep workflow_dispatch for ad-hoc reruns.
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/a11y.yml'
 
 jobs:
   axe:

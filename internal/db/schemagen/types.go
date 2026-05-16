@@ -64,3 +64,11 @@ type Index struct {
 	Def     string // verbatim pg_indexes.indexdef (preserves USING, WHERE, INCLUDE)
 	Unique  bool
 }
+
+// HasTable reports whether the schema declares a table with the given name.
+// Convenience wrapper for targeted parity tests that assert presence of a
+// specific table set (e.g. TestSchemaParity_Wave3).
+func (s *Schema) HasTable(name string) bool {
+	_, ok := s.Tables[name]
+	return ok
+}

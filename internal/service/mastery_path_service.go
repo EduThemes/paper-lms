@@ -168,7 +168,7 @@ func (s *MasteryPathService) EvaluateForStudent(ctx context.Context, submissionI
 		return nil // not yet graded — nothing to do
 	}
 
-	assignment, err := s.assignmentRepo.FindByID(ctx, sub.AssignmentID)
+	assignment, err := s.assignmentRepo.FindByID(ctx, sub.AssignmentID, 0)
 	if err != nil {
 		return err
 	}

@@ -34,9 +34,9 @@ import (
 // faster diagnosis.
 type FerpaViolation struct {
 	ObjectType     string
-	FieldPath      string   // dot-path like "result.score" or "context.course_id"
-	Classification string   // what the tag says the field should be
-	Missing        []string // which policy_flags are missing
+	FieldPath      string                     // dot-path like "result.score" or "context.course_id"
+	Classification models.FerpaClassification // what the tag says the field should be
+	Missing        []string                   // which policy_flags are missing
 }
 
 // requiredEducationRecordFlags is the policy_flags set an event must

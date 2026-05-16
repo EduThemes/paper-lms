@@ -130,6 +130,65 @@ func (r *GamificationWalletRepo) ListTransactionsForUser(ctx context.Context, us
 	}, nil
 }
 
+// RankByCurrency ranks the supplied candidate users by lifetime_earned
+// in the given currency, ties broken by earliest most-recent positive
+// transaction. Candidates with no balance row surface at rank tail
+// with lifetime_earned = 0 (ties among those are arbitrary).
+//
+// The query uses idx_wallet_balances_currency_lifetime (migration
+// 000042) for the primary ordering. The tie-break is a correlated
+// MAX subquery over the transactions ledger — cheap because the
+// tied set is usually tiny.
+func (r *GamificationWalletRepo) RankByCurrency(ctx context.Context, currencyTypeID uint, candidateUserIDs []uint) ([]repository.RankRow, error) {
+	if len(candidateUserIDs) == 0 {
+		return nil, nil
+	}
+
+	type row struct {
+		UserID         uint
+		LifetimeEarned int64
+	}
+	var rows []row
+
+	// LEFT JOIN so candidates with no balance row in this currency still
+	// appear (lifetime_earned = 0). MAX(occurred_at) is the tie-break
+	// signal — earlier completers rank higher. NULL last so missing
+	// balances sort after present ones at the same lifetime_earned tier.
+	err := r.db.WithContext(ctx).
+		Raw(`
+			SELECT u.id AS user_id,
+			       COALESCE(b.lifetime_earned, 0) AS lifetime_earned
+			  FROM users u
+			  LEFT JOIN gamification_wallet_balances b
+			    ON b.user_id = u.id AND b.currency_type_id = ?
+			  LEFT JOIN LATERAL (
+			    SELECT MAX(t.occurred_at) AS last_earn
+			      FROM gamification_wallet_transactions t
+			     WHERE t.user_id = u.id
+			       AND t.currency_type_id = ?
+			       AND t.delta > 0
+			  ) tx ON TRUE
+			 WHERE u.id IN ?
+			 ORDER BY COALESCE(b.lifetime_earned, 0) DESC,
+			          tx.last_earn ASC NULLS LAST,
+			          u.id ASC
+		`, currencyTypeID, currencyTypeID, candidateUserIDs).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]repository.RankRow, len(rows))
+	for i, r := range rows {
+		out[i] = repository.RankRow{
+			UserID:         r.UserID,
+			LifetimeEarned: r.LifetimeEarned,
+			Rank:           i + 1,
+		}
+	}
+	return out, nil
+}
+
 func (r *GamificationWalletRepo) ListTransactionsForUserAndCurrency(ctx context.Context, userID, currencyTypeID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.GamificationWalletTransaction], error) {
 	query := r.db.WithContext(ctx).
 		Model(&models.GamificationWalletTransaction{}).

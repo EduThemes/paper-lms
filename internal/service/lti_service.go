@@ -183,7 +183,7 @@ func (s *LTIService) BuildLaunchToken(ctx context.Context, userID uint, courseID
 	}
 
 	// Look up the course for context claims
-	course, err := s.courseRepo.FindByID(ctx, courseID)
+	course, err := s.courseRepo.FindByID(ctx, courseID, 0)
 	if err != nil {
 		return "", errors.New("course not found")
 	}

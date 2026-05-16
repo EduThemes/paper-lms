@@ -102,7 +102,7 @@ func TestPageGetByID(t *testing.T) {
 		WorkflowState: "unpublished",
 	}
 
-	repo.On("FindByID", mock.Anything, uint(1)).Return(expected, nil)
+	repo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(expected, nil)
 
 	result, err := svc.GetByID(context.Background(), 1)
 
@@ -197,7 +197,7 @@ func TestPageGetByID_NotFound(t *testing.T) {
 	repo := new(mocks.MockPageRepository)
 	svc := service.NewPageService(repo)
 
-	repo.On("FindByID", mock.Anything, uint(999)).Return(nil, errors.New("record not found"))
+	repo.On("FindByID", mock.Anything, uint(999), uint(0)).Return(nil, errors.New("record not found"))
 
 	result, err := svc.GetByID(context.Background(), 999)
 

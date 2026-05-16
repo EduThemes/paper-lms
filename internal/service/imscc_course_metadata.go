@@ -48,7 +48,7 @@ func (p *IMSCCParser) parseCourseSettingsXML(
 	if p.courseRepo == nil {
 		return
 	}
-	course, err := p.courseRepo.FindByID(ctx, courseID)
+	course, err := p.courseRepo.FindByID(ctx, courseID, 0)
 	if err != nil || course == nil {
 		return
 	}
