@@ -15,6 +15,7 @@ import NotificationBell from './NotificationBell';
 import MobileBottomNav from './MobileBottomNav';
 import ThemeToggle from './ThemeToggle';
 import CurrencyPills from './gamification/CurrencyPills';
+import BrandLogo from './brand/BrandLogo';
 
 const baseNav = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -214,7 +215,7 @@ const Layout = ({ children }) => {
         >
           <div className="flex items-center justify-center h-14 border-b border-white/10 w-full">
             <Link to="/" className="text-white" title="Paper LMS">
-              <BookOpen className="w-7 h-7 text-red-400" />
+              <BrandLogo size={32} />
             </Link>
           </div>
 
@@ -257,7 +258,7 @@ const Layout = ({ children }) => {
       {/* Logo */}
       <div className="flex items-center justify-center h-14 border-b border-white/10 w-full">
         <Link to="/" className="text-white relative group" title="Paper LMS" onClick={() => setMobileMenuOpen(false)}>
-          <BookOpen className="w-6 h-6 text-red-400" />
+          <BrandLogo size={28} />
           <span className="absolute left-full ml-2 px-2 py-1 rounded bg-chrome-tooltip text-chrome-tooltip-fg text-xs font-medium whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 hidden md:block">
             Paper LMS
           </span>

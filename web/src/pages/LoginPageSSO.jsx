@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../services/api';
+import BrandLogo from '../components/brand/BrandLogo';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -110,11 +111,8 @@ const getProviderStyle = (provider) => {
 
 const PaperLogo = () => (
   <div className="flex flex-col items-center mb-2">
-    <div className="w-16 h-16 bg-brand-600 rounded-2xl flex items-center justify-center mb-3 shadow-lg">
-      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M4 4h16v16H4z" fill="rgba(255,255,255,0.2)" rx="2" />
-        <path d="M7 8h10M7 12h7M7 16h5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" />
-      </svg>
+    <div className="mb-3">
+      <BrandLogo size={72} />
     </div>
     <h1 className="text-2xl font-bold text-text-primary">Paper LMS</h1>
   </div>

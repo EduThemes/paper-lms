@@ -7,10 +7,10 @@
   "background_color": "#ffffff",
   "theme_color": "#2563eb",
   "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
-    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+    { "src": "/brand/paper-logo.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/brand/paper-logo-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/brand/paper-logo-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/brand/paper-logo-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "categories": ["education"],
   "orientation": "any"
