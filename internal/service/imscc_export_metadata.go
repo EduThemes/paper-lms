@@ -235,7 +235,7 @@ func (e *IMSCCExporter) writeRubricsXML(
 		return nil
 	}
 	page := repository.PaginationParams{Page: 1, PerPage: 1000}
-	rubrics, err := e.rubricRepo.ListByContext(ctx, "Course", courseID, page)
+	rubrics, err := e.rubricRepo.ListByContext(ctx, "Course", courseID, 0, page)
 	if err != nil || len(rubrics.Items) == 0 {
 		return nil
 	}
@@ -342,11 +342,11 @@ func (e *IMSCCExporter) writeLearningOutcomesXML(
 		return nil
 	}
 	page := repository.PaginationParams{Page: 1, PerPage: 1000}
-	groups, err := e.outcomeGroupRepo.ListByContext(ctx, "Course", courseID, page)
+	groups, err := e.outcomeGroupRepo.ListByContext(ctx, "Course", courseID, 0, page)
 	if err != nil || len(groups.Items) == 0 {
 		return nil
 	}
-	outcomes, err := e.outcomeRepo.ListByContext(ctx, "Course", courseID, page)
+	outcomes, err := e.outcomeRepo.ListByContext(ctx, "Course", courseID, 0, page)
 	if err != nil {
 		return nil
 	}

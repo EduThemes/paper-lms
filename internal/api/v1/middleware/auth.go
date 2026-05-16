@@ -82,6 +82,42 @@ func (m *AuthMiddleware) Protected() fiber.Handler {
 			if name, ok := claims["name"].(string); ok {
 				c.Locals("user_name", name)
 			}
+			// Populate is_admin Locals at auth time so EVERY handler
+			// can read it without needing the permissions middleware
+			// chain. Closes F4.3 from
+			// docs/audits/2026-05-15-gamification-audit.md. Tokens
+			// minted before this claim was added simply default to
+			// false — permissions.RequireAdmin / RequireSelfOrAdmin
+			// still re-validate via the userRepo at every protected
+			// admin route, so a missing claim is safe (no escalation
+			// path), just degrades to the previous "DB lookup at
+			// permission middleware" behavior.
+			if role, ok := claims["role"].(string); ok {
+				c.Locals("user_role", role)
+				c.Locals("is_admin", role == "admin")
+			}
+			// 13.1.B — tenant scope. New tokens carry account_id; old
+			// tokens don't. For an old token we look up the user once
+			// and 401 if their DB row also lacks an account_id (can't
+			// happen post-13.1.A migration, but the guard makes the
+			// invariant explicit).
+			if acctFloat, ok := claims["account_id"].(float64); ok && acctFloat > 0 {
+				c.Locals("account_id", uint(acctFloat))
+			} else if m.userRepo != nil {
+				if user, lookupErr := m.userRepo.FindByID(c.Context(), uint(idFloat)); lookupErr == nil && user != nil {
+					if user.AccountID == 0 {
+						return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+							"errors": []fiber.Map{{"message": "session predates tenant assignment; please log in again"}},
+						})
+					}
+					c.Locals("account_id", user.AccountID)
+				}
+			}
+			// admin_account_id captures a masquerade's REAL home tenant
+			// so audit emitters can attribute back to the impersonator.
+			if adminAcct, ok := claims["admin_account_id"].(float64); ok && adminAcct > 0 {
+				c.Locals("admin_account_id", uint(adminAcct))
+			}
 			// If this is a masquerade token, set the masquerade_by local
 			// so handlers can detect masquerade sessions
 			if masqueradeBy, ok := claims["masquerade_by"].(float64); ok {
@@ -96,12 +132,21 @@ func (m *AuthMiddleware) Protected() fiber.Handler {
 			if err == nil {
 				c.Locals("user_id", accessToken.UserID)
 
-				// Look up user for email and name
+				// Look up user for email, name, and role. The role
+				// drives is_admin Locals (closes F4.3); since the
+				// access-token path always does a user lookup anyway,
+				// adding the role is free.
 				if m.userRepo != nil {
 					user, userErr := m.userRepo.FindByID(c.Context(), accessToken.UserID)
 					if userErr == nil {
 						c.Locals("user_email", user.Email)
 						c.Locals("user_name", user.Name)
+						c.Locals("user_role", user.Role)
+						c.Locals("is_admin", user.Role == "admin")
+						// 13.1.B — tenant for access-token sessions.
+						if user.AccountID > 0 {
+							c.Locals("account_id", user.AccountID)
+						}
 					}
 				}
 

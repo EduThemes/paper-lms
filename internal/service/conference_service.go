@@ -51,7 +51,7 @@ func (s *ConferenceService) Create(ctx context.Context, conference *models.Confe
 }
 
 func (s *ConferenceService) GetByID(ctx context.Context, id uint) (*models.Conference, error) {
-	conference, err := s.confRepo.FindByID(ctx, id)
+	conference, err := s.confRepo.FindByID(ctx, id, 0)
 	if err != nil {
 		return nil, errors.New("conference not found")
 	}
@@ -59,7 +59,7 @@ func (s *ConferenceService) GetByID(ctx context.Context, id uint) (*models.Confe
 }
 
 func (s *ConferenceService) Update(ctx context.Context, conference *models.Conference) error {
-	_, err := s.confRepo.FindByID(ctx, conference.ID)
+	_, err := s.confRepo.FindByID(ctx, conference.ID, 0)
 	if err != nil {
 		return errors.New("conference not found")
 	}
@@ -72,13 +72,13 @@ func (s *ConferenceService) Delete(ctx context.Context, id uint) error {
 }
 
 func (s *ConferenceService) ListByContext(ctx context.Context, contextType string, contextID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Conference], error) {
-	return s.confRepo.ListByContext(ctx, contextType, contextID, params)
+	return s.confRepo.ListByContext(ctx, contextType, contextID, 0, params)
 }
 
 // Conference lifecycle
 
 func (s *ConferenceService) StartConference(ctx context.Context, id uint) (*models.Conference, error) {
-	conference, err := s.confRepo.FindByID(ctx, id)
+	conference, err := s.confRepo.FindByID(ctx, id, 0)
 	if err != nil {
 		return nil, errors.New("conference not found")
 	}
@@ -101,7 +101,7 @@ func (s *ConferenceService) StartConference(ctx context.Context, id uint) (*mode
 }
 
 func (s *ConferenceService) EndConference(ctx context.Context, id uint) (*models.Conference, error) {
-	conference, err := s.confRepo.FindByID(ctx, id)
+	conference, err := s.confRepo.FindByID(ctx, id, 0)
 	if err != nil {
 		return nil, errors.New("conference not found")
 	}
@@ -126,7 +126,7 @@ func (s *ConferenceService) EndConference(ctx context.Context, id uint) (*models
 }
 
 func (s *ConferenceService) JoinConference(ctx context.Context, conferenceID, userID uint) (string, error) {
-	conference, err := s.confRepo.FindByID(ctx, conferenceID)
+	conference, err := s.confRepo.FindByID(ctx, conferenceID, 0)
 	if err != nil {
 		return "", errors.New("conference not found")
 	}
@@ -146,7 +146,7 @@ func (s *ConferenceService) JoinConference(ctx context.Context, conferenceID, us
 }
 
 func (s *ConferenceService) GetRecordings(ctx context.Context, id uint) (string, error) {
-	conference, err := s.confRepo.FindByID(ctx, id)
+	conference, err := s.confRepo.FindByID(ctx, id, 0)
 	if err != nil {
 		return "", errors.New("conference not found")
 	}
@@ -158,7 +158,7 @@ func (s *ConferenceService) GetRecordings(ctx context.Context, id uint) (string,
 
 func (s *ConferenceService) AddParticipant(ctx context.Context, conferenceID, userID uint, participationType string) error {
 	// Check conference exists
-	_, err := s.confRepo.FindByID(ctx, conferenceID)
+	_, err := s.confRepo.FindByID(ctx, conferenceID, 0)
 	if err != nil {
 		return errors.New("conference not found")
 	}
@@ -171,7 +171,7 @@ func (s *ConferenceService) AddParticipant(ctx context.Context, conferenceID, us
 	}
 
 	// Check if participant already exists
-	existing, _ := s.participantRepo.FindByConferenceAndUser(ctx, conferenceID, userID)
+	existing, _ := s.participantRepo.FindByConferenceAndUser(ctx, conferenceID, userID, 0)
 	if existing != nil {
 		return errors.New("user is already a participant in this conference")
 	}
@@ -186,7 +186,7 @@ func (s *ConferenceService) AddParticipant(ctx context.Context, conferenceID, us
 }
 
 func (s *ConferenceService) RemoveParticipant(ctx context.Context, conferenceID, userID uint) error {
-	participant, err := s.participantRepo.FindByConferenceAndUser(ctx, conferenceID, userID)
+	participant, err := s.participantRepo.FindByConferenceAndUser(ctx, conferenceID, userID, 0)
 	if err != nil {
 		return errors.New("participant not found")
 	}
@@ -195,5 +195,5 @@ func (s *ConferenceService) RemoveParticipant(ctx context.Context, conferenceID,
 }
 
 func (s *ConferenceService) ListParticipants(ctx context.Context, conferenceID uint) ([]models.ConferenceParticipant, error) {
-	return s.participantRepo.ListByConferenceID(ctx, conferenceID)
+	return s.participantRepo.ListByConferenceID(ctx, conferenceID, 0)
 }

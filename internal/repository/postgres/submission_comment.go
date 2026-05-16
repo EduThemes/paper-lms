@@ -20,9 +20,14 @@ func (r *submissionCommentRepo) Create(ctx context.Context, comment *models.Subm
 	return r.db.WithContext(ctx).Create(comment).Error
 }
 
-func (r *submissionCommentRepo) ListBySubmissionID(ctx context.Context, submissionID uint) ([]models.SubmissionComment, error) {
+func (r *submissionCommentRepo) ListBySubmissionID(ctx context.Context, submissionID, accountID uint) ([]models.SubmissionComment, error) {
 	var comments []models.SubmissionComment
-	if err := r.db.WithContext(ctx).Where("submission_id = ?", submissionID).Order("created_at ASC").Find(&comments).Error; err != nil {
+	q := r.db.WithContext(ctx).Where("submission_id = ?", submissionID)
+	if accountID != 0 {
+		// Scope through submission->assignment->course (deep 3-level subquery).
+		q = q.Where("submission_id IN (SELECT id FROM submissions WHERE assignment_id IN (SELECT id FROM assignments WHERE course_id IN (SELECT id FROM courses WHERE account_id = ?)))", accountID)
+	}
+	if err := q.Order("created_at ASC").Find(&comments).Error; err != nil {
 		return nil, err
 	}
 	return comments, nil

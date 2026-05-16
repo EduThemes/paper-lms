@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, BookOpen, Calendar, Mail, User, LogOut,
+  LayoutDashboard, BookOpen, Calendar, Mail, LogOut,
   Briefcase, Eye, Settings, Home, Inbox, Menu, X, AlertTriangle, Library, Shield
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -14,7 +14,10 @@ import AdminNav from './AdminNav';
 import NotificationBell from './NotificationBell';
 import MobileBottomNav from './MobileBottomNav';
 import ThemeToggle from './ThemeToggle';
+import LanguageSwitcher from './LanguageSwitcher';
 import CurrencyPills from './gamification/CurrencyPills';
+import BrandLogo from './brand/BrandLogo';
+import UserMenu from './UserMenu';
 
 const baseNav = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -214,7 +217,7 @@ const Layout = ({ children }) => {
         >
           <div className="flex items-center justify-center h-14 border-b border-white/10 w-full">
             <Link to="/" className="text-white" title="Paper LMS">
-              <BookOpen className="w-7 h-7 text-red-400" />
+              <BrandLogo size={32} />
             </Link>
           </div>
 
@@ -257,7 +260,7 @@ const Layout = ({ children }) => {
       {/* Logo */}
       <div className="flex items-center justify-center h-14 border-b border-white/10 w-full">
         <Link to="/" className="text-white relative group" title="Paper LMS" onClick={() => setMobileMenuOpen(false)}>
-          <BookOpen className="w-6 h-6 text-red-400" />
+          <BrandLogo size={28} />
           <span className="absolute left-full ml-2 px-2 py-1 rounded bg-chrome-tooltip text-chrome-tooltip-fg text-xs font-medium whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 hidden md:block">
             Paper LMS
           </span>
@@ -290,24 +293,11 @@ const Layout = ({ children }) => {
       <div className="border-t border-white/10 py-2 space-y-1 flex flex-col items-center w-full">
         <NotificationBell />
         <ThemeToggle />
-        <div className="relative group flex items-center justify-center w-10 h-10">
-          <div className="w-8 h-8 rounded-full bg-text-tertiary flex items-center justify-center">
-            <User className="w-4 h-4 text-chrome-sidebar-fg" />
-          </div>
-          <span className="absolute left-full ml-2 px-2 py-1 rounded bg-chrome-tooltip text-chrome-tooltip-fg text-xs font-medium whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 hidden md:block">
-            {user?.name || user?.email}
-          </span>
-        </div>
-        <button
-          onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
-          title="Logout"
-          className="relative group flex items-center justify-center w-10 h-10 rounded-md text-gray-300 hover:bg-white/10 hover:text-white transition-colors"
-        >
-          <LogOut className="w-5 h-5" />
-          <span className="absolute left-full ml-2 px-2 py-1 rounded bg-chrome-tooltip text-chrome-tooltip-fg text-xs font-medium whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 hidden md:block">
-            Logout
-          </span>
-        </button>
+        <LanguageSwitcher />
+        <UserMenu
+          user={user}
+          onLogout={() => { setMobileMenuOpen(false); handleLogout(); }}
+        />
       </div>
     </>
   );

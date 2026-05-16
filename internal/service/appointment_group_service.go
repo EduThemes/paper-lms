@@ -100,8 +100,8 @@ func (s *AppointmentGroupService) CreateGroup(ctx context.Context, group *models
 	return group, createdSlots, nil
 }
 
-func (s *AppointmentGroupService) GetGroup(ctx context.Context, id uint) (*models.AppointmentGroup, error) {
-	g, err := s.groupRepo.FindByID(ctx, id)
+func (s *AppointmentGroupService) GetGroup(ctx context.Context, id, accountID uint) (*models.AppointmentGroup, error) {
+	g, err := s.groupRepo.FindByID(ctx, id, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -258,10 +258,10 @@ func (s *AppointmentGroupService) Cancel(ctx context.Context, reservation *model
 	return s.reservationRepo.Update(ctx, reservation)
 }
 
-func (s *AppointmentGroupService) GetReservation(ctx context.Context, id uint) (*models.AppointmentReservation, error) {
-	return s.reservationRepo.FindByID(ctx, id)
+func (s *AppointmentGroupService) GetReservation(ctx context.Context, id, accountID uint) (*models.AppointmentReservation, error) {
+	return s.reservationRepo.FindByID(ctx, id, accountID)
 }
 
-func (s *AppointmentGroupService) GetSlot(ctx context.Context, id uint) (*models.AppointmentSlot, error) {
-	return s.slotRepo.FindByID(ctx, id)
+func (s *AppointmentGroupService) GetSlot(ctx context.Context, id, accountID uint) (*models.AppointmentSlot, error) {
+	return s.slotRepo.FindByID(ctx, id, accountID)
 }

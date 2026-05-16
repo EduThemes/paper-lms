@@ -97,7 +97,7 @@ func (s *DiscussionV2Service) CreateTopic(ctx context.Context, topic *models.Dis
 }
 
 func (s *DiscussionV2Service) GetTopic(ctx context.Context, id uint) (*models.DiscussionTopic, error) {
-	return s.topicRepo.FindByID(ctx, id)
+	return s.topicRepo.FindByID(ctx, id, 0)
 }
 
 func (s *DiscussionV2Service) UpdateTopic(ctx context.Context, topic *models.DiscussionTopic) error {
@@ -109,7 +109,7 @@ func (s *DiscussionV2Service) DeleteTopic(ctx context.Context, id uint) error {
 }
 
 func (s *DiscussionV2Service) ListTopics(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionTopic], error) {
-	return s.topicRepo.ListByCourseID(ctx, courseID, params)
+	return s.topicRepo.ListByCourseID(ctx, courseID, 0, params)
 }
 
 func (s *DiscussionV2Service) CreateEntry(ctx context.Context, entry *models.DiscussionEntry) error {
@@ -123,7 +123,7 @@ func (s *DiscussionV2Service) CreateEntry(ctx context.Context, entry *models.Dis
 }
 
 func (s *DiscussionV2Service) GetEntry(ctx context.Context, id uint) (*models.DiscussionEntry, error) {
-	return s.entryRepo.FindByID(ctx, id)
+	return s.entryRepo.FindByID(ctx, id, 0)
 }
 
 func (s *DiscussionV2Service) UpdateEntry(ctx context.Context, entry *models.DiscussionEntry) error {
@@ -135,11 +135,11 @@ func (s *DiscussionV2Service) DeleteEntry(ctx context.Context, id uint) error {
 }
 
 func (s *DiscussionV2Service) ListEntries(ctx context.Context, topicID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionEntry], error) {
-	return s.entryRepo.ListByTopicID(ctx, topicID, params)
+	return s.entryRepo.ListByTopicID(ctx, topicID, 0, params)
 }
 
 func (s *DiscussionV2Service) ListReplies(ctx context.Context, entryID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionEntry], error) {
-	return s.entryRepo.ListReplies(ctx, entryID, params)
+	return s.entryRepo.ListReplies(ctx, entryID, 0, params)
 }
 
 func (s *DiscussionV2Service) RateEntry(ctx context.Context, entryID uint, userID uint, rating int) error {
@@ -157,7 +157,7 @@ func (s *DiscussionV2Service) RateEntry(ctx context.Context, entryID uint, userI
 		return err
 	}
 
-	entry, err := s.entryRepo.FindByID(ctx, entryID)
+	entry, err := s.entryRepo.FindByID(ctx, entryID, 0)
 	if err != nil {
 		return err
 	}
@@ -172,12 +172,12 @@ func (s *DiscussionV2Service) RateEntry(ctx context.Context, entryID uint, userI
 // GetFullViewWithReadState returns the full discussion tree with read/unread state per entry
 // and user profile info resolved for all participants.
 func (s *DiscussionV2Service) GetFullViewWithReadState(ctx context.Context, topicID, userID uint) (*DiscussionFullViewV2, error) {
-	topic, err := s.topicRepo.FindByID(ctx, topicID)
+	topic, err := s.topicRepo.FindByID(ctx, topicID, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	allEntries, err := s.entryRepo.ListAllByTopicID(ctx, topicID)
+	allEntries, err := s.entryRepo.ListAllByTopicID(ctx, topicID, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +318,7 @@ func (s *DiscussionV2Service) UpdateEntryWithHistory(ctx context.Context, entryI
 		return errors.New("message cannot be empty")
 	}
 
-	entry, err := s.entryRepo.FindByID(ctx, entryID)
+	entry, err := s.entryRepo.FindByID(ctx, entryID, 0)
 	if err != nil {
 		return err
 	}

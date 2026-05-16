@@ -10,7 +10,9 @@ import (
 
 type GroupCategoryRepository interface {
 	Create(ctx context.Context, category *models.GroupCategory) error
-	FindByID(ctx context.Context, id uint) (*models.GroupCategory, error)
+	// FindByID — 13.1.D: dual-scope. Course-level rows scope via course's
+	// account_id; account-level rows scope direct on account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.GroupCategory, error)
 	Update(ctx context.Context, category *models.GroupCategory) error
 	Delete(ctx context.Context, id uint) error
 	ListByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.GroupCategory], error)
@@ -19,7 +21,9 @@ type GroupCategoryRepository interface {
 
 type GroupRepository interface {
 	Create(ctx context.Context, group *models.Group) error
-	FindByID(ctx context.Context, id uint) (*models.Group, error)
+	// FindByID — 13.1.D: dual-scope. Course-context groups scope via course's
+	// account_id; account-context groups scope direct on account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.Group, error)
 	Update(ctx context.Context, group *models.Group) error
 	Delete(ctx context.Context, id uint) error
 	ListByCategoryID(ctx context.Context, categoryID uint, params PaginationParams) (*PaginatedResult[models.Group], error)
@@ -29,7 +33,8 @@ type GroupRepository interface {
 
 type GroupMembershipRepository interface {
 	Create(ctx context.Context, membership *models.GroupMembership) error
-	FindByID(ctx context.Context, id uint) (*models.GroupMembership, error)
+	// FindByID — 13.1.D: tenant scope via parent group's account/course.
+	FindByID(ctx context.Context, id, accountID uint) (*models.GroupMembership, error)
 	Update(ctx context.Context, membership *models.GroupMembership) error
 	Delete(ctx context.Context, id uint) error
 	ListByGroupID(ctx context.Context, groupID uint, params PaginationParams) (*PaginatedResult[models.GroupMembership], error)

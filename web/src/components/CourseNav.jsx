@@ -50,9 +50,13 @@ const TAB_REGISTRY = {
   content_import:  { path: '/content_import', label: 'Import Content' },
   external_tools:  { path: '/external_tools', label: 'External Tools' },
   settings:        { path: '/settings', label: 'Settings' },
+  leaderboard:     { path: '/leaderboard', label: 'Leaderboard' },
 };
 
 // Teacher-only tab IDs (not shown to students)
+// `leaderboard` was teacher-only in W3-A; W3-B widens student access
+// (server-side pseudonym substitution + tenant-mode render policy
+// handles privacy), so it's no longer in this set.
 const TEACHER_ONLY_TAB_IDS = new Set([
   'question_banks', 'accommodations', 'blueprint', 'pacing',
   'analytics', 'audit_log', 'content_import', 'external_tools', 'settings',
@@ -63,6 +67,7 @@ const DEFAULT_PRIMARY_IDS = ['home', 'announcements', 'assignments', 'modules', 
 const DEFAULT_MORE_IDS = [
   'quizzes', 'discussions', 'files', 'pages', 'rubrics', 'outcomes',
   'groups', 'collaborations', 'conferences', 'syllabus', 'attendance', 'calendar',
+  'leaderboard',
   'question_banks', 'accommodations', 'blueprint', 'pacing',
   'analytics', 'audit_log', 'content_import', 'external_tools', 'settings',
 ];

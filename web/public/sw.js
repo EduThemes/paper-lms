@@ -11,7 +11,7 @@ const APP_SHELL = [
   '/index.html',
   '/offline.html',
   '/manifest.json',
-  '/icons/icon.svg',
+  '/brand/paper-logo.svg',
 ];
 
 // Endpoints that should never be cached

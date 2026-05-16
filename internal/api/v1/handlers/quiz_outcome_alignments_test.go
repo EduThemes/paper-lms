@@ -34,7 +34,7 @@ func setupAlignmentHandler() (*fiber.App, *mocks.MockQuizQuestionOutcomeAlignmen
 func TestAlign_Success(t *testing.T) {
 	app, ar, qr, or := setupAlignmentHandler()
 	qr.On("FindByID", mock.Anything, uint(1)).Return(&models.QuizQuestion{ID: 1}, nil)
-	or.On("FindByID", mock.Anything, uint(2)).Return(&models.LearningOutcome{ID: 2}, nil)
+	or.On("FindByID", mock.Anything, uint(2), uint(0)).Return(&models.LearningOutcome{ID: 2}, nil)
 	ar.On("FindByQuestionAndOutcome", mock.Anything, uint(1), uint(2)).Return(nil, errors.New("not found"))
 	ar.On("Create", mock.Anything, mock.MatchedBy(func(a *models.QuizQuestionOutcomeAlignment) bool {
 		return a.QuizQuestionID == 1 && a.OutcomeID == 2 && a.MasteryThreshold == 0.85
@@ -48,7 +48,7 @@ func TestAlign_Success(t *testing.T) {
 func TestAlign_DefaultThreshold(t *testing.T) {
 	app, ar, qr, or := setupAlignmentHandler()
 	qr.On("FindByID", mock.Anything, uint(1)).Return(&models.QuizQuestion{ID: 1}, nil)
-	or.On("FindByID", mock.Anything, uint(2)).Return(&models.LearningOutcome{ID: 2}, nil)
+	or.On("FindByID", mock.Anything, uint(2), uint(0)).Return(&models.LearningOutcome{ID: 2}, nil)
 	ar.On("FindByQuestionAndOutcome", mock.Anything, uint(1), uint(2)).Return(nil, errors.New("not found"))
 	ar.On("Create", mock.Anything, mock.MatchedBy(func(a *models.QuizQuestionOutcomeAlignment) bool {
 		return a.MasteryThreshold == 0.7
@@ -61,7 +61,7 @@ func TestAlign_DefaultThreshold(t *testing.T) {
 func TestAlign_Duplicate(t *testing.T) {
 	app, ar, qr, or := setupAlignmentHandler()
 	qr.On("FindByID", mock.Anything, uint(1)).Return(&models.QuizQuestion{ID: 1}, nil)
-	or.On("FindByID", mock.Anything, uint(2)).Return(&models.LearningOutcome{ID: 2}, nil)
+	or.On("FindByID", mock.Anything, uint(2), uint(0)).Return(&models.LearningOutcome{ID: 2}, nil)
 	ar.On("FindByQuestionAndOutcome", mock.Anything, uint(1), uint(2)).Return(&models.QuizQuestionOutcomeAlignment{ID: 99}, nil)
 	body := testutil.JSONBody(map[string]interface{}{"outcome_id": 2})
 	resp := testutil.MakeRequest(app, http.MethodPost, "/quiz_questions/1/outcome_alignments", body)

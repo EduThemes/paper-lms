@@ -84,14 +84,16 @@ func (s *CustomRoleService) ListRoles(ctx context.Context, accountID uint, param
 	return s.roleRepo.ListByAccountID(ctx, accountID, params)
 }
 
-// GetRole retrieves a single role by ID.
-func (s *CustomRoleService) GetRole(ctx context.Context, id uint) (*models.CustomRole, error) {
-	return s.roleRepo.FindByID(ctx, id)
+// GetRole retrieves a single role by ID. accountID scopes the read to a
+// single tenant (13.1.D); pass 0 for unscoped reads from privileged
+// internal callers.
+func (s *CustomRoleService) GetRole(ctx context.Context, id, accountID uint) (*models.CustomRole, error) {
+	return s.roleRepo.FindByID(ctx, id, accountID)
 }
 
 // CloneRole duplicates an existing role with a new name.
-func (s *CustomRoleService) CloneRole(ctx context.Context, sourceID uint, newName string, createdByUserID uint) (*models.CustomRole, error) {
-	source, err := s.roleRepo.FindByID(ctx, sourceID)
+func (s *CustomRoleService) CloneRole(ctx context.Context, sourceID, accountID uint, newName string, createdByUserID uint) (*models.CustomRole, error) {
+	source, err := s.roleRepo.FindByID(ctx, sourceID, accountID)
 	if err != nil {
 		return nil, errors.New("source role not found")
 	}
@@ -367,7 +369,7 @@ func (s *CustomRoleService) SetRoleOverride(ctx context.Context, override *model
 	}
 
 	// Check that the role exists
-	_, err := s.roleRepo.FindByID(ctx, override.RoleID)
+	_, err := s.roleRepo.FindByID(ctx, override.RoleID, 0)
 	if err != nil {
 		return errors.New("role not found")
 	}
@@ -392,9 +394,9 @@ func (s *CustomRoleService) RemoveRoleOverride(ctx context.Context, overrideID u
 }
 
 // BulkSetOverrides creates or updates multiple permission overrides for a role at once.
-func (s *CustomRoleService) BulkSetOverrides(ctx context.Context, roleID uint, overrides []models.RoleOverride) error {
+func (s *CustomRoleService) BulkSetOverrides(ctx context.Context, roleID, accountID uint, overrides []models.RoleOverride) error {
 	// Validate the role exists
-	role, err := s.roleRepo.FindByID(ctx, roleID)
+	role, err := s.roleRepo.FindByID(ctx, roleID, accountID)
 	if err != nil {
 		return errors.New("role not found")
 	}

@@ -37,9 +37,11 @@ func TestDiscussionEntryPostedEmitCallback_EmitsEvent(t *testing.T) {
 	if err := g.Create(&course).Error; err != nil {
 		t.Fatalf("create course: %v", err)
 	}
+	author := seedTestUser(t, g, account.ID, "topic-author@example.test")
+	replier := seedTestUser(t, g, account.ID, "topic-replier@example.test")
 	topic := models.DiscussionTopic{
 		CourseID:      course.ID,
-		UserID:        1001,
+		UserID:        author.ID,
 		Title:         "Week 1 Discussion",
 		Message:       "Introduce yourself.",
 		WorkflowState: "active",
@@ -50,7 +52,7 @@ func TestDiscussionEntryPostedEmitCallback_EmitsEvent(t *testing.T) {
 	parentID := uint(5150)
 	entry := models.DiscussionEntry{
 		DiscussionTopicID: topic.ID,
-		UserID:            4242,
+		UserID:            replier.ID,
 		ParentID:          &parentID,
 		Message:           "Replying to the prompt.",
 		WorkflowState:     "active",

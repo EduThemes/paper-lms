@@ -20,9 +20,25 @@ func (r *attachmentRepo) Create(ctx context.Context, attachment *models.Attachme
 	return r.db.WithContext(ctx).Create(attachment).Error
 }
 
-func (r *attachmentRepo) FindByID(ctx context.Context, id uint) (*models.Attachment, error) {
+func (r *attachmentRepo) FindByID(ctx context.Context, id, accountID uint) (*models.Attachment, error) {
 	var attachment models.Attachment
-	if err := r.db.WithContext(ctx).First(&attachment, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Attachments are polymorphic on (context_type, context_id) AND
+		// optionally chained to a folder. We tenant-filter by the same
+		// polymorphic branches we use on folders.
+		q = q.Where(`
+			(context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))
+			OR (context_type = 'Account' AND context_id = ?)
+			OR (context_type = 'Group' AND context_id IN (
+				SELECT g.id FROM groups g
+				WHERE (g.context_type = 'Course' AND g.context_id IN (SELECT id FROM courses WHERE account_id = ?))
+				   OR (g.context_type = 'Account' AND g.context_id = ?)
+			))
+			OR (context_type = 'User' AND context_id IN (SELECT id FROM users WHERE account_id = ?))
+		`, accountID, accountID, accountID, accountID, accountID)
+	}
+	if err := q.First(&attachment, id).Error; err != nil {
 		return nil, err
 	}
 	return &attachment, nil

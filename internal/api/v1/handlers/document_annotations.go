@@ -39,11 +39,11 @@ func (h *DocumentAnnotationHandler) getCourseIDForAnnotation(c *fiber.Ctx, annot
 	if err != nil {
 		return 0, err
 	}
-	submission, err := h.submissionRepo.FindByID(c.Context(), annotation.SubmissionID)
+	submission, err := h.submissionRepo.FindByID(c.Context(), annotation.SubmissionID, callerAccountID(c))
 	if err != nil {
 		return 0, err
 	}
-	assignment, err := h.assignmentRepo.FindByID(c.Context(), submission.AssignmentID)
+	assignment, err := h.assignmentRepo.FindByID(c.Context(), submission.AssignmentID, callerAccountID(c))
 	if err != nil {
 		return 0, err
 	}
@@ -107,7 +107,7 @@ func (h *DocumentAnnotationHandler) ListAnnotations(c *fiber.Ctx) error {
 	}
 
 	// Find the submission
-	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID))
+	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "submission")
 	}
@@ -153,7 +153,7 @@ func (h *DocumentAnnotationHandler) CreateAnnotation(c *fiber.Ctx) error {
 	}
 
 	// Find the submission
-	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(submissionUserID))
+	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(submissionUserID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "submission")
 	}
@@ -405,7 +405,7 @@ func (h *DocumentAnnotationHandler) GetAnnotationSummary(c *fiber.Ctx) error {
 	}
 
 	// Find the submission
-	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID))
+	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "submission")
 	}

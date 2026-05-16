@@ -82,8 +82,9 @@ func TestOutcomeMasteryCrossedEmitCallback_EmitsEvent(t *testing.T) {
 	percent := 0.9
 	mastery := true
 	assessedAt := time.Now().Add(-2 * time.Minute).UTC().Truncate(time.Second)
+	learner := seedTestUser(t, g, account.ID, "mastery-learner@example.test")
 	result := models.LearningOutcomeResult{
-		UserID:              4242,
+		UserID:              learner.ID,
 		LearningOutcomeID:   outcome.ID,
 		ContextType:         "Course",
 		ContextID:           course.ID,

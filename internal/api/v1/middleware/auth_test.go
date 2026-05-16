@@ -22,12 +22,15 @@ import (
 
 const testJWTSecret = "test-jwt-secret-key"
 
-// testUser creates a simple User model for JWT generation.
+// testUser creates a simple User model for JWT generation. AccountID is
+// set so the 13.1.B account_id claim is populated and the middleware
+// doesn't fall back to a userRepo lookup.
 func testUser() *models.User {
 	return &models.User{
-		ID:    42,
-		Email: "alice@example.com",
-		Name:  "Alice Wonderland",
+		ID:        42,
+		AccountID: 1,
+		Email:     "alice@example.com",
+		Name:      "Alice Wonderland",
 	}
 }
 

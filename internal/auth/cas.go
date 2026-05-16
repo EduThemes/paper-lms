@@ -12,19 +12,21 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
-	"github.com/EduThemes/paper-lms/internal/repository"
 )
 
 // CASAuthenticator implements CAS 2.0 protocol authentication.
+//
+// Sprint 10-C: the CAS authenticator no longer carries a
+// UserRepository — the post-credential JIT / auto-link flow moved
+// to LoginPipeline. Callers (SSOHandler.HandleCASCallback) receive
+// an SSOOutcome from ValidateTicketOutcome.
 type CASAuthenticator struct {
-	userRepo   repository.UserRepository
 	httpClient *http.Client
 }
 
 // NewCASAuthenticator creates a new CASAuthenticator.
-func NewCASAuthenticator(userRepo repository.UserRepository) *CASAuthenticator {
+func NewCASAuthenticator() *CASAuthenticator {
 	return &CASAuthenticator{
-		userRepo: userRepo,
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},
@@ -71,19 +73,24 @@ func (a *CASAuthenticator) InitiateLogin(c *fiber.Ctx, provider *models.Authenti
 	return c.Redirect(parsedLoginURL.String(), fiber.StatusFound)
 }
 
-// ValidateTicket validates a CAS service ticket against the CAS server and returns
-// the authenticated user. It uses the CAS 2.0 /serviceValidate endpoint.
-func (a *CASAuthenticator) ValidateTicket(ctx context.Context, provider *models.AuthenticationProvider, ticket, serviceURL string) (*models.User, error) {
+// ValidateTicketOutcome validates a CAS service ticket against the
+// CAS server and returns an SSOOutcome ready for LoginPipeline.Execute.
+//
+// Sprint 10-C: the CAS XML parsing, ticket validation HTTP call, and
+// attribute extraction are byte-identical to the pre-10-C
+// implementation. Only the post-credential JIT / user lookup is gone,
+// replaced by the SSOOutcome return.
+func (a *CASAuthenticator) ValidateTicketOutcome(ctx context.Context, provider *models.AuthenticationProvider, ticket, serviceURL string) (SSOOutcome, error) {
 	if ticket == "" {
-		return nil, fmt.Errorf("CAS ticket is required")
+		return SSOOutcome{}, fmt.Errorf("CAS ticket is required")
 	}
 	if serviceURL == "" {
-		return nil, fmt.Errorf("service URL is required")
+		return SSOOutcome{}, fmt.Errorf("service URL is required")
 	}
 
 	casBaseURL := provider.CASBaseURL
 	if casBaseURL == "" {
-		return nil, fmt.Errorf("CAS base URL is not configured")
+		return SSOOutcome{}, fmt.Errorf("CAS base URL is not configured")
 	}
 
 	// Build validation URL
@@ -94,7 +101,7 @@ func (a *CASAuthenticator) ValidateTicket(ctx context.Context, provider *models.
 
 	parsedURL, err := url.Parse(validateURL)
 	if err != nil {
-		return nil, fmt.Errorf("invalid CAS validate URL: %w", err)
+		return SSOOutcome{}, fmt.Errorf("invalid CAS validate URL: %w", err)
 	}
 
 	q := parsedURL.Query()
@@ -105,42 +112,42 @@ func (a *CASAuthenticator) ValidateTicket(ctx context.Context, provider *models.
 	// Make the validation request
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedURL.String(), nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create validation request: %w", err)
+		return SSOOutcome{}, fmt.Errorf("failed to create validation request: %w", err)
 	}
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("CAS validation request failed: %w", err)
+		return SSOOutcome{}, fmt.Errorf("CAS validation request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("CAS validation returned status %d", resp.StatusCode)
+		return SSOOutcome{}, fmt.Errorf("CAS validation returned status %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB limit
 	if err != nil {
-		return nil, fmt.Errorf("failed to read CAS validation response: %w", err)
+		return SSOOutcome{}, fmt.Errorf("failed to read CAS validation response: %w", err)
 	}
 
 	// Parse the CAS 2.0 XML response
 	casResp, err := parseCASResponse(body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse CAS response: %w", err)
+		return SSOOutcome{}, fmt.Errorf("failed to parse CAS response: %w", err)
 	}
 
 	if casResp.Failure != nil {
-		return nil, fmt.Errorf("CAS authentication failed: [%s] %s",
+		return SSOOutcome{}, fmt.Errorf("CAS authentication failed: [%s] %s",
 			casResp.Failure.Code, strings.TrimSpace(casResp.Failure.Message))
 	}
 
 	if casResp.Success == nil {
-		return nil, fmt.Errorf("unexpected CAS response: no success or failure element")
+		return SSOOutcome{}, fmt.Errorf("unexpected CAS response: no success or failure element")
 	}
 
 	username := strings.TrimSpace(casResp.Success.User)
 	if username == "" {
-		return nil, fmt.Errorf("CAS response contained empty username")
+		return SSOOutcome{}, fmt.Errorf("CAS response contained empty username")
 	}
 
 	// Extract attributes from CAS response
@@ -184,54 +191,24 @@ func (a *CASAuthenticator) ValidateTicket(ctx context.Context, provider *models.
 		displayName = username
 	}
 
-	// Look up or JIT provision user
-	user, findErr := a.userRepo.FindByLoginID(ctx, username)
-	if findErr != nil {
-		user, findErr = a.userRepo.FindByEmail(ctx, email)
-	}
-
-	if findErr != nil {
-		// JIT provision new user
-		user = &models.User{
-			Name:    displayName,
-			LoginID: username,
-			Email:   email,
-		}
-		if firstName != "" && lastName != "" {
-			user.SortableName = lastName + ", " + firstName
-			user.ShortName = firstName
-		}
-		if err := user.HashPassword(generateRandomPassword()); err != nil {
-			return nil, fmt.Errorf("failed to provision user: %w", err)
-		}
-		if err := a.userRepo.Create(ctx, user); err != nil {
-			return nil, fmt.Errorf("failed to create user: %w", err)
-		}
-	} else {
-		// Update user attributes if changed
-		updated := false
-		if displayName != "" && user.Name != displayName {
-			user.Name = displayName
-			updated = true
-		}
-		if email != "" && user.Email != email {
-			user.Email = email
-			updated = true
-		}
-		if firstName != "" && lastName != "" {
-			sortable := lastName + ", " + firstName
-			if user.SortableName != sortable {
-				user.SortableName = sortable
-				user.ShortName = firstName
-				updated = true
-			}
-		}
-		if updated {
-			_ = a.userRepo.Update(ctx, user)
-		}
-	}
-
-	return user, nil
+	// Build the SSOOutcome. EmailVerified is true because the CAS
+	// server already validated the ticket against the directory — the
+	// principal IS authenticated by the time we get here.
+	return SSOOutcome{
+		ProviderID:      provider.ID,
+		ProviderType:    "cas",
+		ExternalSubject: username, // CAS principal name is IdP-stable
+		Email:           email,
+		EmailVerified:   true,
+		Name:            displayName,
+		Attributes: map[string]any{
+			"username":     username,
+			"display_name": displayName,
+			"first_name":   firstName,
+			"last_name":    lastName,
+			"email":        email,
+		},
+	}, nil
 }
 
 // --- CAS 2.0 XML response types ---

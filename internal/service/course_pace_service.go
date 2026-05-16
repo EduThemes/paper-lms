@@ -30,8 +30,8 @@ func (s *CoursePaceService) Create(ctx context.Context, pace *models.CoursePace)
 	return s.paceRepo.Create(ctx, pace)
 }
 
-func (s *CoursePaceService) GetByID(ctx context.Context, id uint) (*models.CoursePace, error) {
-	return s.paceRepo.FindByID(ctx, id)
+func (s *CoursePaceService) GetByID(ctx context.Context, id, accountID uint) (*models.CoursePace, error) {
+	return s.paceRepo.FindByID(ctx, id, accountID)
 }
 
 func (s *CoursePaceService) GetByCourseID(ctx context.Context, courseID uint) (*models.CoursePace, error) {
@@ -58,8 +58,8 @@ func (s *CoursePaceService) ListByCourse(ctx context.Context, courseID uint, par
 	return s.paceRepo.ListByCourseID(ctx, courseID, params)
 }
 
-func (s *CoursePaceService) PublishPace(ctx context.Context, id uint) (*models.CoursePace, error) {
-	pace, err := s.paceRepo.FindByID(ctx, id)
+func (s *CoursePaceService) PublishPace(ctx context.Context, id, accountID uint) (*models.CoursePace, error) {
+	pace, err := s.paceRepo.FindByID(ctx, id, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +108,7 @@ func (s *CoursePaceService) applyPaceDates(ctx context.Context, pace *models.Cou
 			continue
 		}
 
-		assignment, err := s.assignmentRepo.FindByID(ctx, *moduleItem.ContentID)
+		assignment, err := s.assignmentRepo.FindByID(ctx, *moduleItem.ContentID, 0)
 		if err != nil || assignment == nil {
 			continue
 		}
@@ -138,8 +138,8 @@ func (s *CoursePaceService) UpdatePaceItems(ctx context.Context, paceID uint, it
 
 // ComputeTimeline computes projected dates for each module item based on duration
 // and whether weekends are excluded.
-func (s *CoursePaceService) ComputeTimeline(ctx context.Context, paceID uint) ([]map[string]interface{}, error) {
-	pace, err := s.paceRepo.FindByID(ctx, paceID)
+func (s *CoursePaceService) ComputeTimeline(ctx context.Context, paceID, accountID uint) ([]map[string]interface{}, error) {
+	pace, err := s.paceRepo.FindByID(ctx, paceID, accountID)
 	if err != nil {
 		return nil, err
 	}

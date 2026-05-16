@@ -21,11 +21,16 @@ func (r *moduleRepo) Create(ctx context.Context, module *models.ContextModule) e
 	return r.db.WithContext(ctx).Create(module).Error
 }
 
-func (r *moduleRepo) FindByID(ctx context.Context, id uint) (*models.ContextModule, error) {
+func (r *moduleRepo) FindByID(ctx context.Context, id, accountID uint) (*models.ContextModule, error) {
 	var module models.ContextModule
-	if err := r.db.WithContext(ctx).Preload("Items", func(db *gorm.DB) *gorm.DB {
+	q := r.db.WithContext(ctx).Preload("Items", func(db *gorm.DB) *gorm.DB {
 		return db.Order("position ASC")
-	}).First(&module, id).Error; err != nil {
+	})
+	if accountID != 0 {
+		// Scope through the parent course's account_id.
+		q = q.Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID)
+	}
+	if err := q.First(&module, id).Error; err != nil {
 		return nil, err
 	}
 	return &module, nil

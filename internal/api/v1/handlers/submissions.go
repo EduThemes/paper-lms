@@ -24,9 +24,10 @@ type SubmissionHandler struct {
 	observerService             *service.ObserverService
 	outcomeAlignmentRepo        repository.OutcomeAlignmentRepository
 	outcomeService              *service.LearningOutcomeService
+	auditService                *service.AuditService
 }
 
-func NewSubmissionHandler(submissionService *service.SubmissionService, commentRepo repository.SubmissionCommentRepository, attachmentRepo repository.AttachmentRepository, userRepo repository.UserRepository, assignmentRepo repository.AssignmentRepository, notificationDeliveryService *service.NotificationDeliveryService, observerService *service.ObserverService, outcomeAlignmentRepo repository.OutcomeAlignmentRepository, outcomeService *service.LearningOutcomeService) *SubmissionHandler {
+func NewSubmissionHandler(submissionService *service.SubmissionService, commentRepo repository.SubmissionCommentRepository, attachmentRepo repository.AttachmentRepository, userRepo repository.UserRepository, assignmentRepo repository.AssignmentRepository, notificationDeliveryService *service.NotificationDeliveryService, observerService *service.ObserverService, outcomeAlignmentRepo repository.OutcomeAlignmentRepository, outcomeService *service.LearningOutcomeService, auditService *service.AuditService) *SubmissionHandler {
 	return &SubmissionHandler{
 		submissionService:           submissionService,
 		commentRepo:                 commentRepo,
@@ -37,6 +38,7 @@ func NewSubmissionHandler(submissionService *service.SubmissionService, commentR
 		observerService:             observerService,
 		outcomeAlignmentRepo:        outcomeAlignmentRepo,
 		outcomeService:              outcomeService,
+		auditService:                auditService,
 	}
 }
 
@@ -153,6 +155,15 @@ func (h *SubmissionHandler) ListSubmissions(c *fiber.Ctx) error {
 		submissions[i] = submissionToJSON(&s)
 	}
 
+	// 13.5 PII audit — bulk-read semantics (per-row would emit N rows
+	// per page load on a 200-student section, which floods the audit
+	// surface for no real investigative win). One row per call with
+	// student_id=0 + data_field="bulk_submission_list_read" preserves
+	// "who looked at which assignment's submissions, when".
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_submission_list_read", "submissions", uint(assignmentID), c.IP(), c.Get("User-Agent"))
+	}
+
 	return c.JSON(submissions)
 }
 
@@ -167,9 +178,14 @@ func (h *SubmissionHandler) GetSubmission(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid user ID")
 	}
 
-	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID))
+	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "submission")
+	}
+
+	// 13.5 PII audit — single-student read; emit one row per access.
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, submission.UserID, "read", "submission", "submissions", submission.ID, c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(submissionToJSON(submission))
@@ -214,7 +230,7 @@ func (h *SubmissionHandler) CreateSubmission(c *fiber.Ctx) error {
 	if len(input.Submission.FileIDs) > 0 {
 		var attachments []map[string]interface{}
 		for _, fid := range input.Submission.FileIDs {
-			att, err := h.attachmentRepo.FindByID(c.Context(), fid)
+			att, err := h.attachmentRepo.FindByID(c.Context(), fid, callerAccountID(c))
 			if err != nil {
 				return responses.BadRequest(c, fmt.Sprintf("File ID %d not found", fid))
 			}
@@ -277,7 +293,7 @@ func (h *SubmissionHandler) UpdateSubmission(c *fiber.Ctx) error {
 		// Queue grade-posted notification for the student
 		if h.notificationDeliveryService != nil {
 			assignmentName := fmt.Sprintf("Assignment #%d", assignmentID)
-			if assignment, aErr := h.assignmentRepo.FindByID(c.Context(), uint(assignmentID)); aErr == nil {
+			if assignment, aErr := h.assignmentRepo.FindByID(c.Context(), uint(assignmentID), callerAccountID(c)); aErr == nil {
 				assignmentName = assignment.Name
 			}
 			gradeDisplay := input.Submission.PostedGrade
@@ -291,10 +307,10 @@ func (h *SubmissionHandler) UpdateSubmission(c *fiber.Ctx) error {
 
 		// Auto-create outcome results for aligned outcomes
 		if h.outcomeAlignmentRepo != nil && h.outcomeService != nil && submission.Score != nil {
-			if alignments, aErr := h.outcomeAlignmentRepo.ListByAssignmentID(c.Context(), uint(assignmentID)); aErr == nil {
+			if alignments, aErr := h.outcomeAlignmentRepo.ListByAssignmentID(c.Context(), uint(assignmentID), callerAccountID(c)); aErr == nil {
 				for _, alignment := range alignments {
 					possible := 100.0
-					if assignment, aErr := h.assignmentRepo.FindByID(c.Context(), uint(assignmentID)); aErr == nil && assignment.PointsPossible != nil {
+					if assignment, aErr := h.assignmentRepo.FindByID(c.Context(), uint(assignmentID), callerAccountID(c)); aErr == nil && assignment.PointsPossible != nil {
 						possible = *assignment.PointsPossible
 					}
 					result := &models.LearningOutcomeResult{
@@ -318,7 +334,7 @@ func (h *SubmissionHandler) UpdateSubmission(c *fiber.Ctx) error {
 
 	// Handle excused update
 	if input.Submission.Excused != nil {
-		submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID))
+		submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c))
 		if err != nil {
 			return responses.NotFound(c, "submission")
 		}
@@ -360,7 +376,7 @@ func (h *SubmissionHandler) CreateSubmissionComment(c *fiber.Ctx) error {
 	}
 
 	// Find the submission to get its ID
-	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID))
+	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "submission")
 	}
@@ -394,12 +410,12 @@ func (h *SubmissionHandler) ListSubmissionComments(c *fiber.Ctx) error {
 	}
 
 	// Find the submission to get its ID
-	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID))
+	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "submission")
 	}
 
-	comments, err := h.commentRepo.ListBySubmissionID(c.Context(), submission.ID)
+	comments, err := h.commentRepo.ListBySubmissionID(c.Context(), submission.ID, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch comments")
 	}
@@ -421,6 +437,13 @@ func (h *SubmissionHandler) ListSubmissionComments(c *fiber.Ctx) error {
 			j["author_name"] = name
 		}
 		result[i] = j
+	}
+
+	// 13.5 PII audit — student-keyed read of comments on a single
+	// submission. Emit one row per access with the submission's
+	// owning student as the subject.
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, submission.UserID, "read", "submission_comments", "submission_comments", submission.ID, c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(result)

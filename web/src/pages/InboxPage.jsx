@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Mail, Send, Plus, MessageSquare, X, Search, ArrowLeft, Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
 import { Skeleton } from '@/components/ui/skeleton';
 
 const InboxPage = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [conversations, setConversations] = useState([]);
   const [selectedConv, setSelectedConv] = useState(null);
@@ -211,7 +213,7 @@ const InboxPage = () => {
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-2xl font-bold text-text-primary flex items-center gap-2">
           <Mail className="w-6 h-6" />
-          Inbox
+          {t('inboxPage.title')}
         </h2>
         <button
           onClick={() => {
@@ -219,10 +221,10 @@ const InboxPage = () => {
             else setShowNewForm(true);
           }}
           className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
-          aria-label="Compose message"
+          aria-label={t('inboxPage.compose')}
         >
           {showNewForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-          <span>{showNewForm ? 'Cancel' : 'New Conversation'}</span>
+          <span>{showNewForm ? t('common.cancel') : t('inboxPage.newMessage')}</span>
         </button>
       </div>
 
@@ -240,10 +242,10 @@ const InboxPage = () => {
 
       {showNewForm && (
         <div className="bg-surface-0 rounded-lg shadow p-6 mb-6">
-          <h3 className="font-semibold mb-4">New Conversation</h3>
+          <h3 className="font-semibold mb-4">{t('inboxPage.newMessage')}</h3>
           <form onSubmit={handleCreateConversation} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">To</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">{t('inboxPage.to')}</label>
               <div className="border border-border-strong rounded-md px-2 py-1.5 focus-within:ring-2 focus-within:ring-brand-500 focus-within:border-brand-500">
                 <div className="flex flex-wrap gap-1.5 items-center">
                   {selectedRecipients.map((r) => (
@@ -313,7 +315,7 @@ const InboxPage = () => {
               )}
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Subject</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">{t('inboxPage.subject')}</label>
               <input
                 type="text"
                 value={newSubject}
@@ -324,7 +326,7 @@ const InboxPage = () => {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Message</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">{t('inboxPage.message')}</label>
               <textarea
                 value={newBody}
                 onChange={(e) => setNewBody(e.target.value)}
@@ -339,7 +341,7 @@ const InboxPage = () => {
                 disabled={creating || selectedRecipients.length === 0}
                 className="bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
               >
-                {creating ? 'Sending...' : 'Send Message'}
+                {creating ? t('inboxPage.sending') : t('inboxPage.send')}
               </button>
             </div>
           </form>

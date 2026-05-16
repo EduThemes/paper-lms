@@ -88,6 +88,14 @@ const OutcomeProficiencyPage = React.lazy(() => import('./pages/OutcomeProficien
 const MasteryGradebookPage = React.lazy(() => import('./pages/MasteryGradebookPage'));
 const ReadingPreferencesPage = React.lazy(() => import('./pages/ReadingPreferencesPage'));
 const GamificationPreferencesPage = React.lazy(() => import('./pages/GamificationPreferencesPage'));
+const CourseLeaderboardPage = React.lazy(() => import('./pages/CourseLeaderboardPage'));
+// Phase 9-B — TOTP MFA enrollment + step-up.
+const MFAEnrollPage = React.lazy(() => import('./pages/MFAEnrollPage'));
+const MFAVerifyPage = React.lazy(() => import('./pages/MFAVerifyPage'));
+// Phase 10-B — passkey enrollment + management.
+const PasskeyEnrollPage = React.lazy(() => import('./pages/PasskeyEnrollPage'));
+const PasskeyListPage = React.lazy(() => import('./pages/PasskeyListPage'));
+const AccountSettingsPage = React.lazy(() => import('./pages/AccountSettingsPage'));
 // Smart Search, Commons
 const SmartSearchPage = React.lazy(() => import('./pages/SmartSearchPage'));
 const CommonsPage = React.lazy(() => import('./pages/CommonsPage'));
@@ -131,6 +139,13 @@ const App = () => {
       <React.Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-gray-600">Loading...</div></div>}>
       <Routes>
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPageSSO />} />
+        {/* Phase 9-B — TOTP MFA. Verify route is unauthenticated
+            (pending_token IS the credential); enroll route is gated
+            via Protected because the user must have a regular session. */}
+        <Route path="/mfa/verify" element={<MFAVerifyPage />} />
+        <Route path="/mfa/enroll" element={<ProtectedRoute><MFAEnrollPage /></ProtectedRoute>} />
+        <Route path="/users/self/passkeys" element={<ProtectedRoute><PasskeyListPage /></ProtectedRoute>} />
+        <Route path="/users/self/passkeys/enroll" element={<ProtectedRoute><PasskeyEnrollPage /></ProtectedRoute>} />
         <Route path="/consent/verify/:token" element={<ParentalConsentPage />} />
         <Route path="/portfolios/public/:slug" element={<PortfolioPublicPage />} />
         <Route path="/courses/:courseId/p/:slug" element={<PublicPageView />} />
@@ -424,6 +439,14 @@ const App = () => {
           }
         />
         <Route
+          path="/courses/:courseId/leaderboard"
+          element={
+            <ProtectedRoute>
+              <CourseLeaderboardPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/profile/badges"
           element={
             <ProtectedRoute>
@@ -452,6 +475,14 @@ const App = () => {
           element={
             <ProtectedRoute>
               <GamificationPreferencesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/profile/settings"
+          element={
+            <ProtectedRoute>
+              <AccountSettingsPage />
             </ProtectedRoute>
           }
         />

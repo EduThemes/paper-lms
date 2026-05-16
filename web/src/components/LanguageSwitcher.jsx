@@ -37,7 +37,11 @@ const LanguageSwitcher = () => {
           {languages.map((lang) => (
             <button
               key={lang.code}
-              onClick={() => { i18n.changeLanguage(lang.code); setOpen(false); }}
+              onClick={() => {
+                try { localStorage.setItem('paperlms_locale', lang.code); } catch (_) {}
+                i18n.changeLanguage(lang.code);
+                setOpen(false);
+              }}
               className={`block w-full text-left px-4 py-2 text-sm ${
                 i18n.language === lang.code || i18n.language?.startsWith(lang.code + '-')
                   ? 'bg-brand-50 text-brand-600 font-medium'

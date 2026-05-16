@@ -44,19 +44,19 @@ func DiscussionEntryPostedEmitCallback(
 	courseRepo repository.CourseRepository,
 ) service.DiscussionEntryPostedCallback {
 	return func(ctx context.Context, entryID uint) {
-		entry, err := entryRepo.FindByID(ctx, entryID)
+		entry, err := entryRepo.FindByID(ctx, entryID, 0)
 		if err != nil {
 			slog.Error("discussion entry posted emit: load entry",
 				"entry_id", entryID, "error", err)
 			return
 		}
-		topic, err := topicRepo.FindByID(ctx, entry.DiscussionTopicID)
+		topic, err := topicRepo.FindByID(ctx, entry.DiscussionTopicID, 0)
 		if err != nil {
 			slog.Error("discussion entry posted emit: load topic",
 				"entry_id", entryID, "error", err)
 			return
 		}
-		course, err := courseRepo.FindByID(ctx, topic.CourseID)
+		course, err := courseRepo.FindByID(ctx, topic.CourseID, 0)
 		if err != nil {
 			slog.Error("discussion entry posted emit: load course",
 				"entry_id", entryID, "error", err)

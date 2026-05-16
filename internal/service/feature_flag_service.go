@@ -259,7 +259,7 @@ func (s *FeatureFlagService) contextChain(ctx context.Context, contextType strin
 	case models.FeatureContextCourse:
 		// Look up the course to find its account.
 		chain := []contextRef{{Type: models.FeatureContextSiteAdmin, ID: SiteAdminContextID}}
-		if course, err := s.courseRepo.FindByID(ctx, contextID); err == nil {
+		if course, err := s.courseRepo.FindByID(ctx, contextID, 0); err == nil {
 			chain = append(chain, contextRef{Type: models.FeatureContextAccount, ID: course.AccountID})
 		}
 		chain = append(chain, contextRef{Type: models.FeatureContextCourse, ID: contextID})

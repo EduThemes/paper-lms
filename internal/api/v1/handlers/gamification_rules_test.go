@@ -107,13 +107,17 @@ func setupRuleHandler(callerID uint, isAdmin bool) (*fiber.App, *mockGamRuleRepo
 	badgeRepo := new(mockGamBadgeRepo)
 	badgeAwardRepo := new(mockGamBadgeAwardRepo)
 	ruleRepo := new(mockGamRuleRepo)
+	enrollmentRepo := new(mocks.MockEnrollmentRepository)
+	accountRepo := new(mocks.MockAccountRepository)
 
-	h := handlers.NewGamificationHandler(walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo, ruleRepo)
+	snapshotRepo := new(mocks.MockGamificationLeaderboardSnapshotRepository)
+	h := handlers.NewGamificationHandler(walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo, ruleRepo, enrollmentRepo, accountRepo, snapshotRepo)
 
 	app := testutil.SetupTestApp()
 	app.Use(func(c *fiber.Ctx) error {
 		c.Locals("user_id", callerID)
 		c.Locals("is_admin", isAdmin)
+		c.Locals("account_id", uint(1))
 		return c.Next()
 	})
 

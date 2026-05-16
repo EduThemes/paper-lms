@@ -53,7 +53,7 @@ func (s *DiscussionCheckpointService) CreateCheckpoints(
 		return nil, errors.New("at least one checkpoint is required")
 	}
 
-	topic, err := s.topicRepo.FindByID(ctx, topicID)
+	topic, err := s.topicRepo.FindByID(ctx, topicID, 0)
 	if err != nil {
 		return nil, errors.New("discussion topic not found")
 	}
@@ -65,7 +65,7 @@ func (s *DiscussionCheckpointService) CreateCheckpoints(
 	// If the topic is graded (has an assignment), the checkpoint points
 	// must sum to the assignment's points_possible — Canvas requires this.
 	if topic.AssignmentID != nil {
-		assignment, err := s.assignmentRepo.FindByID(ctx, *topic.AssignmentID)
+		assignment, err := s.assignmentRepo.FindByID(ctx, *topic.AssignmentID, 0)
 		if err != nil {
 			return nil, errors.New("parent assignment not found")
 		}
@@ -127,7 +127,7 @@ func (s *DiscussionCheckpointService) DeleteCheckpoint(ctx context.Context, id u
 }
 
 func (s *DiscussionCheckpointService) ListCheckpoints(ctx context.Context, topicID uint) ([]models.DiscussionCheckpoint, error) {
-	return s.checkpointRepo.ListByTopicID(ctx, topicID)
+	return s.checkpointRepo.ListByTopicID(ctx, topicID, 0)
 }
 
 // UserCheckpointProgress is a per-checkpoint progress view for a user.
@@ -146,7 +146,7 @@ func (s *DiscussionCheckpointService) EvaluateUserProgress(
 	ctx context.Context,
 	topicID, userID uint,
 ) ([]UserCheckpointProgress, error) {
-	checkpoints, err := s.checkpointRepo.ListByTopicID(ctx, topicID)
+	checkpoints, err := s.checkpointRepo.ListByTopicID(ctx, topicID, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +156,7 @@ func (s *DiscussionCheckpointService) EvaluateUserProgress(
 
 	// Pull all entries this user wrote on this topic; we partition them
 	// into "initial post" (parent_id IS NULL) and "reply-to-entry" buckets.
-	entries, err := s.entryRepo.ListAllByTopicID(ctx, topicID)
+	entries, err := s.entryRepo.ListAllByTopicID(ctx, topicID, 0)
 	if err != nil {
 		return nil, err
 	}

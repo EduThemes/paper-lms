@@ -57,13 +57,15 @@ func TestRubricAssessmentCreatedEmitCallback_EmitsEvent(t *testing.T) {
 	if err := g.Create(&assoc).Error; err != nil {
 		t.Fatalf("create rubric_association: %v", err)
 	}
+	student := seedTestUser(t, g, account.ID, "rubric-student@example.test")
+	teacher := seedTestUser(t, g, account.ID, "rubric-teacher@example.test")
 	score := 8.5
 	criterionData := `{"criterion_1": {"points": 5, "comments": "great"}}`
 	assessment := models.RubricAssessment{
 		RubricID:            rubric.ID,
 		RubricAssociationID: assoc.ID,
-		UserID:              7777, // student
-		AssessorID:          1234, // teacher
+		UserID:              student.ID,
+		AssessorID:          teacher.ID,
 		Score:               &score,
 		Data:                criterionData,
 		AssessmentType:      "grading",

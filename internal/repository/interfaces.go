@@ -63,12 +63,16 @@ type AccountRepository interface {
 
 type CourseRepository interface {
 	Create(ctx context.Context, course *models.Course) error
-	FindByID(ctx context.Context, id uint) (*models.Course, error)
+	// FindByID — 13.1.D: tenant-scoped. accountID==0 means "no scope"
+	// and is permitted only from internal callers that have already
+	// validated tenant ownership upstream (e.g. background workers).
+	// Handler-layer callers MUST pass the caller's account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.Course, error)
 	FindBySISCourseID(ctx context.Context, sisCourseID string) (*models.Course, error)
 	Update(ctx context.Context, course *models.Course) error
 	Delete(ctx context.Context, id uint) error
-	List(ctx context.Context, params PaginationParams) (*PaginatedResult[models.Course], error)
-	ListByUserID(ctx context.Context, userID uint, params PaginationParams) (*PaginatedResult[models.Course], error)
+	List(ctx context.Context, accountID uint, params PaginationParams) (*PaginatedResult[models.Course], error)
+	ListByUserID(ctx context.Context, userID, accountID uint, params PaginationParams) (*PaginatedResult[models.Course], error)
 }
 
 type SectionRepository interface {
@@ -86,11 +90,34 @@ type EnrollmentRepository interface {
 	ListByUserID(ctx context.Context, userID uint) ([]models.Enrollment, error)
 	FindByUserAndCourse(ctx context.Context, userID, courseID uint) (*models.Enrollment, error)
 	CountByCourseIDs(ctx context.Context, courseIDs []uint) (map[uint]int64, error)
+	// ListActiveStudentUserIDsByCourse (W3-A) returns user_ids of active
+	// StudentEnrollment rows for a course — the leaderboard candidate
+	// set. Uses idx_enrollments_course_active (migration 000042).
+	ListActiveStudentUserIDsByCourse(ctx context.Context, courseID uint) ([]uint, error)
+	// ListActiveStudentEnrollmentsByCourse (W3-B) returns full
+	// Enrollment rows for the same set — needed when the caller
+	// also has to read per-enrollment pseudonym fields rather than
+	// just user_ids.
+	ListActiveStudentEnrollmentsByCourse(ctx context.Context, courseID uint) ([]models.Enrollment, error)
+	// UpdatePseudonymForSelf (W3-B) writes a learner-chosen pseudonym
+	// to their enrollment row in the given course. Returns
+	// repository.ErrPseudonymTaken on UNIQUE collision so the handler
+	// can map it to a 409.
+	UpdatePseudonymForSelf(ctx context.Context, userID, courseID uint, poolCode, name string) error
 }
+
+// ErrPseudonymTaken indicates that another active enrollment in the
+// same course already has the requested pseudonym name in the same
+// pool. The handler maps this to 409 so the picker UI can offer the
+// learner a re-roll.
+var ErrPseudonymTaken = errors.New("pseudonym already taken in this course pool")
 
 type ModuleRepository interface {
 	Create(ctx context.Context, module *models.ContextModule) error
-	FindByID(ctx context.Context, id uint) (*models.ContextModule, error)
+	// 13.1.D — accountID scopes the read to a single tenant via the
+	// parent course's account_id. 0 means "no tenant scope" (internal
+	// callers only).
+	FindByID(ctx context.Context, id, accountID uint) (*models.ContextModule, error)
 	Update(ctx context.Context, module *models.ContextModule) error
 	Delete(ctx context.Context, id uint) error
 	ListByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.ContextModule], error)
@@ -110,7 +137,8 @@ type ModuleItemRepository interface {
 
 type PageRepository interface {
 	Create(ctx context.Context, page *models.WikiPage) error
-	FindByID(ctx context.Context, id uint) (*models.WikiPage, error)
+	// 13.1.D — tenant scope via parent course's account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.WikiPage, error)
 	FindByCourseAndURL(ctx context.Context, courseID uint, url string) (*models.WikiPage, error)
 	FindPublicByCourseAndURL(ctx context.Context, courseID uint, url string) (*models.WikiPage, error)
 	Update(ctx context.Context, page *models.WikiPage) error
@@ -120,7 +148,8 @@ type PageRepository interface {
 
 type AssignmentRepository interface {
 	Create(ctx context.Context, assignment *models.Assignment) error
-	FindByID(ctx context.Context, id uint) (*models.Assignment, error)
+	// 13.1.D — tenant scope via parent course's account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.Assignment, error)
 	FindByIDs(ctx context.Context, ids []uint) ([]models.Assignment, error)
 	Update(ctx context.Context, assignment *models.Assignment) error
 	Delete(ctx context.Context, id uint) error
@@ -137,9 +166,12 @@ type AssignmentGroupRepository interface {
 
 type SubmissionRepository interface {
 	Create(ctx context.Context, submission *models.Submission) error
-	FindByID(ctx context.Context, id uint) (*models.Submission, error)
+	// 13.1.D — tenant scope via parent assignment->course. 0 means no tenant scope (internal callers only).
+	FindByID(ctx context.Context, id, accountID uint) (*models.Submission, error)
 	FindByIDs(ctx context.Context, ids []uint) ([]models.Submission, error)
-	FindByAssignmentAndUser(ctx context.Context, assignmentID, userID uint) (*models.Submission, error)
+	// 13.x.2.1 — tenant-scoped via parent assignment->course->account_id.
+	// 0 means no tenant scope (internal callers only).
+	FindByAssignmentAndUser(ctx context.Context, assignmentID, userID, accountID uint) (*models.Submission, error)
 	FindByAssignmentAndUserIDs(ctx context.Context, assignmentID uint, userIDs []uint) ([]models.Submission, error)
 	// ListByUserAndAssignmentIDs is the snapshot loader's targeted read:
 	// pulls one user's submissions for a small set of assignments at once,
@@ -155,7 +187,8 @@ type SubmissionRepository interface {
 
 type SubmissionCommentRepository interface {
 	Create(ctx context.Context, comment *models.SubmissionComment) error
-	ListBySubmissionID(ctx context.Context, submissionID uint) ([]models.SubmissionComment, error)
+	// 13.1.D — tenant scope via submission->assignment->course. 0 means no tenant scope (internal callers only).
+	ListBySubmissionID(ctx context.Context, submissionID, accountID uint) ([]models.SubmissionComment, error)
 }
 
 type GradingStandardRepository interface {
@@ -197,7 +230,9 @@ type LTIToolConfigurationRepository interface {
 
 type ContextExternalToolRepository interface {
 	Create(ctx context.Context, tool *models.ContextExternalTool) error
-	FindByID(ctx context.Context, id uint) (*models.ContextExternalTool, error)
+	// FindByID — 13.1.D: context-polymorphic tenant scope.
+	// context_type='Course' → JOIN courses; context_type='Account' → direct.
+	FindByID(ctx context.Context, id, accountID uint) (*models.ContextExternalTool, error)
 	Update(ctx context.Context, tool *models.ContextExternalTool) error
 	Delete(ctx context.Context, id uint) error
 	ListByContext(ctx context.Context, contextType string, contextID uint, params PaginationParams) (*PaginatedResult[models.ContextExternalTool], error)
@@ -236,20 +271,27 @@ type NonceRepository interface {
 
 type DiscussionTopicRepository interface {
 	Create(ctx context.Context, topic *models.DiscussionTopic) error
-	FindByID(ctx context.Context, id uint) (*models.DiscussionTopic, error)
+	// FindByID — 13.1.D: tenant-scoped via the parent course's account_id.
+	// accountID==0 means "no scope" and is permitted only from internal
+	// callers that have already validated tenant ownership upstream (e.g.
+	// background workers, service-internal hops). Handler-layer callers
+	// MUST pass the caller's account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.DiscussionTopic, error)
 	Update(ctx context.Context, topic *models.DiscussionTopic) error
 	Delete(ctx context.Context, id uint) error
-	ListByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.DiscussionTopic], error)
+	ListByCourseID(ctx context.Context, courseID, accountID uint, params PaginationParams) (*PaginatedResult[models.DiscussionTopic], error)
 }
 
 type DiscussionEntryRepository interface {
 	Create(ctx context.Context, entry *models.DiscussionEntry) error
-	FindByID(ctx context.Context, id uint) (*models.DiscussionEntry, error)
+	// FindByID — 13.1.D: tenant-scoped via the entry → topic → course
+	// chain. accountID==0 means "no scope" (internal callers only).
+	FindByID(ctx context.Context, id, accountID uint) (*models.DiscussionEntry, error)
 	Update(ctx context.Context, entry *models.DiscussionEntry) error
 	Delete(ctx context.Context, id uint) error
-	ListByTopicID(ctx context.Context, topicID uint, params PaginationParams) (*PaginatedResult[models.DiscussionEntry], error)
-	ListReplies(ctx context.Context, entryID uint, params PaginationParams) (*PaginatedResult[models.DiscussionEntry], error)
-	ListAllByTopicID(ctx context.Context, topicID uint) ([]models.DiscussionEntry, error)
+	ListByTopicID(ctx context.Context, topicID, accountID uint, params PaginationParams) (*PaginatedResult[models.DiscussionEntry], error)
+	ListReplies(ctx context.Context, entryID, accountID uint, params PaginationParams) (*PaginatedResult[models.DiscussionEntry], error)
+	ListAllByTopicID(ctx context.Context, topicID, accountID uint) ([]models.DiscussionEntry, error)
 }
 
 type DiscussionEntryRatingRepository interface {
@@ -261,7 +303,9 @@ type DiscussionEntryRatingRepository interface {
 
 type FolderRepository interface {
 	Create(ctx context.Context, folder *models.Folder) error
-	FindByID(ctx context.Context, id uint) (*models.Folder, error)
+	// 13.1.D — tenant scope via polymorphic context_type/context_id.
+	// accountID==0 means "no scope" (background jobs, IMSCC import).
+	FindByID(ctx context.Context, id, accountID uint) (*models.Folder, error)
 	Update(ctx context.Context, folder *models.Folder) error
 	Delete(ctx context.Context, id uint) error
 	ListByContext(ctx context.Context, contextType string, contextID uint, parentFolderID *uint, params PaginationParams) (*PaginatedResult[models.Folder], error)
@@ -270,7 +314,8 @@ type FolderRepository interface {
 
 type AttachmentRepository interface {
 	Create(ctx context.Context, attachment *models.Attachment) error
-	FindByID(ctx context.Context, id uint) (*models.Attachment, error)
+	// 13.1.D — tenant scope via parent folder's context (inherit-via-parent).
+	FindByID(ctx context.Context, id, accountID uint) (*models.Attachment, error)
 	Update(ctx context.Context, attachment *models.Attachment) error
 	Delete(ctx context.Context, id uint) error
 	ListByContext(ctx context.Context, contextType string, contextID uint, params PaginationParams) (*PaginatedResult[models.Attachment], error)
@@ -295,7 +340,8 @@ type SISBatchErrorRepository interface {
 
 type QuizRepository interface {
 	Create(ctx context.Context, quiz *models.Quiz) error
-	FindByID(ctx context.Context, id uint) (*models.Quiz, error)
+	// 13.1.D — tenant scope via parent course's account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.Quiz, error)
 	Update(ctx context.Context, quiz *models.Quiz) error
 	Delete(ctx context.Context, id uint) error
 	ListByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.Quiz], error)
@@ -339,10 +385,15 @@ type QuizSubmissionAnswerRepository interface {
 
 type RubricRepository interface {
 	Create(ctx context.Context, rubric *models.Rubric) error
-	FindByID(ctx context.Context, id uint) (*models.Rubric, error)
+	// 13.1.D — tenant scope via context_type branch: Account → direct
+	// account_id match; Course → JOIN through courses.account_id.
+	// Rubrics are intentionally cross-course-shareable WITHIN a tenant;
+	// an Account-level rubric in tenant A is reachable from any course
+	// in tenant A but never from tenant B.
+	FindByID(ctx context.Context, id, accountID uint) (*models.Rubric, error)
 	Update(ctx context.Context, rubric *models.Rubric) error
 	Delete(ctx context.Context, id uint) error
-	ListByContext(ctx context.Context, contextType string, contextID uint, params PaginationParams) (*PaginatedResult[models.Rubric], error)
+	ListByContext(ctx context.Context, contextType string, contextID, accountID uint, params PaginationParams) (*PaginatedResult[models.Rubric], error)
 }
 
 type RubricAssociationRepository interface {
@@ -366,7 +417,8 @@ type RubricAssessmentRepository interface {
 
 type GradingPeriodGroupRepository interface {
 	Create(ctx context.Context, group *models.GradingPeriodGroup) error
-	FindByID(ctx context.Context, id uint) (*models.GradingPeriodGroup, error)
+	// 13.1.D — tenant scope via direct account_id column. 0 means no tenant scope (internal callers only).
+	FindByID(ctx context.Context, id, accountID uint) (*models.GradingPeriodGroup, error)
 	Update(ctx context.Context, group *models.GradingPeriodGroup) error
 	Delete(ctx context.Context, id uint) error
 	ListByAccountID(ctx context.Context, accountID uint, params PaginationParams) (*PaginatedResult[models.GradingPeriodGroup], error)
@@ -374,10 +426,11 @@ type GradingPeriodGroupRepository interface {
 
 type GradingPeriodRepository interface {
 	Create(ctx context.Context, period *models.GradingPeriod) error
-	FindByID(ctx context.Context, id uint) (*models.GradingPeriod, error)
+	// 13.1.D — tenant scope via parent grading_period_group's account_id. 0 means no tenant scope (internal callers only).
+	FindByID(ctx context.Context, id, accountID uint) (*models.GradingPeriod, error)
 	Update(ctx context.Context, period *models.GradingPeriod) error
 	Delete(ctx context.Context, id uint) error
-	ListByGroupID(ctx context.Context, groupID uint) ([]models.GradingPeriod, error)
+	ListByGroupID(ctx context.Context, groupID, accountID uint) ([]models.GradingPeriod, error)
 }
 
 // Assignment Overrides
@@ -410,7 +463,9 @@ type LatePolicyRepository interface {
 
 type CalendarEventRepository interface {
 	Create(ctx context.Context, event *models.CalendarEvent) error
-	FindByID(ctx context.Context, id uint) (*models.CalendarEvent, error)
+	// FindByID — 13.1.D: context-polymorphic tenant scope.
+	// User/Course/Group/Account context_type each filter through their tenant key.
+	FindByID(ctx context.Context, id, accountID uint) (*models.CalendarEvent, error)
 	Update(ctx context.Context, event *models.CalendarEvent) error
 	Delete(ctx context.Context, id uint) error
 	ListByContext(ctx context.Context, contextType string, contextID uint, params PaginationParams) (*PaginatedResult[models.CalendarEvent], error)
@@ -478,20 +533,25 @@ type ContentMigrationRepository interface {
 
 type LearningOutcomeGroupRepository interface {
 	Create(ctx context.Context, group *models.LearningOutcomeGroup) error
-	FindByID(ctx context.Context, id uint) (*models.LearningOutcomeGroup, error)
+	// 13.1.D — tenant scope via context_type branch (Account direct,
+	// Course via parent courses.account_id).
+	FindByID(ctx context.Context, id, accountID uint) (*models.LearningOutcomeGroup, error)
 	Update(ctx context.Context, group *models.LearningOutcomeGroup) error
 	Delete(ctx context.Context, id uint) error
-	ListByContext(ctx context.Context, contextType string, contextID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcomeGroup], error)
-	FindRootGroup(ctx context.Context, contextType string, contextID uint) (*models.LearningOutcomeGroup, error)
+	ListByContext(ctx context.Context, contextType string, contextID, accountID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcomeGroup], error)
+	FindRootGroup(ctx context.Context, contextType string, contextID, accountID uint) (*models.LearningOutcomeGroup, error)
 }
 
 type LearningOutcomeRepository interface {
 	Create(ctx context.Context, outcome *models.LearningOutcome) error
-	FindByID(ctx context.Context, id uint) (*models.LearningOutcome, error)
+	// 13.1.D — tenant scope. Outcomes at Account level are shareable
+	// across every course in the same tenant; the polymorphic branch
+	// enforces "Account → direct match, Course → JOIN through courses".
+	FindByID(ctx context.Context, id, accountID uint) (*models.LearningOutcome, error)
 	Update(ctx context.Context, outcome *models.LearningOutcome) error
 	Delete(ctx context.Context, id uint) error
-	ListByGroupID(ctx context.Context, groupID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcome], error)
-	ListByContext(ctx context.Context, contextType string, contextID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcome], error)
+	ListByGroupID(ctx context.Context, groupID, accountID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcome], error)
+	ListByContext(ctx context.Context, contextType string, contextID, accountID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcome], error)
 }
 
 type LearningOutcomeResultRepository interface {
@@ -520,8 +580,10 @@ type LearningOutcomeResultRepository interface {
 type OutcomeAlignmentRepository interface {
 	Create(ctx context.Context, alignment *models.OutcomeAlignment) error
 	Delete(ctx context.Context, id uint) error
-	ListByAssignmentID(ctx context.Context, assignmentID uint) ([]models.OutcomeAlignment, error)
-	ListByCourseID(ctx context.Context, courseID uint) ([]models.OutcomeAlignment, error)
+	// 13.1.D — accountID, when non-zero, filters alignments to those whose
+	// course (or whose assignment's course) belongs to caller's tenant.
+	ListByAssignmentID(ctx context.Context, assignmentID, accountID uint) ([]models.OutcomeAlignment, error)
+	ListByCourseID(ctx context.Context, courseID, accountID uint) ([]models.OutcomeAlignment, error)
 }
 
 // Blueprint Courses
@@ -558,7 +620,8 @@ type BlueprintMigrationRepository interface {
 
 type OneRosterConnectionRepository interface {
 	Create(ctx context.Context, conn *models.OneRosterConnection) error
-	FindByID(ctx context.Context, id uint) (*models.OneRosterConnection, error)
+	// 13.1.D — direct account_id column.
+	FindByID(ctx context.Context, id, accountID uint) (*models.OneRosterConnection, error)
 	Update(ctx context.Context, conn *models.OneRosterConnection) error
 	Delete(ctx context.Context, id uint) error
 	ListByAccountID(ctx context.Context, accountID uint, params PaginationParams) (*PaginatedResult[models.OneRosterConnection], error)
@@ -577,7 +640,8 @@ type OneRosterSyncLogRepository interface {
 
 type DocumentAnnotationRepository interface {
 	Create(ctx context.Context, annotation *models.DocumentAnnotation) error
-	FindByID(ctx context.Context, id uint) (*models.DocumentAnnotation, error)
+	// 13.1.D — tenant scope via submission->assignment->course. 0 means no tenant scope (internal callers only).
+	FindByID(ctx context.Context, id, accountID uint) (*models.DocumentAnnotation, error)
 	Update(ctx context.Context, annotation *models.DocumentAnnotation) error
 	Delete(ctx context.Context, id uint) error
 	ListBySubmissionID(ctx context.Context, submissionID uint, params PaginationParams) (*PaginatedResult[models.DocumentAnnotation], error)
@@ -630,7 +694,10 @@ type PortfolioReflectionRepository interface {
 
 type PortfolioTemplateRepository interface {
 	Create(ctx context.Context, template *models.PortfolioTemplate) error
-	FindByID(ctx context.Context, id uint) (*models.PortfolioTemplate, error)
+	// 13.1.D — direct account_id column. Note: portfolio templates ARE
+	// account-scoped (admin-curated). User portfolios live in
+	// PortfolioRepository and stay user-scoped (private, owner-only).
+	FindByID(ctx context.Context, id, accountID uint) (*models.PortfolioTemplate, error)
 	Update(ctx context.Context, template *models.PortfolioTemplate) error
 	ListPublic(ctx context.Context, params PaginationParams) (*PaginatedResult[models.PortfolioTemplate], error)
 	ListByAccountID(ctx context.Context, accountID uint, params PaginationParams) (*PaginatedResult[models.PortfolioTemplate], error)
@@ -921,10 +988,99 @@ type GamificationWalletRepository interface {
 	// avoids over-fetching when a user has years of cross-currency
 	// transactions.
 	ListTransactionsForUserAndCurrency(ctx context.Context, userID, currencyTypeID uint, params PaginationParams) (*PaginatedResult[models.GamificationWalletTransaction], error)
+	// RankByCurrency (W3-A) returns candidateUserIDs ranked by
+	// lifetime_earned DESC for a single currency. Ties resolved by
+	// earliest most-recent positive transaction (the earlier-completer
+	// ranks higher; doesn't reward sandbagging). Rows with no balance
+	// row for this currency surface with lifetime_earned = 0 and rank
+	// at the tail.
+	//
+	// Composition note: callers MUST narrow candidateUserIDs through
+	// UserRepository.FilterPublicLeaderboardCandidates first. Opt-out
+	// privacy lives in the user repo; this method is rank-only.
+	RankByCurrency(ctx context.Context, currencyTypeID uint, candidateUserIDs []uint) ([]RankRow, error)
+}
+
+// RankRow is the wallet-repo-level rank tuple. Rank starts at 1.
+// LifetimeEarned == 0 for candidates with no balance row in this currency.
+type RankRow struct {
+	UserID         uint
+	LifetimeEarned int64
+	Rank           int
 }
 
 type GamificationFerpaFieldTagRepository interface {
 	Upsert(ctx context.Context, tag *models.GamificationFerpaFieldTag) error
 	Find(ctx context.Context, objectType, fieldPath string) (*models.GamificationFerpaFieldTag, error)
 	ListByObjectType(ctx context.Context, objectType string) ([]models.GamificationFerpaFieldTag, error)
+}
+
+// UserRecoveryCodeRepository (Phase 9-B) persists single-use TOTP
+// recovery codes. Generated in bulk at MFA enrollment; one row
+// marked used per successful recovery-code login.
+type UserRecoveryCodeRepository interface {
+	CreateBatch(ctx context.Context, userID uint, codeHashes []string) error
+	ListUnusedForUser(ctx context.Context, userID uint) ([]models.UserRecoveryCode, error)
+	MarkUsed(ctx context.Context, id uint) error
+	DeleteAllForUser(ctx context.Context, userID uint) error
+}
+
+// UserWebauthnCredentialRepository (Phase 10-B) persists registered
+// passkey credentials. Lookups happen on (a) credential_id for the
+// assertion path and (b) user_id for the management UI. The
+// assertion path also bumps SignCount + LastUsedAt on every login.
+type UserWebauthnCredentialRepository interface {
+	Create(ctx context.Context, cred *models.UserWebauthnCredential) error
+	FindByCredentialID(ctx context.Context, credentialID []byte) (*models.UserWebauthnCredential, error)
+	FindByID(ctx context.Context, id uint) (*models.UserWebauthnCredential, error)
+	ListForUser(ctx context.Context, userID uint) ([]models.UserWebauthnCredential, error)
+	// UpdateSignCount bumps sign_count and last_used_at after a
+	// successful assertion. Replay-counter regression is the
+	// library's concern, not the repo's — callers pass the verified
+	// new counter through.
+	UpdateSignCount(ctx context.Context, id uint, newSignCount uint32) error
+	UpdateNickname(ctx context.Context, id, userID uint, nickname string) error
+	Delete(ctx context.Context, id, userID uint) error
+}
+
+// FederatedIdentityRepository (Phase 9-PRE) anchors external IdP
+// subjects to local user rows. Every federation handler (SAML, LDAP,
+// CAS, OIDC, future WebAuthn) writes through this surface; the
+// LoginPipeline reads it first when resolving an SSOOutcome to a user.
+//
+// Idempotent Create: re-authenticating with the same (provider,
+// subject) updates last_seen_at but doesn't create a duplicate. The
+// UNIQUE constraint on (provider_id, external_subject) gates it.
+type FederatedIdentityRepository interface {
+	// FindByProviderAndSubject returns the existing federation row or
+	// (nil, nil) when no binding exists. Callers fall back to email
+	// auto-link or JIT provisioning.
+	FindByProviderAndSubject(ctx context.Context, providerID uint, externalSubject string) (*models.FederatedIdentity, error)
+	// Create writes a fresh (user, provider, subject) binding. Caller
+	// has already resolved or created the user_id.
+	Create(ctx context.Context, fi *models.FederatedIdentity) error
+	// TouchLastSeen bumps the last_seen_at timestamp + optionally
+	// refreshes the claims_snapshot when the IdP sent richer data
+	// than what was captured at first-login.
+	TouchLastSeen(ctx context.Context, id uint, claimsSnapshot []byte) error
+	// ListForUser is the "manage your linked accounts" view a user
+	// sees in settings.
+	ListForUser(ctx context.Context, userID uint) ([]models.FederatedIdentity, error)
+}
+
+// GamificationLeaderboardSnapshotRepository persists ranked-window
+// snapshots (Sprint 7-B). Writes are idempotent via ON CONFLICT DO
+// NOTHING on the (scope, currency, window_kind, window_end) UNIQUE
+// constraint — the CLI can be re-run for the same window without
+// duplicating rows.
+type GamificationLeaderboardSnapshotRepository interface {
+	// Upsert inserts the snapshot row, no-op on conflict. Returns
+	// `created=true` only when a new row was actually written so the
+	// CLI can log per-window outcomes accurately.
+	Upsert(ctx context.Context, snap *models.GamificationLeaderboardSnapshot) (created bool, err error)
+	// FindByWindow returns the snapshot for the exact (scope,
+	// currency, kind, end) tuple, or nil if no snapshot exists for
+	// that window. The handler uses this to serve `?offset_weeks=N`
+	// reads; nil triggers a 404 at the handler.
+	FindByWindow(ctx context.Context, scopeType models.GamificationScopeType, scopeID, currencyTypeID uint, kind string, windowEnd time.Time) (*models.GamificationLeaderboardSnapshot, error)
 }

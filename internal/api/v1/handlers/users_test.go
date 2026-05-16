@@ -23,7 +23,7 @@ import (
 func setupUserHandler() (*fiber.App, *mocks.MockUserRepository) {
 	mockRepo := new(mocks.MockUserRepository)
 	userService := service.NewUserService(mockRepo)
-	handler := handlers.NewUserHandler(userService, "test-jwt-secret", "test", nil, nil)
+	handler := handlers.NewUserHandler(userService, "test-jwt-secret", "test", nil, nil, nil)
 
 	app := testutil.SetupTestApp()
 
@@ -34,6 +34,7 @@ func setupUserHandler() (*fiber.App, *mocks.MockUserRepository) {
 	// Protected routes: inject user_id into Locals to simulate auth middleware
 	protected := app.Group("", func(c *fiber.Ctx) error {
 		c.Locals("user_id", uint(1))
+		c.Locals("account_id", uint(1))
 		return c.Next()
 	}, middleware.PaginationParams())
 

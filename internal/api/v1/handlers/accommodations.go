@@ -274,7 +274,7 @@ func (h *AccommodationHandler) ApplyAccommodationsToAssignment(c *fiber.Ctx) err
 		return responses.BadRequest(c, "Invalid assignment ID")
 	}
 
-	assignment, err := h.assignmentService.GetByID(c.Context(), uint(assignmentID))
+	assignment, err := h.assignmentService.GetByID(c.Context(), uint(assignmentID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "assignment")
 	}

@@ -101,7 +101,7 @@ func TestModuleGetByID(t *testing.T) {
 		WorkflowState: "active",
 	}
 
-	moduleRepo.On("FindByID", mock.Anything, uint(1)).Return(expected, nil)
+	moduleRepo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(expected, nil)
 
 	result, err := svc.GetByID(context.Background(), 1)
 

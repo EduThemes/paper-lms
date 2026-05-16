@@ -32,7 +32,7 @@ func (s *PageService) Create(ctx context.Context, page *models.WikiPage) error {
 }
 
 func (s *PageService) GetByID(ctx context.Context, id uint) (*models.WikiPage, error) {
-	return s.repo.FindByID(ctx, id)
+	return s.repo.FindByID(ctx, id, 0)
 }
 
 func (s *PageService) GetByURL(ctx context.Context, courseID uint, url string) (*models.WikiPage, error) {

@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type Account struct {
 	ID              uint      `json:"id" gorm:"primaryKey"`
@@ -20,7 +24,44 @@ type Account struct {
 	TenantMode GamificationAudience `json:"tenant_mode" gorm:"not null;type:text;default:'higher_ed'"`
 	// CoppaStrict force-applies COPPA defaults regardless of TenantMode. Used for
 	// K-12 deployments handling under-13 users.
-	CoppaStrict bool      `json:"coppa_strict" gorm:"not null;default:false"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	CoppaStrict bool `json:"coppa_strict" gorm:"not null;default:false"`
+
+	// MFAPolicy (Phase 9-PRE) — per-tenant 2FA enforcement.
+	//   "off"            — 2FA disabled tenant-wide
+	//   "optional"       — users may enroll voluntarily
+	//   "required_admin" — admins must enroll; others optional
+	//   "required_all"   — every user must enroll
+	// Migration 000046 carries the CHECK constraint on these four values
+	// + DEFAULT 'off'. No `default:` GORM tag because the column is
+	// policy-bearing TEXT (see CLAUDE.md "Phase 7 patterns" — same
+	// class as the F1.6 lesson but for enum-shaped text).
+	MFAPolicy string `json:"mfa_policy" gorm:"not null"`
+
+	// DefaultLocale (Phase 13 / 13.11) — per-tenant UI language. Frontend
+	// reads this at session bootstrap; falls back to "en" for tenants
+	// that haven't set a non-default. Migration 000055 carries the
+	// SQL default; the GORM tag is intentionally minimal so the parity
+	// test doesn't complain about default-expression mismatch.
+	DefaultLocale string `json:"default_locale" gorm:"not null"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// BeforeCreate mirrors the SQL DEFAULTs from migrations 000046 and 000055
+// in Go. The DB columns have NOT NULL + DEFAULT, but GORM serializes empty
+// strings as '' rather than omitting them, which (for MFAPolicy) trips the
+// accounts_mfa_policy_check CHECK constraint. The GORM `default:` tag is
+// intentionally NOT used on these two fields per CLAUDE.md "Phase 7
+// patterns" (parity-test friendliness for policy-bearing TEXT columns);
+// the hook is the bridge that keeps test-and-production code paths from
+// having to remember the default value at every Create call site.
+func (a *Account) BeforeCreate(tx *gorm.DB) error {
+	if a.MFAPolicy == "" {
+		a.MFAPolicy = "off"
+	}
+	if a.DefaultLocale == "" {
+		a.DefaultLocale = "en"
+	}
+	return nil
 }

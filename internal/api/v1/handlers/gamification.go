@@ -28,6 +28,9 @@ type GamificationHandler struct {
 	badgeRepo      repository.GamificationBadgeRepository
 	badgeAwardRepo repository.GamificationBadgeAwardRepository
 	ruleRepo       repository.GamificationRuleRepository
+	enrollmentRepo repository.EnrollmentRepository
+	accountRepo    repository.AccountRepository
+	snapshotRepo   repository.GamificationLeaderboardSnapshotRepository
 }
 
 // NewGamificationHandler wires the handlers.
@@ -35,6 +38,9 @@ type GamificationHandler struct {
 //   - userRepo: W2-C (leaderboard opt-out toggle lives on users.leaderboard_opt_out)
 //   - badgeRepo + badgeAwardRepo: W2-D (badge CRUD + manual award)
 //   - ruleRepo: W2-E.1 (recipe-builder CRUD)
+//   - enrollmentRepo: W3-A (course-scoped leaderboard candidate set)
+//   - accountRepo: W3-B (tenant_mode lookup drives pseudonym + top-N policy)
+//   - snapshotRepo: 7-B (?offset_weeks=N reads from gamification_leaderboard_snapshots)
 func NewGamificationHandler(
 	walletRepo repository.GamificationWalletRepository,
 	currencyRepo repository.GamificationCurrencyTypeRepository,
@@ -42,6 +48,9 @@ func NewGamificationHandler(
 	badgeRepo repository.GamificationBadgeRepository,
 	badgeAwardRepo repository.GamificationBadgeAwardRepository,
 	ruleRepo repository.GamificationRuleRepository,
+	enrollmentRepo repository.EnrollmentRepository,
+	accountRepo repository.AccountRepository,
+	snapshotRepo repository.GamificationLeaderboardSnapshotRepository,
 ) *GamificationHandler {
 	return &GamificationHandler{
 		walletRepo:     walletRepo,
@@ -50,6 +59,9 @@ func NewGamificationHandler(
 		badgeRepo:      badgeRepo,
 		badgeAwardRepo: badgeAwardRepo,
 		ruleRepo:       ruleRepo,
+		enrollmentRepo: enrollmentRepo,
+		accountRepo:    accountRepo,
+		snapshotRepo:   snapshotRepo,
 	}
 }
 
@@ -588,6 +600,29 @@ func derefBool(p *bool, def bool) bool {
 	return *p
 }
 
+// parseAudienceLevel normalizes user input to a typed GamificationAudience.
+// Empty / whitespace-only input is treated as "no audience set" (nil).
+// Invalid values are also normalized to nil — the DB enum CHECK is the
+// last line of defense; this layer just keeps obviously bad input out
+// of the round-trip. Closes F1.11 (post-migration-000050 alignment).
+func parseAudienceLevel(raw string) *models.GamificationAudience {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	a := models.GamificationAudience(trimmed)
+	switch a {
+	case models.AudienceK5,
+		models.AudienceM68,
+		models.AudienceH912,
+		models.AudienceHigherEd,
+		models.AudienceCorp,
+		models.AudiencePro:
+		return &a
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Sprint W2-C — per-learner gamification preferences.
 //
@@ -695,6 +730,10 @@ type badgeJSON struct {
 }
 
 func badgeJSONFor(b *models.GamificationBadge) badgeJSON {
+	audience := ""
+	if b.AudienceLevel != nil {
+		audience = string(*b.AudienceLevel)
+	}
 	return badgeJSON{
 		ID:            b.ID,
 		ScopeType:     string(b.ScopeType),
@@ -707,7 +746,7 @@ func badgeJSONFor(b *models.GamificationBadge) badgeJSON {
 		Color:         b.Color,
 		InternalOnly:  b.InternalOnly,
 		SystemOwned:   b.SystemOwned,
-		AudienceLevel: b.AudienceLevel,
+		AudienceLevel: audience,
 	}
 }
 
@@ -789,6 +828,7 @@ func (h *GamificationHandler) CreateBadge(c *fiber.Ctx) error {
 		createdBy = &creatorID
 	}
 
+	audience := parseAudienceLevel(in.AudienceLevel)
 	row := &models.GamificationBadge{
 		TenantID:      tenantID,
 		ScopeType:     scopeType,
@@ -801,7 +841,7 @@ func (h *GamificationHandler) CreateBadge(c *fiber.Ctx) error {
 		Color:         strings.TrimSpace(in.Color),
 		InternalOnly:  derefBool(in.InternalOnly, true),
 		SystemOwned:   false,
-		AudienceLevel: strings.TrimSpace(in.AudienceLevel),
+		AudienceLevel: audience,
 		CreatedBy:     createdBy,
 	}
 	if err := h.badgeRepo.Create(c.Context(), row); err != nil {
@@ -857,7 +897,7 @@ func (h *GamificationHandler) UpdateBadge(c *fiber.Ctx) error {
 		row.InternalOnly = *in.InternalOnly
 	}
 	if in.AudienceLevel != nil {
-		row.AudienceLevel = strings.TrimSpace(*in.AudienceLevel)
+		row.AudienceLevel = parseAudienceLevel(*in.AudienceLevel)
 	}
 	if row.Name == "" || len(row.Name) > 80 {
 		return responses.BadRequest(c, "name is required, max 80 chars")

@@ -21,11 +21,21 @@ func (r *discussionEntryParticipantRepo) Create(ctx context.Context, p *models.D
 	return r.db.WithContext(ctx).Create(p).Error
 }
 
-func (r *discussionEntryParticipantRepo) FindByEntryAndUser(ctx context.Context, entryID, userID uint) (*models.DiscussionEntryParticipant, error) {
+func (r *discussionEntryParticipantRepo) FindByEntryAndUser(ctx context.Context, entryID, userID, accountID uint) (*models.DiscussionEntryParticipant, error) {
 	var p models.DiscussionEntryParticipant
-	if err := r.db.WithContext(ctx).
-		Where("discussion_entry_id = ? AND user_id = ?", entryID, userID).
-		First(&p).Error; err != nil {
+	q := r.db.WithContext(ctx).
+		Where("discussion_entry_id = ? AND user_id = ?", entryID, userID)
+	if accountID != 0 {
+		// 3-level deep: participant → entry → topic → course → account.
+		q = q.Where(`discussion_entry_id IN (
+			SELECT id FROM discussion_entries WHERE discussion_topic_id IN (
+				SELECT id FROM discussion_topics WHERE course_id IN (
+					SELECT id FROM courses WHERE account_id = ?
+				)
+			)
+		)`, accountID)
+	}
+	if err := q.First(&p).Error; err != nil {
 		return nil, err
 	}
 	return &p, nil

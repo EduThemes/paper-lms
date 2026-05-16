@@ -114,7 +114,7 @@ func (h *CourseHandler) GetCourse(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid course ID")
 	}
 
-	course, err := h.courseService.GetByID(c.Context(), uint(id))
+	course, err := h.courseService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "course")
 	}
@@ -187,7 +187,7 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid course ID")
 	}
 
-	course, err := h.courseService.GetByID(c.Context(), uint(id))
+	course, err := h.courseService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "course")
 	}

@@ -122,7 +122,7 @@ func (h *CustomRoleHandler) GetRole(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid role ID")
 	}
 
-	role, err := h.customRoleService.GetRole(c.Context(), uint(id))
+	role, err := h.customRoleService.GetRole(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "role")
 	}
@@ -142,7 +142,7 @@ func (h *CustomRoleHandler) UpdateRole(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid role ID")
 	}
 
-	existing, err := h.customRoleService.GetRole(c.Context(), uint(id))
+	existing, err := h.customRoleService.GetRole(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "role")
 	}
@@ -218,7 +218,7 @@ func (h *CustomRoleHandler) CloneRole(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 
-	clone, err := h.customRoleService.CloneRole(c.Context(), uint(id), input.Name, userID)
+	clone, err := h.customRoleService.CloneRole(c.Context(), uint(id), callerAccountID(c), input.Name, userID)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
@@ -295,7 +295,7 @@ func (h *CustomRoleHandler) BulkSetOverrides(c *fiber.Ctx) error {
 		}
 	}
 
-	if err := h.customRoleService.BulkSetOverrides(c.Context(), uint(id), overrides); err != nil {
+	if err := h.customRoleService.BulkSetOverrides(c.Context(), uint(id), callerAccountID(c), overrides); err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 

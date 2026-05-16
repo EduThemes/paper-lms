@@ -28,6 +28,7 @@ func TestSeedSystemCurrenciesForTenant(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
+	seedTenantAccount(t, g, 1)
 	if err := gamification.SeedSystemCurrenciesForTenant(ctx, g, 1); err != nil {
 		t.Fatalf("seed tenant 1: %v", err)
 	}
@@ -90,6 +91,7 @@ func TestSeedSystemCurrenciesForTenant_Idempotent(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
+	seedTenantAccount(t, g, 1)
 	for i := 0; i < 3; i++ {
 		if err := gamification.SeedSystemCurrenciesForTenant(ctx, g, 1); err != nil {
 			t.Fatalf("seed attempt %d: %v", i+1, err)
@@ -111,6 +113,7 @@ func TestSeedSystemCurrenciesForTenant_MultipleTenants(t *testing.T) {
 
 	ctx := context.Background()
 	for _, tenant := range []uint{1, 2, 3} {
+		seedTenantAccount(t, g, tenant)
 		if err := gamification.SeedSystemCurrenciesForTenant(ctx, g, tenant); err != nil {
 			t.Fatalf("seed tenant %d: %v", tenant, err)
 		}
@@ -202,4 +205,21 @@ func swapDatabase(t *testing.T, rawURL, dbName string) string {
 	}
 	u.Path = "/" + dbName
 	return u.String()
+}
+
+// seedTenantAccount inserts an accounts row with the given id so the
+// fk_gam_currencies_tenant FK (000050) resolves when
+// SeedSystemCurrenciesForTenant writes its 4 system-currency rows. The
+// FK landed in Phase 7-A; pre-FK these tests trusted the orphan id.
+// Re-entrant via ON CONFLICT.
+func seedTenantAccount(t *testing.T, g *gorm.DB, id uint) {
+	t.Helper()
+	if err := g.Exec(
+		`INSERT INTO accounts (id, name, workflow_state, mfa_policy, default_locale, tenant_mode, max_upload_size_mb)
+		 VALUES (?, 'Test Tenant', 'active', 'off', 'en', 'higher_ed', 500)
+		 ON CONFLICT (id) DO NOTHING`,
+		id,
+	).Error; err != nil {
+		t.Fatalf("seed tenant account %d: %v", id, err)
+	}
 }

@@ -131,8 +131,9 @@ func (s *AnalyticsService) GetStudentSummaries(ctx context.Context, courseID uin
 
 		userID := enrollment.UserID
 
-		// Get page view count and interaction seconds for this student in this course
-		pageViewResult, _ := s.pageViewRepo.ListByUserID(ctx, userID, repository.PaginationParams{Page: 1, PerPage: 1})
+		// Get page view count and interaction seconds for this student in this course.
+		// Tenant scope is enforced upstream by GetStudentSummaries' callerAccountID.
+		pageViewResult, _ := s.pageViewRepo.ListByUserID(ctx, userID, 0, repository.PaginationParams{Page: 1, PerPage: 1})
 		var pageViewCount int64
 		if pageViewResult != nil {
 			pageViewCount = pageViewResult.TotalCount
@@ -262,6 +263,7 @@ func (s *AnalyticsService) RecordPageView(ctx context.Context, pageView *models.
 }
 
 // GetUserPageViews returns a paginated list of page views for a user.
-func (s *AnalyticsService) GetUserPageViews(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.PageView], error) {
-	return s.pageViewRepo.ListByUserID(ctx, userID, params)
+// accountID==0 disables the tenant scope (privileged internal callers).
+func (s *AnalyticsService) GetUserPageViews(ctx context.Context, userID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.PageView], error) {
+	return s.pageViewRepo.ListByUserID(ctx, userID, accountID, params)
 }

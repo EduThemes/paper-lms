@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -44,7 +45,26 @@ func (s *UserService) Register(ctx context.Context, name, email, password string
 		ShortName:    name,
 		LoginID:      email,
 		Email:        email,
+		// 13.1 contract: every user carries a NOT NULL account_id (FK to
+		// accounts). Self-registration through this endpoint lands on the
+		// default tenant (account 1) — the same fallback the migration
+		// backfill used for legacy rows without an enrollment. Multi-tenant
+		// signup (per-tenant subdomain or pre-registered invite) overrides
+		// this at the handler layer before reaching the service.
+		AccountID: 1,
 	}
+
+	// WebauthnUserHandle is NOT NULL since migration 000046; the column has
+	// a Postgres DEFAULT gen_random_bytes(64) used for the migration
+	// backfill, but GORM's INSERT serializes our empty []byte as NULL
+	// (overriding the DEFAULT) and trips the constraint. Generate the
+	// handle in Go so the row insert succeeds without relying on the DB
+	// default. The value is stable forever per the Phase 10-B contract.
+	handle := make([]byte, 64)
+	if _, err := rand.Read(handle); err != nil {
+		return nil, fmt.Errorf("generate webauthn handle: %w", err)
+	}
+	user.WebauthnUserHandle = handle
 
 	if err := user.HashPassword(password); err != nil {
 		return nil, err
@@ -136,5 +156,33 @@ func (s *UserService) ResetPassword(ctx context.Context, token, newPassword stri
 
 	user.ResetToken = ""
 	user.ResetTokenExpiresAt = nil
+	return s.repo.Update(ctx, user)
+}
+
+// ChangePassword verifies the current password and sets a new one for a
+// logged-in user. The current-password check defends against an attacker
+// with a stolen session: a session alone shouldn't be enough to pivot to
+// permanent account takeover via password change.
+func (s *UserService) ChangePassword(ctx context.Context, userID uint, currentPassword, newPassword string) error {
+	if len(newPassword) < 8 {
+		return errors.New("password must be at least 8 characters")
+	}
+
+	user, err := s.repo.FindByID(ctx, userID)
+	if err != nil {
+		return errors.New("user not found")
+	}
+
+	if err := user.CheckPassword(currentPassword); err != nil {
+		return errors.New("current password is incorrect")
+	}
+
+	if currentPassword == newPassword {
+		return errors.New("new password must differ from current password")
+	}
+
+	if err := user.HashPassword(newPassword); err != nil {
+		return err
+	}
 	return s.repo.Update(ctx, user)
 }

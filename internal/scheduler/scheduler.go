@@ -28,11 +28,26 @@ type Job struct {
 	Run       JobFunc
 }
 
+// LeaderLock gates each scheduled job's execution behind a multi-pod
+// claim. Implementations return true iff the caller has won the right
+// to run `jobName` for `window` (e.g. "weeklyDigest:2026-W19"). The
+// Postgres-advisory-lock implementation is the production default;
+// the no-op implementation runs every job on every pod (legacy
+// behavior).
+//
+// 13.7 — without this, every pod fires the 7 AM digest → N copies of
+// every email. Acquire takes the lock for the duration of the job and
+// releases on return.
+type LeaderLock interface {
+	WithLock(ctx context.Context, jobName, window string, fn func(context.Context) error) (ran bool, err error)
+}
+
 // Scheduler runs registered jobs on a fixed tick interval.
 type Scheduler struct {
 	jobs     []Job
 	interval time.Duration
 	now      func() time.Time
+	lock     LeaderLock
 
 	mu      sync.Mutex
 	cancel  context.CancelFunc
@@ -60,6 +75,13 @@ func NewScheduler(interval time.Duration) *Scheduler {
 // Register adds a job to the scheduler. Must be called before Start.
 func (s *Scheduler) Register(name string, predicate PredicateFunc, run JobFunc) {
 	s.jobs = append(s.jobs, Job{Name: name, Predicate: predicate, Run: run})
+}
+
+// SetLeaderLock wires a multi-pod-safe lock around each job run. When
+// nil the scheduler runs jobs unconditionally on every pod (legacy
+// single-replica behavior).
+func (s *Scheduler) SetLeaderLock(lock LeaderLock) {
+	s.lock = lock
 }
 
 // Start begins ticking. It returns immediately; the loop runs in its own
@@ -124,9 +146,24 @@ func (s *Scheduler) tick(ctx context.Context) {
 			continue
 		}
 		s.lastRun[job.Name] = now
-		slog.Info("scheduler job starting", "job", job.Name, "at", now.Format(time.RFC3339))
+		// Window key — coarse enough that every pod in the same tick
+		// computes the same value, fine enough that next week's run
+		// hashes to a different lock. Format: job:YYYY-MM-DD-HH.
+		window := now.UTC().Format("2006-01-02-15")
+		slog.Info("scheduler job starting", "job", job.Name, "at", now.Format(time.RFC3339), "window", window)
 		start := time.Now()
-		if err := job.Run(ctx); err != nil {
+		runFn := func(rctx context.Context) error { return job.Run(rctx) }
+		if s.lock != nil {
+			ran, err := s.lock.WithLock(ctx, job.Name, window, runFn)
+			if err != nil {
+				slog.Error("scheduler job failed", "job", job.Name, "err", err, "duration", time.Since(start))
+				continue
+			}
+			if !ran {
+				slog.Info("scheduler job skipped — leader elsewhere", "job", job.Name, "window", window)
+				continue
+			}
+		} else if err := runFn(ctx); err != nil {
 			slog.Error("scheduler job failed", "job", job.Name, "err", err, "duration", time.Since(start))
 			continue
 		}

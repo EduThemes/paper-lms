@@ -21,9 +21,18 @@ func (r *coursePaceModuleItemRepo) Create(ctx context.Context, item *models.Cour
 	return r.db.WithContext(ctx).Create(item).Error
 }
 
-func (r *coursePaceModuleItemRepo) FindByID(ctx context.Context, id uint) (*models.CoursePaceModuleItem, error) {
+func (r *coursePaceModuleItemRepo) FindByID(ctx context.Context, id, accountID uint) (*models.CoursePaceModuleItem, error) {
 	var item models.CoursePaceModuleItem
-	if err := r.db.WithContext(ctx).First(&item, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Scope through pace→course→account_id.
+		q = q.Where(`course_pace_id IN (
+			SELECT id FROM course_paces WHERE course_id IN (
+				SELECT id FROM courses WHERE account_id = ?
+			)
+		)`, accountID)
+	}
+	if err := q.First(&item, id).Error; err != nil {
 		return nil, err
 	}
 	return &item, nil

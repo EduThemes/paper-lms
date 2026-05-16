@@ -8,10 +8,11 @@ import (
 
 type GradebookHandler struct {
 	gradingService *service.GradingService
+	auditService   *service.AuditService
 }
 
-func NewGradebookHandler(gradingService *service.GradingService) *GradebookHandler {
-	return &GradebookHandler{gradingService: gradingService}
+func NewGradebookHandler(gradingService *service.GradingService, auditService *service.AuditService) *GradebookHandler {
+	return &GradebookHandler{gradingService: gradingService, auditService: auditService}
 }
 
 func (h *GradebookHandler) GetGradebook(c *fiber.Ctx) error {
@@ -23,6 +24,15 @@ func (h *GradebookHandler) GetGradebook(c *fiber.Ctx) error {
 	gradebook, err := h.gradingService.GetGradebook(c.Context(), uint(courseID))
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch gradebook")
+	}
+
+	// 13.5 PII audit — bulk-read semantics. A gradebook fetch on a
+	// 200-student section would otherwise emit 200 audit rows per
+	// page load; a single row with student_id=0 and
+	// data_field="bulk_gradebook_read" captures the access pattern
+	// auditors actually want (who fetched this course's gradebook).
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_gradebook_read", "gradebook", uint(courseID), c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(fiber.Map{

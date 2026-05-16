@@ -1,10 +1,16 @@
 name: Accessibility
 
-# Manual trigger only for now — Puppeteer/Chromium download flow needs more
-# work in CI before this can gate every push. Run on demand via the Actions
-# tab or `gh workflow run a11y.yml`. See web/scripts/run-axe.mjs.
+# 13.12 — promoted from workflow_dispatch to pull_request so every PR is
+# gated by the axe audit. The Puppeteer/Chromium download flow now uses
+# the system chromium that ubuntu-latest ships with (PUPPETEER_SKIP_DOWNLOAD=1
+# + PUPPETEER_EXECUTABLE_PATH). Keep workflow_dispatch for ad-hoc reruns.
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/a11y.yml'
 
 jobs:
   axe:
@@ -32,12 +38,32 @@ jobs:
         run: npm run build
 
       - name: Start static server
-        run: npx serve dist -l 5174 &
+        # -s (--single) rewrites every non-asset request to /index.html so
+        # client-side SPA routes (e.g. /courses/1/gradebook) actually
+        # return the React shell instead of a 404. Without this, axe
+        # audits a serve-default 404 page on every route after `/login`,
+        # which trivially fails document-title / html-has-lang / viewport.
+        run: npx serve dist -l 5174 -s &
 
       - name: Wait for server
         run: npx --yes wait-on http://localhost:5174 -t 30000
 
+      - name: Resolve system chromium path
+        id: chromium
+        run: |
+          for bin in /usr/bin/google-chrome /usr/bin/chromium-browser /usr/bin/chromium; do
+            if [ -x "$bin" ]; then
+              echo "path=$bin" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          # Fall back to installing chromium via apt (ubuntu-latest sometimes lacks it post-2026 image rotations).
+          sudo apt-get update -qq && sudo apt-get install -y -qq chromium-browser
+          echo "path=/usr/bin/chromium-browser" >> "$GITHUB_OUTPUT"
+
       - name: Run axe-core
+        env:
+          PUPPETEER_EXECUTABLE_PATH: ${{ steps.chromium.outputs.path }}
         run: npm run axe
 
       - name: Upload screenshots on failure

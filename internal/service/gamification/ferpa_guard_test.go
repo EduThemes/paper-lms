@@ -55,7 +55,7 @@ func tag(objType, fieldPath, classification string) models.GamificationFerpaFiel
 	return models.GamificationFerpaFieldTag{
 		ObjectType:     objType,
 		FieldPath:      fieldPath,
-		Classification: classification,
+		Classification: models.FerpaClassification(classification),
 	}
 }
 

@@ -302,7 +302,7 @@ func (s *ObserverService) GetObserveeCourses(ctx context.Context, observerUserID
 		}
 		seen[e.CourseID] = true
 
-		course, err := s.courseRepo.FindByID(ctx, e.CourseID)
+		course, err := s.courseRepo.FindByID(ctx, e.CourseID, 0)
 		if err != nil {
 			continue
 		}
@@ -344,7 +344,7 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 		if _, ok := courseByID[e.CourseID]; ok {
 			continue
 		}
-		course, cerr := s.courseRepo.FindByID(ctx, e.CourseID)
+		course, cerr := s.courseRepo.FindByID(ctx, e.CourseID, 0)
 		if cerr != nil {
 			continue
 		}
@@ -534,7 +534,7 @@ func (s *ObserverService) GetObserverDashboard(ctx context.Context, observerUser
 		}
 		seen[e.CourseID] = true
 
-		course, err := s.courseRepo.FindByID(ctx, e.CourseID)
+		course, err := s.courseRepo.FindByID(ctx, e.CourseID, 0)
 		if err != nil {
 			continue
 		}

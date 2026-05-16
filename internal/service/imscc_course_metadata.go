@@ -48,7 +48,7 @@ func (p *IMSCCParser) parseCourseSettingsXML(
 	if p.courseRepo == nil {
 		return
 	}
-	course, err := p.courseRepo.FindByID(ctx, courseID)
+	course, err := p.courseRepo.FindByID(ctx, courseID, 0)
 	if err != nil || course == nil {
 		return
 	}
@@ -342,7 +342,7 @@ func (p *IMSCCParser) parseLearningOutcomesXML(
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not parse learning_outcomes.xml: %v", err))
 		return
 	}
-	root, err := p.outcomeGroupRepo.FindRootGroup(ctx, "Course", courseID)
+	root, err := p.outcomeGroupRepo.FindRootGroup(ctx, "Course", courseID, 0)
 	if err != nil || root == nil {
 		// No root group yet — create one so the imported outcomes have a
 		// home. Repos that auto-create may return nil here; tolerate both.

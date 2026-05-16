@@ -46,7 +46,7 @@ func (s *PeerReviewService) AssignPeerReviews(ctx context.Context, courseID, ass
 		if e.Type != "StudentEnrollment" {
 			continue
 		}
-		sub, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, e.UserID)
+		sub, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, e.UserID, 0)
 		if err == nil && sub != nil && sub.WorkflowState == "submitted" {
 			submitterIDs = append(submitterIDs, e.UserID)
 		}
@@ -79,7 +79,7 @@ func (s *PeerReviewService) AssignPeerReviews(ctx context.Context, courseID, ass
 
 		for _, revieweeID := range pool[:n] {
 			// Get the submission for the reviewee
-			sub, _ := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, revieweeID)
+			sub, _ := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, revieweeID, 0)
 			submissionID := uint(0)
 			if sub != nil {
 				submissionID = sub.ID

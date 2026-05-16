@@ -85,7 +85,7 @@ func (s *CommonsService) Publish(ctx context.Context, userID, courseID uint, opt
 		return nil, errors.New("resource_id is required for non-course exports")
 	}
 
-	course, err := s.courseRepo.FindByID(ctx, courseID)
+	course, err := s.courseRepo.FindByID(ctx, courseID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("source course not found: %w", err)
 	}
@@ -148,31 +148,31 @@ func (s *CommonsService) buildSnapshot(ctx context.Context, course *models.Cours
 
 	switch resourceType {
 	case "assignment":
-		a, err := s.assignmentRepo.FindByID(ctx, resourceID)
+		a, err := s.assignmentRepo.FindByID(ctx, resourceID, 0)
 		if err != nil {
 			return nil, fmt.Errorf("assignment not found: %w", err)
 		}
 		bundle["assignment"] = a
 	case "page":
-		p, err := s.pageRepo.FindByID(ctx, resourceID)
+		p, err := s.pageRepo.FindByID(ctx, resourceID, 0)
 		if err != nil {
 			return nil, fmt.Errorf("page not found: %w", err)
 		}
 		bundle["page"] = p
 	case "quiz":
-		q, err := s.quizRepo.FindByID(ctx, resourceID)
+		q, err := s.quizRepo.FindByID(ctx, resourceID, 0)
 		if err != nil {
 			return nil, fmt.Errorf("quiz not found: %w", err)
 		}
 		bundle["quiz"] = q
 	case "module":
-		m, err := s.moduleRepo.FindByID(ctx, resourceID)
+		m, err := s.moduleRepo.FindByID(ctx, resourceID, 0)
 		if err != nil {
 			return nil, fmt.Errorf("module not found: %w", err)
 		}
 		bundle["module"] = m
 	case "discussion_topic":
-		d, err := s.discussionRepo.FindByID(ctx, resourceID)
+		d, err := s.discussionRepo.FindByID(ctx, resourceID, 0)
 		if err != nil {
 			return nil, fmt.Errorf("discussion topic not found: %w", err)
 		}
@@ -194,7 +194,7 @@ func (s *CommonsService) buildSnapshot(ctx context.Context, course *models.Cours
 		if mods, err := s.moduleRepo.ListByCourseID(ctx, course.ID, params); err == nil {
 			bundle["modules"] = mods.Items
 		}
-		if discussions, err := s.discussionRepo.ListByCourseID(ctx, course.ID, params); err == nil {
+		if discussions, err := s.discussionRepo.ListByCourseID(ctx, course.ID, 0, params); err == nil {
 			bundle["discussion_topics"] = discussions.Items
 		}
 	}
@@ -207,9 +207,10 @@ func (s *CommonsService) Browse(ctx context.Context, accountID uint, filters rep
 	return s.sharedRepo.ListByAccount(ctx, accountID, filters, params)
 }
 
-// Get returns a single Commons item by ID.
-func (s *CommonsService) Get(ctx context.Context, id uint) (*models.SharedContent, error) {
-	return s.sharedRepo.FindByID(ctx, id)
+// Get returns a single Commons item by ID, scoped to the caller's tenant.
+// accountID==0 disables the tenant scope (privileged internal callers).
+func (s *CommonsService) Get(ctx context.Context, id, accountID uint) (*models.SharedContent, error) {
+	return s.sharedRepo.FindByID(ctx, id, accountID)
 }
 
 // CommonsImportResult summarizes what a Commons import created in the
@@ -225,12 +226,12 @@ type CommonsImportResult struct {
 // Import clones the snapshotted resource(s) into the target course. It
 // re-creates rows via the standard repository constructors so all the
 // existing validation and indexing applies. Download count is bumped.
-func (s *CommonsService) Import(ctx context.Context, userID, targetCourseID, sharedContentID uint) (*CommonsImportResult, error) {
-	item, err := s.sharedRepo.FindByID(ctx, sharedContentID)
+func (s *CommonsService) Import(ctx context.Context, userID, targetCourseID, sharedContentID, accountID uint) (*CommonsImportResult, error) {
+	item, err := s.sharedRepo.FindByID(ctx, sharedContentID, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("commons item not found: %w", err)
 	}
-	target, err := s.courseRepo.FindByID(ctx, targetCourseID)
+	target, err := s.courseRepo.FindByID(ctx, targetCourseID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("target course not found: %w", err)
 	}
@@ -398,8 +399,8 @@ func (s *CommonsService) Import(ctx context.Context, userID, targetCourseID, sha
 }
 
 // ToggleFavorite flips the caller's favorite for a Commons item.
-func (s *CommonsService) ToggleFavorite(ctx context.Context, userID, sharedContentID uint) (bool, error) {
-	if _, err := s.sharedRepo.FindByID(ctx, sharedContentID); err != nil {
+func (s *CommonsService) ToggleFavorite(ctx context.Context, userID, sharedContentID, accountID uint) (bool, error) {
+	if _, err := s.sharedRepo.FindByID(ctx, sharedContentID, accountID); err != nil {
 		return false, err
 	}
 	return s.sharedRepo.ToggleFavorite(ctx, sharedContentID, userID)

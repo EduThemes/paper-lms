@@ -334,7 +334,7 @@ func NewIMSCCParser(
 // don't dump them onto the seed admin (UserID=1).
 func (p *IMSCCParser) ParsePackage(ctx context.Context, courseID uint, userID uint, zipPath string) (*ImportResult, error) {
 	// Verify the course exists
-	_, err := p.courseRepo.FindByID(ctx, courseID)
+	_, err := p.courseRepo.FindByID(ctx, courseID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("course %d not found: %w", courseID, err)
 	}
@@ -1632,7 +1632,7 @@ func (p *IMSCCParser) rewriteAllBodies(ctx context.Context, courseID uint, resul
 		}
 		switch e.Type {
 		case "WikiPage":
-			page, err := p.pageRepo.FindByID(ctx, e.ID)
+			page, err := p.pageRepo.FindByID(ctx, e.ID, 0)
 			if err != nil {
 				continue
 			}
@@ -1642,7 +1642,7 @@ func (p *IMSCCParser) rewriteAllBodies(ctx context.Context, courseID uint, resul
 				record("page", page.ID, p.pageRepo.Update(ctx, page))
 			}
 		case "Assignment":
-			a, err := p.assignmentRepo.FindByID(ctx, e.ID)
+			a, err := p.assignmentRepo.FindByID(ctx, e.ID, 0)
 			if err != nil {
 				continue
 			}
@@ -1652,7 +1652,7 @@ func (p *IMSCCParser) rewriteAllBodies(ctx context.Context, courseID uint, resul
 				record("assignment", a.ID, p.assignmentRepo.Update(ctx, a))
 			}
 		case "Quiz":
-			q, err := p.quizRepo.FindByID(ctx, e.ID)
+			q, err := p.quizRepo.FindByID(ctx, e.ID, 0)
 			if err != nil {
 				continue
 			}
@@ -1672,7 +1672,7 @@ func (p *IMSCCParser) rewriteAllBodies(ctx context.Context, courseID uint, resul
 				record("quiz_question", qq.ID, p.quizQuestionRepo.Update(ctx, qq))
 			}
 		case "DiscussionTopic":
-			d, err := p.discussionTopicRepo.FindByID(ctx, e.ID)
+			d, err := p.discussionTopicRepo.FindByID(ctx, e.ID, 0)
 			if err != nil {
 				continue
 			}

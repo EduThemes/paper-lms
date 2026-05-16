@@ -133,6 +133,107 @@ func TestSchemaParity_Wave1(t *testing.T) {
 	}
 }
 
+// TestSchemaParity_Wave3 is a focused regression net for the Wave 3
+// (leaderboard + identity + dynamics) table set. The broader
+// TestSchemaParity_Wave1 already runs the full schema diff, but the
+// Wave 1 label is misleading — adding a labelled Wave 3 test makes
+// the intent explicit and the failure message specific to the
+// gamification surface, where drift is highest-risk.
+//
+// Closes F1.12 from docs/audits/2026-05-15-gamification-audit.md.
+func TestSchemaParity_Wave3(t *testing.T) {
+	parityURL := os.Getenv("PARITY_DB_URL")
+	if parityURL == "" {
+		parityURL = os.Getenv("DATABASE_URL")
+	}
+	if parityURL == "" {
+		t.Skip("set PARITY_DB_URL (or DATABASE_URL) to a Postgres admin connection to run this test")
+	}
+
+	adminURL := swapDatabase(t, parityURL, "postgres")
+	admin, err := sql.Open("postgres", adminURL)
+	if err != nil {
+		t.Fatalf("open admin: %v", err)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+
+	stamp := time.Now().UnixNano()
+	amName := fmt.Sprintf("paper_lms_parity_w3_am_%d", stamp)
+	sqlName := fmt.Sprintf("paper_lms_parity_w3_sql_%d", stamp)
+
+	createScratchDB(t, admin, amName)
+	createScratchDB(t, admin, sqlName)
+
+	amURL := swapDatabase(t, parityURL, amName)
+	sqlURL := swapDatabase(t, parityURL, sqlName)
+	bootstrapExtensions(t, amURL)
+	bootstrapExtensions(t, sqlURL)
+
+	wantSchema, err := buildAutoMigrateSchema(amURL)
+	if err != nil {
+		t.Fatalf("automigrate schema: %v", err)
+	}
+	gotSchema, err := buildSQLChainSchema(sqlURL)
+	if err != nil {
+		t.Fatalf("sql chain schema: %v", err)
+	}
+
+	// The W3 (and W2/W1 gamification) tables the gamification feature
+	// surface depends on. If a future PR drops one of these without an
+	// accompanying model removal, the test fails loudly.
+	wave3Tables := []string{
+		"gamification_events",
+		"gamification_ferpa_field_tags",
+		"gamification_currency_types",
+		"gamification_wallet_balances",
+		"gamification_wallet_transactions",
+		"gamification_rules",
+		"gamification_rule_evaluations",
+		"gamification_badges",
+		"gamification_badge_awards",
+		"gamification_leaderboard_snapshots",
+	}
+
+	d := schemagen.ComputeDiff(wantSchema, gotSchema)
+
+	// Drift for any of the listed tables — missing in SQL chain.
+	for _, tableName := range wave3Tables {
+		if !gotSchema.HasTable(tableName) {
+			t.Errorf("Wave 3 table %q missing from SQL chain (declared by GORM model)", tableName)
+		}
+		if !wantSchema.HasTable(tableName) {
+			t.Errorf("Wave 3 table %q missing from GORM AutoMigrate (declared by SQL chain)", tableName)
+		}
+	}
+
+	// Column drift on any of the listed tables.
+	for _, tableName := range wave3Tables {
+		if cols, ok := d.MissingColumns[tableName]; ok && len(cols) > 0 {
+			names := make([]string, len(cols))
+			for i, c := range cols {
+				names[i] = c.Name
+			}
+			t.Errorf("Wave 3 table %q is missing columns in SQL chain: %v", tableName, names)
+		}
+		if cols, ok := d.StaleColumns[tableName]; ok && len(cols) > 0 {
+			names := make([]string, len(cols))
+			for i, c := range cols {
+				names[i] = c.Name
+			}
+			t.Errorf("Wave 3 table %q has stale columns in SQL chain (no GORM model owner): %v", tableName, names)
+		}
+	}
+
+	// Index drift on any of the listed tables.
+	for _, idx := range d.SafeIndexes {
+		for _, tableName := range wave3Tables {
+			if idx.Table == tableName {
+				t.Errorf("Wave 3 table %q is missing index %q in SQL chain", tableName, idx.Name)
+			}
+		}
+	}
+}
+
 func swapDatabase(t *testing.T, rawURL, dbName string) string {
 	t.Helper()
 	u, err := url.Parse(rawURL)

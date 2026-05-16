@@ -140,7 +140,7 @@ func (h *OneRosterHandler) GetConnection(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid connection ID")
 	}
 
-	conn, err := h.onerosterService.GetConnection(c.Context(), uint(id))
+	conn, err := h.onerosterService.GetConnection(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "OneRoster connection")
 	}
@@ -155,7 +155,7 @@ func (h *OneRosterHandler) UpdateConnection(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid connection ID")
 	}
 
-	conn, err := h.onerosterService.GetConnection(c.Context(), uint(id))
+	conn, err := h.onerosterService.GetConnection(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "OneRoster connection")
 	}
@@ -232,7 +232,7 @@ func (h *OneRosterHandler) TestConnection(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid connection ID")
 	}
 
-	success, message, err := h.onerosterService.TestConnection(c.Context(), uint(id))
+	success, message, err := h.onerosterService.TestConnection(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, err.Error())
 	}
@@ -250,7 +250,7 @@ func (h *OneRosterHandler) SyncFull(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid connection ID")
 	}
 
-	syncLog, err := h.onerosterService.SyncFull(c.Context(), uint(id))
+	syncLog, err := h.onerosterService.SyncFull(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
@@ -265,7 +265,7 @@ func (h *OneRosterHandler) SyncIncremental(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid connection ID")
 	}
 
-	syncLog, err := h.onerosterService.SyncIncremental(c.Context(), uint(id))
+	syncLog, err := h.onerosterService.SyncIncremental(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
@@ -304,7 +304,7 @@ func (h *OneRosterHandler) GetSyncStatus(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid connection ID")
 	}
 
-	conn, latestLog, err := h.onerosterService.GetSyncStatus(c.Context(), uint(id))
+	conn, latestLog, err := h.onerosterService.GetSyncStatus(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "OneRoster connection")
 	}

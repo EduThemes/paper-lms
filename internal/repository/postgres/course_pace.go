@@ -20,9 +20,14 @@ func (r *coursePaceRepo) Create(ctx context.Context, pace *models.CoursePace) er
 	return r.db.WithContext(ctx).Create(pace).Error
 }
 
-func (r *coursePaceRepo) FindByID(ctx context.Context, id uint) (*models.CoursePace, error) {
+func (r *coursePaceRepo) FindByID(ctx context.Context, id, accountID uint) (*models.CoursePace, error) {
 	var pace models.CoursePace
-	if err := r.db.WithContext(ctx).Where("id = ? AND workflow_state != ?", id, "deleted").First(&pace).Error; err != nil {
+	q := r.db.WithContext(ctx).Where("id = ? AND workflow_state != ?", id, "deleted")
+	if accountID != 0 {
+		// Scope through parent course's account_id.
+		q = q.Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID)
+	}
+	if err := q.First(&pace).Error; err != nil {
 		return nil, err
 	}
 	return &pace, nil

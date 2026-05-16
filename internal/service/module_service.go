@@ -42,7 +42,7 @@ func (s *ModuleService) Create(ctx context.Context, module *models.ContextModule
 }
 
 func (s *ModuleService) GetByID(ctx context.Context, id uint) (*models.ContextModule, error) {
-	return s.moduleRepo.FindByID(ctx, id)
+	return s.moduleRepo.FindByID(ctx, id, 0)
 }
 
 func (s *ModuleService) Update(ctx context.Context, module *models.ContextModule) error {

@@ -250,14 +250,14 @@ func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uin
 	var imported []models.PortfolioArtifact
 
 	for _, submissionID := range submissionIDs {
-		submission, err := s.submissionRepo.FindByID(ctx, submissionID)
+		submission, err := s.submissionRepo.FindByID(ctx, submissionID, 0)
 		if err != nil {
 			continue // skip submissions that can't be found
 		}
 
 		// Look up the assignment name for the artifact title
 		artifactTitle := fmt.Sprintf("Submission #%d", submissionID)
-		assignment, assignErr := s.assignmentRepo.FindByID(ctx, submission.AssignmentID)
+		assignment, assignErr := s.assignmentRepo.FindByID(ctx, submission.AssignmentID, 0)
 		if assignErr == nil {
 			artifactTitle = assignment.Name
 		}
@@ -348,8 +348,8 @@ func (s *PortfolioService) ListComments(ctx context.Context, portfolioID uint, p
 // Templates
 // ---------------------------------------------------------------------------
 
-func (s *PortfolioService) CreateFromTemplate(ctx context.Context, templateID uint, userID uint) (*models.Portfolio, error) {
-	tmpl, err := s.templateRepo.FindByID(ctx, templateID)
+func (s *PortfolioService) CreateFromTemplate(ctx context.Context, templateID, accountID uint, userID uint) (*models.Portfolio, error) {
+	tmpl, err := s.templateRepo.FindByID(ctx, templateID, accountID)
 	if err != nil {
 		return nil, errors.New("template not found")
 	}

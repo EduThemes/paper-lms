@@ -1,7 +1,22 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
+import i18n from 'i18next';
 import { api } from '../services/api';
 
 const AuthContext = createContext(null);
+
+// Apply the account's default_locale only if the user has NOT made an explicit choice
+// (localStorage 'paperlms_locale' / legacy 'i18nextLng' takes priority over the account default).
+const applyAccountDefaultLocale = (data) => {
+  if (!data) return;
+  const explicit = typeof localStorage !== 'undefined'
+    ? (localStorage.getItem('paperlms_locale') || localStorage.getItem('i18nextLng'))
+    : null;
+  if (explicit) return;
+  const acctLocale = data?.account?.default_locale || data?.account_default_locale;
+  if (acctLocale && acctLocale !== i18n.language) {
+    i18n.changeLanguage(acctLocale);
+  }
+};
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -13,6 +28,7 @@ export const AuthProvider = ({ children }) => {
     api.getSelf()
       .then((data) => {
         setUser(data);
+        applyAccountDefaultLocale(data);
       })
       .catch(() => {
         // Not authenticated or token expired — clear any stale localStorage
@@ -38,8 +54,19 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const data = await api.login(email, password);
-    // Auth is handled by httpOnly cookie set by the server — no localStorage needed
+    // Phase 9-B: when MFA gates this login, the backend returns
+    // {pending_token, mfa_required: true} instead of {token, user}.
+    // Stash the pending token in sessionStorage (NOT localStorage —
+    // clears on tab close) and let the caller route to /mfa/verify.
+    if (data.mfa_required && data.pending_token) {
+      sessionStorage.setItem('mfa_pending_token', data.pending_token);
+      return data;
+    }
+    // Phase 9-B "must enroll" flag: real session issued, but tenant
+    // policy requires the user to enroll before continuing. Caller
+    // routes to /mfa/enroll based on this flag.
     setUser(data.user);
+    applyAccountDefaultLocale(data.user);
     return data;
   };
 

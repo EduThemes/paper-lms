@@ -123,7 +123,7 @@ func TestStartSubmission_New(t *testing.T) {
 	// No existing submission
 	submissionRepo.On("FindByQuizAndUser", ctx, uint(1), uint(10)).Return(nil, errors.New("not found"))
 	submissionRepo.On("Create", ctx, mock.AnythingOfType("*models.QuizSubmission")).Return(nil)
-	quizRepo.On("FindByID", ctx, uint(1)).Return(&models.Quiz{ID: 1, AllowedAttempts: -1}, nil)
+	quizRepo.On("FindByID", ctx, uint(1), uint(0)).Return(&models.Quiz{ID: 1, AllowedAttempts: -1}, nil)
 
 	result, err := svc.StartSubmission(ctx, 1, 10, nil)
 
@@ -184,7 +184,7 @@ func TestStartSubmission_TimeLimit(t *testing.T) {
 
 	submissionRepo.On("FindByQuizAndUser", ctx, uint(1), uint(10)).Return(nil, errors.New("not found"))
 	submissionRepo.On("Create", ctx, mock.AnythingOfType("*models.QuizSubmission")).Return(nil)
-	quizRepo.On("FindByID", ctx, uint(1)).Return(&models.Quiz{ID: 1, AllowedAttempts: -1}, nil)
+	quizRepo.On("FindByID", ctx, uint(1), uint(0)).Return(&models.Quiz{ID: 1, AllowedAttempts: -1}, nil)
 
 	timeLimit := 30
 	beforeStart := time.Now()

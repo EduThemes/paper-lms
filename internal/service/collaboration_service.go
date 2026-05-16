@@ -37,7 +37,7 @@ func (s *CollaborationService) Create(ctx context.Context, collaboration *models
 }
 
 func (s *CollaborationService) GetByID(ctx context.Context, id uint) (*models.Collaboration, error) {
-	collaboration, err := s.collabRepo.FindByID(ctx, id)
+	collaboration, err := s.collabRepo.FindByID(ctx, id, 0)
 	if err != nil {
 		return nil, errors.New("collaboration not found")
 	}
@@ -45,7 +45,7 @@ func (s *CollaborationService) GetByID(ctx context.Context, id uint) (*models.Co
 }
 
 func (s *CollaborationService) Update(ctx context.Context, collaboration *models.Collaboration) error {
-	_, err := s.collabRepo.FindByID(ctx, collaboration.ID)
+	_, err := s.collabRepo.FindByID(ctx, collaboration.ID, 0)
 	if err != nil {
 		return errors.New("collaboration not found")
 	}
@@ -58,5 +58,5 @@ func (s *CollaborationService) Delete(ctx context.Context, id uint) error {
 }
 
 func (s *CollaborationService) ListByContext(ctx context.Context, contextType string, contextID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Collaboration], error) {
-	return s.collabRepo.ListByContext(ctx, contextType, contextID, params)
+	return s.collabRepo.ListByContext(ctx, contextType, contextID, 0, params)
 }

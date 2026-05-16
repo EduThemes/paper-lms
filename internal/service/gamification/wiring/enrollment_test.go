@@ -49,8 +49,9 @@ func TestEnrolledCourseEmitCallback_HappyPath(t *testing.T) {
 		t.Fatalf("create course: %v", err)
 	}
 
+	learner := seedTestUser(t, g, account.ID, "enroll-happy@example.test")
 	enrollment := models.Enrollment{
-		UserID:        42,
+		UserID:        learner.ID,
 		CourseID:      course.ID,
 		Type:          "StudentEnrollment",
 		Role:          "StudentEnrollment",
@@ -166,13 +167,15 @@ func TestEnrolledCourseEmitCallback_StudentAndTeacher(t *testing.T) {
 		t.Fatalf("create course: %v", err)
 	}
 
+	student := seedTestUser(t, g, account.ID, "multirole-student@example.test")
+	teacher := seedTestUser(t, g, account.ID, "multirole-teacher@example.test")
 	type want struct {
 		userID uint
 		typ    string
 	}
 	wants := []want{
-		{userID: 100, typ: "StudentEnrollment"},
-		{userID: 200, typ: "TeacherEnrollment"},
+		{userID: student.ID, typ: "StudentEnrollment"},
+		{userID: teacher.ID, typ: "TeacherEnrollment"},
 	}
 
 	cb := wiring.EnrolledCourseEmitCallback(fx.emitter, fx.enrollmentRepo, fx.courseRepo)

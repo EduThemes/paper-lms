@@ -3,6 +3,9 @@
 /server
 /paper-lms
 /paper-lms-server
+/encrypt-ldap-passwords
+/leaderboard-snapshot
+/seedtestdata
 /bin/
 
 # Environment
@@ -58,6 +61,11 @@ desktop.ini
 # Logs
 *.log
 logs/
+
+# Negate global ~/.gitignore_global '*secret*' rule for legitimate
+# encryption-envelope source files. These are CODE not secrets.
+!internal/auth/secretbox.go
+!internal/auth/secretbox_test.go
 
 # Local Claude / agent scratch
 .claude/

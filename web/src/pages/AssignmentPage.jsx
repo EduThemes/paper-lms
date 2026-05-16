@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Calendar, Award, Clock, User, CheckCircle, AlertCircle, MinusCircle, Zap, Eye, EyeOff, Users, Pencil, X, Save, MessageCircle, ArrowRight, Send, Star, Target } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import useIsTeacher from '../hooks/useIsTeacher';
@@ -31,6 +32,7 @@ const STATUS_CONFIG = {
 };
 
 const AssignmentPage = () => {
+  const { t } = useTranslation();
   const { courseId, assignmentId } = useParams();
   const { user } = useAuth();
   const isTeacher = useIsTeacher(courseId);
@@ -347,7 +349,7 @@ const AssignmentPage = () => {
   if (loading) {
     return <Layout><div className="flex items-center justify-center py-12 gap-2 text-text-tertiary">
   <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-  Loading assignment...
+  {t('assignmentPage.loading')}
 </div></Layout>;
   }
   if (error) {

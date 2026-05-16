@@ -60,7 +60,7 @@ func NewSpeedGraderService(
 // submissions and comments.
 func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, assignmentID uint) (*SpeedGraderData, error) {
 	// Fetch assignment
-	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID)
+	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("assignment not found: %w", err)
 	}
@@ -127,7 +127,7 @@ func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, a
 			student.Submission = sub
 
 			// Fetch comments for this submission
-			comments, err := s.submissionCommentRepo.ListBySubmissionID(ctx, sub.ID)
+			comments, err := s.submissionCommentRepo.ListBySubmissionID(ctx, sub.ID, 0)
 			if err == nil && len(comments) > 0 {
 				student.Comments = comments
 			}
@@ -146,7 +146,9 @@ func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, a
 // GetStudentSubmission returns a single student's submission with comments
 // for the given assignment.
 func (s *SpeedGraderService) GetStudentSubmission(ctx context.Context, assignmentID, userID uint) (*SpeedGraderStudentSubmission, error) {
-	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID)
+	// accountID=0: SpeedGrader's tenant scope is verified at the handler when
+	// it loads the parent assignment; this read trusts that upstream check.
+	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, 0)
 	if err != nil {
 		return &SpeedGraderStudentSubmission{
 			Submission: nil,
@@ -154,7 +156,7 @@ func (s *SpeedGraderService) GetStudentSubmission(ctx context.Context, assignmen
 		}, nil
 	}
 
-	comments, err := s.submissionCommentRepo.ListBySubmissionID(ctx, submission.ID)
+	comments, err := s.submissionCommentRepo.ListBySubmissionID(ctx, submission.ID, 0)
 	if err != nil {
 		comments = make([]models.SubmissionComment, 0)
 	}

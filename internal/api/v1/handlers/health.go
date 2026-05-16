@@ -6,6 +6,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
+
+	"github.com/EduThemes/paper-lms/internal/auth"
 )
 
 // HealthHandler handles health and readiness check endpoints.
@@ -59,16 +61,34 @@ func (h *HealthHandler) Health(c *fiber.Ctx) error {
 
 // Ready returns whether the application is ready to serve traffic.
 // Used by load balancers and Kubernetes readiness probes.
+//
+// 13.9 — deep checks. /health remains a liveness probe (process is
+// running); /ready returns 503 unless every load-bearing dependency
+// answers. Currently:
+//   - DB ping
+//   - Encryption keys loaded (MFA_ENCRYPTION_KEY parsed at boot)
+// S3 head-bucket + OIDC discovery deferred until those backends are
+// always-required.
+//
 // GET /ready
 func (h *HealthHandler) Ready(c *fiber.Ctx) error {
-	if !h.checkDB() {
+	dbOK := h.checkDB()
+	keysOK := auth.EnsureKeysLoaded() == nil
+
+	checks := fiber.Map{
+		"database":         boolToStatus(dbOK),
+		"encryption_keys":  boolToStatus(keysOK),
+	}
+
+	if !dbOK || !keysOK {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"ready": false,
-			"reason": "database not reachable",
+			"ready":  false,
+			"checks": checks,
 		})
 	}
 	return c.JSON(fiber.Map{
-		"ready": true,
+		"ready":  true,
+		"checks": checks,
 	})
 }
 

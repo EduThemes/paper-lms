@@ -21,9 +21,14 @@ func (r *documentAnnotationRepo) Create(ctx context.Context, annotation *models.
 	return r.db.WithContext(ctx).Create(annotation).Error
 }
 
-func (r *documentAnnotationRepo) FindByID(ctx context.Context, id uint) (*models.DocumentAnnotation, error) {
+func (r *documentAnnotationRepo) FindByID(ctx context.Context, id, accountID uint) (*models.DocumentAnnotation, error) {
 	var annotation models.DocumentAnnotation
-	if err := r.db.WithContext(ctx).Preload("User").Preload("Replies", "workflow_state = ?", "active").Preload("Replies.User").First(&annotation, id).Error; err != nil {
+	q := r.db.WithContext(ctx).Preload("User").Preload("Replies", "workflow_state = ?", "active").Preload("Replies.User")
+	if accountID != 0 {
+		// Scope through submission->assignment->course (deep 3-level subquery).
+		q = q.Where("submission_id IN (SELECT id FROM submissions WHERE assignment_id IN (SELECT id FROM assignments WHERE course_id IN (SELECT id FROM courses WHERE account_id = ?)))", accountID)
+	}
+	if err := q.First(&annotation, id).Error; err != nil {
 		return nil, err
 	}
 	return &annotation, nil

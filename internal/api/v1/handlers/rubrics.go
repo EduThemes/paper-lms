@@ -60,7 +60,7 @@ func (h *RubricHandler) ListCourseRubrics(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.rubricService.ListRubricsByContext(c.Context(), "Course", uint(courseID), params)
+	result, err := h.rubricService.ListRubricsByContext(c.Context(), "Course", uint(courseID), callerAccountID(c), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch rubrics")
 	}
@@ -122,7 +122,7 @@ func (h *RubricHandler) GetRubric(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid rubric ID")
 	}
 
-	rubric, err := h.rubricService.GetRubric(c.Context(), uint(rubricID))
+	rubric, err := h.rubricService.GetRubric(c.Context(), uint(rubricID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "rubric")
 	}
@@ -136,7 +136,7 @@ func (h *RubricHandler) UpdateRubric(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid rubric ID")
 	}
 
-	rubric, err := h.rubricService.GetRubric(c.Context(), uint(rubricID))
+	rubric, err := h.rubricService.GetRubric(c.Context(), uint(rubricID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "rubric")
 	}
@@ -205,7 +205,7 @@ func (h *RubricHandler) GetAssignmentRubric(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid assignment ID")
 	}
 
-	rubric, assoc, err := h.rubricService.GetRubricForAssignment(c.Context(), uint(assignmentID))
+	rubric, assoc, err := h.rubricService.GetRubricForAssignment(c.Context(), uint(assignmentID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "rubric")
 	}
@@ -247,6 +247,7 @@ func (h *RubricHandler) AssociateRubric(c *fiber.Ctx) error {
 		input.RubricAssociation.AssociationID,
 		input.RubricAssociation.AssociationType,
 		input.RubricAssociation.UseForGrading,
+		callerAccountID(c),
 	)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())

@@ -75,7 +75,7 @@ func (h *AssignmentHandler) GetAssignment(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid assignment ID")
 	}
 
-	assignment, err := h.assignmentService.GetByID(c.Context(), uint(id))
+	assignment, err := h.assignmentService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "assignment")
 	}
@@ -171,7 +171,7 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid assignment ID")
 	}
 
-	assignment, err := h.assignmentService.GetByID(c.Context(), uint(id))
+	assignment, err := h.assignmentService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "assignment")
 	}

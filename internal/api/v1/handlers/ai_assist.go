@@ -13,18 +13,22 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
 
 // AIAssistHandler wires HTTP requests to AIAssistService.
 type AIAssistHandler struct {
-	service *service.AIAssistService
+	service     *service.AIAssistService
+	accountRepo repository.AccountRepository
 }
 
 // NewAIAssistHandler constructs the handler. The service may be nil-keyed
-// (no ANTHROPIC_API_KEY) — in that case Dispatch returns 503.
-func NewAIAssistHandler(svc *service.AIAssistService) *AIAssistHandler {
-	return &AIAssistHandler{service: svc}
+// (no ANTHROPIC_API_KEY) — in that case Dispatch returns 503. accountRepo
+// drives the 13.4 COPPA gate; a nil repo skips the gate (development
+// fallback), production wires the real one.
+func NewAIAssistHandler(svc *service.AIAssistService, accountRepo repository.AccountRepository) *AIAssistHandler {
+	return &AIAssistHandler{service: svc, accountRepo: accountRepo}
 }
 
 type aiAssistRequest struct {
@@ -42,6 +46,22 @@ func (h *AIAssistHandler) Dispatch(c *fiber.Ctx) error {
 
 	if h.service == nil || !h.service.Configured() {
 		return responses.Error(c, fiber.StatusServiceUnavailable, "AI Assist not configured")
+	}
+
+	// 13.4 — COPPA gate. AI Assist sends student writing to Anthropic;
+	// for accounts with coppa_strict=true or tenant_mode in {k5,m68},
+	// that's a non-starter without explicit parental consent (which
+	// the audit found is not yet wired). Refuse outright; the toolbar
+	// shows "AI Assist disabled for your school" on 403.
+	if h.accountRepo != nil {
+		accountID, _ := c.Locals("account_id").(uint)
+		if accountID > 0 {
+			if account, err := h.accountRepo.FindByID(c.Context(), accountID); err == nil && account != nil {
+				if account.CoppaStrict || string(account.TenantMode) == "k5" || string(account.TenantMode) == "m68" {
+					return responses.Error(c, fiber.StatusForbidden, "AI Assist is disabled for your school's privacy mode")
+				}
+			}
+		}
 	}
 
 	action := c.Params("action")

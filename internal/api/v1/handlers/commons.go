@@ -55,14 +55,35 @@ func sharedContentToJSON(s *models.SharedContent, includeSnapshot bool) fiber.Ma
 	return out
 }
 
-// callerAccountID returns the caller's account scope. Defaults to 1
-// (the root account) so this works in single-tenant setups; once a real
-// account_id is exposed via auth context we will read it from there.
-func callerAccountID(c *fiber.Ctx) uint {
-	if v, ok := c.Locals("account_id").(uint); ok && v != 0 {
-		return v
+// assertSameTenant returns wrote=true if the caller's tenant differs
+// from the resource's account_id. On mismatch it writes a 404 (NOT
+// 403) — 403 would leak the existence of the resource to a different
+// tenant. Per the Fiber `(result, wrote, err)` convention the caller
+// short-circuits when wrote=true.
+func assertSameTenant(c *fiber.Ctx, resourceAccountID uint) bool {
+	if resourceAccountID != callerAccountID(c) {
+		_ = responses.NotFound(c, "resource")
+		return true
 	}
-	return 1
+	return false
+}
+
+// callerAccountID returns the caller's tenant scope from the JWT claim
+// populated by middleware.Protected (13.1.B). The 13.1.C contract:
+// every tenant-keyed handler MUST be mounted behind Protected; a
+// missing Locals value is a programming error and panics. The 12.1
+// recover middleware catches the panic and surfaces a sanitized 500
+// to the client.
+//
+// The previous behavior — returning a hardcoded 1 — silently routed
+// every tenant-mismatched read to account 1 and was the load-bearing
+// vector behind the audit's "multi-tenancy in disguise" finding.
+func callerAccountID(c *fiber.Ctx) uint {
+	v, ok := c.Locals("account_id").(uint)
+	if !ok || v == 0 {
+		panic("callerAccountID: account_id Locals not set — handler mounted without Protected middleware")
+	}
+	return v
 }
 
 // Browse handles GET /api/v1/commons.
@@ -101,7 +122,7 @@ func (h *CommonsHandler) Get(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid commons ID")
 	}
-	item, err := h.commonsService.Get(c.Context(), uint(id))
+	item, err := h.commonsService.Get(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "commons item")
 	}
@@ -169,7 +190,7 @@ func (h *CommonsHandler) Import(c *fiber.Ctx) error {
 	}
 	userID, _ := c.Locals("user_id").(uint)
 
-	result, err := h.commonsService.Import(c.Context(), userID, uint(courseID), uint(id))
+	result, err := h.commonsService.Import(c.Context(), userID, uint(courseID), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
@@ -186,7 +207,7 @@ func (h *CommonsHandler) Favorite(c *fiber.Ctx) error {
 	if userID == 0 {
 		return responses.Unauthorized(c)
 	}
-	favorited, err := h.commonsService.ToggleFavorite(c.Context(), userID, uint(id))
+	favorited, err := h.commonsService.ToggleFavorite(c.Context(), userID, uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}

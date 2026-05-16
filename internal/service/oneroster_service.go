@@ -94,12 +94,12 @@ func (s *OneRosterService) ListConnections(ctx context.Context, accountID uint, 
 	return s.connRepo.ListByAccountID(ctx, accountID, params)
 }
 
-func (s *OneRosterService) GetConnection(ctx context.Context, id uint) (*models.OneRosterConnection, error) {
-	return s.connRepo.FindByID(ctx, id)
+func (s *OneRosterService) GetConnection(ctx context.Context, id, accountID uint) (*models.OneRosterConnection, error) {
+	return s.connRepo.FindByID(ctx, id, accountID)
 }
 
-func (s *OneRosterService) TestConnection(ctx context.Context, connectionID uint) (bool, string, error) {
-	conn, err := s.connRepo.FindByID(ctx, connectionID)
+func (s *OneRosterService) TestConnection(ctx context.Context, connectionID, accountID uint) (bool, string, error) {
+	conn, err := s.connRepo.FindByID(ctx, connectionID, accountID)
 	if err != nil {
 		return false, "", fmt.Errorf("connection not found: %w", err)
 	}
@@ -119,8 +119,8 @@ func (s *OneRosterService) TestConnection(ctx context.Context, connectionID uint
 
 // ---- Sync operations ----
 
-func (s *OneRosterService) SyncFull(ctx context.Context, connectionID uint) (*models.OneRosterSyncLog, error) {
-	conn, err := s.connRepo.FindByID(ctx, connectionID)
+func (s *OneRosterService) SyncFull(ctx context.Context, connectionID, accountID uint) (*models.OneRosterSyncLog, error) {
+	conn, err := s.connRepo.FindByID(ctx, connectionID, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("connection not found: %w", err)
 	}
@@ -153,8 +153,8 @@ func (s *OneRosterService) SyncFull(ctx context.Context, connectionID uint) (*mo
 	return syncLog, nil
 }
 
-func (s *OneRosterService) SyncIncremental(ctx context.Context, connectionID uint) (*models.OneRosterSyncLog, error) {
-	conn, err := s.connRepo.FindByID(ctx, connectionID)
+func (s *OneRosterService) SyncIncremental(ctx context.Context, connectionID, accountID uint) (*models.OneRosterSyncLog, error) {
+	conn, err := s.connRepo.FindByID(ctx, connectionID, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("connection not found: %w", err)
 	}
@@ -195,8 +195,8 @@ func (s *OneRosterService) GetSyncLogs(ctx context.Context, connectionID uint, p
 	return s.syncLogRepo.ListByConnectionID(ctx, connectionID, params)
 }
 
-func (s *OneRosterService) GetSyncStatus(ctx context.Context, connectionID uint) (*models.OneRosterConnection, *models.OneRosterSyncLog, error) {
-	conn, err := s.connRepo.FindByID(ctx, connectionID)
+func (s *OneRosterService) GetSyncStatus(ctx context.Context, connectionID, accountID uint) (*models.OneRosterConnection, *models.OneRosterSyncLog, error) {
+	conn, err := s.connRepo.FindByID(ctx, connectionID, accountID)
 	if err != nil {
 		return nil, nil, err
 	}

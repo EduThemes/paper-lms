@@ -29,7 +29,12 @@ func forbidden(c *fiber.Ctx, msg string) error {
 	})
 }
 
-// RequireAdmin ensures the user has admin role. Used for account-scoped routes.
+// RequireAdmin ensures the user has admin role AND is admin of the
+// caller's tenant. 13.1.F: after role==admin, also verify
+// user.AccountID == c.Locals("account_id"). A site admin (admin
+// account_id is the root account) still passes for child accounts via
+// the accounts parent-chain traversal — document explicitly when
+// account hierarchy is wired (Phase 14).
 func (pm *PermissionMiddleware) RequireAdmin() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		userID, ok := c.Locals("user_id").(uint)
@@ -44,6 +49,16 @@ func (pm *PermissionMiddleware) RequireAdmin() fiber.Handler {
 
 		if user.Role != "admin" {
 			return forbidden(c, "user is not an account admin")
+		}
+
+		// 13.1.F — tenant scope check. The auth middleware (13.1.B)
+		// has populated account_id Locals; this admin must own the
+		// resource's tenant. Site admins (account_id == 1, the root)
+		// retain access across the deployment until the explicit
+		// account-hierarchy traversal lands.
+		callerAccount, _ := c.Locals("account_id").(uint)
+		if callerAccount != 0 && user.AccountID != callerAccount && user.AccountID != 1 {
+			return forbidden(c, "admin role does not extend to this tenant")
 		}
 
 		c.Locals("is_admin", true)

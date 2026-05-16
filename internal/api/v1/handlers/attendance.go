@@ -12,10 +12,11 @@ import (
 
 type AttendanceHandler struct {
 	attendanceService *service.AttendanceService
+	auditService      *service.AuditService
 }
 
-func NewAttendanceHandler(attendanceService *service.AttendanceService) *AttendanceHandler {
-	return &AttendanceHandler{attendanceService: attendanceService}
+func NewAttendanceHandler(attendanceService *service.AttendanceService, auditService *service.AuditService) *AttendanceHandler {
+	return &AttendanceHandler{attendanceService: attendanceService, auditService: auditService}
 }
 
 func attendanceRecordToJSON(r *models.AttendanceRecord) fiber.Map {
@@ -156,6 +157,14 @@ func (h *AttendanceHandler) GetClassAttendance(c *fiber.Ctx) error {
 		items[i] = attendanceRecordToJSON(&r)
 	}
 
+	// 13.5 PII audit — bulk-read of a whole class's attendance for a
+	// given date. Per-row emission would cost N student-rows per
+	// teacher pageview; one row keyed to the course captures the
+	// access pattern auditors actually want.
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_attendance_read", "attendance_records", uint(courseID), c.IP(), c.Get("User-Agent"))
+	}
+
 	return c.JSON(items)
 }
 
@@ -185,6 +194,12 @@ func (h *AttendanceHandler) GetStudentAttendance(c *fiber.Ctx) error {
 		items[i] = attendanceRecordToJSON(&r)
 	}
 
+	// 13.5 PII audit — single-student attendance read; the subject
+	// is the userID path param.
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, uint(userID), "read", "attendance", "attendance_records", uint(courseID), c.IP(), c.Get("User-Agent"))
+	}
+
 	return c.JSON(items)
 }
 
@@ -203,6 +218,11 @@ func (h *AttendanceHandler) GetStudentAttendanceSummary(c *fiber.Ctx) error {
 	summary, err := h.attendanceService.GetAttendanceSummary(c.Context(), uint(userID), uint(courseID))
 	if err != nil {
 		return responses.InternalError(c, "Could not calculate attendance summary")
+	}
+
+	// 13.5 PII audit — single-student attendance summary read.
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, uint(userID), "read", "attendance_summary", "attendance_records", uint(courseID), c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(fiber.Map{
@@ -227,6 +247,13 @@ func (h *AttendanceHandler) ExportAttendanceCSV(c *fiber.Ctx) error {
 	csvData, err := h.attendanceService.ExportAttendanceCSV(c.Context(), uint(courseID))
 	if err != nil {
 		return responses.InternalError(c, "Could not export attendance")
+	}
+
+	// 13.5 PII audit — bulk export of attendance is the highest-
+	// signal event in this handler (carries every student's status
+	// for every day) and is worth a dedicated audit row.
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "export", "bulk_attendance_export", "attendance_records", uint(courseID), c.IP(), c.Get("User-Agent"))
 	}
 
 	c.Set("Content-Type", "text/csv")

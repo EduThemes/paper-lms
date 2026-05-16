@@ -32,10 +32,15 @@ type GamificationBadge struct {
 	// hits the bool-default elision class (W2-A lesson).
 	InternalOnly  bool                  `json:"internal_only"`
 	SystemOwned   bool                  `json:"system_owned"`
-	// AudienceLevel is informational today (e.g., 'k5', '68', '912',
-	// 'higher_ed', 'corp'). Wave 3's audience-filter rules can consult
-	// this; W2-D's CRUD just round-trips it.
-	AudienceLevel string                `json:"audience_level"`
+	// AudienceLevel is informational today (e.g., 'k5', 'm68', 'h912',
+	// 'higher_ed', 'corp', 'pro'). Wave 3's audience-filter rules can
+	// consult this; W2-D's CRUD just round-trips it. Aligned to the
+	// gamification_audience enum in migration 000050 (F1.11 closeout).
+	// Nullable — badges without an explicit audience apply broadly.
+	// The pointer is load-bearing: GORM serializes a `string` as ''
+	// not NULL, and the column shape post-000050 is nullable enum, so
+	// pointer-or-NULL is the only correct Go-side shape.
+	AudienceLevel *GamificationAudience `json:"audience_level,omitempty" gorm:"type:text"`
 	CreatedBy     *uint                 `json:"created_by,omitempty"`
 	CreatedAt     time.Time             `json:"created_at" gorm:"not null;default:now()"`
 	UpdatedAt     time.Time             `json:"updated_at" gorm:"not null;default:now()"`

@@ -20,9 +20,13 @@ func (r *oneRosterConnectionRepo) Create(ctx context.Context, conn *models.OneRo
 	return r.db.WithContext(ctx).Create(conn).Error
 }
 
-func (r *oneRosterConnectionRepo) FindByID(ctx context.Context, id uint) (*models.OneRosterConnection, error) {
+func (r *oneRosterConnectionRepo) FindByID(ctx context.Context, id, accountID uint) (*models.OneRosterConnection, error) {
 	var conn models.OneRosterConnection
-	if err := r.db.WithContext(ctx).First(&conn, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		q = q.Where("account_id = ?", accountID)
+	}
+	if err := q.First(&conn, id).Error; err != nil {
 		return nil, err
 	}
 	return &conn, nil

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -58,6 +59,7 @@ const COPPA_RIGHTS = [
 ];
 
 const ParentalConsentPage = () => {
+  const { t } = useTranslation();
   const { token } = useParams();
   const [consent, setConsent] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -111,7 +113,7 @@ const ParentalConsentPage = () => {
       <div className="min-h-screen bg-brand-50 flex items-center justify-center px-4">
         <div className="text-center">
           <div className="h-8 w-8 border-3 border-brand-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" role="status" aria-label="Loading" />
-          <p className="text-text-secondary">Loading consent details...</p>
+          <p className="text-text-secondary">{t('parentalConsentPage.loadingDetails')}</p>
         </div>
       </div>
     );
@@ -123,12 +125,12 @@ const ParentalConsentPage = () => {
       <div className="min-h-screen bg-brand-50 flex items-center justify-center px-4">
         <div className="bg-surface-0 rounded-2xl shadow-lg p-8 max-w-lg w-full text-center">
           <XCircleIcon className="w-16 h-16 text-accent-danger mx-auto mb-4" />
-          <h1 className="text-xl font-bold text-text-primary mb-2">Invalid or Expired Link</h1>
+          <h1 className="text-xl font-bold text-text-primary mb-2">{t('parentalConsentPage.invalidLink')}</h1>
           <p className="text-text-secondary mb-6">
-            This consent link is no longer valid. It may have expired or already been used.
+            {t('parentalConsentPage.invalidLinkDesc')}
           </p>
           <p className="text-sm text-text-tertiary">
-            If you believe this is an error, please contact your child's school administrator.
+            {t('parentalConsentPage.invalidLinkContact')}
           </p>
         </div>
       </div>
@@ -141,19 +143,19 @@ const ParentalConsentPage = () => {
       <div className="min-h-screen bg-brand-50 flex items-center justify-center px-4">
         <div className="bg-surface-0 rounded-2xl shadow-lg p-8 max-w-lg w-full text-center">
           <CheckCircleIcon className="w-16 h-16 text-accent-success mx-auto mb-4" />
-          <h1 className="text-xl font-bold text-text-primary mb-2">Consent Granted</h1>
+          <h1 className="text-xl font-bold text-text-primary mb-2">{t('parentalConsentPage.consentGranted')}</h1>
           <p className="text-text-secondary mb-4">
-            Thank you for providing consent for <strong>{consent?.student_name}</strong>.
+            {t('parentalConsentPage.consentGrantedThanks', { name: consent?.student_name })}
           </p>
           <div className="bg-accent-success/10 border border-accent-success/30 rounded-lg p-4 text-left mb-6">
-            <h2 className="font-semibold text-accent-success mb-2">What happens next:</h2>
+            <h2 className="font-semibold text-accent-success mb-2">{t('parentalConsentPage.whatHappensNext')}</h2>
             <ul className="text-sm text-accent-success space-y-1 list-disc list-inside">
-              <li>Your child's account at <strong>{consent?.account_name}</strong> is now fully active</li>
-              <li>They can sign in and access all course materials</li>
-              <li>You can withdraw consent at any time by contacting the school</li>
+              <li>{t('parentalConsentPage.consentGrantedItem1', { school: consent?.account_name })}</li>
+              <li>{t('parentalConsentPage.consentGrantedItem2')}</li>
+              <li>{t('parentalConsentPage.consentGrantedItem3')}</li>
             </ul>
           </div>
-          <p className="text-xs text-text-disabled">You may close this window.</p>
+          <p className="text-xs text-text-disabled">{t('parentalConsentPage.mayCloseWindow')}</p>
         </div>
       </div>
     );
@@ -165,21 +167,21 @@ const ParentalConsentPage = () => {
       <div className="min-h-screen bg-brand-50 flex items-center justify-center px-4">
         <div className="bg-surface-0 rounded-2xl shadow-lg p-8 max-w-lg w-full text-center">
           <XCircleIcon className="w-16 h-16 text-accent-warning mx-auto mb-4" />
-          <h1 className="text-xl font-bold text-text-primary mb-2">Consent Not Granted</h1>
+          <h1 className="text-xl font-bold text-text-primary mb-2">{t('parentalConsentPage.consentNotGranted')}</h1>
           <p className="text-text-secondary mb-4">
-            You have chosen not to provide consent for <strong>{consent?.student_name}</strong>.
+            {t('parentalConsentPage.consentDeniedSummary', { name: consent?.student_name })}
           </p>
           <div className="bg-accent-warning/10 border border-accent-warning/30 rounded-lg p-4 text-left mb-6">
-            <h2 className="font-semibold text-accent-warning mb-2">What this means:</h2>
+            <h2 className="font-semibold text-accent-warning mb-2">{t('parentalConsentPage.whatThisMeans')}</h2>
             <ul className="text-sm text-accent-warning space-y-1 list-disc list-inside">
-              <li>Your child's account will be limited and may not have full access to course features</li>
-              <li>No personal information beyond basic enrollment will be stored</li>
-              <li>Teachers may need to provide alternative participation methods</li>
-              <li>You can change your decision at any time by contacting the school</li>
+              <li>{t('parentalConsentPage.deniedItem1')}</li>
+              <li>{t('parentalConsentPage.deniedItem2')}</li>
+              <li>{t('parentalConsentPage.deniedItem3')}</li>
+              <li>{t('parentalConsentPage.deniedItem4')}</li>
             </ul>
           </div>
           <p className="text-sm text-text-tertiary">
-            Questions? Contact your child's school administrator.
+            {t('parentalConsentPage.deniedQuestions')}
           </p>
         </div>
       </div>
@@ -194,8 +196,8 @@ const ParentalConsentPage = () => {
         <div className="bg-surface-0 rounded-2xl shadow-lg overflow-hidden">
           <div className="bg-brand-600 px-6 py-8 text-center">
             <ShieldIcon className="w-12 h-12 text-white mx-auto mb-3" />
-            <h1 className="text-2xl font-bold text-white">Parental Consent Request</h1>
-            <p className="text-brand-100 mt-1 text-sm">Paper LMS - Student Data Privacy</p>
+            <h1 className="text-2xl font-bold text-white">{t('parentalConsentPage.requestTitle')}</h1>
+            <p className="text-brand-100 mt-1 text-sm">{t('parentalConsentPage.subtitle')}</p>
           </div>
 
           <div className="p-6 sm:p-8">
@@ -203,29 +205,27 @@ const ParentalConsentPage = () => {
             <div className="bg-brand-50 border border-brand-100 rounded-lg p-4 mb-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <p className="text-xs font-medium text-brand-500 uppercase tracking-wider">Student</p>
-                  <p className="text-text-primary font-semibold">{consent?.student_name || 'Student'}</p>
+                  <p className="text-xs font-medium text-brand-500 uppercase tracking-wider">{t('parentalConsentPage.studentLabel')}</p>
+                  <p className="text-text-primary font-semibold">{consent?.student_name || t('parentalConsentPage.studentLabel')}</p>
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-brand-500 uppercase tracking-wider">School / Account</p>
-                  <p className="text-text-primary font-semibold">{consent?.account_name || 'School'}</p>
+                  <p className="text-xs font-medium text-brand-500 uppercase tracking-wider">{t('parentalConsentPage.schoolLabel')}</p>
+                  <p className="text-text-primary font-semibold">{consent?.account_name || t('parentalConsentPage.schoolLabel')}</p>
                 </div>
               </div>
             </div>
 
             {/* What is being requested */}
             <div className="mb-6">
-              <h2 className="text-lg font-semibold text-text-primary mb-2">What is being requested?</h2>
+              <h2 className="text-lg font-semibold text-text-primary mb-2">{t('parentalConsentPage.whatIsRequested')}</h2>
               <p className="text-text-secondary text-sm leading-relaxed">
-                {consent?.account_name || 'Your child\'s school'} uses Paper LMS as its learning management system.
-                Because your child is under 13 years of age, the Children's Online Privacy Protection Act (COPPA)
-                requires parental consent before collecting personal information.
+                {t('parentalConsentPage.requestDesc', { school: consent?.account_name || t('parentalConsentPage.yourChildsSchool') })}
               </p>
             </div>
 
             {/* Data Collected */}
             <div className="mb-6">
-              <h2 className="text-lg font-semibold text-text-primary mb-3">Information Collected</h2>
+              <h2 className="text-lg font-semibold text-text-primary mb-3">{t('parentalConsentPage.informationCollected')}</h2>
               <div className="space-y-2">
                 {DATA_COLLECTED.map((item, i) => (
                   <div key={i} className="flex items-start gap-3 p-3 bg-surface-1 rounded-lg">
@@ -241,9 +241,9 @@ const ParentalConsentPage = () => {
 
             {/* COPPA Rights */}
             <div className="mb-6">
-              <h2 className="text-lg font-semibold text-text-primary mb-3">Your Rights Under COPPA</h2>
+              <h2 className="text-lg font-semibold text-text-primary mb-3">{t('parentalConsentPage.rightsUnderCoppa')}</h2>
               <p className="text-text-secondary text-sm mb-3">
-                As a parent or legal guardian, you have the right to:
+                {t('parentalConsentPage.rightsIntro')}
               </p>
               <ul className="space-y-2">
                 {COPPA_RIGHTS.map((right, i) => (
@@ -269,18 +269,18 @@ const ParentalConsentPage = () => {
                 onClick={handleGrant}
                 disabled={submitting}
                 className="flex-1 bg-accent-success text-white py-3 px-6 rounded-lg font-semibold hover:bg-accent-success/90 focus:outline-none focus:ring-2 focus:ring-accent-success focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                aria-label="Grant parental consent"
+                aria-label={t('parentalConsentPage.grantAria')}
               >
-                {submitting ? 'Processing...' : 'I Give Consent'}
+                {submitting ? t('parentalConsentPage.processing') : t('parentalConsentPage.giveConsent')}
               </button>
               <button
                 type="button"
                 onClick={handleDeny}
                 disabled={submitting}
                 className="flex-1 bg-accent-danger text-white py-3 px-6 rounded-lg font-semibold hover:bg-accent-danger/90 focus:outline-none focus:ring-2 focus:ring-accent-danger focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                aria-label="Deny parental consent"
+                aria-label={t('parentalConsentPage.denyAria')}
               >
-                {submitting ? 'Processing...' : 'I Do Not Consent'}
+                {submitting ? t('parentalConsentPage.processing') : t('parentalConsentPage.doNotConsent')}
               </button>
             </div>
 
@@ -291,10 +291,10 @@ const ParentalConsentPage = () => {
                   href="/privacy"
                   className="text-brand-500 hover:underline focus:underline focus:outline-none"
                 >
-                  Read Full Privacy Policy
+                  {t('parentalConsentPage.readPrivacyPolicy')}
                 </a>
                 <p>
-                  Questions? Contact{' '}
+                  {t('parentalConsentPage.questionsContact')}{' '}
                   <a
                     href="mailto:privacy@paperlms.com"
                     className="text-brand-500 hover:underline focus:underline focus:outline-none"
@@ -309,7 +309,7 @@ const ParentalConsentPage = () => {
 
         {/* Trust footer */}
         <p className="text-center text-xs text-text-disabled mt-6">
-          Paper LMS is committed to protecting student privacy in compliance with COPPA, FERPA, and applicable state laws.
+          {t('parentalConsentPage.trustFooter')}
         </p>
       </div>
     </div>

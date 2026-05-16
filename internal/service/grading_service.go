@@ -126,7 +126,7 @@ func (s *GradingService) GetGradebook(ctx context.Context, courseID uint) (*Grad
 
 func (s *GradingService) GetStudentGrade(ctx context.Context, courseID, studentID uint) (*StudentGrade, error) {
 	// Get course to check if weighted grading is enabled
-	course, err := s.courseRepo.FindByID(ctx, courseID)
+	course, err := s.courseRepo.FindByID(ctx, courseID, 0)
 	if err != nil {
 		return nil, err
 	}

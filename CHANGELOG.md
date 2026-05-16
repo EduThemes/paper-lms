@@ -6,6 +6,175 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Phase 6 / Wave 3 Prelude — brand logo as a swappable asset
+
+Lands the canonical Paper LMS mark and consolidates the four places it
+ships from (favicon, navbar, login, install) behind a single asset path
+so the next rebrand is a one-file swap.
+
+- **Asset placement** — `web/public/brand/paper-logo.svg` is the source
+  of truth; rasterized PNGs at 32 / 180 / 512 sit alongside for the
+  `apple-touch-icon`, the PWA manifest, and Android home-screen install.
+  No bundler involvement — the asset is fetched at runtime so a future
+  rebrand is "replace one file."
+- **`<BrandLogo />`** (`web/src/components/brand/BrandLogo.jsx`) is the
+  single JSX entry point. Props: `size`, `className`, `alt`. Used by
+  Layout (both standard and simplified modes), LoginPageSSO, and
+  SetupWizardPage. No more inline SVG stubs.
+- **`web/index.html`** — favicon now `/brand/paper-logo.svg`, with a
+  PNG fallback for `<link rel="icon" type="image/png">` and an
+  `apple-touch-icon` at 180×180. `theme-color` stays `#2563eb` (matches
+  chrome; the new mark's orange accent is a brand contrast, not the
+  chrome color).
+- **Service worker** (`web/public/sw.js`) precache updated to the new
+  brand path so the offline shell renders the right mark.
+- **`web/public/manifest.json`** icons retargeted at the brand assets;
+  the old `/icons/icon.svg` is no longer referenced but kept on disk
+  for any bookmarked link.
+
+### Phase 6 / Wave 3 Sprint W3-A — ranking infrastructure + teacher leaderboard
+
+Lights up the read path the W2 engine has been depositing XP into.
+Ranking query is gated to admins + course instructors / TAs in this
+sprint; student access lands in W3-B with the pseudonym layer in front.
+
+Backend
+- **Migration 000042** — two indexes that keep the per-currency rank
+  cheap: `idx_wallet_balances_currency_lifetime` (currency_type_id,
+  lifetime_earned DESC) and the partial
+  `idx_enrollments_course_active` over the active subset. No new
+  tables — ranking is live-computed from
+  `gamification_wallet_balances.lifetime_earned`, the column the wallet
+  model documents as "earned not held, leaderboards stay accurate
+  even when learners spend gems."
+- **`GamificationWalletRepository.RankByCurrency`** new repo method.
+  Returns `[]RankRow{UserID, LifetimeEarned, Rank}` sorted DESC by
+  lifetime_earned, ties broken by earliest most-recent positive
+  transaction (the earlier-completer ranks higher — doesn't reward
+  sandbagging). LEFT JOIN so candidates with no balance row surface at
+  rank tail with lifetime_earned=0.
+- **`EnrollmentRepository.ListActiveStudentUserIDsByCourse`** — the
+  candidate-set primitive for course-scoped leaderboards. Uses the new
+  partial index.
+- **`GET /api/v1/courses/:course_id/leaderboard`** handler
+  (`gamification_leaderboards.go`) chains the four privacy primitives:
+  candidate set → `FilterPublicLeaderboardCandidates` (W2-C opt-out) →
+  `RankByCurrency` → name lookup. Gated 403 for non-instructor viewers
+  in W3-A. Default currency is `xp` (Wave 1 seed guarantees this).
+- **`GamificationHandler`** gains `enrollmentRepo` dep; constructor
+  signature widens by one parameter, all four call sites updated.
+
+Frontend
+- **`<LeaderboardTable />`** (`web/src/components/gamification/`) is
+  the shared row renderer reused by every leaderboard surface (W3-A
+  teacher, W3-B student, W3-C relative). Reuses the W2-A
+  `border-surface-raised` / `bg-surface-1` styling vocabulary so the
+  new surface feels native.
+- **`CourseLeaderboardPage`** at `/courses/:courseId/leaderboard`,
+  registered as a CourseNav tab (teacher-only in W3-A; W3-B widens).
+
+### Phase 6 / Wave 3 Sprint W3-B — pseudonym identity layer + student access
+
+Closes the W3-A teacher-only access and substitutes whimsical aliases
+for peer learners on student-facing renders, per the user's design
+constraint that no K-5 student ever sees another kid's legal name on a
+leaderboard. Adds learner-self pseudonym switching gated by tenant mode.
+
+Backend
+- **Migration 000043** — `enrollments` gains `pseudonym_pool_code TEXT
+  NOT NULL DEFAULT 'animals_v1'` and `pseudonym_name TEXT` (nullable
+  for lazy fill). Partial UNIQUE on
+  `(course_id, pseudonym_pool_code, pseudonym_name) WHERE pseudonym_name
+  IS NOT NULL` enforces collision-free assignment within a course while
+  letting fresh enrollments live with `pseudonym_name=NULL` until the
+  first leaderboard read or a learner-driven switch.
+- **`internal/service/gamification/pseudonym/`** — new sub-package
+  hosting the catalog (`animals_v1`, `superheroes_v1`, `explorers_v1`),
+  the curated word lists, the deterministic FNV-64 `GenerateForEnrollment`
+  primitive, a `Validate` gate that rejects free-text names not present
+  in the pool's combinatorial space ("butthead mcnastyface" → 400), and
+  a small `Generator` interface with retry-on-collision semantics.
+  ~47 adjectives × ~60 nouns per pool ≈ 2,820 combos.
+- **`leaderboard_render_policy.go`** — `RenderPolicyFor(tenantMode,
+  viewerRole, viewerRank)` resolves the tenant-mode matrix locked with
+  the user 2026-05-14:
+  - K-5 / M68 students: pseudonyms always on, no top-N for any viewer,
+    no learner switching (teacher-controlled).
+  - H912 students: pseudonyms on, top-5 visible to top-5 only, learner
+    may switch pool or pick first-name mode.
+  - HigherEd / Corp / Pro students: real names, top-5 visible to top-5.
+  - Admin + course teachers / TAs always see real names + full list.
+- **`enrollments.UpdatePseudonymForSelf`** repo method writes the
+  learner-chosen alias atomically; UNIQUE violations translate to
+  `repository.ErrPseudonymTaken` → 409 at the handler.
+- **`GET /api/v1/courses/:course_id/gamification/pseudonym_pools`** —
+  returns the catalog with five sample names per pool so the picker UI
+  doesn't round-trip per click. Gated by render policy
+  (`LearnerCanSwitch=false` → 403).
+- **`PUT /api/v1/courses/:course_id/enrollments/self/pseudonym`** —
+  self-only switcher. Accepts `{pool_code, name}` (validates name ∈ pool),
+  `{pool_code, regenerate: true}` (server rolls deterministically with
+  collision retry), or `{pool_code: "first_name"}` (special-case
+  renders the first whitespace-delimited token of `User.Name`).
+- **`GetCourseLeaderboard`** rewritten end-to-end: drops the W3-A
+  student 403, resolves viewer role + tenant mode, applies render
+  policy, substitutes pseudonyms on peer rows (viewer always sees own
+  legal name), trims to top-N when policy says so.
+- **`GamificationHandler`** widens by one more dep (`accountRepo` for
+  the tenant_mode lookup) — eighth and final constructor parameter
+  for this wave.
+
+Frontend
+- **CourseNav** removes `leaderboard` from `TEACHER_ONLY_TAB_IDS` —
+  students can now reach the surface, with the server deciding what
+  they see based on policy.
+
+### Phase 6 / Wave 3 Sprint W3-C — relative window + filler users + next-to-beat
+
+Lands the motivational mechanics on top of the W3-B identity layer.
+For any student outside the tenant-mode-allowed top-N, the response
+becomes a 5-row relative window centered on the viewer, with filler
+"ghost" entries padding any gap below their rank — so a learner in
+last place never sees themselves dead last.
+
+Backend
+- **`ComposeRelativeWindow`** (`leaderboard_relative.go`) takes the
+  full ranked list + viewerID + the viewer's pseudonym pool + their
+  enrollment id, returns a `RelativeWindow{Rows, NextToBeat}`. Viewer
+  lands at index 2 of a 5-row window when possible; trailing fillers
+  decay geometrically (0.85 per step) below the lowest real row, with
+  stable identity per `(pool, viewerEnrollmentID, slotIndex)` so the
+  same kid sees the same fillers across refreshes within a window.
+- **Filler privacy invariant** — response shape is byte-identical to a
+  real row. No `is_filler` flag, no synthetic user_id, no special
+  marker. A learner inspecting the network tab can't distinguish a
+  filler from a real peer.
+- **`NextToBeat`** — when the viewer has a rank above 1, the response
+  carries the "if you earn N more XP you pass ___" payload (gap =
+  above_score - viewer_score + 1) with the same pseudonym substitution
+  the row pseudonyms use.
+- **`GetCourseLeaderboard`** gains the `relative` window kind. The
+  decision tree:
+  - Student + policy says no top-N → relative window with fillers.
+  - Anyone with top-N permission → top 5 rows, real names per policy.
+  - Admin / teacher full-list → paginated full list.
+- **Tests** — `leaderboard_relative_test.go` covers four critical
+  scenarios: lone viewer pads four fillers, mid-pack viewer gets ±2
+  window with no fillers, last-place viewer never sees themselves
+  bottom-row, stable filler identity across refreshes + differing
+  filler identity across viewers. Plus a tenant-mode matrix test for
+  `RenderPolicyFor` covering all five tenant modes × three roles.
+
+Deferred to a follow-up sprint
+- **Migration 000044 + snapshot generator** — the
+  `gamification_leaderboard_snapshots` table and the weekly-reset CLI
+  (`cmd/leaderboard-snapshot`) were planned for W3-C but defer to a
+  follow-up. The relative window + filler mechanic ships on live
+  compute; weekly-window snapshots are additive and don't change the
+  current API shape.
+- **Pseudonym picker UI + frontend mode toggle** — the backend exposes
+  pools + the PUT switcher; the picker modal lands in a follow-up.
+
 ### Phase 6 / Wave 2 Sprint W2-D — internal-only badges
 
 Lands the badge primitive: admins / instructors author badges, manually

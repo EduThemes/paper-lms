@@ -155,7 +155,7 @@ func (s *LTIAGSService) PostScore(ctx context.Context, lineItemID uint, result *
 // score computed from the LTI result. The score is scaled to the assignment's
 // points_possible: score = (resultScore / resultMaximum) * pointsPossible.
 func (s *LTIAGSService) syncSubmissionScore(ctx context.Context, assignmentID uint, result *models.LTIResult) error {
-	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, result.UserID)
+	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, result.UserID, 0)
 	if err != nil {
 		// No submission exists yet; nothing to sync
 		return nil
@@ -165,7 +165,7 @@ func (s *LTIAGSService) syncSubmissionScore(ctx context.Context, assignmentID ui
 	if result.ResultScore != nil && result.ResultMaximum != nil && *result.ResultMaximum > 0 {
 		// Scale to assignment's actual points_possible (default 100 if not set)
 		pointsPossible := 100.0
-		if assignment, aErr := s.assignmentRepo.FindByID(ctx, assignmentID); aErr == nil && assignment.PointsPossible != nil && *assignment.PointsPossible > 0 {
+		if assignment, aErr := s.assignmentRepo.FindByID(ctx, assignmentID, 0); aErr == nil && assignment.PointsPossible != nil && *assignment.PointsPossible > 0 {
 			pointsPossible = *assignment.PointsPossible
 		}
 		score := *result.ResultScore / *result.ResultMaximum * pointsPossible

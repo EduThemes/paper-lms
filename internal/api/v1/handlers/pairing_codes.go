@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -91,6 +93,37 @@ func (h *PairingCodeHandler) List(c *fiber.Ctx) error {
 		out[i] = pairingCodeToJSON(&codes[i])
 	}
 	return c.JSON(out)
+}
+
+// MintForStudent handles POST /users/:student_id/observer-pairing-codes.
+//
+// Authorization (item 12.6 consent rule, enforced inside the service):
+//   - A teacher in any of the student's active courses may mint.
+//   - The student themselves may mint only when EVERY course they're
+//     enrolled in lives under an account whose tenant_mode is adult-mode
+//     (higher_ed / corp / pro). K-12 students must use the teacher path.
+//
+// Pre-12.6 the parent-link path (POST /users/:user_id/observees) took
+// observee_id directly with no verification. This route is the
+// teacher-mediated counterpart of POST /users/self/pairing_codes.
+func (h *PairingCodeHandler) MintForStudent(c *fiber.Ctx) error {
+	studentID, perr := c.ParamsInt("student_id")
+	if perr != nil || studentID <= 0 {
+		return responses.BadRequest(c, "Invalid student ID")
+	}
+	callerID, err := getUserID(c)
+	if err != nil {
+		return err
+	}
+
+	pc, gerr := h.pairingService.GenerateForStudent(c.Context(), callerID, uint(studentID), 0)
+	if gerr != nil {
+		if errors.Is(gerr, service.ErrPairingMintForbidden) {
+			return responses.Forbidden(c, "not authorized to mint a pairing code for this student")
+		}
+		return responses.BadRequest(c, gerr.Error())
+	}
+	return c.Status(fiber.StatusCreated).JSON(pairingCodeToJSON(pc))
 }
 
 // Revoke handles DELETE /users/self/pairing_codes/:id

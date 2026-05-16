@@ -20,9 +20,17 @@ func (r *groupCategoryRepo) Create(ctx context.Context, category *models.GroupCa
 	return r.db.WithContext(ctx).Create(category).Error
 }
 
-func (r *groupCategoryRepo) FindByID(ctx context.Context, id uint) (*models.GroupCategory, error) {
+func (r *groupCategoryRepo) FindByID(ctx context.Context, id, accountID uint) (*models.GroupCategory, error) {
 	var category models.GroupCategory
-	if err := r.db.WithContext(ctx).First(&category, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Dual-scope: rows have either account_id direct OR course_id → courses.account_id.
+		q = q.Where(`
+			(account_id IS NOT NULL AND account_id = ?)
+			OR (course_id IS NOT NULL AND course_id IN (SELECT id FROM courses WHERE account_id = ?))
+		`, accountID, accountID)
+	}
+	if err := q.First(&category, id).Error; err != nil {
 		return nil, err
 	}
 	return &category, nil

@@ -18,12 +18,13 @@ func NewAccountHandler(accountRepo repository.AccountRepository) *AccountHandler
 
 func accountToJSON(a *models.Account) fiber.Map {
 	return fiber.Map{
-		"id":                  a.ID,
-		"name":                a.Name,
-		"parent_account_id":   a.ParentAccountID,
-		"root_account_id":     a.RootAccountID,
-		"workflow_state":      a.WorkflowState,
-		"max_upload_size_mb":  a.MaxUploadSizeMB,
+		"id":                 a.ID,
+		"name":               a.Name,
+		"parent_account_id":  a.ParentAccountID,
+		"root_account_id":    a.RootAccountID,
+		"workflow_state":     a.WorkflowState,
+		"max_upload_size_mb": a.MaxUploadSizeMB,
+		"tenant_mode":        string(a.TenantMode),
 	}
 }
 
@@ -60,7 +61,7 @@ func (h *AccountHandler) GetAccount(c *fiber.Ctx) error {
 }
 
 // UpdateAccount lets an admin edit account-level settings.
-// Currently exposes name and max_upload_size_mb.
+// Exposes name, max_upload_size_mb, and tenant_mode.
 func (h *AccountHandler) UpdateAccount(c *fiber.Ctx) error {
 	id, err := c.ParamsInt("id")
 	if err != nil {
@@ -73,8 +74,9 @@ func (h *AccountHandler) UpdateAccount(c *fiber.Ctx) error {
 	}
 
 	var input struct {
-		Name     *string `json:"name"`
-		Settings *struct {
+		Name       *string `json:"name"`
+		TenantMode *string `json:"tenant_mode"`
+		Settings   *struct {
 			MaxUploadSizeMB *uint `json:"max_upload_size_mb"`
 		} `json:"settings"`
 	}
@@ -84,6 +86,20 @@ func (h *AccountHandler) UpdateAccount(c *fiber.Ctx) error {
 
 	if input.Name != nil && *input.Name != "" {
 		account.Name = *input.Name
+	}
+	// tenant_mode drives every gamification + privacy default; the
+	// leaderboard RenderPolicy reads it (RenderPolicyFor) to decide
+	// what students see. Locked to the six gamification_audience
+	// enum values; an unknown string is rejected with 400 rather than
+	// silently coerced.
+	if input.TenantMode != nil {
+		switch models.GamificationAudience(*input.TenantMode) {
+		case models.AudienceK5, models.AudienceM68, models.AudienceH912,
+			models.AudienceHigherEd, models.AudienceCorp, models.AudiencePro:
+			account.TenantMode = models.GamificationAudience(*input.TenantMode)
+		default:
+			return responses.BadRequest(c, "invalid tenant_mode; must be one of k5, m68, h912, higher_ed, corp, pro")
+		}
 	}
 	if input.Settings != nil && input.Settings.MaxUploadSizeMB != nil {
 		v := *input.Settings.MaxUploadSizeMB

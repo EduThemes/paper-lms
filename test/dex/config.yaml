@@ -1,0 +1,50 @@
+# Dex configuration for Paper LMS OIDC E2E tests.
+#
+# Two static users: alice@dex.test / password and bob@dex.test / password.
+# One client: paper-lms-dev with secret dev-secret-not-prod and redirect
+# back to the local backend's OIDC callback.
+#
+# Loaded by the `dex` service in docker-compose.yml. Bring up with:
+#   make dex-up
+#
+# After Dex is healthy, configure it in Paper:
+#   1. Sign in as admin@paper.test.
+#   2. Visit /admin/auth-providers.
+#   3. Add provider → preset: Generic OIDC → issuer http://localhost:5556/dex.
+#   4. Client ID: paper-lms-dev. Client Secret: dev-secret-not-prod.
+#   5. Enable auto-provision so first-login creates the user.
+
+issuer: http://localhost:5556/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+  allowedOrigins:
+    - '*'
+
+# Disable the consent screen for the dev experience — every login goes
+# straight from credentials to callback.
+oauth2:
+  skipApprovalScreen: true
+
+staticClients:
+  - id: paper-lms-dev
+    redirectURIs:
+      # Backend handles the callback then redirects to the SPA.
+      - http://localhost:3000/api/v1/auth/oidc/callback
+    name: 'Paper LMS (dev)'
+    secret: dev-secret-not-prod
+
+enablePasswordDB: true
+staticPasswords:
+  # bcrypt of "password" (cost 10).
+  - email: alice@dex.test
+    hash: $2a$10$FZuRIKbXj1.OZv7DD/9bmuAjMv4bqvyzX6dRvbSYBTy79zi6F9m8W
+    username: alice
+    userID: 08a8684b-db88-4b73-90a9-3cd1661f5466
+  - email: bob@dex.test
+    hash: $2a$10$FZuRIKbXj1.OZv7DD/9bmuAjMv4bqvyzX6dRvbSYBTy79zi6F9m8W
+    username: bob
+    userID: 14ee29bc-9bd6-4a7c-9da7-7fa6c4f56cca

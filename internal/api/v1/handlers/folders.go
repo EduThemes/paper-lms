@@ -79,7 +79,7 @@ func (h *FolderHandler) CreateCourseFolder(c *fiber.Ctx) error {
 		parentFolderID = &root.ID
 	}
 
-	parent, err := h.fileService.GetFolder(c.Context(), *parentFolderID)
+	parent, err := h.fileService.GetFolder(c.Context(), *parentFolderID, callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "parent folder")
 	}
@@ -108,7 +108,7 @@ func (h *FolderHandler) GetFolder(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid folder ID")
 	}
 
-	folder, err := h.fileService.GetFolder(c.Context(), uint(id))
+	folder, err := h.fileService.GetFolder(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "folder")
 	}
@@ -128,7 +128,7 @@ func (h *FolderHandler) UpdateFolder(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid folder ID")
 	}
 
-	folder, err := h.fileService.GetFolder(c.Context(), uint(id))
+	folder, err := h.fileService.GetFolder(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "folder")
 	}
@@ -168,7 +168,7 @@ func (h *FolderHandler) DeleteFolder(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid folder ID")
 	}
 
-	folder, err := h.fileService.GetFolder(c.Context(), uint(id))
+	folder, err := h.fileService.GetFolder(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "folder")
 	}
@@ -192,7 +192,7 @@ func (h *FolderHandler) ListSubfolders(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid folder ID")
 	}
 
-	parentFolder, err := h.fileService.GetFolder(c.Context(), uint(folderID))
+	parentFolder, err := h.fileService.GetFolder(c.Context(), uint(folderID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "folder")
 	}
@@ -205,7 +205,7 @@ func (h *FolderHandler) ListSubfolders(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.fileService.ListSubfolders(c.Context(), uint(folderID), params)
+	result, err := h.fileService.ListSubfolders(c.Context(), uint(folderID), callerAccountID(c), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch subfolders")
 	}

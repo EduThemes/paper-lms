@@ -20,9 +20,19 @@ func (r *contextExternalToolRepo) Create(ctx context.Context, tool *models.Conte
 	return r.db.WithContext(ctx).Create(tool).Error
 }
 
-func (r *contextExternalToolRepo) FindByID(ctx context.Context, id uint) (*models.ContextExternalTool, error) {
+func (r *contextExternalToolRepo) FindByID(ctx context.Context, id, accountID uint) (*models.ContextExternalTool, error) {
 	var tool models.ContextExternalTool
-	if err := r.db.WithContext(ctx).Where("workflow_state != ?", "deleted").First(&tool, id).Error; err != nil {
+	q := r.db.WithContext(ctx).Where("workflow_state != ?", "deleted")
+	if accountID != 0 {
+		// Context-polymorphic tenant scope:
+		//  Course → context_id→courses.account_id
+		//  Account → context_id IS account_id
+		q = q.Where(`
+			(context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))
+			OR (context_type = 'Account' AND context_id = ?)
+		`, accountID, accountID)
+	}
+	if err := q.First(&tool, id).Error; err != nil {
 		return nil, err
 	}
 	return &tool, nil

@@ -23,6 +23,9 @@ i18n
       es: { translation: es },
     },
     fallbackLng: 'en',
+    // Empty string in a non-English bundle means "not yet translated" — fall back to English.
+    // (Wave D.2's translator is filling es.json placeholders in parallel.)
+    returnEmptyString: false,
     interpolation: {
       escapeValue: false, // React already escapes
     },

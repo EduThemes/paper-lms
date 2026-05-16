@@ -84,7 +84,7 @@ func (h *LearningOutcomeHandler) ListGroups(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.outcomeService.ListGroups(c.Context(), "Course", uint(courseID), params)
+	result, err := h.outcomeService.ListGroups(c.Context(), "Course", uint(courseID), callerAccountID(c), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch outcome groups")
 	}
@@ -136,7 +136,7 @@ func (h *LearningOutcomeHandler) GetGroup(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid group ID")
 	}
 
-	group, err := h.outcomeService.GetGroup(c.Context(), uint(groupID))
+	group, err := h.outcomeService.GetGroup(c.Context(), uint(groupID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "outcome group")
 	}
@@ -150,7 +150,7 @@ func (h *LearningOutcomeHandler) UpdateGroup(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid group ID")
 	}
 
-	group, err := h.outcomeService.GetGroup(c.Context(), uint(groupID))
+	group, err := h.outcomeService.GetGroup(c.Context(), uint(groupID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "outcome group")
 	}
@@ -205,7 +205,7 @@ func (h *LearningOutcomeHandler) ListOutcomes(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.outcomeService.ListOutcomes(c.Context(), uint(groupID), params)
+	result, err := h.outcomeService.ListOutcomes(c.Context(), uint(groupID), callerAccountID(c), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch outcomes")
 	}
@@ -273,7 +273,7 @@ func (h *LearningOutcomeHandler) GetOutcome(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid outcome ID")
 	}
 
-	outcome, err := h.outcomeService.GetOutcome(c.Context(), uint(outcomeID))
+	outcome, err := h.outcomeService.GetOutcome(c.Context(), uint(outcomeID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "outcome")
 	}
@@ -287,7 +287,7 @@ func (h *LearningOutcomeHandler) UpdateOutcome(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid outcome ID")
 	}
 
-	outcome, err := h.outcomeService.GetOutcome(c.Context(), uint(outcomeID))
+	outcome, err := h.outcomeService.GetOutcome(c.Context(), uint(outcomeID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "outcome")
 	}
@@ -381,7 +381,7 @@ func (h *LearningOutcomeHandler) ListResults(c *fiber.Ctx) error {
 	params := middleware.GetPagination(c)
 
 	// Get all outcomes for the course first
-	outcomes, err := h.outcomeService.ListOutcomesByContext(c.Context(), "Course", uint(courseID), repository.PaginationParams{Page: 1, PerPage: 1000})
+	outcomes, err := h.outcomeService.ListOutcomesByContext(c.Context(), "Course", uint(courseID), callerAccountID(c), repository.PaginationParams{Page: 1, PerPage: 1000})
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch outcomes")
 	}
@@ -453,7 +453,7 @@ func (h *LearningOutcomeHandler) GetMasteryGradebook(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	rollups, outcomes, err := h.outcomeService.GetMasteryGradebook(c.Context(), uint(courseID), params)
+	rollups, outcomes, err := h.outcomeService.GetMasteryGradebook(c.Context(), uint(courseID), callerAccountID(c), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch mastery gradebook")
 	}
@@ -555,9 +555,9 @@ func (h *LearningOutcomeHandler) ListAlignments(c *fiber.Ctx) error {
 	var alignments []models.OutcomeAlignment
 
 	if assignmentID > 0 {
-		alignments, err = h.alignmentRepo.ListByAssignmentID(c.Context(), uint(assignmentID))
+		alignments, err = h.alignmentRepo.ListByAssignmentID(c.Context(), uint(assignmentID), callerAccountID(c))
 	} else {
-		alignments, err = h.alignmentRepo.ListByCourseID(c.Context(), uint(courseID))
+		alignments, err = h.alignmentRepo.ListByCourseID(c.Context(), uint(courseID), callerAccountID(c))
 	}
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch alignments")

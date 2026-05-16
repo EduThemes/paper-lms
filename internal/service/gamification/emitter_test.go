@@ -57,14 +57,38 @@ func setupEmitterFixture(t *testing.T, cooldownSeconds *int) emitterFixture {
 		t.Fatalf("look up xp currency: %v", err)
 	}
 
+	// Course row — 13.2 added assignments_course_id_fkey, so an
+	// orphan course_id breaks the assignment insert below.
+	course := models.Course{Name: "Test Course", AccountID: tenantID, WorkflowState: "available"}
+	if err := g.Create(&course).Error; err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+
 	// Assignment row — only the submission predicate reads it (indirectly,
 	// by id), but ListByUserAndAssignmentIDs walks the submissions table.
 	// We still create a real Assignment so the FK is satisfied if any
 	// later check needs it.
 	pointsPossible := 100.0
-	assignment := models.Assignment{Name: "Reading 1", CourseID: 1, WorkflowState: "published", PointsPossible: &pointsPossible}
+	assignment := models.Assignment{Name: "Reading 1", CourseID: course.ID, WorkflowState: "published", PointsPossible: &pointsPossible}
 	if err := g.Create(&assignment).Error; err != nil {
 		t.Fatalf("create assignment: %v", err)
+	}
+
+	// User — 13.2 added submissions_user_id_fkey, so the submission
+	// below needs a real user row. User.BeforeCreate (13.x.9) fills in
+	// WebauthnUserHandle + AccountID defaults.
+	user := models.User{
+		Name:    "Emitter Test User",
+		Email:   "emitter@example.test",
+		LoginID: "emitter@example.test",
+		Role:    "user",
+		AccountID: tenantID,
+	}
+	if err := user.HashPassword("placeholder"); err != nil {
+		t.Fatalf("hash pw: %v", err)
+	}
+	if err := g.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
 	}
 
 	// User submitted with score 95.
@@ -72,7 +96,7 @@ func setupEmitterFixture(t *testing.T, cooldownSeconds *int) emitterFixture {
 	submittedAt := time.Now()
 	sub := models.Submission{
 		AssignmentID:  assignment.ID,
-		UserID:        42,
+		UserID:        user.ID,
 		SubmittedAt:   &submittedAt,
 		Score:         &score,
 		WorkflowState: "graded",
@@ -156,7 +180,7 @@ func setupEmitterFixture(t *testing.T, cooldownSeconds *int) emitterFixture {
 	return emitterFixture{
 		db:           g,
 		tenantID:     tenantID,
-		userID:       42,
+		userID:       user.ID,
 		assignmentID: assignment.ID,
 		ruleID:       rule.ID,
 		xpCurrencyID: xp.ID,

@@ -45,14 +45,14 @@ func CompletedQuizEmitCallback(
 			return
 		}
 
-		quiz, err := quizRepo.FindByID(ctx, quizSubmission.QuizID)
+		quiz, err := quizRepo.FindByID(ctx, quizSubmission.QuizID, 0)
 		if err != nil {
 			slog.Error("completed quiz emit: load quiz",
 				"submission_id", submissionID, "error", err)
 			return
 		}
 
-		course, err := courseRepo.FindByID(ctx, quiz.CourseID)
+		course, err := courseRepo.FindByID(ctx, quiz.CourseID, 0)
 		if err != nil {
 			slog.Error("completed quiz emit: load course",
 				"submission_id", submissionID, "error", err)

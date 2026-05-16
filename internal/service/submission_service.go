@@ -88,7 +88,7 @@ func NewSubmissionService(
 
 func (s *SubmissionService) Create(ctx context.Context, submission *models.Submission) error {
 	// Validate assignment exists
-	assignment, err := s.assignmentRepo.FindByID(ctx, submission.AssignmentID)
+	assignment, err := s.assignmentRepo.FindByID(ctx, submission.AssignmentID, 0)
 	if err != nil {
 		return errors.New("assignment not found")
 	}
@@ -108,7 +108,9 @@ func (s *SubmissionService) Create(ctx context.Context, submission *models.Submi
 	}
 
 	// Check for existing submission and increment attempt
-	existing, _ := s.submissionRepo.FindByAssignmentAndUser(ctx, submission.AssignmentID, submission.UserID)
+	// accountID=0: tenant verification already happened upstream in the
+	// handler when it loaded the assignment.
+	existing, _ := s.submissionRepo.FindByAssignmentAndUser(ctx, submission.AssignmentID, submission.UserID, 0)
 	if existing != nil {
 		existing.SubmissionType = submission.SubmissionType
 		existing.Body = submission.Body
@@ -136,8 +138,12 @@ func (s *SubmissionService) Create(ctx context.Context, submission *models.Submi
 	return nil
 }
 
-func (s *SubmissionService) GetByAssignmentAndUser(ctx context.Context, assignmentID, userID uint) (*models.Submission, error) {
-	return s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID)
+// GetByAssignmentAndUser is the cross-tenant-sensitive read path.
+// callers MUST pass `callerAccountID(c)` from a handler; 0 from internal
+// callers (LTI callbacks, peer-review wiring) where the (assignment,
+// user) pair was already tenant-verified upstream.
+func (s *SubmissionService) GetByAssignmentAndUser(ctx context.Context, assignmentID, userID, accountID uint) (*models.Submission, error) {
+	return s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, accountID)
 }
 
 func (s *SubmissionService) ListByAssignment(ctx context.Context, assignmentID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Submission], error) {
@@ -170,7 +176,8 @@ func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, gra
 
 	gradeStr := strconv.FormatFloat(score, 'f', -1, 64)
 
-	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID)
+	// accountID=0: tenant verification already done upstream by the grading handler.
+	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, 0)
 	if err != nil {
 		// No existing submission — create one (teacher grading without student submission)
 		submission = &models.Submission{
@@ -198,7 +205,7 @@ func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, gra
 	}
 
 	// For group assignments, apply the same grade to all other group members
-	assignment, aErr := s.assignmentRepo.FindByID(ctx, assignmentID)
+	assignment, aErr := s.assignmentRepo.FindByID(ctx, assignmentID, 0)
 	if aErr == nil && assignment.GroupCategoryID != nil && *assignment.GroupCategoryID > 0 {
 		s.gradeGroupMembers(ctx, assignment, userID, graderID, score, gradeStr, &now)
 	}
@@ -243,7 +250,7 @@ func (s *SubmissionService) getGroupMemberIDs(ctx context.Context, userID, group
 func (s *SubmissionService) createGroupSubmissions(ctx context.Context, assignment *models.Assignment, submission *models.Submission) {
 	memberIDs := s.getGroupMemberIDs(ctx, submission.UserID, *assignment.GroupCategoryID)
 	for _, memberID := range memberIDs {
-		existing, _ := s.submissionRepo.FindByAssignmentAndUser(ctx, submission.AssignmentID, memberID)
+		existing, _ := s.submissionRepo.FindByAssignmentAndUser(ctx, submission.AssignmentID, memberID, 0)
 		if existing != nil {
 			existing.SubmissionType = submission.SubmissionType
 			existing.Body = submission.Body
@@ -281,7 +288,7 @@ func (s *SubmissionService) gradeGroupMembers(ctx context.Context, assignment *m
 		memberScore := s.applyLateDeduction(ctx, assignment.ID, memberID, score)
 		memberGradeStr := strconv.FormatFloat(memberScore, 'f', -1, 64)
 
-		existing, _ := s.submissionRepo.FindByAssignmentAndUser(ctx, assignment.ID, memberID)
+		existing, _ := s.submissionRepo.FindByAssignmentAndUser(ctx, assignment.ID, memberID, 0)
 		if existing != nil {
 			existing.Score = &memberScore
 			existing.Grade = &memberGradeStr
@@ -308,13 +315,13 @@ func (s *SubmissionService) gradeGroupMembers(ctx context.Context, assignment *m
 // Returns the adjusted score (or original score if no deduction applies).
 func (s *SubmissionService) applyLateDeduction(ctx context.Context, assignmentID, userID uint, score float64) float64 {
 	// Get the submission to check if it's late
-	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID)
+	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, 0)
 	if err != nil || !submission.Late {
 		return score
 	}
 
 	// Get the assignment to determine course and due date
-	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID)
+	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, 0)
 	if err != nil || assignment.DueAt == nil {
 		return score
 	}
@@ -371,7 +378,7 @@ func (s *SubmissionService) applyLateDeduction(ctx context.Context, assignmentID
 // isGradingPeriodClosed checks whether the assignment falls within a closed grading period.
 // Returns (true, periodTitle) if closed, (false, "") if open or no grading periods configured.
 func (s *SubmissionService) isGradingPeriodClosed(ctx context.Context, assignmentID uint) (bool, string) {
-	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID)
+	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, 0)
 	if err != nil {
 		return false, ""
 	}
@@ -383,7 +390,7 @@ func (s *SubmissionService) isGradingPeriodClosed(ctx context.Context, assignmen
 		return false, ""
 	}
 
-	course, err := s.courseRepo.FindByID(ctx, assignment.CourseID)
+	course, err := s.courseRepo.FindByID(ctx, assignment.CourseID, 0)
 	if err != nil {
 		return false, ""
 	}
@@ -400,7 +407,7 @@ func (s *SubmissionService) isGradingPeriodClosed(ctx context.Context, assignmen
 		if group.WorkflowState != "active" {
 			continue
 		}
-		periods, err := s.gradingPeriodRepo.ListByGroupID(ctx, group.ID)
+		periods, err := s.gradingPeriodRepo.ListByGroupID(ctx, group.ID, 0)
 		if err != nil {
 			continue
 		}

@@ -78,7 +78,7 @@ func (h *CalendarEventHandler) GetEvent(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid calendar event ID")
 	}
 
-	event, err := h.calendarService.GetByID(c.Context(), uint(id))
+	event, err := h.calendarService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "calendar event")
 	}
@@ -133,7 +133,7 @@ func (h *CalendarEventHandler) UpdateEvent(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid calendar event ID")
 	}
 
-	event, err := h.calendarService.GetByID(c.Context(), uint(id))
+	event, err := h.calendarService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "calendar event")
 	}
@@ -195,7 +195,7 @@ func (h *CalendarEventHandler) DeleteEvent(c *fiber.Ctx) error {
 	}
 
 	// Authorization: only the event creator or admin can delete
-	event, err := h.calendarService.GetByID(c.Context(), uint(id))
+	event, err := h.calendarService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "calendar event")
 	}

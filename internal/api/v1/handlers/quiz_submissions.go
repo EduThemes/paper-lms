@@ -11,10 +11,11 @@ import (
 type QuizSubmissionHandler struct {
 	quizService     *service.QuizService
 	observerService *service.ObserverService
+	auditService    *service.AuditService
 }
 
-func NewQuizSubmissionHandler(quizService *service.QuizService, observerService *service.ObserverService) *QuizSubmissionHandler {
-	return &QuizSubmissionHandler{quizService: quizService, observerService: observerService}
+func NewQuizSubmissionHandler(quizService *service.QuizService, observerService *service.ObserverService, auditService *service.AuditService) *QuizSubmissionHandler {
+	return &QuizSubmissionHandler{quizService: quizService, observerService: observerService, auditService: auditService}
 }
 
 func quizSubmissionToJSON(qs *models.QuizSubmission) fiber.Map {
@@ -116,6 +117,11 @@ func (h *QuizSubmissionHandler) GetSubmission(c *fiber.Ctx) error {
 		if !isTeacherOrTA && !isObserver {
 			return responses.Error(c, fiber.StatusForbidden, "You do not have permission to view this submission")
 		}
+	}
+
+	// 13.5 PII audit — single-student read of a quiz attempt.
+	if userID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), userID, submission.UserID, "read", "quiz_attempt", "quiz_submissions", submission.ID, c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(fiber.Map{
@@ -242,6 +248,12 @@ func (h *QuizSubmissionHandler) GetSubmissionAnswers(c *fiber.Ctx) error {
 		result[i] = quizSubmissionAnswerToJSON(&a)
 	}
 
+	// 13.5 PII audit — student-keyed read of a quiz attempt's answers.
+	// Subject is the quiz submission's owner (sub.UserID).
+	if userID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), userID, sub.UserID, "read", "quiz_answers", "quiz_submissions", sub.ID, c.IP(), c.Get("User-Agent"))
+	}
+
 	return c.JSON(fiber.Map{
 		"quiz_submission_answers": result,
 	})
@@ -315,6 +327,15 @@ func (h *QuizSubmissionHandler) ListSubmissions(c *fiber.Ctx) error {
 	submissions := make([]fiber.Map, len(result.Items))
 	for i, qs := range result.Items {
 		submissions[i] = quizSubmissionToJSON(&qs)
+	}
+
+	// 13.5 PII audit — bulk-read semantics. Per-row would explode the
+	// audit table on large quiz rosters; one row per call with
+	// student_id=0 + data_field="bulk_quiz_attempt_list_read" is what
+	// audit investigations actually want (who pulled this quiz's
+	// attempts, when).
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_quiz_attempt_list_read", "quiz_submissions", uint(quizID), c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(fiber.Map{

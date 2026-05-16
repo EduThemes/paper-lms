@@ -381,7 +381,7 @@ func (s *QuizService) StartSubmission(ctx context.Context, quizID, userID uint, 
 	}
 
 	// Enforce attempt limits
-	quiz, err := s.quizRepo.FindByID(ctx, quizID)
+	quiz, err := s.quizRepo.FindByID(ctx, quizID, 0)
 	if err != nil {
 		return nil, errors.New("quiz not found")
 	}
@@ -594,7 +594,7 @@ func (s *QuizService) ListSubmissionAnswers(ctx context.Context, submissionID, u
 
 // GetQuiz returns a quiz by ID.
 func (s *QuizService) GetQuiz(ctx context.Context, quizID uint) (*models.Quiz, error) {
-	return s.quizRepo.FindByID(ctx, quizID)
+	return s.quizRepo.FindByID(ctx, quizID, 0)
 }
 
 // ListAllQuestions returns all active questions for a quiz (no pagination).

@@ -493,12 +493,12 @@ func (s *BlueprintService) syncQuizQuestions(ctx context.Context, sourceQuizID, 
 
 // syncDiscussions copies discussion topics from source to child.
 func (s *BlueprintService) syncDiscussions(ctx context.Context, sourceCourseID, childCourseID uint, idMap map[string]uint) error {
-	sourceTopics, err := s.discRepo.ListByCourseID(ctx, sourceCourseID, bigPage)
+	sourceTopics, err := s.discRepo.ListByCourseID(ctx, sourceCourseID, 0, bigPage)
 	if err != nil {
 		return err
 	}
 
-	childTopics, err := s.discRepo.ListByCourseID(ctx, childCourseID, bigPage)
+	childTopics, err := s.discRepo.ListByCourseID(ctx, childCourseID, 0, bigPage)
 	if err != nil {
 		return err
 	}
@@ -713,7 +713,7 @@ func (s *BlueprintService) GetUnsyncedChanges(ctx context.Context, templateID ui
 	}
 
 	// Check discussions
-	discussions, err := s.discRepo.ListByCourseID(ctx, courseid, bigPage)
+	discussions, err := s.discRepo.ListByCourseID(ctx, courseid, 0, bigPage)
 	if err == nil {
 		for _, d := range discussions.Items {
 			if since.IsZero() || d.UpdatedAt.After(since) {

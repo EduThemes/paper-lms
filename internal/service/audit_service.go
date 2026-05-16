@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,18 +17,58 @@ import (
 type AuditService struct {
 	auditLogRepo       *postgres.AuditLogRepo
 	gradeChangeLogRepo *postgres.GradeChangeLogRepo
+	// 13.5 — PII access log repo is wired here so handlers reach a
+	// single audit surface (`auditService`) rather than having to
+	// thread FERPAService through everywhere they read student data.
+	piiLogRepo postgres.PIIAccessLogRepository
 }
 
 // NewAuditService creates a new AuditService with the given repository dependencies.
-func NewAuditService(auditLogRepo *postgres.AuditLogRepo, gradeChangeLogRepo *postgres.GradeChangeLogRepo) *AuditService {
+// piiLogRepo may be nil — `LogPIIAccess` becomes a no-op when not wired (useful for tests
+// that don't exercise the FERPA surface).
+func NewAuditService(auditLogRepo *postgres.AuditLogRepo, gradeChangeLogRepo *postgres.GradeChangeLogRepo, piiLogRepo postgres.PIIAccessLogRepository) *AuditService {
 	return &AuditService{
 		auditLogRepo:       auditLogRepo,
 		gradeChangeLogRepo: gradeChangeLogRepo,
+		piiLogRepo:         piiLogRepo,
 	}
 }
 
+// LogPIIAccess creates a PII access log entry for FERPA audit trail.
+// Same shape as FERPAService.LogPIIAccess but reachable from handlers that
+// only hold an *AuditService. Returns nil if the PII log repo is unwired
+// (test wiring) — fire-and-forget callers shouldn't 5xx on audit failure.
+func (s *AuditService) LogPIIAccess(ctx context.Context, accessorID, studentID uint, accessType, dataField, resource string, resourceID uint, ipAddress, userAgent string) error {
+	if s == nil || s.piiLogRepo == nil {
+		return nil
+	}
+	if accessorID == 0 {
+		return errors.New("accessor_id is required")
+	}
+	// studentID == 0 is permitted for bulk-read summaries (e.g., a teacher
+	// pulling the whole gradebook): the handler emits one row with
+	// student_id=0 and data_field="bulk_<resource>_read" rather than
+	// N rows. Documented at the call site.
+	log := &models.PIIAccessLog{
+		AccessorID: accessorID,
+		StudentID:  studentID,
+		AccessType: accessType,
+		DataField:  dataField,
+		Resource:   resource,
+		ResourceID: resourceID,
+		IPAddress:  ipAddress,
+		UserAgent:  userAgent,
+	}
+	return s.piiLogRepo.Create(ctx, log)
+}
+
 // LogEvent creates an audit log entry for a system event.
+// No-ops when the service or auditLogRepo is nil so test wiring that
+// only exercises the PII surface can leave auditLogRepo unwired.
 func (s *AuditService) LogEvent(ctx context.Context, eventType string, userID uint, courseID, accountID *uint, contextType string, contextID uint, action, payload, ipAddress, userAgent string) error {
+	if s == nil || s.auditLogRepo == nil {
+		return nil
+	}
 	log := &models.AuditLog{
 		EventType:   eventType,
 		UserID:      userID,

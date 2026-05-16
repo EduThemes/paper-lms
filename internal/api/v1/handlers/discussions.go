@@ -72,7 +72,7 @@ func (h *DiscussionHandler) GetTopic(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid topic ID")
 	}
 
-	topic, err := h.discussionService.GetTopic(c.Context(), uint(id))
+	topic, err := h.discussionService.GetTopic(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "discussion topic")
 	}
@@ -145,7 +145,7 @@ func (h *DiscussionHandler) UpdateTopic(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid topic ID")
 	}
 
-	topic, err := h.discussionService.GetTopic(c.Context(), uint(id))
+	topic, err := h.discussionService.GetTopic(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "discussion topic")
 	}

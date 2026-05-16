@@ -162,7 +162,7 @@ func (h *OutcomeProficiencyHandler) LearningMasteryGradebook(c *fiber.Ctx) error
 	if err != nil {
 		return responses.BadRequest(c, "Invalid course ID")
 	}
-	gb, err := h.mastery.GetMasteryGradebook(c.Context(), uint(id))
+	gb, err := h.mastery.GetMasteryGradebook(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not build mastery gradebook")
 	}

@@ -20,9 +20,13 @@ func (r *gradingPeriodGroupRepo) Create(ctx context.Context, group *models.Gradi
 	return r.db.WithContext(ctx).Create(group).Error
 }
 
-func (r *gradingPeriodGroupRepo) FindByID(ctx context.Context, id uint) (*models.GradingPeriodGroup, error) {
+func (r *gradingPeriodGroupRepo) FindByID(ctx context.Context, id, accountID uint) (*models.GradingPeriodGroup, error) {
 	var group models.GradingPeriodGroup
-	if err := r.db.WithContext(ctx).Where("id = ? AND workflow_state != ?", id, "deleted").First(&group).Error; err != nil {
+	q := r.db.WithContext(ctx).Where("id = ? AND workflow_state != ?", id, "deleted")
+	if accountID != 0 {
+		q = q.Where("account_id = ?", accountID)
+	}
+	if err := q.First(&group).Error; err != nil {
 		return nil, err
 	}
 	return &group, nil

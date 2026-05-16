@@ -3,11 +3,25 @@ package db
 import (
 	"fmt"
 	"log"
+	"log/slog"
+	"os"
+	"strconv"
+	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+)
+
+// 13.8 — pool tuning. Defaults assume per-pod sizing on a 3-replica
+// deploy hitting a Postgres with max_connections ~ 100. Override per
+// environment via DB_MAX_OPEN_CONNS / DB_MAX_IDLE_CONNS /
+// DB_CONN_MAX_LIFETIME.
+const (
+	defaultMaxOpenConns    = 25
+	defaultMaxIdleConns    = 5
+	defaultConnMaxLifetime = 30 * time.Minute
 )
 
 func Connect(databaseURL string) (*gorm.DB, error) {
@@ -23,8 +37,26 @@ func Connect(databaseURL string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to get database instance: %w", err)
 	}
 
-	sqlDB.SetMaxOpenConns(100)
-	sqlDB.SetMaxIdleConns(25)
+	maxOpen, _ := strconv.Atoi(os.Getenv("DB_MAX_OPEN_CONNS"))
+	if maxOpen <= 0 {
+		maxOpen = defaultMaxOpenConns
+	}
+	maxIdle, _ := strconv.Atoi(os.Getenv("DB_MAX_IDLE_CONNS"))
+	if maxIdle <= 0 {
+		maxIdle = defaultMaxIdleConns
+	}
+	lifetime, _ := time.ParseDuration(os.Getenv("DB_CONN_MAX_LIFETIME"))
+	if lifetime <= 0 {
+		lifetime = defaultConnMaxLifetime
+	}
+	sqlDB.SetMaxOpenConns(maxOpen)
+	sqlDB.SetMaxIdleConns(maxIdle)
+	sqlDB.SetConnMaxLifetime(lifetime)
+	slog.Info("db pool configured",
+		"max_open", maxOpen,
+		"max_idle", maxIdle,
+		"max_lifetime", lifetime,
+	)
 
 	log.Println("Connected to PostgreSQL database")
 	return db, nil
@@ -196,6 +228,14 @@ func AutoMigrate(db *gorm.DB) error {
 		// Phase 6 Wave 1 Sprint C: per-user content-view aggregates that
 		// the ViewedContent predicate reads at rule-evaluation time.
 		&models.ContentView{},
+		// Phase 6 Wave 2 + Wave 3 / Phase 7 — gamification tables that
+		// landed in the SQL chain (000041 badges, 000045 leaderboard
+		// snapshots) but were left off the GORM AutoMigrate set. The
+		// schemagen parity test (TestSchemaParity_Wave3) is the watchdog
+		// that catches this drift.
+		&models.GamificationBadge{},
+		&models.GamificationBadgeAward{},
+		&models.GamificationLeaderboardSnapshot{},
 	)
 }
 

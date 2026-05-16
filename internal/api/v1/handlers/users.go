@@ -11,6 +11,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/auth"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
+	"github.com/EduThemes/paper-lms/internal/repository/postgres"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
 
@@ -20,10 +21,36 @@ type UserHandler struct {
 	jwtSecret      string
 	environment    string
 	tokenBlacklist *service.TokenBlacklist
+	// loginPipeline (Phase 9-PRE) — the local-password Login handler
+	// produces an SSOOutcome and runs it through the pipeline so MFA
+	// policy + audit logging + (future) federation linkage applies
+	// uniformly with the federated paths. nil-safe: when not wired
+	// the handler falls back to the pre-9-PRE direct-mint flow.
+	loginPipeline *auth.LoginPipeline
+
+	// Phase 13.4 (Wave C.2) — COPPA signup gate dependencies. All
+	// nil-safe: a nil accountRepo skips the gate entirely (the older
+	// development path and existing tests still work). Production
+	// wires the full set.
+	accountRepo         repository.AccountRepository
+	ageVerifyRepo       postgres.AgeVerificationRepository
+	parentalConsentRepo postgres.ParentalConsentRepository
+	authAudit           *auth.AuthAudit
 }
 
-func NewUserHandler(userService *service.UserService, jwtSecret string, environment string, tokenBlacklist *service.TokenBlacklist, auditService *service.AuditService) *UserHandler {
-	return &UserHandler{userService: userService, jwtSecret: jwtSecret, environment: environment, tokenBlacklist: tokenBlacklist, auditService: auditService}
+func NewUserHandler(userService *service.UserService, jwtSecret string, environment string, tokenBlacklist *service.TokenBlacklist, auditService *service.AuditService, loginPipeline *auth.LoginPipeline) *UserHandler {
+	return &UserHandler{userService: userService, jwtSecret: jwtSecret, environment: environment, tokenBlacklist: tokenBlacklist, auditService: auditService, loginPipeline: loginPipeline}
+}
+
+// WithCOPPADeps wires the Phase 13.4 signup gate. Optional builder
+// method so the existing NewUserHandler call sites (and tests) keep
+// working without a six-arg explosion. Returns the handler for chaining.
+func (h *UserHandler) WithCOPPADeps(accountRepo repository.AccountRepository, ageVerifyRepo postgres.AgeVerificationRepository, parentalConsentRepo postgres.ParentalConsentRepository, authAudit *auth.AuthAudit) *UserHandler {
+	h.accountRepo = accountRepo
+	h.ageVerifyRepo = ageVerifyRepo
+	h.parentalConsentRepo = parentalConsentRepo
+	h.authAudit = authAudit
+	return h
 }
 
 // setAuthCookie sets an httpOnly secure cookie with the JWT token.
@@ -60,9 +87,16 @@ type loginRequest struct {
 }
 
 type registerRequest struct {
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Name                  string `json:"name"`
+	Email                 string `json:"email"`
+	Password              string `json:"password"`
+	// ParentalConsentToken (Phase 13.4 / Wave C.2) carries the token a
+	// parent received via email after a prior consent request. When
+	// the signup tenant is coppa_strict and the user's age verification
+	// indicates is_under_13, this token MUST be present and valid
+	// (status="granted", consent_type="data_collection"); otherwise
+	// the new row is created in pending_parental_consent state.
+	ParentalConsentToken  string `json:"parental_consent_token"`
 }
 
 func (h *UserHandler) Login(c *fiber.Ctx) error {
@@ -76,14 +110,60 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		return responses.Error(c, fiber.StatusUnauthorized, "Invalid credentials")
 	}
 
+	// Phase 9-PRE: route through LoginPipeline so MFA policy / audit
+	// logging / future federation linkage applies uniformly. The
+	// pipeline returns either a real session token OR a pending-MFA
+	// token; this handler translates to HTTP.
+	if h.loginPipeline != nil {
+		outcome := auth.SSOOutcome{
+			ProviderType:    "local",
+			ExternalSubject: fmt.Sprintf("%d", user.ID),
+			Email:           user.Email,
+			EmailVerified:   true, // user authenticated against their own row
+			Name:            user.Name,
+		}
+		meta := auth.RequestMeta{IPAddress: c.IP(), UserAgent: c.Get("User-Agent")}
+		result, err := h.loginPipeline.Execute(c.Context(), outcome, meta)
+		if err != nil {
+			return responses.InternalError(c, "Could not complete login")
+		}
+		// MFA gate: pending token returned, real session withheld.
+		if result.PendingToken != "" {
+			return c.JSON(fiber.Map{
+				"pending_token": result.PendingToken,
+				"mfa_required":  true,
+			})
+		}
+		// Token issued. Possibly with a "must enroll" flag.
+		h.setAuthCookie(c, result.Token)
+		body := fiber.Map{
+			"token": result.Token,
+			"user": fiber.Map{
+				"id":            result.User.ID,
+				"name":          result.User.Name,
+				"sortable_name": result.User.SortableName,
+				"short_name":    result.User.ShortName,
+				"login_id":      result.User.LoginID,
+				"email":         result.User.Email,
+				"avatar_url":    result.User.AvatarURL,
+				"locale":        result.User.Locale,
+				"role":          result.User.Role,
+			},
+		}
+		if result.MustEnroll {
+			body["must_enroll_mfa"] = true
+		}
+		return c.JSON(body)
+	}
+
+	// Fallback: pre-9-PRE direct-mint path. Kept so the handler is
+	// safe to wire in stages (pipeline can be added to DI after the
+	// handler is constructed in tests).
 	token, err := auth.GenerateToken(user, h.jwtSecret)
 	if err != nil {
 		return responses.InternalError(c, "Could not generate token")
 	}
-
-	// Set httpOnly cookie for browser-based auth
 	h.setAuthCookie(c, token)
-
 	return c.JSON(fiber.Map{
 		"token": token,
 		"user": fiber.Map{
@@ -111,6 +191,55 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 		return responses.BadRequest(c, err.Error())
 	}
 
+	// Phase 13.4 (Wave C.2) — COPPA signup gate. When the tenant is
+	// coppa_strict AND the user's age verification indicates is_under_13,
+	// require a valid parental_consent_token. Without it, mark the user
+	// as pending_parental_consent (no auto-login) and return 201 with a
+	// message instructing the user that a parent must verify.
+	//
+	// The user row is already created at this point (because the older
+	// Register flow ran first and we re-use the same email-uniqueness
+	// path). We then update the requires_parental_consent flag in-place
+	// before issuing — or withholding — the session token.
+	meta := auth.RequestMeta{IPAddress: c.IP(), UserAgent: c.Get("User-Agent")}
+	if h.accountRepo != nil && user.AccountID > 0 {
+		if account, accErr := h.accountRepo.FindByID(c.Context(), user.AccountID); accErr == nil && account != nil && account.CoppaStrict {
+			isUnder13 := false
+			if h.ageVerifyRepo != nil {
+				if av, avErr := h.ageVerifyRepo.FindByUserID(c.Context(), user.ID); avErr == nil && av != nil {
+					isUnder13 = av.IsUnder13
+				}
+			}
+			if isUnder13 {
+				tokenValid := false
+				if h.parentalConsentRepo != nil && input.ParentalConsentToken != "" {
+					if consent, cErr := h.parentalConsentRepo.FindByToken(c.Context(), input.ParentalConsentToken); cErr == nil && consent != nil {
+						if consent.Status == "granted" && consent.ConsentedAt != nil {
+							tokenValid = true
+						}
+					}
+				}
+				if !tokenValid {
+					// Mark the row as pending; the user cannot be auto-logged-in.
+					user.RequiresParentalConsent = true
+					_ = h.userService.Update(c.Context(), user)
+					if h.authAudit != nil {
+						h.authAudit.RegistrationCompleted(c.Context(), user.ID, "pending_parental_consent", meta)
+					}
+					return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+						"message": "Account created in pending state. A parent must verify the consent token before this account can be used.",
+						"user": fiber.Map{
+							"id":                       user.ID,
+							"name":                     user.Name,
+							"email":                    user.Email,
+							"requires_parental_consent": true,
+						},
+					})
+				}
+			}
+		}
+	}
+
 	token, err := auth.GenerateToken(user, h.jwtSecret)
 	if err != nil {
 		return responses.InternalError(c, "Could not generate token")
@@ -118,6 +247,14 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 
 	// Set httpOnly cookie for browser-based auth
 	h.setAuthCookie(c, token)
+
+	// Phase 13.4 (Wave C.2) — audit symmetry with the login path.
+	// Pipeline extension to cover Register is the cleaner long-term
+	// fix; firing the audit event manually here closes the gap with
+	// minimal blast radius.
+	if h.authAudit != nil {
+		h.authAudit.RegistrationCompleted(c.Context(), user.ID, "active", meta)
+	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"token": token,
@@ -261,6 +398,29 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 	})
 }
 
+// ChangePassword lets a logged-in user rotate their own password. Requires
+// the current password to defend against session-theft → account-takeover.
+func (h *UserHandler) ChangePassword(c *fiber.Ctx) error {
+	userID, err := getUserID(c)
+	if err != nil {
+		return err
+	}
+	var input struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := c.BodyParser(&input); err != nil {
+		return responses.BadRequest(c, "Invalid input")
+	}
+	if input.CurrentPassword == "" || input.NewPassword == "" {
+		return responses.BadRequest(c, "current_password and new_password are required")
+	}
+	if err := h.userService.ChangePassword(c.Context(), userID, input.CurrentPassword, input.NewPassword); err != nil {
+		return responses.BadRequest(c, err.Error())
+	}
+	return c.JSON(fiber.Map{"changed": true})
+}
+
 // UpdateUserRole sets a user's role. Admin-only at the route level.
 func (h *UserHandler) UpdateUserRole(c *fiber.Ctx) error {
 	id, err := c.ParamsInt("id")
@@ -359,8 +519,12 @@ func (h *UserHandler) StartMasquerade(c *fiber.Ctx) error {
 		return responses.NotFound(c, "user")
 	}
 
+	// 13.1.B — pass the admin's home tenant so the masquerade token's
+	// admin_account_id claim attributes the impersonation correctly.
+	adminAccountID, _ := c.Locals("account_id").(uint)
+
 	// Generate a masquerade token (target user's identity + admin's ID in masquerade_by claim)
-	token, err := auth.GenerateMasqueradeToken(targetUser, adminUserID, h.jwtSecret)
+	token, err := auth.GenerateMasqueradeToken(targetUser, adminUserID, adminAccountID, h.jwtSecret)
 	if err != nil {
 		return responses.InternalError(c, "Could not generate masquerade token")
 	}

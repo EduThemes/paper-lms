@@ -20,9 +20,13 @@ func (r *assignmentRepo) Create(ctx context.Context, assignment *models.Assignme
 	return r.db.WithContext(ctx).Create(assignment).Error
 }
 
-func (r *assignmentRepo) FindByID(ctx context.Context, id uint) (*models.Assignment, error) {
+func (r *assignmentRepo) FindByID(ctx context.Context, id, accountID uint) (*models.Assignment, error) {
 	var assignment models.Assignment
-	if err := r.db.WithContext(ctx).First(&assignment, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		q = q.Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID)
+	}
+	if err := q.First(&assignment, id).Error; err != nil {
 		return nil, err
 	}
 	return &assignment, nil
