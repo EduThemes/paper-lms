@@ -450,7 +450,7 @@ func main() {
 		notificationDeliveryRepo, communicationChannelRepo, notificationPrefRepo,
 		notificationRepo, userRepo, smtpConfig,
 	)
-	auditService := service.NewAuditService(auditLogRepo, gradeChangeLogRepo)
+	auditService := service.NewAuditService(auditLogRepo, gradeChangeLogRepo, piiAccessLogRepo)
 	// services
 	customRoleService := service.NewCustomRoleService(customRoleRepo, roleOverrideRepo, enrollmentRepo)
 	onerosterService := service.NewOneRosterService(onerosterConnRepo, onerosterSyncLogRepo, userRepo, courseRepo, sectionRepo, enrollmentRepo, accountRepo, database)
@@ -620,8 +620,8 @@ func main() {
 	gamificationHandler := handlers.NewGamificationHandler(gamificationWalletRepo, gamificationCurrencyTypeRepo, userRepo, gamificationBadgeRepo, gamificationBadgeAwardRepo, gamificationRuleRepo, enrollmentRepo, accountRepo, gamificationLeaderboardSnapshotRepo)
 	assignmentHandler := handlers.NewAssignmentHandler(assignmentService)
 	assignmentGroupHandler := handlers.NewAssignmentGroupHandler(assignmentGroupService)
-	submissionHandler := handlers.NewSubmissionHandler(submissionService, submissionCommentRepo, attachmentRepo, userRepo, assignmentRepo, notificationDeliveryService, observerService, outcomeAlignmentRepo, learningOutcomeService)
-	gradebookHandler := handlers.NewGradebookHandler(gradingService)
+	submissionHandler := handlers.NewSubmissionHandler(submissionService, submissionCommentRepo, attachmentRepo, userRepo, assignmentRepo, notificationDeliveryService, observerService, outcomeAlignmentRepo, learningOutcomeService, auditService)
+	gradebookHandler := handlers.NewGradebookHandler(gradingService, auditService)
 	gradingStandardHandler := handlers.NewGradingStandardHandler(gradingStandardRepo)
 	developerKeyHandler := handlers.NewDeveloperKeyHandler(devKeyService)
 	accessTokenHandler := handlers.NewAccessTokenHandler(accessTokenService)
@@ -638,7 +638,7 @@ func main() {
 	// handlers
 	quizHandler := handlers.NewQuizHandler(quizRepo)
 	quizQuestionHandler := handlers.NewQuizQuestionHandler(quizService)
-	quizSubmissionHandler := handlers.NewQuizSubmissionHandler(quizService, observerService)
+	quizSubmissionHandler := handlers.NewQuizSubmissionHandler(quizService, observerService, auditService)
 	rubricHandler := handlers.NewRubricHandler(rubricService)
 	rubricAssessmentHandler := handlers.NewRubricAssessmentHandler(rubricService)
 	gradingPeriodHandler := handlers.NewGradingPeriodHandler(gradingPeriodService)
@@ -646,7 +646,7 @@ func main() {
 	latePolicyHandler := handlers.NewLatePolicyHandler(latePolicyService)
 	// handlers
 	calendarEventHandler := handlers.NewCalendarEventHandler(calendarService, authz)
-	conversationHandler := handlers.NewConversationHandler(conversationService, userService, accountRepo, enrollmentRepo)
+	conversationHandler := handlers.NewConversationHandler(conversationService, userService, accountRepo, enrollmentRepo, auditService)
 	notificationHandler := handlers.NewNotificationHandler(notificationService)
 	// handlers
 	contentMigrationHandler := handlers.NewContentMigrationHandler(contentMigrationService)
@@ -660,7 +660,7 @@ func main() {
 	collaborationHandler := handlers.NewCollaborationHandler(collaborationService, authz)
 	conferenceHandler := handlers.NewConferenceHandler(conferenceService, authz)
 	analyticsHandler := handlers.NewAnalyticsHandler(analyticsService)
-	observerHandler := handlers.NewObserverHandler(observerService, pairingCodeService)
+	observerHandler := handlers.NewObserverHandler(observerService, pairingCodeService, auditService)
 	// handlers
 	graphqlResolver := graphql.NewResolver(courseService, assignmentService, userService, enrollmentService, moduleService, submissionService)
 	graphqlHandler := handlers.NewGraphQLHandler(graphqlResolver)
@@ -684,7 +684,7 @@ func main() {
 	coppaHandler := handlers.NewCOPPAHandler(coppaService)
 	ferpaHandler := handlers.NewFERPAHandler(ferpaService)
 	accommodationHandler := handlers.NewAccommodationHandler(accommodationService, assignmentService, authz)
-	attendanceHandler := handlers.NewAttendanceHandler(attendanceService)
+	attendanceHandler := handlers.NewAttendanceHandler(attendanceService, auditService)
 	portfolioHandler := handlers.NewPortfolioHandler(portfolioService, authz)
 	courseHomeHandler := handlers.NewCourseHomeHandler(courseHomeService)
 	peerReviewHandler := handlers.NewPeerReviewHandler(peerReviewService)
@@ -830,6 +830,7 @@ func main() {
 		authMiddleware,
 		permMiddleware,
 		accountRepo,
+		auditService,
 	)
 
 	// Create Fiber app

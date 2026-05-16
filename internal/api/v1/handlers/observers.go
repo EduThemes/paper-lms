@@ -15,10 +15,11 @@ type ObserverHandler struct {
 	// must redeem a one-shot code minted by the student (adult-mode
 	// tenants) or by a teacher in the student's course (K-12 mode).
 	pairingService *service.PairingCodeService
+	auditService   *service.AuditService
 }
 
-func NewObserverHandler(observerService *service.ObserverService, pairingService *service.PairingCodeService) *ObserverHandler {
-	return &ObserverHandler{observerService: observerService, pairingService: pairingService}
+func NewObserverHandler(observerService *service.ObserverService, pairingService *service.PairingCodeService, auditService *service.AuditService) *ObserverHandler {
+	return &ObserverHandler{observerService: observerService, pairingService: pairingService, auditService: auditService}
 }
 
 // LinkObservee handles POST /users/:user_id/observees
@@ -128,6 +129,12 @@ func (h *ObserverHandler) GetChildOverview(c *fiber.Ctx) error {
 		return responses.BadRequest(c, err.Error())
 	}
 
+	// 13.5 PII audit — parent/observer reads child's academic
+	// overview. Subject is the childID path param.
+	if h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), uint(userID), uint(childID), "read", "child_overview", "child_overview", uint(childID), c.IP(), c.Get("User-Agent"))
+	}
+
 	return c.JSON(overview)
 }
 
@@ -156,6 +163,12 @@ func (h *ObserverHandler) GetObserveeCourses(c *fiber.Ctx) error {
 			"course_code":    course.CourseCode,
 			"workflow_state": course.WorkflowState,
 		}
+	}
+
+	// 13.5 PII audit — parent/observer reads child's course list.
+	// Subject is the observeeID path param.
+	if h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), uint(userID), uint(observeeID), "read", "child_courses", "child_courses", uint(observeeID), c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(result)

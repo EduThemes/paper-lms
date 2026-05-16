@@ -24,9 +24,10 @@ type SubmissionHandler struct {
 	observerService             *service.ObserverService
 	outcomeAlignmentRepo        repository.OutcomeAlignmentRepository
 	outcomeService              *service.LearningOutcomeService
+	auditService                *service.AuditService
 }
 
-func NewSubmissionHandler(submissionService *service.SubmissionService, commentRepo repository.SubmissionCommentRepository, attachmentRepo repository.AttachmentRepository, userRepo repository.UserRepository, assignmentRepo repository.AssignmentRepository, notificationDeliveryService *service.NotificationDeliveryService, observerService *service.ObserverService, outcomeAlignmentRepo repository.OutcomeAlignmentRepository, outcomeService *service.LearningOutcomeService) *SubmissionHandler {
+func NewSubmissionHandler(submissionService *service.SubmissionService, commentRepo repository.SubmissionCommentRepository, attachmentRepo repository.AttachmentRepository, userRepo repository.UserRepository, assignmentRepo repository.AssignmentRepository, notificationDeliveryService *service.NotificationDeliveryService, observerService *service.ObserverService, outcomeAlignmentRepo repository.OutcomeAlignmentRepository, outcomeService *service.LearningOutcomeService, auditService *service.AuditService) *SubmissionHandler {
 	return &SubmissionHandler{
 		submissionService:           submissionService,
 		commentRepo:                 commentRepo,
@@ -37,6 +38,7 @@ func NewSubmissionHandler(submissionService *service.SubmissionService, commentR
 		observerService:             observerService,
 		outcomeAlignmentRepo:        outcomeAlignmentRepo,
 		outcomeService:              outcomeService,
+		auditService:                auditService,
 	}
 }
 
@@ -153,6 +155,15 @@ func (h *SubmissionHandler) ListSubmissions(c *fiber.Ctx) error {
 		submissions[i] = submissionToJSON(&s)
 	}
 
+	// 13.5 PII audit — bulk-read semantics (per-row would emit N rows
+	// per page load on a 200-student section, which floods the audit
+	// surface for no real investigative win). One row per call with
+	// student_id=0 + data_field="bulk_submission_list_read" preserves
+	// "who looked at which assignment's submissions, when".
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_submission_list_read", "submissions", uint(assignmentID), c.IP(), c.Get("User-Agent"))
+	}
+
 	return c.JSON(submissions)
 }
 
@@ -170,6 +181,11 @@ func (h *SubmissionHandler) GetSubmission(c *fiber.Ctx) error {
 	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID))
 	if err != nil {
 		return responses.NotFound(c, "submission")
+	}
+
+	// 13.5 PII audit — single-student read; emit one row per access.
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, submission.UserID, "read", "submission", "submissions", submission.ID, c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(submissionToJSON(submission))
@@ -421,6 +437,13 @@ func (h *SubmissionHandler) ListSubmissionComments(c *fiber.Ctx) error {
 			j["author_name"] = name
 		}
 		result[i] = j
+	}
+
+	// 13.5 PII audit — student-keyed read of comments on a single
+	// submission. Emit one row per access with the submission's
+	// owning student as the subject.
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, submission.UserID, "read", "submission_comments", "submission_comments", submission.ID, c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(result)

@@ -13,18 +13,21 @@ type ConversationHandler struct {
 	conversationService *service.ConversationService
 	userService         *service.UserService
 	// accountRepo + enrollmentRepo drive the 13.4 COPPA gate on
-	// CreateConversation. Both nil-safe: a nil accountRepo skips the
-	// gate (development fallback / older tests). Production wires both.
+	// CreateConversation. auditService drives 13.5 LogPIIAccess on
+	// reads. All three nil-safe — handler degrades to legacy
+	// pre-Phase-13 behavior when any is unset.
 	accountRepo    repository.AccountRepository
 	enrollmentRepo repository.EnrollmentRepository
+	auditService   *service.AuditService
 }
 
-func NewConversationHandler(conversationService *service.ConversationService, userService *service.UserService, accountRepo repository.AccountRepository, enrollmentRepo repository.EnrollmentRepository) *ConversationHandler {
+func NewConversationHandler(conversationService *service.ConversationService, userService *service.UserService, accountRepo repository.AccountRepository, enrollmentRepo repository.EnrollmentRepository, auditService *service.AuditService) *ConversationHandler {
 	return &ConversationHandler{
 		conversationService: conversationService,
 		userService:         userService,
 		accountRepo:         accountRepo,
 		enrollmentRepo:      enrollmentRepo,
+		auditService:        auditService,
 	}
 }
 
@@ -177,6 +180,15 @@ func (h *ConversationHandler) GetConversation(c *fiber.Ctx) error {
 		return responses.NotFound(c, "conversation")
 	}
 
+	// 13.5 PII audit — conversations have N participants; per-row
+	// emission would inflate the audit table for no investigative
+	// win. One row per access with student_id=0 +
+	// data_field="bulk_conversation_read" captures the meaningful
+	// signal (who looked at which conversation, when).
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_conversation_read", "conversations", conv.ID, c.IP(), c.Get("User-Agent"))
+	}
+
 	j := conversationToJSON(conv)
 	j["participants"] = h.resolveParticipants(c, conv.ID)
 	return c.JSON(j)
@@ -292,6 +304,13 @@ func (h *ConversationHandler) ListMessages(c *fiber.Ctx) error {
 			j["user_name"] = user.Name
 		}
 		messages[i] = j
+	}
+
+	// 13.5 PII audit — bulk-read semantics on a conversation message
+	// list. Same rationale as GetConversation: messages have N
+	// authors; emit one row per call keyed to the conversation ID.
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_conversation_message_read", "conversations", uint(id), c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(messages)

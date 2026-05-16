@@ -41,7 +41,7 @@ func setupSubmissionTest() (
 	gradingPeriodGroupRepo := new(mocks.MockGradingPeriodGroupRepository)
 	gradingPeriodRepo := new(mocks.MockGradingPeriodRepository)
 	submissionService := service.NewSubmissionService(submissionRepo, assignmentRepo, enrollmentRepo, latePolicyRepo, courseRepo, gradingPeriodGroupRepo, gradingPeriodRepo, nil)
-	handler := handlers.NewSubmissionHandler(submissionService, commentRepo, attachmentRepo, userRepo, assignmentRepo, nil, nil, nil, nil)
+	handler := handlers.NewSubmissionHandler(submissionService, commentRepo, attachmentRepo, userRepo, assignmentRepo, nil, nil, nil, nil, nil)
 
 	app = testutil.SetupTestApp()
 

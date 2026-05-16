@@ -6,6 +6,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/auth"
 	"github.com/EduThemes/paper-lms/internal/repository"
+	"github.com/EduThemes/paper-lms/internal/service"
 )
 
 type Router struct {
@@ -110,6 +111,10 @@ type Router struct {
 	gamificationHandler *handlers.GamificationHandler
 	authMiddleware             *middleware.AuthMiddleware
 	permMiddleware             *middleware.PermissionMiddleware
+	// 13.5 — wired so the global AuditWrites middleware can emit an
+	// audit_log row on every successful 2xx write inside the
+	// protected group. Single mount; covers ~333 write routes.
+	auditService *service.AuditService
 }
 
 func NewRouter(
@@ -214,6 +219,7 @@ func NewRouter(
 	authMiddleware *middleware.AuthMiddleware,
 	permMiddleware *middleware.PermissionMiddleware,
 	accountRepo repository.AccountRepository,
+	auditService *service.AuditService,
 ) *Router {
 	return &Router{
 		accountRepo: accountRepo,
@@ -306,6 +312,7 @@ func NewRouter(
 		gamificationHandler:         gamificationHandler,
 		authMiddleware:              authMiddleware,
 		permMiddleware:              permMiddleware,
+		auditService:                auditService,
 	}
 }
 
@@ -376,6 +383,13 @@ func (r *Router) Register(app *fiber.App) {
 
 	// Protected routes (authentication required)
 	protected := api.Group("", r.authMiddleware.Protected(), middleware.CSRFProtection())
+
+	// 13.5 — global AuditWrites mount. Filters by HTTP method (POST/PUT/
+	// PATCH/DELETE) and 2xx status inside the middleware, so a single
+	// `protected.Use(...)` covers every authenticated write route
+	// (~333 of them) without per-route plumbing. MUST sit before any
+	// route declarations on this group.
+	protected.Use(middleware.AuditWrites(r.auditService, "http.write"))
 
 	// Users (self access or admin)
 	protected.Get("/users/self", r.userHandler.GetSelf)

@@ -1,28 +1,31 @@
 package middleware
 
 import (
+	"context"
+
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/EduThemes/paper-lms/internal/service"
 )
 
-// AuditWrites mounts after the route handler and emits an audit_log
-// row when the response is 2xx and the request method is a writing
-// method (POST/PUT/PATCH/DELETE).
+// AuditEventEmitter is the narrow surface AuditWrites needs from the
+// audit service. Extracted so the middleware is mockable in tests
+// without having to spin up a real *postgres.AuditLogRepo.
+type AuditEventEmitter interface {
+	LogEvent(ctx context.Context, eventType string, userID uint, courseID, accountID *uint, contextType string, contextID uint, action, payload, ipAddress, userAgent string) error
+}
+
+// AuditWrites mounts on every write-emitting protected route group
+// and emits an audit_log row when the response is 2xx and the
+// request method is a writing method (POST/PUT/PATCH/DELETE).
 //
 // 13.5 — `LogPIIAccess` and `LogGradeChange` were defined but never
-// called; this is the systematic wrapping piece. Mounts go on every
-// student-keyed CRUD route surface. The contextType + contextID are
-// derived from the URL params heuristically (entity-from-path); the
-// per-handler `LogPIIAccess` call on the read path still owes a
-// follow-up pass.
-//
-// Effort note: this middleware exists; wiring it onto every write
-// route across the handler surface is deferred to a separate session.
-// The audit's "defined, never called" finding is resolved by the
-// function existing + a representative mount on the most sensitive
-// routes (grade changes, deletion requests).
-func AuditWrites(auditService *service.AuditService, eventType string) fiber.Handler {
+// called pre-13.5; this middleware is the systematic wrapping piece
+// for the write side. A single `protected.Use(...)` in the router
+// covers every authenticated write route (~333 of them) without
+// per-route plumbing. The read side is handled per-handler with
+// `auditService.LogPIIAccess`.
+func AuditWrites(emitter AuditEventEmitter, eventType string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		if err := c.Next(); err != nil {
 			return err
@@ -36,7 +39,9 @@ func AuditWrites(auditService *service.AuditService, eventType string) fiber.Han
 			method != fiber.MethodPatch && method != fiber.MethodDelete {
 			return nil
 		}
-		if auditService == nil {
+		// Nil-emitter guard. Production wires a *service.AuditService;
+		// tests can pass nil to bypass emission, or a fake to assert.
+		if emitter == nil {
 			return nil
 		}
 		userID, _ := c.Locals("user_id").(uint)
@@ -52,7 +57,7 @@ func AuditWrites(auditService *service.AuditService, eventType string) fiber.Han
 		payload := method + " " + c.Path()
 		// Fire-and-forget — the request has already succeeded; an
 		// audit-write failure should NOT 5xx the client.
-		_ = auditService.LogEvent(
+		_ = emitter.LogEvent(
 			c.Context(),
 			eventType,
 			userID,
@@ -68,3 +73,6 @@ func AuditWrites(auditService *service.AuditService, eventType string) fiber.Han
 		return nil
 	}
 }
+
+// Compile-time check that *service.AuditService satisfies AuditEventEmitter.
+var _ AuditEventEmitter = (*service.AuditService)(nil)
