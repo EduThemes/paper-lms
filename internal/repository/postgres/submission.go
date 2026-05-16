@@ -21,9 +21,14 @@ func (r *submissionRepo) Create(ctx context.Context, submission *models.Submissi
 	return r.db.WithContext(ctx).Create(submission).Error
 }
 
-func (r *submissionRepo) FindByID(ctx context.Context, id uint) (*models.Submission, error) {
+func (r *submissionRepo) FindByID(ctx context.Context, id, accountID uint) (*models.Submission, error) {
 	var submission models.Submission
-	if err := r.db.WithContext(ctx).First(&submission, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Scope through assignment->course->account_id (deep 2-level subquery).
+		q = q.Where("assignment_id IN (SELECT id FROM assignments WHERE course_id IN (SELECT id FROM courses WHERE account_id = ?))", accountID)
+	}
+	if err := q.First(&submission, id).Error; err != nil {
 		return nil, err
 	}
 	return &submission, nil

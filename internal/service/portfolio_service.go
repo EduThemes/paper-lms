@@ -250,7 +250,7 @@ func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uin
 	var imported []models.PortfolioArtifact
 
 	for _, submissionID := range submissionIDs {
-		submission, err := s.submissionRepo.FindByID(ctx, submissionID)
+		submission, err := s.submissionRepo.FindByID(ctx, submissionID, 0)
 		if err != nil {
 			continue // skip submissions that can't be found
 		}

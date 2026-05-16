@@ -18,8 +18,8 @@ func (m *MockGradingPeriodGroupRepository) Create(ctx context.Context, group *mo
 	return args.Error(0)
 }
 
-func (m *MockGradingPeriodGroupRepository) FindByID(ctx context.Context, id uint) (*models.GradingPeriodGroup, error) {
-	args := m.Called(ctx, id)
+func (m *MockGradingPeriodGroupRepository) FindByID(ctx context.Context, id, accountID uint) (*models.GradingPeriodGroup, error) {
+	args := m.Called(ctx, id, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

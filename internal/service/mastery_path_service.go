@@ -160,7 +160,7 @@ func (s *MasteryPathService) DeleteRule(ctx context.Context, id uint) error {
 // Idempotent: replaying for the same submission inserts no new rows because of
 // the (set_id, student_id, action_type) unique index.
 func (s *MasteryPathService) EvaluateForStudent(ctx context.Context, submissionID uint) error {
-	sub, err := s.submissionRepo.FindByID(ctx, submissionID)
+	sub, err := s.submissionRepo.FindByID(ctx, submissionID, 0)
 	if err != nil {
 		return err
 	}

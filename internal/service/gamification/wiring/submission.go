@@ -59,7 +59,7 @@ func GradedSubmissionEmitCallback(
 	courseRepo repository.CourseRepository,
 ) service.SubmissionGradedCallback {
 	return func(ctx context.Context, submissionID uint) {
-		submission, err := submissionRepo.FindByID(ctx, submissionID)
+		submission, err := submissionRepo.FindByID(ctx, submissionID, 0)
 		if err != nil {
 			slog.Error("graded submission emit: load submission",
 				"submission_id", submissionID, "error", err)

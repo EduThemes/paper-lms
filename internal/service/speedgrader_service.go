@@ -127,7 +127,7 @@ func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, a
 			student.Submission = sub
 
 			// Fetch comments for this submission
-			comments, err := s.submissionCommentRepo.ListBySubmissionID(ctx, sub.ID)
+			comments, err := s.submissionCommentRepo.ListBySubmissionID(ctx, sub.ID, 0)
 			if err == nil && len(comments) > 0 {
 				student.Comments = comments
 			}
@@ -154,7 +154,7 @@ func (s *SpeedGraderService) GetStudentSubmission(ctx context.Context, assignmen
 		}, nil
 	}
 
-	comments, err := s.submissionCommentRepo.ListBySubmissionID(ctx, submission.ID)
+	comments, err := s.submissionCommentRepo.ListBySubmissionID(ctx, submission.ID, 0)
 	if err != nil {
 		comments = make([]models.SubmissionComment, 0)
 	}

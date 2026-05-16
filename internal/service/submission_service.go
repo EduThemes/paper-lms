@@ -400,7 +400,7 @@ func (s *SubmissionService) isGradingPeriodClosed(ctx context.Context, assignmen
 		if group.WorkflowState != "active" {
 			continue
 		}
-		periods, err := s.gradingPeriodRepo.ListByGroupID(ctx, group.ID)
+		periods, err := s.gradingPeriodRepo.ListByGroupID(ctx, group.ID, 0)
 		if err != nil {
 			continue
 		}

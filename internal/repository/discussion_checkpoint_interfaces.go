@@ -21,7 +21,8 @@ type DiscussionCheckpointRepository interface {
 // against discussion checkpoints.
 type DiscussionCheckpointSubmissionRepository interface {
 	UpsertSubmission(ctx context.Context, submission *models.DiscussionCheckpointSubmission) error
-	FindByCheckpointAndUser(ctx context.Context, checkpointID, userID uint) (*models.DiscussionCheckpointSubmission, error)
-	ListByCheckpoint(ctx context.Context, checkpointID uint) ([]models.DiscussionCheckpointSubmission, error)
-	ListByUserAndTopic(ctx context.Context, topicID, userID uint) ([]models.DiscussionCheckpointSubmission, error)
+	// 13.1.D — tenant scope via checkpoint->topic->course. 0 means no tenant scope (internal callers only).
+	FindByCheckpointAndUser(ctx context.Context, checkpointID, userID, accountID uint) (*models.DiscussionCheckpointSubmission, error)
+	ListByCheckpoint(ctx context.Context, checkpointID, accountID uint) ([]models.DiscussionCheckpointSubmission, error)
+	ListByUserAndTopic(ctx context.Context, topicID, userID, accountID uint) ([]models.DiscussionCheckpointSubmission, error)
 }

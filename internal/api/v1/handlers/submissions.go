@@ -399,7 +399,7 @@ func (h *SubmissionHandler) ListSubmissionComments(c *fiber.Ctx) error {
 		return responses.NotFound(c, "submission")
 	}
 
-	comments, err := h.commentRepo.ListBySubmissionID(c.Context(), submission.ID)
+	comments, err := h.commentRepo.ListBySubmissionID(c.Context(), submission.ID, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch comments")
 	}

@@ -19,8 +19,8 @@ func (m *MockSubmissionRepository) Create(ctx context.Context, submission *model
 	return args.Error(0)
 }
 
-func (m *MockSubmissionRepository) FindByID(ctx context.Context, id uint) (*models.Submission, error) {
-	args := m.Called(ctx, id)
+func (m *MockSubmissionRepository) FindByID(ctx context.Context, id, accountID uint) (*models.Submission, error) {
+	args := m.Called(ctx, id, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

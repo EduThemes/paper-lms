@@ -17,8 +17,8 @@ func (m *MockSubmissionCommentRepository) Create(ctx context.Context, comment *m
 	return args.Error(0)
 }
 
-func (m *MockSubmissionCommentRepository) ListBySubmissionID(ctx context.Context, submissionID uint) ([]models.SubmissionComment, error) {
-	args := m.Called(ctx, submissionID)
+func (m *MockSubmissionCommentRepository) ListBySubmissionID(ctx context.Context, submissionID, accountID uint) ([]models.SubmissionComment, error) {
+	args := m.Called(ctx, submissionID, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

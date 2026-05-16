@@ -79,32 +79,40 @@ func (r *discussionCheckpointSubmissionRepo) UpsertSubmission(ctx context.Contex
 		Create(s).Error
 }
 
-func (r *discussionCheckpointSubmissionRepo) FindByCheckpointAndUser(ctx context.Context, checkpointID, userID uint) (*models.DiscussionCheckpointSubmission, error) {
+func (r *discussionCheckpointSubmissionRepo) FindByCheckpointAndUser(ctx context.Context, checkpointID, userID, accountID uint) (*models.DiscussionCheckpointSubmission, error) {
 	var sub models.DiscussionCheckpointSubmission
-	if err := r.db.WithContext(ctx).
-		Where("discussion_checkpoint_id = ? AND user_id = ?", checkpointID, userID).
-		First(&sub).Error; err != nil {
+	q := r.db.WithContext(ctx).Where("discussion_checkpoint_id = ? AND user_id = ?", checkpointID, userID)
+	if accountID != 0 {
+		// Scope through checkpoint->topic->course (deep 3-level subquery).
+		q = q.Where("discussion_checkpoint_id IN (SELECT id FROM discussion_checkpoints WHERE discussion_topic_id IN (SELECT id FROM discussion_topics WHERE course_id IN (SELECT id FROM courses WHERE account_id = ?)))", accountID)
+	}
+	if err := q.First(&sub).Error; err != nil {
 		return nil, err
 	}
 	return &sub, nil
 }
 
-func (r *discussionCheckpointSubmissionRepo) ListByCheckpoint(ctx context.Context, checkpointID uint) ([]models.DiscussionCheckpointSubmission, error) {
+func (r *discussionCheckpointSubmissionRepo) ListByCheckpoint(ctx context.Context, checkpointID, accountID uint) ([]models.DiscussionCheckpointSubmission, error) {
 	var subs []models.DiscussionCheckpointSubmission
-	if err := r.db.WithContext(ctx).
-		Where("discussion_checkpoint_id = ?", checkpointID).
-		Find(&subs).Error; err != nil {
+	q := r.db.WithContext(ctx).Where("discussion_checkpoint_id = ?", checkpointID)
+	if accountID != 0 {
+		q = q.Where("discussion_checkpoint_id IN (SELECT id FROM discussion_checkpoints WHERE discussion_topic_id IN (SELECT id FROM discussion_topics WHERE course_id IN (SELECT id FROM courses WHERE account_id = ?)))", accountID)
+	}
+	if err := q.Find(&subs).Error; err != nil {
 		return nil, err
 	}
 	return subs, nil
 }
 
-func (r *discussionCheckpointSubmissionRepo) ListByUserAndTopic(ctx context.Context, topicID, userID uint) ([]models.DiscussionCheckpointSubmission, error) {
+func (r *discussionCheckpointSubmissionRepo) ListByUserAndTopic(ctx context.Context, topicID, userID, accountID uint) ([]models.DiscussionCheckpointSubmission, error) {
 	var subs []models.DiscussionCheckpointSubmission
-	if err := r.db.WithContext(ctx).
+	q := r.db.WithContext(ctx).
 		Joins("JOIN discussion_checkpoints dc ON dc.id = discussion_checkpoint_submissions.discussion_checkpoint_id").
-		Where("dc.discussion_topic_id = ? AND discussion_checkpoint_submissions.user_id = ?", topicID, userID).
-		Find(&subs).Error; err != nil {
+		Where("dc.discussion_topic_id = ? AND discussion_checkpoint_submissions.user_id = ?", topicID, userID)
+	if accountID != 0 {
+		q = q.Where("dc.discussion_topic_id IN (SELECT id FROM discussion_topics WHERE course_id IN (SELECT id FROM courses WHERE account_id = ?))", accountID)
+	}
+	if err := q.Find(&subs).Error; err != nil {
 		return nil, err
 	}
 	return subs, nil

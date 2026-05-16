@@ -166,7 +166,8 @@ type AssignmentGroupRepository interface {
 
 type SubmissionRepository interface {
 	Create(ctx context.Context, submission *models.Submission) error
-	FindByID(ctx context.Context, id uint) (*models.Submission, error)
+	// 13.1.D — tenant scope via parent assignment->course. 0 means no tenant scope (internal callers only).
+	FindByID(ctx context.Context, id, accountID uint) (*models.Submission, error)
 	FindByIDs(ctx context.Context, ids []uint) ([]models.Submission, error)
 	FindByAssignmentAndUser(ctx context.Context, assignmentID, userID uint) (*models.Submission, error)
 	FindByAssignmentAndUserIDs(ctx context.Context, assignmentID uint, userIDs []uint) ([]models.Submission, error)
@@ -184,7 +185,8 @@ type SubmissionRepository interface {
 
 type SubmissionCommentRepository interface {
 	Create(ctx context.Context, comment *models.SubmissionComment) error
-	ListBySubmissionID(ctx context.Context, submissionID uint) ([]models.SubmissionComment, error)
+	// 13.1.D — tenant scope via submission->assignment->course. 0 means no tenant scope (internal callers only).
+	ListBySubmissionID(ctx context.Context, submissionID, accountID uint) ([]models.SubmissionComment, error)
 }
 
 type GradingStandardRepository interface {
@@ -396,7 +398,8 @@ type RubricAssessmentRepository interface {
 
 type GradingPeriodGroupRepository interface {
 	Create(ctx context.Context, group *models.GradingPeriodGroup) error
-	FindByID(ctx context.Context, id uint) (*models.GradingPeriodGroup, error)
+	// 13.1.D — tenant scope via direct account_id column. 0 means no tenant scope (internal callers only).
+	FindByID(ctx context.Context, id, accountID uint) (*models.GradingPeriodGroup, error)
 	Update(ctx context.Context, group *models.GradingPeriodGroup) error
 	Delete(ctx context.Context, id uint) error
 	ListByAccountID(ctx context.Context, accountID uint, params PaginationParams) (*PaginatedResult[models.GradingPeriodGroup], error)
@@ -404,10 +407,11 @@ type GradingPeriodGroupRepository interface {
 
 type GradingPeriodRepository interface {
 	Create(ctx context.Context, period *models.GradingPeriod) error
-	FindByID(ctx context.Context, id uint) (*models.GradingPeriod, error)
+	// 13.1.D — tenant scope via parent grading_period_group's account_id. 0 means no tenant scope (internal callers only).
+	FindByID(ctx context.Context, id, accountID uint) (*models.GradingPeriod, error)
 	Update(ctx context.Context, period *models.GradingPeriod) error
 	Delete(ctx context.Context, id uint) error
-	ListByGroupID(ctx context.Context, groupID uint) ([]models.GradingPeriod, error)
+	ListByGroupID(ctx context.Context, groupID, accountID uint) ([]models.GradingPeriod, error)
 }
 
 // Assignment Overrides
@@ -607,7 +611,8 @@ type OneRosterSyncLogRepository interface {
 
 type DocumentAnnotationRepository interface {
 	Create(ctx context.Context, annotation *models.DocumentAnnotation) error
-	FindByID(ctx context.Context, id uint) (*models.DocumentAnnotation, error)
+	// 13.1.D — tenant scope via submission->assignment->course. 0 means no tenant scope (internal callers only).
+	FindByID(ctx context.Context, id, accountID uint) (*models.DocumentAnnotation, error)
 	Update(ctx context.Context, annotation *models.DocumentAnnotation) error
 	Delete(ctx context.Context, id uint) error
 	ListBySubmissionID(ctx context.Context, submissionID uint, params PaginationParams) (*PaginatedResult[models.DocumentAnnotation], error)

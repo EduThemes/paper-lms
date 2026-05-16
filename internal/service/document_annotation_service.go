@@ -40,7 +40,7 @@ func (s *DocumentAnnotationService) isInstructor(ctx context.Context, userID, co
 
 // GetAnnotation returns a single annotation by ID with its replies preloaded.
 func (s *DocumentAnnotationService) GetAnnotation(ctx context.Context, annotationID uint) (*models.DocumentAnnotation, error) {
-	annotation, err := s.annotationRepo.FindByID(ctx, annotationID)
+	annotation, err := s.annotationRepo.FindByID(ctx, annotationID, 0)
 	if err != nil {
 		return nil, errors.New("annotation not found")
 	}
@@ -54,7 +54,7 @@ func (s *DocumentAnnotationService) GetAnnotation(ctx context.Context, annotatio
 // Instructors can annotate any submission. Students can only annotate their own submissions.
 func (s *DocumentAnnotationService) CreateAnnotation(ctx context.Context, annotation *models.DocumentAnnotation, courseID uint) error {
 	// Validate submission exists
-	submission, err := s.submissionRepo.FindByID(ctx, annotation.SubmissionID)
+	submission, err := s.submissionRepo.FindByID(ctx, annotation.SubmissionID, 0)
 	if err != nil {
 		return errors.New("submission not found")
 	}
@@ -90,7 +90,7 @@ func (s *DocumentAnnotationService) CreateAnnotation(ctx context.Context, annota
 
 // UpdateAnnotation updates an existing annotation. Only the owner can edit their own annotation.
 func (s *DocumentAnnotationService) UpdateAnnotation(ctx context.Context, annotationID uint, userID uint, updates map[string]interface{}) (*models.DocumentAnnotation, error) {
-	annotation, err := s.annotationRepo.FindByID(ctx, annotationID)
+	annotation, err := s.annotationRepo.FindByID(ctx, annotationID, 0)
 	if err != nil {
 		return nil, errors.New("annotation not found")
 	}
@@ -141,7 +141,7 @@ func (s *DocumentAnnotationService) UpdateAnnotation(ctx context.Context, annota
 
 // DeleteAnnotation soft-deletes an annotation. Owner or instructor can delete.
 func (s *DocumentAnnotationService) DeleteAnnotation(ctx context.Context, annotationID uint, userID uint, courseID uint) error {
-	annotation, err := s.annotationRepo.FindByID(ctx, annotationID)
+	annotation, err := s.annotationRepo.FindByID(ctx, annotationID, 0)
 	if err != nil {
 		return errors.New("annotation not found")
 	}
@@ -172,7 +172,7 @@ func (s *DocumentAnnotationService) ListAnnotationsByPage(ctx context.Context, s
 
 // ResolveAnnotation marks an annotation as resolved.
 func (s *DocumentAnnotationService) ResolveAnnotation(ctx context.Context, annotationID uint, resolvedByUserID uint) error {
-	annotation, err := s.annotationRepo.FindByID(ctx, annotationID)
+	annotation, err := s.annotationRepo.FindByID(ctx, annotationID, 0)
 	if err != nil {
 		return errors.New("annotation not found")
 	}
@@ -186,7 +186,7 @@ func (s *DocumentAnnotationService) ResolveAnnotation(ctx context.Context, annot
 
 // UnresolveAnnotation removes the resolved status from an annotation.
 func (s *DocumentAnnotationService) UnresolveAnnotation(ctx context.Context, annotationID uint) error {
-	annotation, err := s.annotationRepo.FindByID(ctx, annotationID)
+	annotation, err := s.annotationRepo.FindByID(ctx, annotationID, 0)
 	if err != nil {
 		return errors.New("annotation not found")
 	}
@@ -242,7 +242,7 @@ func (s *DocumentAnnotationService) GetAnnotationSummary(ctx context.Context, su
 
 // ReplyToAnnotation creates an annotation as a reply to an existing annotation.
 func (s *DocumentAnnotationService) ReplyToAnnotation(ctx context.Context, parentAnnotationID uint, reply *models.DocumentAnnotation, courseID uint) error {
-	parent, err := s.annotationRepo.FindByID(ctx, parentAnnotationID)
+	parent, err := s.annotationRepo.FindByID(ctx, parentAnnotationID, 0)
 	if err != nil {
 		return errors.New("parent annotation not found")
 	}
@@ -259,7 +259,7 @@ func (s *DocumentAnnotationService) ReplyToAnnotation(ctx context.Context, paren
 	reply.WorkflowState = "active"
 
 	// Permission check: instructors can reply to any annotation, students to their own submission's annotations
-	submission, err := s.submissionRepo.FindByID(ctx, reply.SubmissionID)
+	submission, err := s.submissionRepo.FindByID(ctx, reply.SubmissionID, 0)
 	if err != nil {
 		return errors.New("submission not found")
 	}

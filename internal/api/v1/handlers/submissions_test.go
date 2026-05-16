@@ -307,7 +307,7 @@ func TestListSubmissionComments(t *testing.T) {
 		{ID: 2, SubmissionID: 1, AuthorID: 3, Comment: "Needs revision."},
 	}
 
-	commentRepo.On("ListBySubmissionID", mock.Anything, uint(1)).Return(comments, nil)
+	commentRepo.On("ListBySubmissionID", mock.Anything, uint(1), uint(1)).Return(comments, nil)
 	userRepo.On("FindByID", mock.Anything, uint(1)).Return(&models.User{ID: 1, Name: "Teacher One"}, nil)
 	userRepo.On("FindByID", mock.Anything, uint(3)).Return(&models.User{ID: 3, Name: "Teacher Two"}, nil)
 

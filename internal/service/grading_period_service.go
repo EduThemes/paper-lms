@@ -30,7 +30,7 @@ func (s *GradingPeriodService) CreateGroup(ctx context.Context, group *models.Gr
 }
 
 func (s *GradingPeriodService) GetGroup(ctx context.Context, id uint) (*models.GradingPeriodGroup, error) {
-	return s.groupRepo.FindByID(ctx, id)
+	return s.groupRepo.FindByID(ctx, id, 0)
 }
 
 func (s *GradingPeriodService) UpdateGroup(ctx context.Context, group *models.GradingPeriodGroup) error {
@@ -61,7 +61,7 @@ func (s *GradingPeriodService) CreatePeriod(ctx context.Context, period *models.
 }
 
 func (s *GradingPeriodService) GetPeriod(ctx context.Context, id uint) (*models.GradingPeriod, error) {
-	return s.periodRepo.FindByID(ctx, id)
+	return s.periodRepo.FindByID(ctx, id, 0)
 }
 
 func (s *GradingPeriodService) UpdatePeriod(ctx context.Context, period *models.GradingPeriod) error {
@@ -76,5 +76,5 @@ func (s *GradingPeriodService) DeletePeriod(ctx context.Context, id uint) error 
 }
 
 func (s *GradingPeriodService) ListPeriodsByGroup(ctx context.Context, groupID uint) ([]models.GradingPeriod, error) {
-	return s.periodRepo.ListByGroupID(ctx, groupID)
+	return s.periodRepo.ListByGroupID(ctx, groupID, 0)
 }
