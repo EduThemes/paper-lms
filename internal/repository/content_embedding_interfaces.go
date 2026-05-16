@@ -29,7 +29,11 @@ type ContentEmbeddingRepository interface {
 	// SearchByCourse returns the top `limit` most-similar rows in a course
 	// using pgvector's cosine-distance operator (`<=>`). Falls back to
 	// in-process cosine ranking when pgvector is not installed.
-	SearchByCourse(ctx context.Context, courseID uint, queryVec []float32, limit int) ([]SearchHit, error)
+	//
+	// 13.1.D — accountID, when non-zero, filters via the parent course's
+	// tenant; a cross-tenant courseID returns an empty hit set.
+	SearchByCourse(ctx context.Context, courseID, accountID uint, queryVec []float32, limit int) ([]SearchHit, error)
 	// ListByCourse is used for full re-index loops over an existing index.
-	ListByCourse(ctx context.Context, courseID uint) ([]models.ContentEmbedding, error)
+	// 13.1.D — accountID, when non-zero, filters via the parent course's tenant.
+	ListByCourse(ctx context.Context, courseID, accountID uint) ([]models.ContentEmbedding, error)
 }

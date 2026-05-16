@@ -380,10 +380,15 @@ type QuizSubmissionAnswerRepository interface {
 
 type RubricRepository interface {
 	Create(ctx context.Context, rubric *models.Rubric) error
-	FindByID(ctx context.Context, id uint) (*models.Rubric, error)
+	// 13.1.D — tenant scope via context_type branch: Account → direct
+	// account_id match; Course → JOIN through courses.account_id.
+	// Rubrics are intentionally cross-course-shareable WITHIN a tenant;
+	// an Account-level rubric in tenant A is reachable from any course
+	// in tenant A but never from tenant B.
+	FindByID(ctx context.Context, id, accountID uint) (*models.Rubric, error)
 	Update(ctx context.Context, rubric *models.Rubric) error
 	Delete(ctx context.Context, id uint) error
-	ListByContext(ctx context.Context, contextType string, contextID uint, params PaginationParams) (*PaginatedResult[models.Rubric], error)
+	ListByContext(ctx context.Context, contextType string, contextID, accountID uint, params PaginationParams) (*PaginatedResult[models.Rubric], error)
 }
 
 type RubricAssociationRepository interface {
@@ -523,20 +528,25 @@ type ContentMigrationRepository interface {
 
 type LearningOutcomeGroupRepository interface {
 	Create(ctx context.Context, group *models.LearningOutcomeGroup) error
-	FindByID(ctx context.Context, id uint) (*models.LearningOutcomeGroup, error)
+	// 13.1.D — tenant scope via context_type branch (Account direct,
+	// Course via parent courses.account_id).
+	FindByID(ctx context.Context, id, accountID uint) (*models.LearningOutcomeGroup, error)
 	Update(ctx context.Context, group *models.LearningOutcomeGroup) error
 	Delete(ctx context.Context, id uint) error
-	ListByContext(ctx context.Context, contextType string, contextID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcomeGroup], error)
-	FindRootGroup(ctx context.Context, contextType string, contextID uint) (*models.LearningOutcomeGroup, error)
+	ListByContext(ctx context.Context, contextType string, contextID, accountID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcomeGroup], error)
+	FindRootGroup(ctx context.Context, contextType string, contextID, accountID uint) (*models.LearningOutcomeGroup, error)
 }
 
 type LearningOutcomeRepository interface {
 	Create(ctx context.Context, outcome *models.LearningOutcome) error
-	FindByID(ctx context.Context, id uint) (*models.LearningOutcome, error)
+	// 13.1.D — tenant scope. Outcomes at Account level are shareable
+	// across every course in the same tenant; the polymorphic branch
+	// enforces "Account → direct match, Course → JOIN through courses".
+	FindByID(ctx context.Context, id, accountID uint) (*models.LearningOutcome, error)
 	Update(ctx context.Context, outcome *models.LearningOutcome) error
 	Delete(ctx context.Context, id uint) error
-	ListByGroupID(ctx context.Context, groupID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcome], error)
-	ListByContext(ctx context.Context, contextType string, contextID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcome], error)
+	ListByGroupID(ctx context.Context, groupID, accountID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcome], error)
+	ListByContext(ctx context.Context, contextType string, contextID, accountID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcome], error)
 }
 
 type LearningOutcomeResultRepository interface {
@@ -565,8 +575,10 @@ type LearningOutcomeResultRepository interface {
 type OutcomeAlignmentRepository interface {
 	Create(ctx context.Context, alignment *models.OutcomeAlignment) error
 	Delete(ctx context.Context, id uint) error
-	ListByAssignmentID(ctx context.Context, assignmentID uint) ([]models.OutcomeAlignment, error)
-	ListByCourseID(ctx context.Context, courseID uint) ([]models.OutcomeAlignment, error)
+	// 13.1.D — accountID, when non-zero, filters alignments to those whose
+	// course (or whose assignment's course) belongs to caller's tenant.
+	ListByAssignmentID(ctx context.Context, assignmentID, accountID uint) ([]models.OutcomeAlignment, error)
+	ListByCourseID(ctx context.Context, courseID, accountID uint) ([]models.OutcomeAlignment, error)
 }
 
 // Blueprint Courses

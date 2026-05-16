@@ -23,14 +23,22 @@ func (r *OutcomeAlignmentRepository) Delete(ctx context.Context, id uint) error 
 	return r.db.WithContext(ctx).Delete(&models.OutcomeAlignment{}, id).Error
 }
 
-func (r *OutcomeAlignmentRepository) ListByAssignmentID(ctx context.Context, assignmentID uint) ([]models.OutcomeAlignment, error) {
+func (r *OutcomeAlignmentRepository) ListByAssignmentID(ctx context.Context, assignmentID, accountID uint) ([]models.OutcomeAlignment, error) {
 	var alignments []models.OutcomeAlignment
-	err := r.db.WithContext(ctx).Where("assignment_id = ?", assignmentID).Find(&alignments).Error
+	q := r.db.WithContext(ctx).Where("assignment_id = ?", assignmentID)
+	if accountID != 0 {
+		q = q.Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID)
+	}
+	err := q.Find(&alignments).Error
 	return alignments, err
 }
 
-func (r *OutcomeAlignmentRepository) ListByCourseID(ctx context.Context, courseID uint) ([]models.OutcomeAlignment, error) {
+func (r *OutcomeAlignmentRepository) ListByCourseID(ctx context.Context, courseID, accountID uint) ([]models.OutcomeAlignment, error) {
 	var alignments []models.OutcomeAlignment
-	err := r.db.WithContext(ctx).Where("course_id = ?", courseID).Find(&alignments).Error
+	q := r.db.WithContext(ctx).Where("course_id = ?", courseID)
+	if accountID != 0 {
+		q = q.Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID)
+	}
+	err := q.Find(&alignments).Error
 	return alignments, err
 }

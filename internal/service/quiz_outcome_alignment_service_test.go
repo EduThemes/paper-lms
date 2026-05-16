@@ -27,7 +27,7 @@ func TestQuizOutcomeAlignmentService_Align(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		svc, ar, qr, or := newAlignmentService(t)
 		qr.On("FindByID", ctx, uint(1)).Return(&models.QuizQuestion{ID: 1}, nil)
-		or.On("FindByID", ctx, uint(2)).Return(&models.LearningOutcome{ID: 2}, nil)
+		or.On("FindByID", ctx, uint(2), uint(0)).Return(&models.LearningOutcome{ID: 2}, nil)
 		ar.On("FindByQuestionAndOutcome", ctx, uint(1), uint(2)).Return(nil, errors.New("not found"))
 		ar.On("Create", ctx, mock.MatchedBy(func(a *models.QuizQuestionOutcomeAlignment) bool {
 			return a.QuizQuestionID == 1 && a.OutcomeID == 2 && a.MasteryThreshold == 0.8
@@ -40,7 +40,7 @@ func TestQuizOutcomeAlignmentService_Align(t *testing.T) {
 	t.Run("unique constraint blocks duplicates", func(t *testing.T) {
 		svc, ar, qr, or := newAlignmentService(t)
 		qr.On("FindByID", ctx, uint(1)).Return(&models.QuizQuestion{ID: 1}, nil)
-		or.On("FindByID", ctx, uint(2)).Return(&models.LearningOutcome{ID: 2}, nil)
+		or.On("FindByID", ctx, uint(2), uint(0)).Return(&models.LearningOutcome{ID: 2}, nil)
 		existing := &models.QuizQuestionOutcomeAlignment{ID: 99, QuizQuestionID: 1, OutcomeID: 2}
 		ar.On("FindByQuestionAndOutcome", ctx, uint(1), uint(2)).Return(existing, nil)
 		_, err := svc.Align(ctx, 1, 2, 0.7)
@@ -73,7 +73,7 @@ func TestQuizOutcomeAlignmentService_Align(t *testing.T) {
 	t.Run("outcome not found", func(t *testing.T) {
 		svc, _, qr, or := newAlignmentService(t)
 		qr.On("FindByID", ctx, uint(1)).Return(&models.QuizQuestion{ID: 1}, nil)
-		or.On("FindByID", ctx, uint(2)).Return(nil, errors.New("nope"))
+		or.On("FindByID", ctx, uint(2), uint(0)).Return(nil, errors.New("nope"))
 		_, err := svc.Align(ctx, 1, 2, 0.5)
 		assert.EqualError(t, err, "learning outcome not found")
 	})

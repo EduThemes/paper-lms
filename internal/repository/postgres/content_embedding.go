@@ -43,12 +43,28 @@ func (r *contentEmbeddingRepo) DeleteByContent(ctx context.Context, contentType 
 		Delete(&models.ContentEmbedding{}).Error
 }
 
-func (r *contentEmbeddingRepo) SearchByCourse(ctx context.Context, courseID uint, queryVec []float32, limit int) ([]repository.SearchHit, error) {
+func (r *contentEmbeddingRepo) SearchByCourse(ctx context.Context, courseID, accountID uint, queryVec []float32, limit int) ([]repository.SearchHit, error) {
 	if limit <= 0 {
 		limit = 10
 	}
 	if len(queryVec) == 0 {
 		return []repository.SearchHit{}, nil
+	}
+
+	// 13.1.D — if accountID is non-zero, gate the read on the parent
+	// course belonging to caller's tenant. A cross-tenant courseID
+	// returns an empty hit set rather than 404 (avoids existence leak).
+	if accountID != 0 {
+		var allowed int64
+		if err := r.db.WithContext(ctx).
+			Table("courses").
+			Where("id = ? AND account_id = ?", courseID, accountID).
+			Count(&allowed).Error; err != nil {
+			return nil, err
+		}
+		if allowed == 0 {
+			return []repository.SearchHit{}, nil
+		}
 	}
 
 	// Try the pgvector cosine-distance operator first. If pgvector is not
@@ -100,8 +116,20 @@ func (r *contentEmbeddingRepo) SearchByCourse(ctx context.Context, courseID uint
 	return r.searchByCourseInGo(ctx, courseID, queryVec, limit)
 }
 
-func (r *contentEmbeddingRepo) ListByCourse(ctx context.Context, courseID uint) ([]models.ContentEmbedding, error) {
+func (r *contentEmbeddingRepo) ListByCourse(ctx context.Context, courseID, accountID uint) ([]models.ContentEmbedding, error) {
 	var items []models.ContentEmbedding
+	if accountID != 0 {
+		var allowed int64
+		if err := r.db.WithContext(ctx).
+			Table("courses").
+			Where("id = ? AND account_id = ?", courseID, accountID).
+			Count(&allowed).Error; err != nil {
+			return nil, err
+		}
+		if allowed == 0 {
+			return items, nil
+		}
+	}
 	if err := r.db.WithContext(ctx).
 		Where("course_id = ?", courseID).
 		Order("id ASC").

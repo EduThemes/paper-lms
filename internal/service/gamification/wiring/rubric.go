@@ -72,7 +72,7 @@ func RubricAssessmentCreatedEmitCallback(
 				"assessment_id", assessmentID, "error", err)
 			return
 		}
-		rubric, err := rubricRepo.FindByID(ctx, assessment.RubricID)
+		rubric, err := rubricRepo.FindByID(ctx, assessment.RubricID, 0)
 		if err != nil {
 			slog.Error("rubric assessment emit: load rubric",
 				"assessment_id", assessmentID,

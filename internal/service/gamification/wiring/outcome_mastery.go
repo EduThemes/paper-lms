@@ -86,7 +86,7 @@ func OutcomeMasteryCrossedEmitCallback(
 			)
 			return
 		}
-		outcome, err := outcomeRepo.FindByID(ctx, outcomeID)
+		outcome, err := outcomeRepo.FindByID(ctx, outcomeID, 0)
 		if err != nil {
 			slog.Error("outcome mastery emit: load outcome",
 				"outcome_id", outcomeID,

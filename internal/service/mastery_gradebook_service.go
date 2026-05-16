@@ -72,7 +72,7 @@ type MasteryGradebook struct {
 // computes one cell per (student, outcome) using the most recent
 // LearningOutcomeResult for that pair and resolves the proficiency level using
 // the course's proficiency scale.
-func (s *MasteryGradebookService) GetMasteryGradebook(ctx context.Context, courseID uint) (*MasteryGradebook, error) {
+func (s *MasteryGradebookService) GetMasteryGradebook(ctx context.Context, courseID, accountID uint) (*MasteryGradebook, error) {
 	// Resolve scale.
 	scale, err := s.proficiency.Get(ctx, "Course", courseID)
 	if err != nil {
@@ -115,7 +115,7 @@ func (s *MasteryGradebookService) GetMasteryGradebook(ctx context.Context, cours
 	outcomeIDs := []uint{}
 	page = 1
 	for {
-		res, err := s.outcomeRepo.ListByContext(ctx, "Course", courseID, repository.PaginationParams{Page: page, PerPage: 100})
+		res, err := s.outcomeRepo.ListByContext(ctx, "Course", courseID, accountID, repository.PaginationParams{Page: page, PerPage: 100})
 		if err != nil {
 			return nil, err
 		}

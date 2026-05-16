@@ -48,7 +48,7 @@ func (s *QuizOutcomeAlignmentService) Align(ctx context.Context, quizQuestionID,
 		return nil, errors.New("quiz question not found")
 	}
 	if s.outcomeRepo != nil {
-		if _, err := s.outcomeRepo.FindByID(ctx, outcomeID); err != nil {
+		if _, err := s.outcomeRepo.FindByID(ctx, outcomeID, 0); err != nil {
 			return nil, errors.New("learning outcome not found")
 		}
 	}

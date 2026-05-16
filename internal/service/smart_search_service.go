@@ -76,7 +76,9 @@ func (s *SmartSearchService) RemoveContent(ctx context.Context, contentType stri
 }
 
 // Search returns up to `limit` results ranked by cosine similarity.
-func (s *SmartSearchService) Search(ctx context.Context, courseID uint, query string, limit int) ([]SmartSearchResult, error) {
+// 13.1.D — accountID, when non-zero, scopes the search to courses owned
+// by the caller's tenant.
+func (s *SmartSearchService) Search(ctx context.Context, courseID, accountID uint, query string, limit int) ([]SmartSearchResult, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return []SmartSearchResult{}, nil
@@ -88,7 +90,7 @@ func (s *SmartSearchService) Search(ctx context.Context, courseID uint, query st
 	if err != nil {
 		return nil, err
 	}
-	hits, err := s.embeddings.SearchByCourse(ctx, courseID, vec, limit)
+	hits, err := s.embeddings.SearchByCourse(ctx, courseID, accountID, vec, limit)
 	if err != nil {
 		return nil, err
 	}

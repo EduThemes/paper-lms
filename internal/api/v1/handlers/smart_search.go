@@ -48,7 +48,7 @@ func (h *SmartSearchHandler) Search(c *fiber.Ctx) error {
 	}
 	q := c.Query("q")
 	limit := c.QueryInt("limit", 10)
-	results, err := h.search.Search(c.Context(), uint(courseID), q, limit)
+	results, err := h.search.Search(c.Context(), uint(courseID), callerAccountID(c), q, limit)
 	if err != nil {
 		return responses.InternalError(c, "Smart search failed")
 	}

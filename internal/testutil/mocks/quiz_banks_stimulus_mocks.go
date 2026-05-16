@@ -169,8 +169,8 @@ func (m *MockLearningOutcomeRepository) Create(ctx context.Context, outcome *mod
 	return m.Called(ctx, outcome).Error(0)
 }
 
-func (m *MockLearningOutcomeRepository) FindByID(ctx context.Context, id uint) (*models.LearningOutcome, error) {
-	args := m.Called(ctx, id)
+func (m *MockLearningOutcomeRepository) FindByID(ctx context.Context, id, accountID uint) (*models.LearningOutcome, error) {
+	args := m.Called(ctx, id, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -185,16 +185,16 @@ func (m *MockLearningOutcomeRepository) Delete(ctx context.Context, id uint) err
 	return m.Called(ctx, id).Error(0)
 }
 
-func (m *MockLearningOutcomeRepository) ListByGroupID(ctx context.Context, groupID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcome], error) {
-	args := m.Called(ctx, groupID, params)
+func (m *MockLearningOutcomeRepository) ListByGroupID(ctx context.Context, groupID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcome], error) {
+	args := m.Called(ctx, groupID, accountID, params)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*repository.PaginatedResult[models.LearningOutcome]), args.Error(1)
 }
 
-func (m *MockLearningOutcomeRepository) ListByContext(ctx context.Context, contextType string, contextID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcome], error) {
-	args := m.Called(ctx, contextType, contextID, params)
+func (m *MockLearningOutcomeRepository) ListByContext(ctx context.Context, contextType string, contextID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcome], error) {
+	args := m.Called(ctx, contextType, contextID, accountID, params)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

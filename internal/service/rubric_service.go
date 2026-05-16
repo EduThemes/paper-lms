@@ -78,8 +78,8 @@ func (s *RubricService) CreateRubric(ctx context.Context, rubric *models.Rubric)
 	return s.rubricRepo.Create(ctx, rubric)
 }
 
-func (s *RubricService) GetRubric(ctx context.Context, id uint) (*models.Rubric, error) {
-	return s.rubricRepo.FindByID(ctx, id)
+func (s *RubricService) GetRubric(ctx context.Context, id, accountID uint) (*models.Rubric, error) {
+	return s.rubricRepo.FindByID(ctx, id, accountID)
 }
 
 func (s *RubricService) UpdateRubric(ctx context.Context, rubric *models.Rubric) error {
@@ -90,14 +90,14 @@ func (s *RubricService) DeleteRubric(ctx context.Context, id uint) error {
 	return s.rubricRepo.Delete(ctx, id)
 }
 
-func (s *RubricService) ListRubricsByContext(ctx context.Context, contextType string, contextID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Rubric], error) {
-	return s.rubricRepo.ListByContext(ctx, contextType, contextID, params)
+func (s *RubricService) ListRubricsByContext(ctx context.Context, contextType string, contextID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Rubric], error) {
+	return s.rubricRepo.ListByContext(ctx, contextType, contextID, accountID, params)
 }
 
 // Association methods
 
-func (s *RubricService) CreateAssociation(ctx context.Context, rubricID, associationID uint, associationType string, useForGrading bool) (*models.RubricAssociation, error) {
-	rubric, err := s.rubricRepo.FindByID(ctx, rubricID)
+func (s *RubricService) CreateAssociation(ctx context.Context, rubricID, associationID uint, associationType string, useForGrading bool, accountID uint) (*models.RubricAssociation, error) {
+	rubric, err := s.rubricRepo.FindByID(ctx, rubricID, accountID)
 	if err != nil {
 		return nil, errors.New("rubric not found")
 	}
@@ -127,13 +127,13 @@ func (s *RubricService) DeleteAssociation(ctx context.Context, id uint) error {
 	return s.assocRepo.Delete(ctx, id)
 }
 
-func (s *RubricService) GetRubricForAssignment(ctx context.Context, assignmentID uint) (*models.Rubric, *models.RubricAssociation, error) {
+func (s *RubricService) GetRubricForAssignment(ctx context.Context, assignmentID, accountID uint) (*models.Rubric, *models.RubricAssociation, error) {
 	assoc, err := s.assocRepo.FindByAssociation(ctx, assignmentID, "Assignment")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	rubric, err := s.rubricRepo.FindByID(ctx, assoc.RubricID)
+	rubric, err := s.rubricRepo.FindByID(ctx, assoc.RubricID, accountID)
 	if err != nil {
 		return nil, nil, err
 	}

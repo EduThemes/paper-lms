@@ -72,8 +72,8 @@ func (s *LearningOutcomeService) CreateGroup(ctx context.Context, group *models.
 	return s.groupRepo.Create(ctx, group)
 }
 
-func (s *LearningOutcomeService) GetGroup(ctx context.Context, id uint) (*models.LearningOutcomeGroup, error) {
-	return s.groupRepo.FindByID(ctx, id)
+func (s *LearningOutcomeService) GetGroup(ctx context.Context, id, accountID uint) (*models.LearningOutcomeGroup, error) {
+	return s.groupRepo.FindByID(ctx, id, accountID)
 }
 
 func (s *LearningOutcomeService) UpdateGroup(ctx context.Context, group *models.LearningOutcomeGroup) error {
@@ -84,12 +84,12 @@ func (s *LearningOutcomeService) DeleteGroup(ctx context.Context, id uint) error
 	return s.groupRepo.Delete(ctx, id)
 }
 
-func (s *LearningOutcomeService) ListGroups(ctx context.Context, contextType string, contextID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcomeGroup], error) {
-	return s.groupRepo.ListByContext(ctx, contextType, contextID, params)
+func (s *LearningOutcomeService) ListGroups(ctx context.Context, contextType string, contextID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcomeGroup], error) {
+	return s.groupRepo.ListByContext(ctx, contextType, contextID, accountID, params)
 }
 
-func (s *LearningOutcomeService) GetRootGroup(ctx context.Context, contextType string, contextID uint) (*models.LearningOutcomeGroup, error) {
-	return s.groupRepo.FindRootGroup(ctx, contextType, contextID)
+func (s *LearningOutcomeService) GetRootGroup(ctx context.Context, contextType string, contextID, accountID uint) (*models.LearningOutcomeGroup, error) {
+	return s.groupRepo.FindRootGroup(ctx, contextType, contextID, accountID)
 }
 
 // Outcome methods
@@ -116,8 +116,8 @@ func (s *LearningOutcomeService) CreateOutcome(ctx context.Context, outcome *mod
 	return s.outcomeRepo.Create(ctx, outcome)
 }
 
-func (s *LearningOutcomeService) GetOutcome(ctx context.Context, id uint) (*models.LearningOutcome, error) {
-	return s.outcomeRepo.FindByID(ctx, id)
+func (s *LearningOutcomeService) GetOutcome(ctx context.Context, id, accountID uint) (*models.LearningOutcome, error) {
+	return s.outcomeRepo.FindByID(ctx, id, accountID)
 }
 
 func (s *LearningOutcomeService) UpdateOutcome(ctx context.Context, outcome *models.LearningOutcome) error {
@@ -128,12 +128,12 @@ func (s *LearningOutcomeService) DeleteOutcome(ctx context.Context, id uint) err
 	return s.outcomeRepo.Delete(ctx, id)
 }
 
-func (s *LearningOutcomeService) ListOutcomes(ctx context.Context, groupID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcome], error) {
-	return s.outcomeRepo.ListByGroupID(ctx, groupID, params)
+func (s *LearningOutcomeService) ListOutcomes(ctx context.Context, groupID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcome], error) {
+	return s.outcomeRepo.ListByGroupID(ctx, groupID, accountID, params)
 }
 
-func (s *LearningOutcomeService) ListOutcomesByContext(ctx context.Context, contextType string, contextID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcome], error) {
-	return s.outcomeRepo.ListByContext(ctx, contextType, contextID, params)
+func (s *LearningOutcomeService) ListOutcomesByContext(ctx context.Context, contextType string, contextID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcome], error) {
+	return s.outcomeRepo.ListByContext(ctx, contextType, contextID, accountID, params)
 }
 
 // Result methods
@@ -154,7 +154,7 @@ func (s *LearningOutcomeService) CreateResult(ctx context.Context, result *model
 
 	// Determine mastery if mastery_points are available and score is provided
 	if result.Score != nil {
-		outcome, err := s.outcomeRepo.FindByID(ctx, result.LearningOutcomeID)
+		outcome, err := s.outcomeRepo.FindByID(ctx, result.LearningOutcomeID, 0)
 		if err == nil {
 			mastery := *result.Score >= outcome.MasteryPoints
 			result.Mastery = &mastery
@@ -207,9 +207,9 @@ type OutcomeRollupScore struct {
 
 // GetMasteryGradebook returns all outcomes for a course with rollup results for all students
 // who have outcome results in the course.
-func (s *LearningOutcomeService) GetMasteryGradebook(ctx context.Context, courseID uint, params repository.PaginationParams) ([]MasteryRollup, []models.LearningOutcome, error) {
+func (s *LearningOutcomeService) GetMasteryGradebook(ctx context.Context, courseID, accountID uint, params repository.PaginationParams) ([]MasteryRollup, []models.LearningOutcome, error) {
 	// Get all outcomes for the course
-	allOutcomes, err := s.outcomeRepo.ListByContext(ctx, "Course", courseID, repository.PaginationParams{Page: 1, PerPage: 1000})
+	allOutcomes, err := s.outcomeRepo.ListByContext(ctx, "Course", courseID, accountID, repository.PaginationParams{Page: 1, PerPage: 1000})
 	if err != nil {
 		return nil, nil, err
 	}
