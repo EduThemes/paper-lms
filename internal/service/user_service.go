@@ -45,6 +45,13 @@ func (s *UserService) Register(ctx context.Context, name, email, password string
 		ShortName:    name,
 		LoginID:      email,
 		Email:        email,
+		// 13.1 contract: every user carries a NOT NULL account_id (FK to
+		// accounts). Self-registration through this endpoint lands on the
+		// default tenant (account 1) — the same fallback the migration
+		// backfill used for legacy rows without an enrollment. Multi-tenant
+		// signup (per-tenant subdomain or pre-registered invite) overrides
+		// this at the handler layer before reaching the service.
+		AccountID: 1,
 	}
 
 	// WebauthnUserHandle is NOT NULL since migration 000046; the column has
