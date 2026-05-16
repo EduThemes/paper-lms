@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -45,6 +46,18 @@ func (s *UserService) Register(ctx context.Context, name, email, password string
 		LoginID:      email,
 		Email:        email,
 	}
+
+	// WebauthnUserHandle is NOT NULL since migration 000046; the column has
+	// a Postgres DEFAULT gen_random_bytes(64) used for the migration
+	// backfill, but GORM's INSERT serializes our empty []byte as NULL
+	// (overriding the DEFAULT) and trips the constraint. Generate the
+	// handle in Go so the row insert succeeds without relying on the DB
+	// default. The value is stable forever per the Phase 10-B contract.
+	handle := make([]byte, 64)
+	if _, err := rand.Read(handle); err != nil {
+		return nil, fmt.Errorf("generate webauthn handle: %w", err)
+	}
+	user.WebauthnUserHandle = handle
 
 	if err := user.HashPassword(password); err != nil {
 		return nil, err
