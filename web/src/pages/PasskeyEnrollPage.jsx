@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, KeyRound, AlertTriangle } from 'lucide-react';
 import Layout from '../components/Layout';
 import { b64urlToBytes, bytesToB64url } from '../lib/webauthn';
+import { getCSRFToken } from '../services/api';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -36,7 +37,10 @@ export default function PasskeyEnrollPage() {
       // challenge + user id base64url-encoded as strings.
       const beginRes = await fetch(`${API_URL}/users/self/passkeys/begin`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': getCSRFToken(),
+        },
         credentials: 'include',
         body: JSON.stringify({ nickname }),
       });
@@ -55,7 +59,10 @@ export default function PasskeyEnrollPage() {
       const payload = encodeAttestationResponse(cred);
       const finishRes = await fetch(`${API_URL}/users/self/passkeys/finish`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': getCSRFToken(),
+        },
         credentials: 'include',
         body: JSON.stringify(payload),
       });

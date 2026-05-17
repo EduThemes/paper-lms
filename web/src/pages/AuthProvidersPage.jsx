@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Shield, Plus, Trash2, Edit3, AlertTriangle, X, TestTube2, Check } from 'lucide-react';
 import Layout from '../components/Layout';
+import { getCSRFToken } from '../services/api';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 const getHeaders = () => ({
   'Content-Type': 'application/json',
+  'X-CSRF-Token': getCSRFToken(),
 });
 
 const ACCOUNT_ID = 1;

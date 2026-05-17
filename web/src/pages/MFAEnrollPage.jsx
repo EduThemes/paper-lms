@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, AlertTriangle, Copy, Check } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import Layout from '../components/Layout';
+import { getCSRFToken } from '../services/api';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -36,7 +37,10 @@ export default function MFAEnrollPage() {
     try {
       const res = await fetch(`${API_URL}/users/self/mfa/enroll`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': getCSRFToken(),
+        },
         credentials: 'include',
         body: JSON.stringify({ password }),
       });
@@ -61,7 +65,10 @@ export default function MFAEnrollPage() {
     try {
       const res = await fetch(`${API_URL}/users/self/mfa/verify-enrollment`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': getCSRFToken(),
+        },
         credentials: 'include',
         body: JSON.stringify({ code }),
       });
