@@ -116,6 +116,26 @@ func main() {
 		log.Fatalf("Failed to seed database: %v", err)
 	}
 
+	// Phase 9-PRE encryption-at-rest backfill: seal any LDAP bind
+	// passwords still in the legacy plaintext column. Runs after the
+	// migration chain (so ldap_bind_password_encrypted exists) and
+	// after SeedDefaultAccount so any seed-time LDAP providers also
+	// get encrypted. Idempotent — no-ops on a clean DB. See
+	// migration 000060 for the SQL-side rationale.
+	{
+		bctx, bcancel := context.WithTimeout(context.Background(), 60*time.Second)
+		sealed, err := auth.BackfillLDAPBindPasswords(bctx, database)
+		bcancel()
+		if err != nil {
+			if cfg.Environment == "production" {
+				log.Fatalf("LDAP bind password backfill failed: %v", err)
+			}
+			log.Printf("warning: LDAP bind password backfill skipped (%v) — plaintext rows remain; set MFA_ENCRYPTION_KEY and reboot to seal them", err)
+		} else if sealed > 0 {
+			log.Printf("LDAP bind password backfill: sealed %d row(s) into encrypted column", sealed)
+		}
+	}
+
 	// Backfill system gamification currencies for every tenant. Idempotent —
 	// re-runs on every boot, no-ops on already-populated tenants thanks to
 	// the uniq_gam_currency_scope_code index + ON CONFLICT DO NOTHING.

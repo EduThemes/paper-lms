@@ -11,8 +11,80 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"gorm.io/gorm"
+
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 )
+
+// BackfillLDAPBindPasswords seals any LDAP bind passwords that are
+// still stored in the legacy plaintext column. Invoked at boot (right
+// after EnsureKeysLoaded) so the Phase 9-PRE encryption-at-rest
+// contract is enforced as a closed loop without operator action.
+//
+// Idempotent: rows whose ldap_bind_password_encrypted column already
+// has bytes are skipped. On a freshly-encrypted DB this is a single
+// SELECT that returns nothing. The function returns the number of
+// rows it sealed so the caller can log the migration footprint.
+//
+// Failure modes: a row whose plaintext cannot be sealed (e.g. the
+// encryption key is unavailable) aborts the whole backfill — we'd
+// rather leave the row plaintext for one more boot than partially
+// migrate. Callers should treat a non-nil error as boot-non-fatal in
+// development (so a missing MFA_ENCRYPTION_KEY doesn't lock out the
+// dev loop) but fatal in production.
+func BackfillLDAPBindPasswords(ctx context.Context, db *gorm.DB) (int, error) {
+	if db == nil {
+		return 0, nil
+	}
+	// Probe the keychain first so we fail fast rather than after the
+	// SELECT. EnsureKeysLoaded is idempotent (sync.Once) so this is
+	// free if the caller already invoked it.
+	if err := EnsureKeysLoaded(); err != nil {
+		return 0, fmt.Errorf("encryption keys unavailable: %w", err)
+	}
+
+	type row struct {
+		ID               uint
+		LDAPBindPassword string
+	}
+	var rows []row
+	q := db.WithContext(ctx).
+		Table("authentication_providers").
+		Select("id, ldap_bind_password").
+		Where("auth_type = ?", "ldap").
+		Where("ldap_bind_password IS NOT NULL AND ldap_bind_password <> ''").
+		Where("ldap_bind_password_encrypted IS NULL OR octet_length(ldap_bind_password_encrypted) = 0")
+	if err := q.Find(&rows).Error; err != nil {
+		return 0, fmt.Errorf("list backfill candidates: %w", err)
+	}
+	if len(rows) == 0 {
+		return 0, nil
+	}
+
+	sealed := 0
+	for _, r := range rows {
+		ct, err := Encrypt([]byte(r.LDAPBindPassword))
+		if err != nil {
+			return sealed, fmt.Errorf("seal row %d: %w", r.ID, err)
+		}
+		// Write the ciphertext and clear the plaintext column in the
+		// same UPDATE so a crash mid-loop can't leave a row with both
+		// columns populated. The plaintext column staying nullable
+		// after Wave-A is intentional — Wave-B drops it.
+		err = db.WithContext(ctx).
+			Table("authentication_providers").
+			Where("id = ?", r.ID).
+			Updates(map[string]any{
+				"ldap_bind_password_encrypted": ct,
+				"ldap_bind_password":           "",
+			}).Error
+		if err != nil {
+			return sealed, fmt.Errorf("update row %d: %w", r.ID, err)
+		}
+		sealed++
+	}
+	return sealed, nil
+}
 
 // LDAPAuthenticator provides LDAP authentication against an
 // AuthenticationProvider.
@@ -64,9 +136,18 @@ func (a *LDAPAuthenticator) BuildOutcome(ctx context.Context, provider *models.A
 	}
 	defer conn.Close()
 
-	// Step 1: Bind with service account (if configured) to search for the user
-	if provider.LDAPBindDN != "" && provider.LDAPBindPassword != "" {
-		if err := ldapBind(conn, provider.LDAPBindDN, provider.LDAPBindPassword); err != nil {
+	// Step 1: Bind with service account (if configured) to search for the user.
+	// Read the bind password through resolveLDAPBindPassword: prefer the
+	// encrypted column (Phase 9-PRE encryption-at-rest), fall back to the
+	// legacy plaintext field for rows that haven't been rotated through
+	// the encryption path yet. The plaintext fallback goes away when
+	// Wave-B drops the column.
+	bindPassword, err := resolveLDAPBindPassword(provider)
+	if err != nil {
+		return SSOOutcome{}, fmt.Errorf("ldap bind password unavailable: %w", err)
+	}
+	if provider.LDAPBindDN != "" && bindPassword != "" {
+		if err := ldapBind(conn, provider.LDAPBindDN, bindPassword); err != nil {
 			return SSOOutcome{}, fmt.Errorf("service account bind failed: %w", err)
 		}
 	}
@@ -176,14 +257,42 @@ func (a *LDAPAuthenticator) TestConnection(ctx context.Context, provider *models
 	}
 	defer conn.Close()
 
-	// If a bind DN is configured, test the service account bind
-	if provider.LDAPBindDN != "" && provider.LDAPBindPassword != "" {
-		if err := ldapBind(conn, provider.LDAPBindDN, provider.LDAPBindPassword); err != nil {
+	// If a bind DN is configured, test the service account bind.
+	// Same encrypted-first / plaintext-fallback resolution as BuildOutcome
+	// — keeps the test surface honest about which storage path will be
+	// used in production for this provider.
+	bindPassword, err := resolveLDAPBindPassword(provider)
+	if err != nil {
+		return fmt.Errorf("ldap bind password unavailable: %w", err)
+	}
+	if provider.LDAPBindDN != "" && bindPassword != "" {
+		if err := ldapBind(conn, provider.LDAPBindDN, bindPassword); err != nil {
 			return fmt.Errorf("service account bind failed: %w", err)
 		}
 	}
 
 	return nil
+}
+
+// resolveLDAPBindPassword reads the bind password from whichever column
+// is populated. Prefers the AES-256-GCM ciphertext column (the Phase
+// 9-PRE encryption-at-rest contract; see internal/auth/secretbox.go and
+// the docstring on AuthenticationProvider.LDAPBindPasswordEncrypted),
+// falls back to the legacy plaintext column for rows that predate the
+// rotation. The plaintext fallback is the bridge that keeps this PR
+// backward-compatible — Wave-B will drop the plaintext column and this
+// branch with it. Empty inputs return "" with no error so callers can
+// skip the service-account bind when no credential is configured at
+// all (anonymous LDAP search).
+func resolveLDAPBindPassword(provider *models.AuthenticationProvider) (string, error) {
+	if len(provider.LDAPBindPasswordEncrypted) > 0 {
+		pt, err := Decrypt(provider.LDAPBindPasswordEncrypted)
+		if err != nil {
+			return "", fmt.Errorf("decrypt ldap_bind_password_encrypted: %w", err)
+		}
+		return string(pt), nil
+	}
+	return provider.LDAPBindPassword, nil
 }
 
 // connect establishes a TCP or TLS connection to the LDAP server.

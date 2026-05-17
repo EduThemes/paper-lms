@@ -24,7 +24,19 @@ type AuthenticationProvider struct {
 	LDAPPort           int    `json:"ldap_port,omitempty"`
 	LDAPBase           string `json:"ldap_base,omitempty"`
 	LDAPFilter         string `json:"ldap_filter,omitempty"`
-	LDAPBindDN         string `json:"ldap_bind_dn,omitempty"`
+	LDAPBindDN string `json:"ldap_bind_dn,omitempty"`
+	// LDAPBindPassword is the legacy plaintext bind password column.
+	// Phase 9-PRE moved the canonical write to LDAPBindPasswordEncrypted
+	// (AES-256-GCM via internal/auth/secretbox). The Create/Update
+	// handlers now seal new passwords into the encrypted column and
+	// blank this field; the LDAP read path (resolveLDAPBindPassword in
+	// internal/auth/ldap.go) prefers the encrypted column and falls
+	// back to this one only for un-rotated rows.
+	//
+	// TODO: drop in Wave-B follow-up migration after the Go-side
+	// backfill (RebackfillLDAPBindPasswords at boot) finishes flipping
+	// every plaintext row to ciphertext. At that point both this field
+	// and the SQL column go away.
 	LDAPBindPassword   string `json:"-"` // Never expose in JSON
 	LDAPUseTLS         bool   `json:"ldap_use_tls"`
 	LDAPLoginAttribute string `json:"ldap_login_attribute,omitempty" gorm:"default:'uid'"`

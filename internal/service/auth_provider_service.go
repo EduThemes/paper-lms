@@ -97,6 +97,16 @@ func (s *AuthProviderService) UpdateProvider(ctx context.Context, id uint, updat
 	if updates.LDAPBindPassword != "" {
 		existing.LDAPBindPassword = updates.LDAPBindPassword
 	}
+	// Mirror of the OIDC ciphertext-rotation pattern below: a zero-length
+	// LDAPBindPasswordEncrypted means "admin didn't rotate the bind
+	// password" — keep whatever ciphertext is on disk. Any non-empty
+	// value is a fresh secretbox-encrypted rotation from the handler.
+	if len(updates.LDAPBindPasswordEncrypted) > 0 {
+		existing.LDAPBindPasswordEncrypted = updates.LDAPBindPasswordEncrypted
+		// A new encrypted secret is the canonical write — make sure no
+		// stale plaintext can shadow it once Wave-B drops the column.
+		existing.LDAPBindPassword = ""
+	}
 	if updates.LDAPLoginAttribute != "" {
 		existing.LDAPLoginAttribute = updates.LDAPLoginAttribute
 	}
