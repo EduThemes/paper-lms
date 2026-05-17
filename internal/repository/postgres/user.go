@@ -94,12 +94,25 @@ func (r *userRepo) List(ctx context.Context, params repository.PaginationParams)
 	}, nil
 }
 
-func (r *userRepo) Search(ctx context.Context, searchTerm string, params repository.PaginationParams) (*repository.PaginatedResult[models.User], error) {
+// Search returns paginated users whose name or email matches searchTerm.
+//
+// Tenant scope (Phase 13.1.D pattern): when accountID != 0 the query is
+// constrained to users in that account; accountID == 0 means "no tenant
+// scope" and is reserved for internal background callers. Handler
+// callers MUST pass `callerAccountID(c)` — see
+// `internal/api/v1/handlers/helpers.go`. This method previously had no
+// tenant filter, which let any admin in any tenant enumerate users in
+// any other tenant via name/email substring (Canvas-CVE-class
+// cross-tenant info leak).
+func (r *userRepo) Search(ctx context.Context, searchTerm string, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.User], error) {
 	var users []models.User
 	var count int64
 
 	like := "%" + searchTerm + "%"
 	query := r.db.WithContext(ctx).Model(&models.User{}).Where("name ILIKE ? OR email ILIKE ?", like, like)
+	if accountID != 0 {
+		query = query.Where("account_id = ?", accountID)
+	}
 	query.Count(&count)
 
 	offset := (params.Page - 1) * params.PerPage
