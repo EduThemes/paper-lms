@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/smtp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,10 @@ import (
 )
 
 // SMTPConfig holds the configuration for outbound email delivery.
+// Kept as a struct so the resolved-effective view can be passed
+// around internally. Construction now happens per-send (see
+// resolveSMTPConfig) so cred rotation via the super-admin panel
+// takes effect without a restart.
 type SMTPConfig struct {
 	Host     string
 	Port     int
@@ -25,6 +30,22 @@ type SMTPConfig struct {
 	Enabled  bool
 }
 
+// SettingsLookupFunc is the type NotificationDeliveryService accepts
+// for resolving live config values. Function-typed rather than
+// interface-typed for two reasons:
+//
+//  1. It breaks an import cycle. internal/auth imports internal/service
+//     (via auth_audit.go). If this package imported
+//     internal/service/settings (which imports internal/auth for
+//     secretbox), Go rejects the cycle. A bare function type lets
+//     the caller (cmd/server/main.go) wire the closure that holds
+//     the settings.Service reference.
+//  2. Tests can stub trivially with a literal map lookup.
+//
+// Empty string + nil error means "no value in the resolution chain";
+// non-nil error means "the lookup itself failed transiently."
+type SettingsLookupFunc func(ctx context.Context, key string) (string, error)
+
 // NotificationDeliveryService is the core notification dispatch engine.
 type NotificationDeliveryService struct {
 	deliveryRepo postgres.NotificationDeliveryRepository
@@ -32,17 +53,27 @@ type NotificationDeliveryService struct {
 	prefRepo     repository.NotificationPreferenceRepository
 	notifRepo    repository.NotificationRepository
 	userRepo     repository.UserRepository
-	smtpConfig   SMTPConfig
+	lookup       SettingsLookupFunc
 }
 
-// NewNotificationDeliveryService creates a new NotificationDeliveryService with all required dependencies.
+// NewNotificationDeliveryService creates a new NotificationDeliveryService
+// with all required dependencies. The lookup function resolves SMTP
+// settings per-send so cred rotation via the super-admin UI takes
+// effect immediately. Pass nil only in tests that don't exercise the
+// email path.
+//
+// Wave 5: this signature dropped the SMTPConfig parameter. The
+// catalog (internal/service/settings/catalog.go) carries the env
+// fallback names (SMTP_HOST, SMTP_PORT, …) so deployments that have
+// never touched the settings UI keep working unchanged — the
+// resolution chain returns the env value with source="env".
 func NewNotificationDeliveryService(
 	deliveryRepo postgres.NotificationDeliveryRepository,
 	channelRepo postgres.CommunicationChannelRepository,
 	prefRepo repository.NotificationPreferenceRepository,
 	notifRepo repository.NotificationRepository,
 	userRepo repository.UserRepository,
-	smtpConfig SMTPConfig,
+	lookup SettingsLookupFunc,
 ) *NotificationDeliveryService {
 	return &NotificationDeliveryService{
 		deliveryRepo: deliveryRepo,
@@ -50,8 +81,78 @@ func NewNotificationDeliveryService(
 		prefRepo:     prefRepo,
 		notifRepo:    notifRepo,
 		userRepo:     userRepo,
-		smtpConfig:   smtpConfig,
+		lookup:       lookup,
 	}
+}
+
+// resolveSMTPConfig fetches the live SMTP configuration via the
+// settings lookup. Called on every Send so changes to SMTP creds
+// take effect immediately — the whole point of the Settings Engine.
+//
+// The lookup function (wired in main.go) walks the resolution chain
+// (account → instance → env → default) internally; this function
+// just reads each catalog key and assembles the struct. A missing or
+// unparseable port falls back to 587 — the same default the catalog
+// declares.
+func (s *NotificationDeliveryService) resolveSMTPConfig(ctx context.Context) (SMTPConfig, error) {
+	if s.lookup == nil {
+		return SMTPConfig{}, fmt.Errorf("notification delivery: settings lookup not wired")
+	}
+
+	read := func(key string) (string, error) {
+		v, err := s.lookup(ctx, key)
+		if err != nil {
+			return "", fmt.Errorf("settings %s: %w", key, err)
+		}
+		return v, nil
+	}
+
+	host, err := read("smtp.host")
+	if err != nil {
+		return SMTPConfig{}, err
+	}
+	portStr, err := read("smtp.port")
+	if err != nil {
+		return SMTPConfig{}, err
+	}
+	username, err := read("smtp.username")
+	if err != nil {
+		return SMTPConfig{}, err
+	}
+	password, err := read("smtp.password")
+	if err != nil {
+		return SMTPConfig{}, err
+	}
+	from, err := read("smtp.from")
+	if err != nil {
+		return SMTPConfig{}, err
+	}
+	enabledStr, err := read("smtp.enabled")
+	if err != nil {
+		return SMTPConfig{}, err
+	}
+
+	port, _ := strconv.Atoi(strings.TrimSpace(portStr))
+	if port == 0 {
+		port = 587 // catalog default; explicit so a bad parse doesn't yield port 0
+	}
+
+	// Enabled parsing matches the pre-Wave-5 strict semantics from
+	// internal/config/config.go: only the literal lowercase string
+	// "true" counts. Operators using non-canonical casing (e.g.
+	// SMTP_ENABLED=True) as a soft-disable keep working — Wave 5
+	// audit H1 caught the widened parse before it shipped. Values
+	// written through the super-admin UI are normalized to
+	// lowercase by the catalog's validator at write time, so this
+	// only affects env-var-driven deployments.
+	return SMTPConfig{
+		Host:     host,
+		Port:     port,
+		Username: username,
+		Password: password,
+		From:     from,
+		Enabled:  enabledStr == "true",
+	}, nil
 }
 
 // QueueNotification looks up the user's notification preference for the given type,
@@ -159,7 +260,7 @@ func (s *NotificationDeliveryService) ProcessPendingDeliveries(ctx context.Conte
 		var sendErr error
 		switch d.ChannelType {
 		case "email":
-			sendErr = s.SendEmail(d.Address, d.Subject, d.Body)
+			sendErr = s.SendEmail(ctx, d.Address, d.Subject, d.Body)
 		case "webhook":
 			sendErr = s.sendWebhook(d.Address, d.Subject, d.Body)
 		default:
@@ -184,9 +285,22 @@ func (s *NotificationDeliveryService) ProcessPendingDeliveries(ctx context.Conte
 	return processed, nil
 }
 
-// SendEmail sends an email via SMTP with the body wrapped in a simple HTML template.
-func (s *NotificationDeliveryService) SendEmail(to, subject, body string) error {
-	if !s.smtpConfig.Enabled {
+// SendEmail sends an email via SMTP with the body wrapped in a simple
+// HTML template. Resolves live SMTP config via the settings service on
+// every call — a super-admin who rotates the password through the
+// /superadmin/settings UI takes effect immediately on the next send,
+// no restart.
+//
+// Wave 5: SendEmail now takes ctx so the resolution call can be
+// cancellable + propagate request scope. Callers internal to this
+// package already had ctx in scope; the public-API change is
+// limited to this file and main.go's wiring.
+func (s *NotificationDeliveryService) SendEmail(ctx context.Context, to, subject, body string) error {
+	cfg, err := s.resolveSMTPConfig(ctx)
+	if err != nil {
+		return err
+	}
+	if !cfg.Enabled {
 		return fmt.Errorf("SMTP is not enabled")
 	}
 
@@ -196,16 +310,16 @@ func (s *NotificationDeliveryService) SendEmail(to, subject, body string) error 
 	}
 
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=\"utf-8\"\r\n\r\n%s",
-		s.smtpConfig.From, to, subject, htmlBody)
+		cfg.From, to, subject, htmlBody)
 
-	addr := fmt.Sprintf("%s:%d", s.smtpConfig.Host, s.smtpConfig.Port)
+	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 
 	var auth smtp.Auth
-	if s.smtpConfig.Username != "" {
-		auth = smtp.PlainAuth("", s.smtpConfig.Username, s.smtpConfig.Password, s.smtpConfig.Host)
+	if cfg.Username != "" {
+		auth = smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
 	}
 
-	if err := smtp.SendMail(addr, auth, s.smtpConfig.From, []string{to}, []byte(msg)); err != nil {
+	if err := smtp.SendMail(addr, auth, cfg.From, []string{to}, []byte(msg)); err != nil {
 		return fmt.Errorf("SMTP send failed: %w", err)
 	}
 
@@ -249,7 +363,7 @@ func (s *NotificationDeliveryService) ProcessDigests(ctx context.Context, digest
 			var sendErr error
 			switch key.ChannelType {
 			case "email":
-				sendErr = s.SendEmail(key.Address, d.Subject, d.Body)
+				sendErr = s.SendEmail(ctx, key.Address, d.Subject, d.Body)
 			case "webhook":
 				sendErr = s.sendWebhook(key.Address, d.Subject, d.Body)
 			}
@@ -280,7 +394,7 @@ func (s *NotificationDeliveryService) ProcessDigests(ctx context.Context, digest
 		var sendErr error
 		switch key.ChannelType {
 		case "email":
-			sendErr = s.SendEmail(key.Address, subject, digestBody)
+			sendErr = s.SendEmail(ctx, key.Address, subject, digestBody)
 		case "webhook":
 			sendErr = s.sendWebhook(key.Address, subject, digestBody)
 		}

@@ -2,7 +2,9 @@
 //
 // AIAssistService wraps the Anthropic Claude API for three RCE V2 toolbar
 // actions: Outline, Summarize, Rewrite. The frontend never sees the API key
-// — the backend reads ANTHROPIC_API_KEY from env via config.AnthropicAPIKey.
+// — the backend resolves it per-request via the Settings Engine, so a
+// super-admin who rotates `ai.anthropic.api_key` through the
+// /superadmin/settings UI takes effect on the very next call (no restart).
 //
 // Model: claude-haiku-4-5-20251001 (cheap + fast — see CLAUDE.md model table).
 package service
@@ -25,6 +27,12 @@ const (
 	aiAssistModel     = "claude-haiku-4-5-20251001"
 	aiAssistMaxTokens = 1024
 	aiAssistTimeout   = 15 * time.Second
+
+	// aiAnthropicAPIKeyCatalogKey is the Settings Engine catalog key
+	// resolved on every request. The catalog declares the env fallback
+	// (ANTHROPIC_API_KEY) so deployments that never touch the
+	// super-admin UI keep working unchanged.
+	aiAnthropicAPIKeyCatalogKey = "ai.anthropic.api_key"
 )
 
 // HTTPDoer is the minimal interface AIAssistService needs from an HTTP client.
@@ -33,22 +41,33 @@ type HTTPDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// ErrAIAssistNotConfigured is returned when ANTHROPIC_API_KEY is empty.
-// Handlers translate this into HTTP 503 with the Canvas error format.
+// ErrAIAssistNotConfigured is returned when the resolved Anthropic API key
+// is empty. Handlers translate this into HTTP 503 with the Canvas error
+// format.
 var ErrAIAssistNotConfigured = errors.New("AI Assist not configured")
 
 // AIAssistService proxies a small set of authoring helpers to Anthropic.
+//
+// Wave 5: the API key is no longer held in a struct field at boot. Each
+// public action resolves the catalog key `ai.anthropic.api_key` via the
+// injected lookup function so cred rotation through the super-admin UI
+// takes effect immediately. Empty resolved value -> ErrAIAssistNotConfigured.
 type AIAssistService struct {
-	apiKey     string
+	lookup     SettingsLookupFunc
 	httpClient HTTPDoer
 }
 
-// NewAIAssistService constructs a service. Pass an empty apiKey to make the
-// service report ErrAIAssistNotConfigured on every call (lets the server boot
-// without the key in dev).
-func NewAIAssistService(apiKey string) *AIAssistService {
+// NewAIAssistService constructs a service. Pass a nil lookup to make the
+// service report ErrAIAssistNotConfigured on every call (lets the server
+// boot without the Settings Engine wired, and lets tests that don't
+// exercise the network path skip the closure plumbing).
+//
+// The lookup signature mirrors the SMTP refactor in
+// NotificationDeliveryService — see SettingsLookupFunc in
+// notification_delivery_service.go for the cycle-breaking rationale.
+func NewAIAssistService(lookup SettingsLookupFunc) *AIAssistService {
 	return &AIAssistService{
-		apiKey: apiKey,
+		lookup: lookup,
 		httpClient: &http.Client{
 			Timeout: aiAssistTimeout + 5*time.Second, // context still bounds it tighter
 		},
@@ -61,9 +80,35 @@ func (s *AIAssistService) WithHTTPClient(c HTTPDoer) *AIAssistService {
 	return s
 }
 
-// Configured reports whether an API key is present.
+// resolveAPIKey reads `ai.anthropic.api_key` via the injected lookup. A
+// nil lookup or empty resolved value both yield ErrAIAssistNotConfigured;
+// transient lookup failures bubble up unchanged.
+func (s *AIAssistService) resolveAPIKey(ctx context.Context) (string, error) {
+	if s.lookup == nil {
+		return "", ErrAIAssistNotConfigured
+	}
+	v, err := s.lookup(ctx, aiAnthropicAPIKeyCatalogKey)
+	if err != nil {
+		return "", fmt.Errorf("settings %s: %w", aiAnthropicAPIKeyCatalogKey, err)
+	}
+	if strings.TrimSpace(v) == "" {
+		return "", ErrAIAssistNotConfigured
+	}
+	return v, nil
+}
+
+// Configured reports whether the service has any chance of serving a
+// request. Retained for the handler-level fast-path 503 so we don't burn
+// a settings lookup on every COPPA-blocked request. Uses a background
+// context because the call is a boolean probe, not a request-bound
+// resolution — request-time errors still flow through ErrAIAssistNotConfigured
+// in complete().
+//
+// Returns false only when no lookup is wired at all. The per-request
+// resolveAPIKey is the source of truth for "is the key actually set"; we
+// deliberately don't burn a settings round-trip here.
 func (s *AIAssistService) Configured() bool {
-	return strings.TrimSpace(s.apiKey) != ""
+	return s.lookup != nil
 }
 
 // --- Public actions -------------------------------------------------------
@@ -129,13 +174,17 @@ type anthropicResponse struct {
 }
 
 // complete drives the Anthropic Messages API with one transparent retry on
-// 429 / 5xx. Hard timeout is enforced via a derived context.
+// 429 / 5xx. Hard timeout is enforced via a derived context. Resolves the
+// API key once per logical call (not per retry) — a rotation between
+// attempts is rare enough that the slight staleness is acceptable.
 func (s *AIAssistService) complete(ctx context.Context, system, userText string) (string, error) {
-	if !s.Configured() {
-		return "", ErrAIAssistNotConfigured
-	}
 	if strings.TrimSpace(userText) == "" {
 		return "", errors.New("text is required")
+	}
+
+	apiKey, err := s.resolveAPIKey(ctx)
+	if err != nil {
+		return "", err
 	}
 
 	body := anthropicRequest{
@@ -157,7 +206,7 @@ func (s *AIAssistService) complete(ctx context.Context, system, userText string)
 	// One retry on 429 / 5xx. Skip retry if the context is already done.
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
-		text, retry, err := s.doOnce(callCtx, payload)
+		text, retry, err := s.doOnce(callCtx, apiKey, payload)
 		if err == nil {
 			return text, nil
 		}
@@ -180,12 +229,12 @@ func (s *AIAssistService) complete(ctx context.Context, system, userText string)
 
 // doOnce performs a single HTTP round-trip. The bool return indicates whether
 // the caller should retry (true on 429/5xx/transient transport errors).
-func (s *AIAssistService) doOnce(ctx context.Context, payload []byte) (string, bool, error) {
+func (s *AIAssistService) doOnce(ctx context.Context, apiKey string, payload []byte) (string, bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, anthropicEndpoint, bytes.NewReader(payload))
 	if err != nil {
 		return "", false, err
 	}
-	req.Header.Set("x-api-key", s.apiKey)
+	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", anthropicVersion)
 	req.Header.Set("content-type", "application/json")
 

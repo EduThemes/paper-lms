@@ -15,10 +15,40 @@ import { AuthProvider, useAuth } from '../contexts/AuthContext';
 
 const wrapper = ({ children }) => <AuthProvider>{children}</AuthProvider>;
 
+// Node 25's experimental built-in localStorage (a side effect of
+// --experimental-webstorage being on by default) shadows jsdom's
+// Storage implementation with an inert empty object that has no
+// .clear / .getItem / .setItem / .removeItem methods. Install a
+// minimal in-memory Storage shim before this suite runs so the
+// AuthContext under test (and these tests' own setup/assertions)
+// see a working localStorage. Scope is intentionally limited to
+// this file — production code is untouched.
+function installLocalStorageShim() {
+  const store = new Map();
+  const shim = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(String(k), String(v)); },
+    removeItem: (k) => { store.delete(k); },
+    clear: () => { store.clear(); },
+    key: (i) => Array.from(store.keys())[i] ?? null,
+    get length() { return store.size; },
+  };
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: shim,
+  });
+  if (typeof window !== 'undefined') {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: shim,
+    });
+  }
+}
+
 describe('AuthContext', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    localStorage.clear();
+    installLocalStorageShim();
     // Default: getSelf rejects (not authenticated)
     api.getSelf.mockRejectedValue(new Error('Not authenticated'));
   });

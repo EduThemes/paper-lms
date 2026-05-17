@@ -456,19 +456,40 @@ func main() {
 	announcementService := service.NewAnnouncementService(announcementRepo, announcementReceiptRepo, enrollmentRepo)
 	enrollmentTermService := service.NewEnrollmentTermService(enrollmentTermRepo, database)
 	// services
-	smtpConfig := service.SMTPConfig{
-		Host:     cfg.SMTPHost,
-		Port:     cfg.SMTPPort,
-		Username: cfg.SMTPUsername,
-		Password: cfg.SMTPPassword,
-		From:     cfg.SMTPFrom,
-		Enabled:  cfg.SMTPEnabled,
+	//
+	// Wave 5: auditService + settingsService now construct BEFORE
+	// notificationDeliveryService because the latter resolves SMTP
+	// config via settingsService on every send (per-request cred
+	// rotation, no restart needed). The catalog's EnvFallback chain
+	// reads SMTP_HOST / SMTP_PORT / … so deployments that have
+	// never opened the super-admin panel keep working unchanged.
+	auditService := service.NewAuditService(auditLogRepo, gradeChangeLogRepo, piiAccessLogRepo)
+	settingRepo := postgres.NewSettingRepository(database)
+	settingsService := settings.NewService(settingRepo, accountRepo, auditService)
+
+	// settingsLookup is the cycle-breaking closure shared by every
+	// consumer that resolves catalog keys through the Settings
+	// Engine — SMTP (notification_delivery_service), AI Assist
+	// (ai_assist_service), OIDC (auth.OIDCHandler), and the future
+	// Wave 6 S3 path. See service.SettingsLookupFunc / auth.SettingsLookupFunc
+	// docstrings for why function-typed (avoids the auth→service→settings→auth
+	// import cycle).
+	//
+	// Per-tenant scope hints aren't threaded here — these consumers
+	// today resolve at instance scope; per-tenant SMTP/Anthropic/etc.
+	// is a Wave 5.B follow-up that needs per-request account context
+	// from the Fiber Ctx.
+	settingsLookup := func(ctx context.Context, key string) (string, error) {
+		ev, err := settingsService.Get(ctx, key, settings.ScopeHints{})
+		if err != nil {
+			return "", err
+		}
+		return ev.Value, nil
 	}
 	notificationDeliveryService := service.NewNotificationDeliveryService(
 		notificationDeliveryRepo, communicationChannelRepo, notificationPrefRepo,
-		notificationRepo, userRepo, smtpConfig,
+		notificationRepo, userRepo, settingsLookup,
 	)
-	auditService := service.NewAuditService(auditLogRepo, gradeChangeLogRepo, piiAccessLogRepo)
 	// services
 	customRoleService := service.NewCustomRoleService(customRoleRepo, roleOverrideRepo, enrollmentRepo)
 	onerosterService := service.NewOneRosterService(onerosterConnRepo, onerosterSyncLogRepo, userRepo, courseRepo, sectionRepo, enrollmentRepo, accountRepo, database)
@@ -549,7 +570,10 @@ func main() {
 		moduleRepo,
 		discussionTopicRepo,
 	)
-	aiAssistService := service.NewAIAssistService(cfg.AnthropicAPIKey)
+	// Wave 5: AI Assist resolves `ai.anthropic.api_key` per-request
+	// via the Settings Engine (shared settingsLookup closure declared
+	// up by notificationDeliveryService).
+	aiAssistService := service.NewAIAssistService(settingsLookup)
 
 	batchService := service.NewBatchService(
 		courseRepo, moduleRepo, moduleItemRepo, assignmentRepo, quizRepo, quizQuestionRepo,
@@ -587,9 +611,32 @@ func main() {
 
 	// Initialize token blacklist for session revocation on logout
 	tokenBlacklist := service.NewTokenBlacklist()
-	// Phase 9-A — OIDC client. Reads OIDC_REDIRECT_BASE from env; in
-	// dev defaults to http://localhost:3000 inside the handler.
-	oidcHandler := auth.NewOIDCHandler(authProviderRepo, loginPipeline, "", os.Getenv("OIDC_REDIRECT_BASE"))
+	// Phase 9-A — OIDC client. The redirect base is resolved per
+	// request via the Settings Engine ("auth.oidc.redirect_base"),
+	// which carries the OIDC_REDIRECT_BASE env fallback in its
+	// catalog entry. The construction-time value passed here is the
+	// last-resort fallback when the settings lookup AND the catalog
+	// env fallback both come back empty.
+	//
+	// Wave 5 audit H2: in development we explicitly pass
+	// "http://localhost:3000" as the constructor fallback so the
+	// usual dev loop still works without setting OIDC_REDIRECT_BASE.
+	// In production we pass empty; if the operator also forgot the
+	// env var, the handler returns an error from buildConfig
+	// instead of silently constructing a callback URL the IdP
+	// would reject anyway.
+	//
+	// Reuses the shared settingsLookup closure declared earlier.
+	// auth.SettingsLookupFunc has the same underlying signature so
+	// Go's implicit conversion handles the named-type translation.
+	oidcRedirectFallback := os.Getenv("OIDC_REDIRECT_BASE")
+	if oidcRedirectFallback == "" && cfg.Environment == "development" {
+		oidcRedirectFallback = "http://localhost:3000"
+	}
+	if oidcRedirectFallback == "" && cfg.Environment == "production" {
+		log.Printf("warning: OIDC_REDIRECT_BASE is unset in production; OIDC login will fail until a super-admin sets auth.oidc.redirect_base via /superadmin/settings")
+	}
+	oidcHandler := auth.NewOIDCHandler(authProviderRepo, loginPipeline, "", oidcRedirectFallback, settingsLookup)
 	// Phase 9-B / 10-A — TOTP MFA + per-token rate limiting.
 	userRecoveryCodeRepo := postgres.NewUserRecoveryCodeRepository(database)
 	mfaRateLimit := auth.NewMFAAttemptTracker(nil)
@@ -711,16 +758,12 @@ func main() {
 	quizStatisticsHandler := handlers.NewQuizStatisticsHandler(quizService)
 	setupHandler := handlers.NewSetupHandler(userService, accountRepo, userRepo, database, cfg.JWTSecret, cfg.Environment)
 
-	// Super-Admin Settings Engine (Wave 2 read-only surface). Reads
-	// settings rows from migration 000057; walks the account parent
-	// chain via accountRepo; emits audit_log rows via auditService.
-	// AccountRepo satisfies the narrow settings.AccountAncestry
-	// interface structurally — no adapter needed.
-	settingRepo := postgres.NewSettingRepository(database)
-	settingsService := settings.NewService(settingRepo, accountRepo, auditService)
-	// accountRepo satisfies the narrow accountExistenceChecker interface
-	// the write handler uses to validate account-scope writes. auditService
-	// satisfies settingsAuditSink for the setting.tested event class.
+	// Super-Admin Settings Engine handler. settingsService is
+	// constructed earlier (before notificationDeliveryService) — see
+	// the Wave 5 note up there. accountRepo satisfies the narrow
+	// accountExistenceChecker interface the write handler uses to
+	// validate account-scope writes; auditService satisfies
+	// settingsAuditSink for the setting.tested event class.
 	superAdminSettingsHandler := handlers.NewSuperAdminSettingsHandler(settingsService, accountRepo, auditService)
 	// P3 Feature handlers
 	featureFlagHandler := handlers.NewFeatureFlagHandler(featureFlagService, enrollmentRepo, userRepo)

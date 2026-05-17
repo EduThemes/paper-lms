@@ -26,9 +26,25 @@ func makeResp(status int, body string) *http.Response {
 
 const happyBody = `{"content":[{"type":"text","text":"- Point one\n- Point two"}]}`
 
+// staticLookup is a test SettingsLookupFunc that always returns the same
+// value. Empty value mimics the "no key configured" branch.
+func staticLookup(value string) SettingsLookupFunc {
+	return func(_ context.Context, _ string) (string, error) {
+		return value, nil
+	}
+}
+
 func TestAIAssist(t *testing.T) {
-	t.Run("not configured returns sentinel error", func(t *testing.T) {
-		svc := NewAIAssistService("")
+	t.Run("not configured returns sentinel error - nil lookup", func(t *testing.T) {
+		svc := NewAIAssistService(nil)
+		_, err := svc.Outline(context.Background(), "hello world")
+		if !errors.Is(err, ErrAIAssistNotConfigured) {
+			t.Fatalf("expected ErrAIAssistNotConfigured, got %v", err)
+		}
+	})
+
+	t.Run("not configured returns sentinel error - empty lookup result", func(t *testing.T) {
+		svc := NewAIAssistService(staticLookup(""))
 		_, err := svc.Outline(context.Background(), "hello world")
 		if !errors.Is(err, ErrAIAssistNotConfigured) {
 			t.Fatalf("expected ErrAIAssistNotConfigured, got %v", err)
@@ -36,7 +52,7 @@ func TestAIAssist(t *testing.T) {
 	})
 
 	t.Run("empty text rejected", func(t *testing.T) {
-		svc := NewAIAssistService("test-key")
+		svc := NewAIAssistService(staticLookup("test-key"))
 		_, err := svc.Summarize(context.Background(), "   ")
 		if err == nil {
 			t.Fatal("expected error for empty input, got nil")
@@ -58,7 +74,7 @@ func TestAIAssist(t *testing.T) {
 			}
 			return makeResp(http.StatusOK, happyBody), nil
 		})
-		svc := NewAIAssistService("test-key").WithHTTPClient(client)
+		svc := NewAIAssistService(staticLookup("test-key")).WithHTTPClient(client)
 
 		out, err := svc.Outline(context.Background(), "Some long prose to outline.")
 		if err != nil {
@@ -78,7 +94,7 @@ func TestAIAssist(t *testing.T) {
 		client := roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
 			return makeResp(http.StatusOK, happyBody), nil
 		})
-		svc := NewAIAssistService("test-key").WithHTTPClient(client)
+		svc := NewAIAssistService(staticLookup("test-key")).WithHTTPClient(client)
 
 		if _, err := svc.Summarize(context.Background(), "text"); err != nil {
 			t.Fatalf("Summarize: %v", err)
@@ -97,7 +113,7 @@ func TestAIAssist(t *testing.T) {
 			}
 			return makeResp(http.StatusOK, happyBody), nil
 		})
-		svc := NewAIAssistService("test-key").WithHTTPClient(client)
+		svc := NewAIAssistService(staticLookup("test-key")).WithHTTPClient(client)
 
 		out, err := svc.Outline(context.Background(), "anything")
 		if err != nil {
@@ -117,7 +133,7 @@ func TestAIAssist(t *testing.T) {
 			atomic.AddInt32(&calls, 1)
 			return makeResp(http.StatusBadGateway, `upstream down`), nil
 		})
-		svc := NewAIAssistService("test-key").WithHTTPClient(client)
+		svc := NewAIAssistService(staticLookup("test-key")).WithHTTPClient(client)
 
 		_, err := svc.Outline(context.Background(), "anything")
 		if err == nil {
@@ -134,7 +150,7 @@ func TestAIAssist(t *testing.T) {
 			atomic.AddInt32(&calls, 1)
 			return makeResp(http.StatusBadRequest, `{"error":{"type":"invalid_request","message":"bad"}}`), nil
 		})
-		svc := NewAIAssistService("test-key").WithHTTPClient(client)
+		svc := NewAIAssistService(staticLookup("test-key")).WithHTTPClient(client)
 
 		_, err := svc.Outline(context.Background(), "anything")
 		if err == nil {
@@ -151,7 +167,7 @@ func TestAIAssist(t *testing.T) {
 			<-req.Context().Done()
 			return nil, req.Context().Err()
 		})
-		svc := NewAIAssistService("test-key").WithHTTPClient(client)
+		svc := NewAIAssistService(staticLookup("test-key")).WithHTTPClient(client)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()

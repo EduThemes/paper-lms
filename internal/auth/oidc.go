@@ -4,24 +4,24 @@
 // Sign-In, or any compliant OIDC IdP).
 //
 // Why this lib stack:
-//   * golang.org/x/oauth2 — Go-team-maintained OAuth2 plumbing.
-//   * github.com/coreos/go-oidc/v3 — OIDC layer on top; OpenID
+//   - golang.org/x/oauth2 — Go-team-maintained OAuth2 plumbing.
+//   - github.com/coreos/go-oidc/v3 — OIDC layer on top; OpenID
 //     Foundation-certified. Reads /.well-known/openid-configuration,
 //     verifies ID-token JWT signatures via JWKS, handles claim
 //     extraction.
 //
 // What this handler does NOT do:
-//   * Provision users. The LoginPipeline owns that decision.
-//   * Mint sessions. The LoginPipeline does that too.
-//   * Talk to the database for anything other than reading the
+//   - Provision users. The LoginPipeline owns that decision.
+//   - Mint sessions. The LoginPipeline does that too.
+//   - Talk to the database for anything other than reading the
 //     provider's stored client_secret. SSOOutcome is its only output.
 //
 // What it DOES do:
-//   * State + nonce CSRF protection (PKCE for the public-client path
+//   - State + nonce CSRF protection (PKCE for the public-client path
 //     when secret is absent, but presets all use confidential clients
 //     so PKCE is opt-in).
-//   * Verify the ID token signature + issuer + audience + expiry.
-//   * Build the SSOOutcome, including EmailVerified from the claim
+//   - Verify the ID token signature + issuer + audience + expiry.
+//   - Build the SSOOutcome, including EmailVerified from the claim
 //     (default false if absent — per OIDC spec, an IdP that omits
 //     the claim is NOT asserting verification).
 package auth
@@ -42,24 +42,45 @@ import (
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 )
 
+// SettingsLookupFunc is the type OIDCHandler accepts for resolving
+// live config values (specifically the OIDC redirect base) from the
+// Settings Engine. Function-typed rather than interface-typed to
+// break a would-be import cycle: internal/auth imports
+// internal/service (via auth_audit.go); internal/service/settings
+// imports internal/auth (for secretbox). A bare function type lets
+// cmd/server/main.go wire the closure that holds the
+// settings.Service reference without dragging the package in here.
+//
+// Empty string + nil error means "no value in the resolution chain"
+// (callers fall back to the construction-time redirectBase);
+// non-nil error means "the lookup itself failed transiently."
+type SettingsLookupFunc func(ctx context.Context, key string) (string, error)
+
 // OIDCHandler dispatches the OIDC code flow.
 type OIDCHandler struct {
 	providers     AuthProviderLookup
 	loginPipeline *LoginPipeline
 	cookieDomain  string
-	redirectBase  string // e.g. "https://lms.example.com" — used to build the callback URL
+	redirectBase  string // construction-time fallback used when the settings lookup returns empty
+	lookup        SettingsLookupFunc
 }
 
 // NewOIDCHandler wires the handler. cookieDomain is used for the
 // state cookie; pass "" for "current host." redirectBase is the
 // scheme+host the IdP will redirect back to; the actual callback
-// path is constant (/api/v1/auth/oidc/callback).
-func NewOIDCHandler(providers AuthProviderLookup, pipeline *LoginPipeline, cookieDomain, redirectBase string) *OIDCHandler {
+// path is constant (/api/v1/auth/oidc/callback). lookup resolves
+// "auth.oidc.redirect_base" via the Settings Engine per-request so
+// the value can be rotated from the super-admin panel without a
+// restart; the catalog handles the OIDC_REDIRECT_BASE env fallback
+// internally. When lookup returns empty (no setting + no env) the
+// constructor-supplied redirectBase is the safety net.
+func NewOIDCHandler(providers AuthProviderLookup, pipeline *LoginPipeline, cookieDomain, redirectBase string, lookup SettingsLookupFunc) *OIDCHandler {
 	return &OIDCHandler{
 		providers:     providers,
 		loginPipeline: pipeline,
 		cookieDomain:  cookieDomain,
 		redirectBase:  redirectBase,
+		lookup:        lookup,
 	}
 }
 
@@ -245,10 +266,29 @@ func (h *OIDCHandler) buildConfig(ctx context.Context, provider *models.Authenti
 		scopes = []string(provider.OIDCScopes)
 	}
 
-	callback := h.redirectBase
+	// Resolve the redirect base per-request via the Settings Engine
+	// so super-admin changes take effect without a restart. The
+	// catalog handles the OIDC_REDIRECT_BASE env fallback internally;
+	// when nothing is set anywhere the construction-time redirectBase
+	// is the safety net. There is intentionally NO hard-coded fallback
+	// below that — Wave 5 audit H2 found the previous draft silently
+	// papering over a production misconfig with "http://localhost:3000",
+	// which the IdP would reject anyway. main.go now passes a dev
+	// fallback explicitly when cfg.Environment=="development"; in
+	// production an empty result here yields an error instead of a
+	// silent broken redirect.
+	callback := ""
+	if h.lookup != nil {
+		v, err := h.lookup(ctx, "auth.oidc.redirect_base")
+		if err == nil {
+			callback = v
+		}
+	}
 	if callback == "" {
-		// Sensible dev default; production must set REDIRECT_BASE.
-		callback = "http://localhost:3000"
+		callback = h.redirectBase
+	}
+	if callback == "" {
+		return nil, nil, fmt.Errorf("OIDC redirect base not configured: set the auth.oidc.redirect_base setting, OIDC_REDIRECT_BASE env var, or FRONTEND_URL")
 	}
 	cfg := &oauth2.Config{
 		ClientID:     provider.OIDCClientID,
