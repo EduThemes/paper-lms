@@ -1,6 +1,6 @@
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
-function getCSRFToken() {
+export function getCSRFToken() {
   const match = document.cookie.match(/(?:^|;\s*)paper_csrf=([^;]*)/);
   return match ? match[1] : '';
 }
