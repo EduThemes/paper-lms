@@ -136,3 +136,44 @@ jobs:
             -t paper-lms-frontend:${{ github.sha }} \
             -t paper-lms-frontend:latest \
             .
+
+  deploy-demo:
+    name: Deploy to Demo
+    runs-on: ubuntu-latest
+    needs: [docker, backend-test]
+    # Only on push to main, never on PRs. Skip via "[skip deploy]" in commit
+    # message for refactors / docs / housekeeping that shouldn't restart prod.
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      !contains(github.event.head_commit.message, '[skip deploy]')
+    # Serialize deploys so back-to-back merges don't race each other.
+    # cancel-in-progress=false → the second push waits for the first to finish.
+    concurrency:
+      group: deploy-demo
+      cancel-in-progress: false
+    steps:
+      - name: SSH and invoke scripts/deploy.sh
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEMO_SSH_HOST }}
+          username: ${{ secrets.DEMO_SSH_USER }}
+          key: ${{ secrets.DEMO_SSH_KEY }}
+          port: ${{ secrets.DEMO_SSH_PORT || 22 }}
+          # If any line in the script fails the whole step fails.
+          script_stop: true
+          # Deploy includes a build + migrate + rolling restart + health
+          # check. 15min is conservative for a backend rebuild on a small VM.
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEMO_REPO_PATH }}"
+            # Sync to the exact commit CI just built. Hard reset (not pull)
+            # because the demo box should be a mirror of origin/main — never
+            # carry local changes. If it does, that's a separate problem,
+            # not something this deploy should silently merge around.
+            git fetch origin main
+            git reset --hard ${{ github.sha }}
+            # Existing deploy script handles backup → build → migrate →
+            # rolling restart → health-check → auto-rollback on failure.
+            ./scripts/deploy.sh "${{ github.sha }}" --yes
