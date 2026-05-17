@@ -98,7 +98,7 @@ func (h *SSOHandler) HandleSAMLACS(c *fiber.Ctx) error {
 // HandleSAMLMetadata serves the SAML SP metadata XML document.
 // GET /api/v1/auth/saml/metadata
 func (h *SSOHandler) HandleSAMLMetadata(c *fiber.Ctx) error {
-	metadata, err := h.samlHandler.GenerateMetadata()
+	metadata, err := h.samlHandler.GenerateMetadata(c.Context())
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"errors": []fiber.Map{{"message": "Failed to generate SAML metadata"}},
@@ -312,4 +312,3 @@ func (h *SSOHandler) HandleLDAPLogin(c *fiber.Ctx) error {
 	}
 	return c.JSON(resp)
 }
-

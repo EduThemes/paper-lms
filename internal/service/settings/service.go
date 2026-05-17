@@ -367,6 +367,51 @@ func (s *Service) Set(ctx context.Context, scope ScopeType, scopeID uint, key, v
 		return err
 	}
 
+	// Catalog-level write-time validator (Wave 7 / Wave 6 audit H2).
+	// Runs AFTER the type-coercion check so the validator can assume
+	// `value` parses as the declared ValueType. The peer callback
+	// resolves OTHER keys at the same scope+scope_id so a validator
+	// can check cross-key invariants (e.g. RPID-must-be-suffix-of-
+	// every-origin) without re-implementing the resolution chain.
+	//
+	// peer only returns OPERATOR-SET values — when the peer key is
+	// resolving from env/default/none, peer returns "" (as if unset).
+	// This means a validator on "first config of either key" doesn't
+	// fight the catalog default. The general pattern:
+	//
+	//   if peer == "" { /* defer — operator hasn't chosen yet */ }
+	//   else if value doesn't match peer { reject }
+	//
+	// Without this distinction, setting auth.passkey.rporigins on a
+	// fresh deployment would always reject because the default
+	// auth.passkey.rpid is "localhost" and no real origin would
+	// have localhost as a registrable suffix.
+	if def.Validate != nil {
+		peerHints := ScopeHints{}
+		if scope == ScopeAccount {
+			peerHints.AccountID = scopeID
+		}
+		peer := func(peerKey string) (string, error) {
+			ev, err := s.Get(ctx, peerKey, peerHints)
+			if err != nil {
+				return "", err
+			}
+			// Treat env/default/none sources as "unset" — operator
+			// hasn't chosen this value yet, so coupling checks
+			// against it would fight defaults. Validators that
+			// genuinely want the resolved value (including fallback)
+			// should call s.Get directly with the appropriate ctx.
+			switch ev.Source {
+			case SourceUser, SourceAccount, SourceInstance:
+				return ev.Value, nil
+			}
+			return "", nil
+		}
+		if err := def.Validate(ctx, value, peer); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidValue, err)
+		}
+	}
+
 	row := &models.Setting{
 		ScopeType: string(scope),
 		ScopeID:   scopeID,

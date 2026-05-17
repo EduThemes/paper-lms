@@ -2,6 +2,7 @@ package auth
 
 import (
 	"compress/flate"
+	"context"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -14,6 +15,7 @@ import (
 	"fmt"
 	"hash"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -25,12 +27,23 @@ import (
 )
 
 // SAMLConfig holds the configuration for the SAML Service Provider.
+//
+// Wave 7: EntityID + CertPEM + KeyPEM are construction-time fallbacks
+// only. Live config is resolved per-request via the Settings Engine
+// (keys auth.saml.entity_id / auth.saml.cert_file / auth.saml.key_file)
+// so a super-admin can rotate the entity ID or drop a new cert at the
+// configured path without a restart. CertPEM/KeyPEM hold FILESYSTEM
+// PATHS (despite the legacy field name) — the catalog description and
+// env-var names (SAML_CERT_FILE / SAML_KEY_FILE) are the source of
+// truth. Inline-PEM-as-secret is a Wave 8 follow-up.
 type SAMLConfig struct {
 	// EntityID is the SP entity ID (e.g., "https://paperlms.example.com/saml/metadata")
 	EntityID string
-	// CertPEM is the SP signing certificate in PEM format
+	// CertPEM is the filesystem path to the SP signing certificate (PEM).
+	// Field name retained for backward compat; treat as a path.
 	CertPEM string
-	// KeyPEM is the SP private key in PEM format
+	// KeyPEM is the filesystem path to the SP private key (PEM).
+	// Field name retained for backward compat; treat as a path.
 	KeyPEM string
 	// IDPURL is the IDP Single Sign-On URL
 	IDPURL string
@@ -56,41 +69,112 @@ type SAMLHandler struct {
 	userRepo         repository.UserRepository
 	authProviderRepo repository.AuthenticationProviderRepository
 	loginPipeline    *LoginPipeline
+	// lookup resolves auth.saml.{entity_id,cert_file,key_file} per
+	// request via the Settings Engine. Same function-typed shape as
+	// the OIDC handler — see SettingsLookupFunc docstring (oidc.go).
+	// When lookup is nil or returns empty, the construction-time
+	// SAMLConfig values are the safety net so env-only deployments
+	// keep working unchanged.
+	lookup SettingsLookupFunc
 }
 
 // NewSAMLHandler creates a new SAMLHandler with the given configuration and repositories.
-func NewSAMLHandler(config SAMLConfig, userRepo repository.UserRepository, authProviderRepo repository.AuthenticationProviderRepository, loginPipeline *LoginPipeline) *SAMLHandler {
+//
+// Wave 7: lookup is the per-request resolver for auth.saml.* settings.
+// Pass nil to disable live resolution (env-only behavior, used by tests
+// or callers that haven't migrated yet). The construction-time SAMLConfig
+// remains the fallback when the lookup returns empty or errors.
+func NewSAMLHandler(config SAMLConfig, userRepo repository.UserRepository, authProviderRepo repository.AuthenticationProviderRepository, loginPipeline *LoginPipeline, lookup SettingsLookupFunc) *SAMLHandler {
 	return &SAMLHandler{
 		config:           config,
 		userRepo:         userRepo,
 		authProviderRepo: authProviderRepo,
 		loginPipeline:    loginPipeline,
+		lookup:           lookup,
 	}
+}
+
+// resolveEntityID returns the live SP entity ID, falling back to the
+// construction-time value when the settings lookup is missing or empty.
+// Errors from the lookup itself are non-fatal: we fall back rather than
+// 500-ing the ceremony, on the principle that a stale value beats no
+// SAML at all.
+func (h *SAMLHandler) resolveEntityID(ctx context.Context) string {
+	if h.lookup != nil {
+		if v, err := h.lookup(ctx, "auth.saml.entity_id"); err == nil && v != "" {
+			return v
+		}
+	}
+	return h.config.EntityID
+}
+
+// resolveCertPath returns the live SP cert filesystem path.
+func (h *SAMLHandler) resolveCertPath(ctx context.Context) string {
+	if h.lookup != nil {
+		if v, err := h.lookup(ctx, "auth.saml.cert_file"); err == nil && v != "" {
+			return v
+		}
+	}
+	return h.config.CertPEM
+}
+
+// resolveKeyPath returns the live SP key filesystem path. Reserved for
+// future AuthnRequest signing — kept alongside its siblings so all
+// three settings keys are wired in one place.
+func (h *SAMLHandler) resolveKeyPath(ctx context.Context) string {
+	if h.lookup != nil {
+		if v, err := h.lookup(ctx, "auth.saml.key_file"); err == nil && v != "" {
+			return v
+		}
+	}
+	return h.config.KeyPEM
+}
+
+// loadCertPEM reads the cert file at the resolved path. Returns empty
+// string + nil error when no path is configured anywhere — callers
+// downstream of GenerateMetadata interpret that as "no signing cert
+// available, emit metadata without a KeyDescriptor." A path that's set
+// but unreadable is a real error and surfaces to the caller.
+//
+// Cert files are small (a few KB) and SAML ceremonies are infrequent,
+// so we re-read on every call rather than caching. If profiling ever
+// shows this as a hot path, add an in-memory cache keyed by (path,
+// mtime) — but don't pre-optimize.
+func (h *SAMLHandler) loadCertPEM(ctx context.Context) (string, error) {
+	path := h.resolveCertPath(ctx)
+	if path == "" {
+		return "", nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read SAML cert at %q: %w", path, err)
+	}
+	return string(b), nil
 }
 
 // --- SAML XML types ---
 
 // samlEntityDescriptor represents the SP metadata document.
 type samlEntityDescriptor struct {
-	XMLName  xml.Name          `xml:"urn:oasis:names:tc:SAML:2.0:metadata EntityDescriptor"`
-	EntityID string            `xml:"entityID,attr"`
+	XMLName  xml.Name            `xml:"urn:oasis:names:tc:SAML:2.0:metadata EntityDescriptor"`
+	EntityID string              `xml:"entityID,attr"`
 	SPSSOD   samlSPSSODescriptor `xml:"SPSSODescriptor"`
 }
 
 type samlSPSSODescriptor struct {
-	XMLName                    xml.Name                    `xml:"urn:oasis:names:tc:SAML:2.0:metadata SPSSODescriptor"`
-	AuthnRequestsSigned        bool                        `xml:"AuthnRequestsSigned,attr"`
-	WantAssertionsSigned       bool                        `xml:"WantAssertionsSigned,attr"`
-	ProtocolSupportEnumeration string                      `xml:"protocolSupportEnumeration,attr"`
-	KeyDescriptors             []samlKeyDescriptor         `xml:"KeyDescriptor"`
-	NameIDFormats              []samlNameIDFormat           `xml:"NameIDFormat"`
+	XMLName                    xml.Name                       `xml:"urn:oasis:names:tc:SAML:2.0:metadata SPSSODescriptor"`
+	AuthnRequestsSigned        bool                           `xml:"AuthnRequestsSigned,attr"`
+	WantAssertionsSigned       bool                           `xml:"WantAssertionsSigned,attr"`
+	ProtocolSupportEnumeration string                         `xml:"protocolSupportEnumeration,attr"`
+	KeyDescriptors             []samlKeyDescriptor            `xml:"KeyDescriptor"`
+	NameIDFormats              []samlNameIDFormat             `xml:"NameIDFormat"`
 	AssertionConsumerServices  []samlAssertionConsumerService `xml:"AssertionConsumerService"`
 }
 
 type samlKeyDescriptor struct {
-	XMLName xml.Name     `xml:"urn:oasis:names:tc:SAML:2.0:metadata KeyDescriptor"`
-	Use     string       `xml:"use,attr"`
-	KeyInfo samlKeyInfo  `xml:"KeyInfo"`
+	XMLName xml.Name    `xml:"urn:oasis:names:tc:SAML:2.0:metadata KeyDescriptor"`
+	Use     string      `xml:"use,attr"`
+	KeyInfo samlKeyInfo `xml:"KeyInfo"`
 }
 
 type samlKeyInfo struct {
@@ -117,15 +201,15 @@ type samlAssertionConsumerService struct {
 
 // samlAuthnRequest represents a SAML AuthnRequest.
 type samlAuthnRequest struct {
-	XMLName                        xml.Name              `xml:"urn:oasis:names:tc:SAML:2.0:protocol AuthnRequest"`
-	ID                             string                `xml:"ID,attr"`
-	Version                        string                `xml:"Version,attr"`
-	IssueInstant                   string                `xml:"IssueInstant,attr"`
-	Destination                    string                `xml:"Destination,attr"`
-	AssertionConsumerServiceURL    string                `xml:"AssertionConsumerServiceURL,attr"`
-	ProtocolBinding                string                `xml:"ProtocolBinding,attr"`
-	Issuer                         samlIssuer            `xml:"Issuer"`
-	NameIDPolicy                   *samlNameIDPolicy     `xml:"NameIDPolicy,omitempty"`
+	XMLName                     xml.Name          `xml:"urn:oasis:names:tc:SAML:2.0:protocol AuthnRequest"`
+	ID                          string            `xml:"ID,attr"`
+	Version                     string            `xml:"Version,attr"`
+	IssueInstant                string            `xml:"IssueInstant,attr"`
+	Destination                 string            `xml:"Destination,attr"`
+	AssertionConsumerServiceURL string            `xml:"AssertionConsumerServiceURL,attr"`
+	ProtocolBinding             string            `xml:"ProtocolBinding,attr"`
+	Issuer                      samlIssuer        `xml:"Issuer"`
+	NameIDPolicy                *samlNameIDPolicy `xml:"NameIDPolicy,omitempty"`
 }
 
 type samlIssuer struct {
@@ -141,14 +225,14 @@ type samlNameIDPolicy struct {
 
 // samlResponse is the top-level SAML Response element received from the IDP.
 type samlResponse struct {
-	XMLName      xml.Name          `xml:"urn:oasis:names:tc:SAML:2.0:protocol Response"`
-	ID           string            `xml:"ID,attr"`
-	Version      string            `xml:"Version,attr"`
-	IssueInstant string            `xml:"IssueInstant,attr"`
-	Destination  string            `xml:"Destination,attr"`
-	InResponseTo string            `xml:"InResponseTo,attr"`
-	Status       samlStatus        `xml:"Status"`
-	Assertions   []samlAssertion   `xml:"Assertion"`
+	XMLName      xml.Name        `xml:"urn:oasis:names:tc:SAML:2.0:protocol Response"`
+	ID           string          `xml:"ID,attr"`
+	Version      string          `xml:"Version,attr"`
+	IssueInstant string          `xml:"IssueInstant,attr"`
+	Destination  string          `xml:"Destination,attr"`
+	InResponseTo string          `xml:"InResponseTo,attr"`
+	Status       samlStatus      `xml:"Status"`
+	Assertions   []samlAssertion `xml:"Assertion"`
 }
 
 type samlStatus struct {
@@ -160,19 +244,19 @@ type samlStatusCode struct {
 }
 
 type samlAssertion struct {
-	XMLName            xml.Name                `xml:"urn:oasis:names:tc:SAML:2.0:assertion Assertion"`
-	ID                 string                  `xml:"ID,attr"`
-	Version            string                  `xml:"Version,attr"`
-	IssueInstant       string                  `xml:"IssueInstant,attr"`
-	Issuer             samlIssuer              `xml:"Issuer"`
-	Subject            samlSubject             `xml:"Subject"`
-	Conditions         *samlConditions         `xml:"Conditions,omitempty"`
-	AuthnStatements    []samlAuthnStatement    `xml:"AuthnStatement"`
+	XMLName             xml.Name                 `xml:"urn:oasis:names:tc:SAML:2.0:assertion Assertion"`
+	ID                  string                   `xml:"ID,attr"`
+	Version             string                   `xml:"Version,attr"`
+	IssueInstant        string                   `xml:"IssueInstant,attr"`
+	Issuer              samlIssuer               `xml:"Issuer"`
+	Subject             samlSubject              `xml:"Subject"`
+	Conditions          *samlConditions          `xml:"Conditions,omitempty"`
+	AuthnStatements     []samlAuthnStatement     `xml:"AuthnStatement"`
 	AttributeStatements []samlAttributeStatement `xml:"AttributeStatement"`
 }
 
 type samlSubject struct {
-	NameID              samlNameID              `xml:"NameID"`
+	NameID              samlNameID               `xml:"NameID"`
 	SubjectConfirmation *samlSubjectConfirmation `xml:"SubjectConfirmation,omitempty"`
 }
 
@@ -193,8 +277,8 @@ type samlSubjectConfirmationData struct {
 }
 
 type samlConditions struct {
-	NotBefore    string                   `xml:"NotBefore,attr,omitempty"`
-	NotOnOrAfter string                   `xml:"NotOnOrAfter,attr,omitempty"`
+	NotBefore    string                    `xml:"NotBefore,attr,omitempty"`
+	NotOnOrAfter string                    `xml:"NotOnOrAfter,attr,omitempty"`
 	Audiences    []samlAudienceRestriction `xml:"AudienceRestriction"`
 }
 
@@ -227,11 +311,26 @@ type samlAttributeValue struct {
 }
 
 // GenerateMetadata produces the SP metadata XML document.
-func (h *SAMLHandler) GenerateMetadata() ([]byte, error) {
-	certBase64 := extractCertBase64(h.config.CertPEM)
+//
+// Wave 7: entity ID + cert are resolved per-request via the Settings
+// Engine. The cert is read from disk on each call (see loadCertPEM
+// docstring for the caching tradeoff).
+func (h *SAMLHandler) GenerateMetadata(ctx context.Context) ([]byte, error) {
+	certPEM, err := h.loadCertPEM(ctx)
+	if err != nil {
+		return nil, err
+	}
+	certBase64, err := extractCertBase64(certPEM)
+	if err != nil {
+		// Wave 7 audit M1: refuse to emit metadata that would echo
+		// arbitrary file contents. A super-admin who pointed
+		// auth.saml.cert_file at /etc/shadow or a private-key file
+		// lands here instead of leaking the bytes.
+		return nil, fmt.Errorf("SAML metadata: %w", err)
+	}
 
 	metadata := samlEntityDescriptor{
-		EntityID: h.config.EntityID,
+		EntityID: h.resolveEntityID(ctx),
 		SPSSOD: samlSPSSODescriptor{
 			AuthnRequestsSigned:        true,
 			WantAssertionsSigned:       true,
@@ -306,7 +405,7 @@ func (h *SAMLHandler) InitiateLogin(c *fiber.Ctx) error {
 		AssertionConsumerServiceURL: h.config.ACSURL,
 		ProtocolBinding:             "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
 		Issuer: samlIssuer{
-			Value: h.config.EntityID,
+			Value: h.resolveEntityID(c.Context()),
 		},
 		NameIDPolicy: &samlNameIDPolicy{
 			Format:      "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
@@ -585,18 +684,32 @@ func extractSAMLAttributes(statements []samlAttributeStatement) map[string]strin
 	return attrs
 }
 
-// extractCertBase64 extracts the base64-encoded certificate body from a PEM block.
-func extractCertBase64(certPEM string) string {
+// extractCertBase64 extracts the base64-encoded certificate body from
+// a PEM block. Returns an empty string and an error if the input is
+// not a valid PEM CERTIFICATE block — this prevents the SAML
+// metadata endpoint from echoing arbitrary file contents when a
+// super-admin (accidentally or maliciously) points
+// auth.saml.cert_file at /etc/shadow or a key file.
+//
+// SECURITY (Wave 7 audit M1): cert/key paths are super-admin-
+// supplied filesystem paths. loadCertPEM reads whatever bytes are at
+// that path; without this check, those bytes would be embedded into
+// the public /saml/metadata XML response. Refusing non-CERTIFICATE
+// blocks turns the file-exfil escalation back into a "broken SAML
+// config" self-DoS — the operator sees an error in the metadata
+// generator, not a silent data leak.
+func extractCertBase64(certPEM string) (string, error) {
 	block, _ := pem.Decode([]byte(certPEM))
 	if block == nil {
-		// If it's not PEM-encoded, assume it's already raw base64
-		return strings.TrimSpace(certPEM)
+		return "", fmt.Errorf("SAML cert file does not contain a PEM block — refusing to embed in metadata")
 	}
-	// Verify it's a valid certificate
+	if block.Type != "CERTIFICATE" {
+		return "", fmt.Errorf("SAML cert file PEM block is type %q, expected CERTIFICATE — refusing to embed in metadata", block.Type)
+	}
 	if _, err := x509.ParseCertificate(block.Bytes); err != nil {
-		return base64.StdEncoding.EncodeToString(block.Bytes)
+		return "", fmt.Errorf("SAML cert file does not parse as an X.509 certificate: %w", err)
 	}
-	return base64.StdEncoding.EncodeToString(block.Bytes)
+	return base64.StdEncoding.EncodeToString(block.Bytes), nil
 }
 
 // generateSAMLID creates a random SAML-compliant ID string.
@@ -647,7 +760,7 @@ func (h *SAMLHandler) verifyResponseSignature(c *fiber.Ctx, responseXML []byte) 
 
 	if idpCert == nil {
 		// No IDP certificate configured — skip only if SAML not configured at all
-		if h.config.EntityID == "" {
+		if h.resolveEntityID(c.Context()) == "" {
 			return nil // SAML not fully configured, skip
 		}
 		return fmt.Errorf("no IDP certificate configured — cannot verify SAML signature")
@@ -764,4 +877,3 @@ func extractSignatureComponents(xmlData []byte) ([]byte, []byte, []byte, string,
 
 	return sigValue, digestValue, signedInfo, algorithm, nil
 }
-

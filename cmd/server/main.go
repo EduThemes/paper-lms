@@ -618,7 +618,11 @@ func main() {
 		cfg.JWTSecret,
 	)
 
-	samlHandler := auth.NewSAMLHandler(samlCfg, userRepo, authProviderRepo, loginPipeline)
+	// Wave 7: SAML resolves auth.saml.{entity_id,cert_file,key_file}
+	// per-request via the shared settingsLookup closure (declared up by
+	// notificationDeliveryService). samlCfg remains the construction-time
+	// fallback for env-only deployments.
+	samlHandler := auth.NewSAMLHandler(samlCfg, userRepo, authProviderRepo, loginPipeline, settingsLookup)
 	ldapAuth := auth.NewLDAPAuthenticator()
 	casAuth := auth.NewCASAuthenticator()
 	ssoHandler := auth.NewSSOHandler(samlHandler, ldapAuth, casAuth, userRepo, authProviderRepo, cfg, loginPipeline)

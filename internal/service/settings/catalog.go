@@ -19,6 +19,8 @@
 // the settings store itself. See plan §"Known risks".
 package settings
 
+import "context"
+
 // ValueType declares how the catalog coerces the value on read and
 // which storage column carries it. Mirrors the
 // settings_value_type_check CHECK constraint in migration 000057.
@@ -56,7 +58,31 @@ type Definition struct {
 	EnvFallback string      // env var name to read if no setting row exists
 	Default     string      // hard-coded fallback if neither setting nor env
 	TestAction  string      // "email" | "s3" | "oidc" | "anthropic" | "" (no test)
+
+	// Validate runs at write time AFTER the type-coercion check in
+	// validateValue. Nil means no extra validation beyond the type
+	// check. The `peer` callback resolves OTHER catalog keys at the
+	// SAME scope+scope_id as the in-flight Set, so a validator can
+	// implement cross-key invariants (e.g. "auth.passkey.rpid must
+	// be a registrable suffix of every origin in
+	// auth.passkey.rporigins"). Failing validators reject the write
+	// with ErrInvalidValue.
+	//
+	// Closes Wave 6 audit H2 (write-time RPID/origins coupling).
+	Validate ValidatorFunc `json:"-"`
 }
+
+// ValidatorFunc is the signature for catalog-level write-time
+// validators. The peer callback runs the full Get resolution chain
+// for OTHER keys (same scope + same scope_id as the in-flight Set),
+// so a validator can read related values without re-implementing
+// the resolution logic.
+//
+// IMPORTANT: validators should be defensive about empty peer results
+// — a paired key may not be set yet. The general pattern is "if my
+// peer is set AND we don't agree, reject; otherwise pass (defer
+// to ceremony-time validation)."
+type ValidatorFunc func(ctx context.Context, value string, peer func(key string) (string, error)) error
 
 // AllowsScope returns true when this catalog entry may be set at the
 // given scope. The service rejects writes at any non-allowed scope.
@@ -216,11 +242,12 @@ var Catalog = []Definition{
 	// ── Federated auth (OIDC redirect base) ─────────────────────────
 	{
 		Key: "auth.oidc.redirect_base", Group: "Federated auth", Label: "OIDC redirect base URL",
-		Description: "Base URL used to build the OIDC callback redirect_uri. Defaults to the deployment's Frontend URL.",
+		Description: "Base URL used to build the OIDC callback redirect_uri. Defaults to the deployment's Frontend URL. Must be https (http allowed only for localhost dev).",
 		ValueType:   TypeString,
 		Scopes:      []ScopeType{ScopeInstance, ScopeAccount},
 		EnvFallback: "OIDC_REDIRECT_BASE",
 		TestAction:  "oidc",
+		Validate:    validateHTTPSURL,
 	},
 
 	// ── Passkeys ────────────────────────────────────────────────────
@@ -233,23 +260,26 @@ var Catalog = []Definition{
 		Scopes:      []ScopeType{ScopeInstance},
 		EnvFallback: "PASSKEY_RPID",
 		Default:     "localhost",
+		Validate:    validatePasskeyRPID,
 	},
 	{
 		Key: "auth.passkey.rporigins", Group: "Passkeys", Label: "WebAuthn RP origins",
 		Description: "Comma-separated list of allowed origins for passkey ceremonies. Defaults to the Frontend URL.",
 		ValueType:   TypeString,
 		Scopes:      []ScopeType{ScopeInstance},
+		Validate:    validatePasskeyRPOrigins,
 		EnvFallback: "PASSKEY_RPORIGINS",
 	},
 
 	// ── Branding ────────────────────────────────────────────────────
 	{
 		Key: "branding.frontend_url", Group: "Branding", Label: "Frontend URL",
-		Description: "Public URL where the SPA is served. Used as the default origin for password reset links, OIDC callbacks, and passkey ceremonies.",
+		Description: "Public URL where the SPA is served. Used as the default origin for password reset links, OIDC callbacks, and passkey ceremonies. Must be https (http allowed only for localhost dev).",
 		ValueType:   TypeString,
 		Scopes:      []ScopeType{ScopeInstance, ScopeAccount},
 		EnvFallback: "FRONTEND_URL",
 		Default:     "http://localhost:5173",
+		Validate:    validateHTTPSURL,
 	},
 
 	// ── Quotas & limits ─────────────────────────────────────────────

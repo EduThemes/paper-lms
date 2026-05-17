@@ -29,15 +29,6 @@ type Config struct {
 	SAMLEntityID string
 	SAMLCertFile string
 	SAMLKeyFile  string
-	// SMTP Email
-	SMTPHost     string
-	SMTPPort     int
-	SMTPUsername string
-	SMTPPassword string
-	SMTPFrom     string
-	SMTPEnabled  bool
-	// AI Assist (RCE V2 — Anthropic Messages API proxy)
-	AnthropicAPIKey string
 }
 
 func Load() *Config {
@@ -52,12 +43,6 @@ func Load() *Config {
 		SAMLEntityID:    getEnv("SAML_ENTITY_ID", ""),
 		SAMLCertFile:    getEnv("SAML_CERT_FILE", ""),
 		SAMLKeyFile:     getEnv("SAML_KEY_FILE", ""),
-		SMTPHost:        getEnv("SMTP_HOST", ""),
-		SMTPPort:        getEnvInt("SMTP_PORT", 587),
-		SMTPUsername:    getEnv("SMTP_USERNAME", ""),
-		SMTPPassword:    getEnv("SMTP_PASSWORD", ""),
-		SMTPFrom:        getEnv("SMTP_FROM", "noreply@paperlms.org"),
-		SMTPEnabled:     getEnv("SMTP_ENABLED", "false") == "true",
 		AutoMigrate:     getEnv("AUTO_MIGRATE", "true") == "true",
 		StorageBackend:  getEnv("STORAGE_BACKEND", "local"),
 		S3Bucket:        getEnv("S3_BUCKET", ""),
@@ -65,7 +50,6 @@ func Load() *Config {
 		S3Endpoint:      getEnv("S3_ENDPOINT", ""),
 		S3AccessKey:     getEnv("S3_ACCESS_KEY", ""),
 		S3SecretKey:     getEnv("S3_SECRET_KEY", ""),
-		AnthropicAPIKey: getEnv("ANTHROPIC_API_KEY", ""),
 	}
 }
 
@@ -97,9 +81,6 @@ func (c *Config) Validate() {
 		}
 		if c.AutoMigrate {
 			fmt.Println("WARNING: AUTO_MIGRATE=true in production. Set AUTO_MIGRATE=false to use versioned SQL migrations instead of GORM AutoMigrate.")
-		}
-		if !c.SMTPEnabled {
-			fmt.Println("WARNING: SMTP is not enabled (SMTP_ENABLED=true). Email notifications (grade posted, assignment due, announcements) will not be delivered to students or parents.")
 		}
 	}
 }
