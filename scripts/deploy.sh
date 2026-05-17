@@ -32,8 +32,14 @@ OVERRIDE_FILE="${OVERRIDE_FILE:-$PROJECT_DIR/deployments/docker/docker-compose.o
 ENV_FILE="${ENV_FILE:-$PROJECT_DIR/.env}"
 DEPLOY_DIR="$PROJECT_DIR/.deploy"
 LOG_DIR="$PROJECT_DIR/logs/deploys"
-HEALTH_URL="http://127.0.0.1:3000/health"
-READY_URL="http://127.0.0.1:3000/ready"
+# Health checks run INSIDE the backend container via `dc exec`. We don't
+# curl the host's 127.0.0.1:3000 because (a) the backend port isn't published
+# to the host on the standard topology — host nginx terminates TLS and proxies
+# through the frontend container — and (b) on multi-tenant hosts something
+# else may already own port 3000, which would give a false positive against
+# the wrong service. Going through `dc exec` always lands on paper-lms.
+HEALTH_PATH="/health"
+READY_PATH="/ready"
 HEALTH_TIMEOUT=30
 MIN_DISK_MB=2048
 
@@ -83,6 +89,21 @@ dc() {
   docker compose "${compose_args[@]}" "$@"
 }
 
+# probe_backend curls the backend container directly via `dc exec`. Returns
+# the response body on stdout, exit 0 on success / non-zero on failure. The
+# alpine image ships wget, not curl. Errors and "set -e/pipefail" are
+# swallowed so callers can branch on the actual response.
+probe_backend() {
+  local path="$1"
+  set +e +o pipefail
+  local out
+  out=$(dc exec -T backend wget -qO- "http://127.0.0.1:3000${path}" 2>/dev/null)
+  local rc=$?
+  set -eo pipefail
+  printf '%s' "$out"
+  return $rc
+}
+
 log()   { echo -e "${BLUE}[DEPLOY]${NC} $*" | tee -a "$DEPLOY_LOG" 2>/dev/null || echo -e "${BLUE}[DEPLOY]${NC} $*"; }
 ok()    { echo -e "${GREEN}[  OK  ]${NC} $*" | tee -a "$DEPLOY_LOG" 2>/dev/null || echo -e "${GREEN}[  OK  ]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[ WARN ]${NC} $*" | tee -a "$DEPLOY_LOG" 2>/dev/null || echo -e "${YELLOW}[ WARN ]${NC} $*"; }
@@ -130,7 +151,7 @@ rollback() {
   log "Waiting for backend health..."
   local i=0
   while [ $i -lt $HEALTH_TIMEOUT ]; do
-    if curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
+    if probe_backend "$HEALTH_PATH" >/dev/null 2>&1; then
       ok "Backend recovered after rollback"
       break
     fi
@@ -379,7 +400,7 @@ else
   log "Waiting for backend health check (timeout: ${HEALTH_TIMEOUT}s)..."
   HEALTHY=false
   for i in $(seq 1 $HEALTH_TIMEOUT); do
-    if curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
+    if probe_backend "$HEALTH_PATH" >/dev/null 2>&1; then
       HEALTHY=true
       ok "Backend healthy after ${i}s"
       break
@@ -415,25 +436,23 @@ log "Step 8: Post-deployment verification"
 if [ "$DRY_RUN" = true ]; then
   log "[DRY RUN] Would verify /health and /ready endpoints"
 else
-  # Check /health
-  HEALTH_RESPONSE=$(curl -sf "$HEALTH_URL" 2>/dev/null || echo '{}')
-  HEALTH_STATUS=$(echo "$HEALTH_RESPONSE" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
-
-  if [ "$HEALTH_STATUS" = "healthy" ]; then
+  # Check /health. Test for the substring in an `if` so a non-match doesn't
+  # trip set -e/pipefail before we can branch into rollback.
+  HEALTH_RESPONSE=$(probe_backend "$HEALTH_PATH" || true)
+  if printf '%s' "$HEALTH_RESPONSE" | grep -q '"status":"healthy"'; then
     ok "/health → healthy"
   else
-    warn "/health returned: $HEALTH_STATUS"
+    warn "/health returned: ${HEALTH_RESPONSE:-<empty>}"
     rollback "Health check returned unhealthy status"
   fi
 
-  # Check /ready
-  READY_RESPONSE=$(curl -sf "$READY_URL" 2>/dev/null || echo '{}')
-  READY_STATUS=$(echo "$READY_RESPONSE" | grep -o '"ready":true' || echo "")
-
-  if [ -n "$READY_STATUS" ]; then
+  # Check /ready. Same pattern; /ready returns `"ready":true` when every
+  # load-bearing dependency (DB, encryption keys) is up.
+  READY_RESPONSE=$(probe_backend "$READY_PATH" || true)
+  if printf '%s' "$READY_RESPONSE" | grep -q '"ready":true'; then
     ok "/ready → ready"
   else
-    warn "/ready returned: $READY_RESPONSE"
+    warn "/ready returned: ${READY_RESPONSE:-<empty>}"
     rollback "Readiness check failed"
   fi
 
