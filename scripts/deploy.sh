@@ -22,6 +22,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="${COMPOSE_FILE:-$PROJECT_DIR/deployments/docker/docker-compose.prod.yml}"
+# Optional override (host-specific topology — e.g. host-nginx-terminates-TLS,
+# port remap, extra env passthrough). Loaded when present; ignored otherwise.
+# Critical: without this, deploy.sh recreates containers without the override's
+# env vars + port remap and the next deploy 502s + restart-loops.
+OVERRIDE_FILE="${OVERRIDE_FILE:-$PROJECT_DIR/deployments/docker/docker-compose.override.yml}"
+# Project-root .env. docker compose's default search is the compose-file's
+# directory, which misses the canonical location at the repo root.
+ENV_FILE="${ENV_FILE:-$PROJECT_DIR/.env}"
 DEPLOY_DIR="$PROJECT_DIR/.deploy"
 LOG_DIR="$PROJECT_DIR/logs/deploys"
 HEALTH_URL="http://127.0.0.1:3000/health"
@@ -62,6 +70,18 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
+
+# dc wraps `docker compose` with the canonical -f / --env-file flags so every
+# invocation in this script picks up the override file (when present) and the
+# project-root .env. Replaces the previous bare `docker compose -f $COMPOSE_FILE`
+# pattern which silently dropped both, causing env-less restarts + host-port
+# binding conflicts on hosts using docker-compose.override.yml.
+dc() {
+  local compose_args=(-f "$COMPOSE_FILE")
+  [ -f "$OVERRIDE_FILE" ] && compose_args+=(-f "$OVERRIDE_FILE")
+  [ -f "$ENV_FILE" ] && compose_args+=(--env-file "$ENV_FILE")
+  docker compose "${compose_args[@]}" "$@"
+}
 
 log()   { echo -e "${BLUE}[DEPLOY]${NC} $*" | tee -a "$DEPLOY_LOG" 2>/dev/null || echo -e "${BLUE}[DEPLOY]${NC} $*"; }
 ok()    { echo -e "${GREEN}[  OK  ]${NC} $*" | tee -a "$DEPLOY_LOG" 2>/dev/null || echo -e "${GREEN}[  OK  ]${NC} $*"; }
@@ -105,7 +125,7 @@ rollback() {
 
   # Restart services with previous images
   log "Restarting backend with previous image..."
-  docker compose -f "$COMPOSE_FILE" up -d --no-deps backend
+  dc up -d --no-deps backend
 
   log "Waiting for backend health..."
   local i=0
@@ -118,7 +138,7 @@ rollback() {
     i=$((i + 1))
   done
 
-  docker compose -f "$COMPOSE_FILE" up -d --no-deps frontend
+  dc up -d --no-deps frontend
 
   warn "================================================="
   warn "  ROLLBACK COMPLETE (code only)"
@@ -180,7 +200,7 @@ ok "Disk space: ${AVAILABLE_MB}MB available (minimum: ${MIN_DISK_MB}MB)"
 
 # Record current service status
 log "Current service status:"
-docker compose -f "$COMPOSE_FILE" ps 2>/dev/null | tee -a "$DEPLOY_LOG" || warn "No services currently running"
+dc ps 2>/dev/null | tee -a "$DEPLOY_LOG" || warn "No services currently running"
 
 echo ""
 
@@ -193,10 +213,10 @@ else
   log "Step 2: Pre-deployment database backup"
 
   # Check postgres is healthy
-  if ! docker compose -f "$COMPOSE_FILE" ps postgres 2>/dev/null | grep -q "healthy"; then
+  if ! dc ps postgres 2>/dev/null | grep -q "healthy"; then
     # Try to check if it's at least running
-    if ! docker compose -f "$COMPOSE_FILE" ps postgres 2>/dev/null | grep -q "Up"; then
-      fail "PostgreSQL is not running. Start it first: docker compose -f $COMPOSE_FILE up -d postgres"
+    if ! dc ps postgres 2>/dev/null | grep -q "Up"; then
+      fail "PostgreSQL is not running. Start it first: cd $PROJECT_DIR && ./scripts/deploy.sh $VERSION --skip-backup"
     fi
     warn "PostgreSQL health status unclear, attempting backup anyway..."
   else
@@ -211,13 +231,13 @@ else
     log "Creating backup: $BACKUP_FILENAME"
 
     # Run backup via the backup container's postgres tools
-    docker compose -f "$COMPOSE_FILE" run --rm \
+    dc run --rm \
       -e BACKUP_DIR=/backups \
       -e RETENTION_DAYS=0 \
       backup sh -c "pg_dump \"\$DATABASE_URL\" --no-owner --no-privileges | gzip > /backups/$BACKUP_FILENAME"
 
     # Verify backup exists and has content
-    BACKUP_SIZE=$(docker compose -f "$COMPOSE_FILE" run --rm backup sh -c "stat -c%s /backups/$BACKUP_FILENAME 2>/dev/null || stat -f%z /backups/$BACKUP_FILENAME 2>/dev/null || echo 0")
+    BACKUP_SIZE=$(dc run --rm backup sh -c "stat -c%s /backups/$BACKUP_FILENAME 2>/dev/null || stat -f%z /backups/$BACKUP_FILENAME 2>/dev/null || echo 0")
     BACKUP_SIZE=$(echo "$BACKUP_SIZE" | tr -d '[:space:]')
 
     if [ "$BACKUP_SIZE" -lt 1024 ]; then
@@ -226,7 +246,7 @@ else
     ok "Backup created: $BACKUP_FILENAME ($(( BACKUP_SIZE / 1024 )) KB)"
 
     # Verify gzip integrity
-    docker compose -f "$COMPOSE_FILE" run --rm backup sh -c "gzip -t /backups/$BACKUP_FILENAME"
+    dc run --rm backup sh -c "gzip -t /backups/$BACKUP_FILENAME"
     ok "Backup integrity verified (gzip test passed)"
   fi
 fi
@@ -240,8 +260,8 @@ log "Step 3: Saving rollback metadata"
 
 # Get current migration version if possible
 CURRENT_MIGRATE_VERSION="unknown"
-if docker compose -f "$COMPOSE_FILE" ps backend 2>/dev/null | grep -q "Up"; then
-  CURRENT_MIGRATE_VERSION=$(docker compose -f "$COMPOSE_FILE" exec -T backend ./migrate version 2>/dev/null | head -1 || echo "unknown")
+if dc ps backend 2>/dev/null | grep -q "Up"; then
+  CURRENT_MIGRATE_VERSION=$(dc exec -T backend ./migrate version 2>/dev/null | head -1 || echo "unknown")
 fi
 
 PREVIOUS_VERSION="unknown"
@@ -293,7 +313,7 @@ if [ "$DRY_RUN" = true ]; then
 else
   confirm "Ready to build. This will take a few minutes. Continue?"
 
-  VERSION="$VERSION" docker compose -f "$COMPOSE_FILE" build --no-cache backend frontend \
+  VERSION="$VERSION" dc build --no-cache backend frontend \
     || fail "Image build failed. Previous containers are still running."
 
   # Tag with version and latest
@@ -315,18 +335,23 @@ if [ "$DRY_RUN" = true ]; then
 else
   log "Running migrations (old backend is still serving traffic)..."
 
-  if ! VERSION="$VERSION" docker compose -f "$COMPOSE_FILE" run --rm backend ./migrate up; then
+  if ! VERSION="$VERSION" dc run --rm backend ./migrate up; then
     warn "================================================="
     warn "  MIGRATION FAILED"
     warn ""
     warn "  The old backend is still running."
     warn "  The database may be in a dirty state."
     warn ""
+    # Build the manual-recovery command line with whatever -f / --env-file
+    # flags this run was using, so a copy-paste actually works.
+    DC_HINT="docker compose -f $COMPOSE_FILE"
+    [ -f "$OVERRIDE_FILE" ] && DC_HINT="$DC_HINT -f $OVERRIDE_FILE"
+    [ -f "$ENV_FILE" ] && DC_HINT="$DC_HINT --env-file $ENV_FILE"
     warn "  To check migration status:"
-    warn "    docker compose -f $COMPOSE_FILE run --rm backend ./migrate version"
+    warn "    $DC_HINT run --rm backend ./migrate version"
     warn ""
     warn "  If dirty, force to the last clean version:"
-    warn "    docker compose -f $COMPOSE_FILE run --rm backend ./migrate force <VERSION>"
+    warn "    $DC_HINT run --rm backend ./migrate force <VERSION>"
     warn ""
     warn "  Then fix the migration SQL and re-run this script."
     warn "================================================="
@@ -348,7 +373,7 @@ if [ "$DRY_RUN" = true ]; then
 else
   # Restart backend (postgres stays up)
   log "Restarting backend..."
-  VERSION="$VERSION" docker compose -f "$COMPOSE_FILE" up -d --no-deps backend
+  VERSION="$VERSION" dc up -d --no-deps backend
 
   # Wait for backend health
   log "Waiting for backend health check (timeout: ${HEALTH_TIMEOUT}s)..."
@@ -368,13 +393,13 @@ else
 
   # Restart frontend
   log "Restarting frontend..."
-  VERSION="$VERSION" docker compose -f "$COMPOSE_FILE" up -d --no-deps frontend
+  VERSION="$VERSION" dc up -d --no-deps frontend
 
   # Brief wait for frontend to start
   sleep 3
 
   # Check frontend is running
-  if ! docker compose -f "$COMPOSE_FILE" ps frontend 2>/dev/null | grep -q "Up"; then
+  if ! dc ps frontend 2>/dev/null | grep -q "Up"; then
     rollback "Frontend failed to start"
   fi
   ok "Frontend started"
@@ -414,7 +439,7 @@ else
 
   # List all service states
   log "Service status after deployment:"
-  docker compose -f "$COMPOSE_FILE" ps | tee -a "$DEPLOY_LOG"
+  dc ps | tee -a "$DEPLOY_LOG"
 fi
 
 echo ""
