@@ -6,21 +6,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 const ACCOUNT_ID = 1;
 
-// TENANT_MODE_OPTIONS — drives the gamification leaderboard
-// RenderPolicy backend (see internal/service/gamification/render_policy.go).
-// Picking K-5 / M68 hides peer top-N from students; H912 reveals top-5
-// to top-5 viewers; HigherEd / Corp / Pro use real names by default.
-// Closes the per-mode admin toggle item from the Phase 6 Wave 3
-// deferred-follow-up list.
-const TENANT_MODE_OPTIONS = [
-  { value: 'k5', label: 'K-5 (Elementary)', description: 'Hides peer leaderboards from students. Pseudonyms required.' },
-  { value: 'm68', label: 'Middle (6-8)', description: 'Hides peer leaderboards from students. Pseudonyms required.' },
-  { value: 'h912', label: 'High School (9-12)', description: 'Top-5 students see their top-5 peers. Pseudonyms by default.' },
-  { value: 'higher_ed', label: 'Higher Education', description: 'Real names; full leaderboards visible to enrolled students.' },
-  { value: 'corp', label: 'Corporate Training', description: 'Real names; full leaderboards visible to enrolled learners.' },
-  { value: 'pro', label: 'Professional Development', description: 'Real names; full leaderboards visible to enrolled learners.' },
-];
-
 const AdminSettingsPage = () => {
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -28,7 +13,6 @@ const AdminSettingsPage = () => {
   const [saving, setSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [maxUploadMB, setMaxUploadMB] = useState('');
-  const [tenantMode, setTenantMode] = useState('higher_ed');
 
   useEffect(() => {
     let cancelled = false;
@@ -38,7 +22,6 @@ const AdminSettingsPage = () => {
         if (cancelled) return;
         setAccount(a);
         setMaxUploadMB(String(a.max_upload_size_mb ?? 500));
-        setTenantMode(a.tenant_mode || 'higher_ed');
       } catch (err) {
         if (!cancelled) setError(err.message);
       } finally {
@@ -65,12 +48,10 @@ const AdminSettingsPage = () => {
     setStatusMsg('');
     try {
       const updated = await api.updateAccount(ACCOUNT_ID, {
-        tenant_mode: tenantMode,
         settings: { max_upload_size_mb: n },
       });
       setAccount(updated);
       setMaxUploadMB(String(updated.max_upload_size_mb));
-      setTenantMode(updated.tenant_mode || 'higher_ed');
       setStatusMsg('Settings saved');
       setTimeout(() => setStatusMsg(''), 1800);
     } catch (err) {
@@ -100,44 +81,6 @@ const AdminSettingsPage = () => {
         ) : (
           <form onSubmit={handleSave} className="space-y-6">
             <fieldset className="rounded-lg border border-border-default bg-surface-0 p-5">
-              <legend className="px-2 text-sm font-semibold text-text-primary">Tenant mode</legend>
-              <p className="text-xs text-text-tertiary mt-1 mb-3">
-                Drives every gamification + privacy default. Leaderboard visibility,
-                pseudonym requirements, and real-name display all hang off this
-                setting. Change with care — switching to a stricter mode immediately
-                hides peer leaderboards from existing students.
-              </p>
-              <div className="space-y-2">
-                {TENANT_MODE_OPTIONS.map((opt) => (
-                  <label
-                    key={opt.value}
-                    className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm ${
-                      tenantMode === opt.value
-                        ? 'border-brand-500 bg-brand-500/5'
-                        : 'border-border-default bg-surface-0 hover:bg-surface-1'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="tenant_mode"
-                      value={opt.value}
-                      checked={tenantMode === opt.value}
-                      onChange={(e) => setTenantMode(e.target.value)}
-                      className="mt-1"
-                    />
-                    <div>
-                      <div className="font-medium text-text-primary">{opt.label}</div>
-                      <div className="text-xs text-text-tertiary mt-0.5">{opt.description}</div>
-                    </div>
-                  </label>
-                ))}
-              </div>
-              <p className="text-xs text-text-tertiary mt-3">
-                Currently active: <span className="font-medium text-text-secondary">{account?.tenant_mode || 'higher_ed'}</span>
-              </p>
-            </fieldset>
-
-            <fieldset className="rounded-lg border border-border-default bg-surface-0 p-5">
               <legend className="px-2 text-sm font-semibold text-text-primary">Uploads</legend>
 
               <label htmlFor="max-upload" className="block text-sm font-medium text-text-secondary mt-2">
@@ -161,6 +104,11 @@ const AdminSettingsPage = () => {
                 Currently enforced: <span className="font-medium text-text-secondary">{account?.max_upload_size_mb ?? 500} MB</span>
               </p>
             </fieldset>
+
+            <p className="text-xs text-text-tertiary">
+              Looking for leaderboard / pseudonym / tenant-mode settings? They moved to
+              {' '}<a href="/admin/gamification/settings" className="text-brand-600 hover:underline">Admin → Gamification → Settings</a>.
+            </p>
 
             {error && (
               <div className="rounded-md border border-accent-danger/30 bg-accent-danger/5 p-3">
