@@ -231,7 +231,7 @@ function SecurityTab() {
         description="Use Google Authenticator, 1Password, Authy, or any TOTP app."
       />
       <LinkCard
-        to="/profile/passkeys"
+        to="/users/self/passkeys"
         icon={Fingerprint}
         title="Passkeys"
         description="Sign in with Touch ID, Windows Hello, or a hardware key. No password needed."
