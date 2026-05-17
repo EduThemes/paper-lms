@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Layout from '../components/Layout';
+import { getCSRFToken } from '../services/api';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -59,6 +60,7 @@ const GraphiQLPage = () => {
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
+          'X-CSRF-Token': getCSRFToken(),
         },
         body: JSON.stringify({
           query: query,

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
 import { Settings, Link2, RefreshCw, Clock, CheckCircle, AlertCircle, Plus, Trash2, X, Loader2 } from 'lucide-react';
-import { api } from '../services/api';
+import { api, getCSRFToken } from '../services/api';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
@@ -10,6 +10,7 @@ const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
 const getHeaders = () => ({
   'Content-Type': 'application/json',
+  'X-CSRF-Token': getCSRFToken(),
 });
 
 const BlueprintPage = () => {

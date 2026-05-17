@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Plus, Edit2, Trash2, Clock, CheckCircle } from 'lucide-react';
-import { api } from '../services/api';
+import { api, getCSRFToken } from '../services/api';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -87,7 +87,10 @@ const EnrollmentTermsPage = () => {
       const response = await fetch(url, {
         method,
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': getCSRFToken(),
+        },
         body: JSON.stringify(payload),
       });
 
@@ -122,6 +125,7 @@ const EnrollmentTermsPage = () => {
       const response = await fetch(`/api/v1/accounts/${accountId}/terms/${termId}`, {
         method: 'DELETE',
         credentials: 'include',
+        headers: { 'X-CSRF-Token': getCSRFToken() },
       });
       if (!response.ok) throw new Error('Failed to delete term');
       fetchTerms();

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { KeyRound, Trash2, Plus, Cloud, Pencil, Check, X } from 'lucide-react';
 import Layout from '../components/Layout';
+import { getCSRFToken } from '../services/api';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -37,6 +38,7 @@ export default function PasskeyListPage() {
     if (!confirm('Revoke this passkey? You will no longer be able to sign in with this device.')) return;
     const res = await fetch(`${API_URL}/users/self/passkeys/${id}`, {
       method: 'DELETE',
+      headers: { 'X-CSRF-Token': getCSRFToken() },
       credentials: 'include',
     });
     if (res.ok || res.status === 204) {
@@ -49,7 +51,10 @@ export default function PasskeyListPage() {
   const saveName = async (id) => {
     const res = await fetch(`${API_URL}/users/self/passkeys/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': getCSRFToken(),
+      },
       credentials: 'include',
       body: JSON.stringify({ nickname: draftName }),
     });
