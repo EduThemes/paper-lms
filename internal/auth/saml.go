@@ -130,17 +130,36 @@ func (h *SAMLHandler) resolveKeyPath(ctx context.Context) string {
 	return h.config.KeyPEM
 }
 
-// loadCertPEM reads the cert file at the resolved path. Returns empty
-// string + nil error when no path is configured anywhere — callers
-// downstream of GenerateMetadata interpret that as "no signing cert
-// available, emit metadata without a KeyDescriptor." A path that's set
-// but unreadable is a real error and surfaces to the caller.
+// loadCertPEM returns the SP signing cert as raw PEM bytes.
+// Resolution priority (Wave 9):
 //
-// Cert files are small (a few KB) and SAML ceremonies are infrequent,
-// so we re-read on every call rather than caching. If profiling ever
-// shows this as a hot path, add an in-memory cache keyed by (path,
-// mtime) — but don't pre-optimize.
+//  1. auth.saml.cert_pem (inline base64-encoded PEM stored as a
+//     secret). When set, used directly — no filesystem read.
+//  2. auth.saml.cert_file (filesystem path). When set, read the
+//     file at that path.
+//  3. Construction-time h.config.CertPEM (legacy env-only path).
+//
+// Returns empty string + nil error when no source is configured —
+// callers downstream of GenerateMetadata interpret that as "no
+// signing cert available, emit metadata without a KeyDescriptor."
+// A configured-but-unreadable file is a real error.
+//
+// SECURITY (Wave 9): inline-PEM eliminates the "super-admin sets
+// cert_file = /etc/shadow" exfiltration vector. Wave 7's
+// extractCertBase64 already rejects non-CERTIFICATE bytes in the
+// metadata path; this gives operators a way to provision SAML
+// entirely without filesystem ACLs.
+//
+// Cert files are small (a few KB) and SAML ceremonies are
+// infrequent, so we re-read on every call rather than caching.
 func (h *SAMLHandler) loadCertPEM(ctx context.Context) (string, error) {
+	// 1. Inline PEM secret takes precedence.
+	if h.lookup != nil {
+		if v, err := h.lookup(ctx, "auth.saml.cert_pem"); err == nil && v != "" {
+			return v, nil
+		}
+	}
+	// 2. Filesystem path (settings or boot fallback).
 	path := h.resolveCertPath(ctx)
 	if path == "" {
 		return "", nil
@@ -148,6 +167,30 @@ func (h *SAMLHandler) loadCertPEM(ctx context.Context) (string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read SAML cert at %q: %w", path, err)
+	}
+	return string(b), nil
+}
+
+// loadKeyPEM returns the SP signing key as raw PEM bytes. Same
+// resolution priority as loadCertPEM. Returns empty + nil when
+// nothing is configured.
+//
+// Reserved for future AuthnRequest signing — not currently called
+// from the ceremony path. Wired in this wave so the inline-PEM
+// resolution is consistent across cert and key.
+func (h *SAMLHandler) loadKeyPEM(ctx context.Context) (string, error) {
+	if h.lookup != nil {
+		if v, err := h.lookup(ctx, "auth.saml.key_pem"); err == nil && v != "" {
+			return v, nil
+		}
+	}
+	path := h.resolveKeyPath(ctx)
+	if path == "" {
+		return "", nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read SAML key at %q: %w", path, err)
 	}
 	return string(b), nil
 }

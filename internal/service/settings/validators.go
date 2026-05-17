@@ -2,6 +2,8 @@ package settings
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net/url"
 	"strings"
@@ -177,6 +179,87 @@ func labelCount(host string) int {
 		return 0
 	}
 	return strings.Count(host, ".") + 1
+}
+
+// validateAbsolutePath enforces that filesystem-path settings (the
+// path-based SAML cert/key keys) are absolute and don't contain ".."
+// segments. Wave 9: defense-in-depth on top of Wave 7's
+// extractCertBase64 fix.
+//
+// Why care about path traversal when the operator who can set this
+// is already a super-admin? The Wave 7 audit M1 finding noted that
+// SAML cert paths fed straight into os.ReadFile + the metadata
+// endpoint, turning the super-admin role into a "read any file the
+// server can read" escalation. Wave 7 closed the *exfiltration*
+// (metadata refuses to embed non-CERTIFICATE bytes); this
+// validator closes the obvious-mistake vector at write time.
+//
+// We accept absolute paths only — relative paths like "../keys/x.pem"
+// or "etc/shadow" would be resolved against the server's CWD and
+// could hit unintended files. Empty value is allowed (clear back to
+// env/default).
+func validateAbsolutePath(ctx context.Context, value string, peer func(key string) (string, error)) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if !strings.HasPrefix(value, "/") {
+		return fmt.Errorf("path must be absolute (start with /)")
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == ".." {
+			return fmt.Errorf("path must not contain '..' segments")
+		}
+	}
+	return nil
+}
+
+// validateSAMLCertPEM enforces that the inline-PEM SAML cert setting
+// holds a valid X.509 CERTIFICATE block. Same shape check as
+// internal/auth/saml.go:extractCertBase64 — duplicated here because
+// we can't import auth from settings (cycle), and because we want
+// write-time rejection rather than waiting until the next metadata
+// fetch surfaces the bad value.
+func validateSAMLCertPEM(ctx context.Context, value string, peer func(key string) (string, error)) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	block, _ := pem.Decode([]byte(value))
+	if block == nil {
+		return fmt.Errorf("not a valid PEM block — expected -----BEGIN CERTIFICATE-----…")
+	}
+	if block.Type != "CERTIFICATE" {
+		return fmt.Errorf("PEM block type is %q, expected CERTIFICATE (don't paste a private key here)", block.Type)
+	}
+	if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+		return fmt.Errorf("PEM CERTIFICATE block does not parse as X.509: %v", err)
+	}
+	return nil
+}
+
+// validateSAMLKeyPEM enforces that the inline-PEM SAML key setting
+// holds a PEM block of a recognized private-key type. We don't
+// further validate the key parses (the SAML library will do that
+// when it actually signs) — but a non-PEM, or PEM with the wrong
+// block type, would fail later in a confusing way.
+func validateSAMLKeyPEM(ctx context.Context, value string, peer func(key string) (string, error)) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	block, _ := pem.Decode([]byte(value))
+	if block == nil {
+		return fmt.Errorf("not a valid PEM block — expected -----BEGIN PRIVATE KEY-----, BEGIN RSA PRIVATE KEY, or BEGIN EC PRIVATE KEY")
+	}
+	switch block.Type {
+	case "PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY":
+		return nil
+	case "CERTIFICATE":
+		return fmt.Errorf("you pasted a CERTIFICATE here; put it in auth.saml.cert_pem")
+	default:
+		return fmt.Errorf("PEM block type is %q, expected a PRIVATE KEY variant", block.Type)
+	}
 }
 
 // validateHTTPSURL is a small reusable validator for string-typed

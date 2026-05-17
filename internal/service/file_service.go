@@ -10,10 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
+	"github.com/EduThemes/paper-lms/internal/settingsctx"
 	"github.com/EduThemes/paper-lms/internal/storage"
+	"github.com/google/uuid"
 )
 
 // MaxUploadSize is the default maximum file upload size (100 MB).
@@ -54,8 +55,8 @@ var allowedMIMETypes = map[string][]string{
 var blockedExtensions = map[string]bool{
 	".exe": true, ".bat": true, ".cmd": true, ".com": true,
 	".msi": true, ".scr": true, ".pif": true, ".vbs": true,
-	".js":  true, ".wsh": true, ".wsf": true, ".ps1": true,
-	".sh":  true, ".cgi": true, ".dll": true, ".sys": true,
+	".js": true, ".wsh": true, ".wsf": true, ".ps1": true,
+	".sh": true, ".cgi": true, ".dll": true, ".sys": true,
 	".svg": true, ".html": true, ".htm": true, // XSS vectors: SVG can embed scripts, HTML executes arbitrary JS
 }
 
@@ -260,6 +261,13 @@ func (s *FileService) uploadFile(ctx context.Context, attachment *models.Attachm
 	hash := md5.New()
 	tee := io.TeeReader(fileData, hash)
 
+	// Wave 9: per-tenant S3 config resolution. Callers that have a caller
+	// accountID in scope (e.g. UploadCourseFile handler) stamp it via
+	// settingsctx.WithAccountID before calling here so the S3 backend's
+	// Wave 6 lookup walks account → parent → instance → env. Trusted
+	// imports (IMSCC parser) currently don't have a clear caller account —
+	// FOLLOW-UP (Wave 10): widen UploadFileTrusted to accept accountID and
+	// thread from imscc_parser caller context.
 	if err := s.storageBackend.Put(ctx, storageKey, tee, attachment.ContentType); err != nil {
 		return fmt.Errorf("could not store file: %w", err)
 	}
@@ -316,5 +324,9 @@ func (s *FileService) GetFileURL(ctx context.Context, id, accountID uint) (strin
 	if err != nil {
 		return "", err
 	}
-	return s.storageBackend.URL(ctx, attachment.StoragePath)
+	// Stamp the caller's account onto ctx so the S3 backend resolves
+	// storage.s3.* at account scope (Wave 6 lookup closure walks account →
+	// parent → instance → env). Enables per-district S3 buckets.
+	scopedCtx := settingsctx.WithAccountID(ctx, accountID)
+	return s.storageBackend.URL(scopedCtx, attachment.StoragePath)
 }

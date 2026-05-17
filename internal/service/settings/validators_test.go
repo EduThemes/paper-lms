@@ -244,3 +244,122 @@ func TestServiceSet_ValidatorRunsAfterTypeCheck(t *testing.T) {
 		t.Errorf("expected ErrInvalidValue: %v", err)
 	}
 }
+
+// ── Wave 9: path absolute + SAML PEM validators ──────────────────────
+
+func TestValidateAbsolutePath_AcceptsAbsolute(t *testing.T) {
+	for _, v := range []string{
+		"/etc/paper-lms/saml/cert.pem",
+		"/srv/saml/key",
+		"/",
+		"", // empty = clear
+	} {
+		if err := validateAbsolutePath(context.Background(), v, nil); err != nil {
+			t.Errorf("absolute path %q should be accepted: %v", v, err)
+		}
+	}
+}
+
+func TestValidateAbsolutePath_RejectsRelative(t *testing.T) {
+	for _, v := range []string{
+		"etc/shadow",
+		"./relative",
+		"~/keys/cert.pem",
+		"saml/cert.pem",
+	} {
+		if err := validateAbsolutePath(context.Background(), v, nil); err == nil {
+			t.Errorf("relative path %q should be rejected", v)
+		}
+	}
+}
+
+func TestValidateAbsolutePath_RejectsTraversal(t *testing.T) {
+	for _, v := range []string{
+		"/srv/../etc/shadow",
+		"/etc/../etc/shadow",
+		"/a/b/../../etc/passwd",
+		"/..",
+	} {
+		err := validateAbsolutePath(context.Background(), v, nil)
+		if err == nil {
+			t.Errorf("path with .. %q should be rejected", v)
+			continue
+		}
+		if !strings.Contains(err.Error(), "..") {
+			t.Errorf("error should mention ..: %v", err)
+		}
+	}
+}
+
+func TestValidateSAMLCertPEM_AcceptsValidCertificate(t *testing.T) {
+	certPEM := `-----BEGIN CERTIFICATE-----
+MIIBhTCCASugAwIBAgIQIRi6zePL6mKjOipn+dNuaTAKBggqhkjOPQQDAjASMRAw
+DgYDVQQKEwdBY21lIENvMB4XDTE3MTAyMDE5NDMwNloXDTE4MTAyMDE5NDMwNlow
+EjEQMA4GA1UEChMHQWNtZSBDbzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABD0d
+7VNhbWvZLWPuj/RtHFjvtJBEwOkhbN/BnnE8rnZR8+sbwnc/KhCk3FhnpHZnQz7B
+5aETbbIgmuvewdjvSBSjYzBhMA4GA1UdDwEB/wQEAwICpDATBgNVHSUEDDAKBggr
+BgEFBQcDATAPBgNVHRMBAf8EBTADAQH/MCkGA1UdEQQiMCCCDmxvY2FsaG9zdDo1
+NDUzgg4xMjcuMC4wLjE6NTQ1MzAKBggqhkjOPQQDAgNIADBFAiEA2zpJEPQyz6/l
+Wf86aX6PepsntZv2GYlA5UpabfT2EZICICpJ5h/iI+i341gBmLiAFQOyTDT+/wQc
+6MF9+Yw1Yy0t
+-----END CERTIFICATE-----`
+	if err := validateSAMLCertPEM(context.Background(), certPEM, nil); err != nil {
+		t.Errorf("valid cert should be accepted: %v", err)
+	}
+}
+
+func TestValidateSAMLCertPEM_RejectsPrivateKey(t *testing.T) {
+	keyPEM := `-----BEGIN RSA PRIVATE KEY-----
+MIIBOgIBAAJBAKi4mGTGQXkPpL5LjK1bN4kxnT9rJDeKQ8FvKBV3HJh0EhAUhPp1
+-----END RSA PRIVATE KEY-----`
+	err := validateSAMLCertPEM(context.Background(), keyPEM, nil)
+	if err == nil {
+		t.Fatal("RSA PRIVATE KEY in cert slot should reject")
+	}
+	if !strings.Contains(err.Error(), "private key") {
+		t.Errorf("error should call out the private-key paste: %v", err)
+	}
+}
+
+func TestValidateSAMLCertPEM_RejectsNonPEM(t *testing.T) {
+	if err := validateSAMLCertPEM(context.Background(), "just some random text\nnot a cert", nil); err == nil {
+		t.Fatal("non-PEM should reject")
+	}
+}
+
+func TestValidateSAMLCertPEM_EmptyAccepted(t *testing.T) {
+	if err := validateSAMLCertPEM(context.Background(), "", nil); err != nil {
+		t.Errorf("empty (clear) should be accepted: %v", err)
+	}
+}
+
+func TestValidateSAMLKeyPEM_AcceptsKeyTypes(t *testing.T) {
+	for _, blockType := range []string{"PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY"} {
+		pemStr := "-----BEGIN " + blockType + "-----\nMIIBOgIBAAJBAKi4mGTGQXkPpL5LjK1bN4kxnT9rJDeKQ8FvKBV3HJh0EhAUhPp1\n-----END " + blockType + "-----"
+		if err := validateSAMLKeyPEM(context.Background(), pemStr, nil); err != nil {
+			t.Errorf("key type %q should be accepted: %v", blockType, err)
+		}
+	}
+}
+
+func TestValidateSAMLKeyPEM_RejectsCertificate(t *testing.T) {
+	certPEM := `-----BEGIN CERTIFICATE-----
+MIIBhTCCASugAwIBAgIQIRi6zePL6mKjOipn+dNuaTAKBggqhkjOPQQDAjASMRAw
+-----END CERTIFICATE-----`
+	err := validateSAMLKeyPEM(context.Background(), certPEM, nil)
+	if err == nil {
+		t.Fatal("certificate in key slot should reject")
+	}
+	if !strings.Contains(err.Error(), "cert_pem") {
+		t.Errorf("error should suggest the right slot: %v", err)
+	}
+}
+
+func TestValidateSAMLKeyPEM_RejectsUnknownBlockType(t *testing.T) {
+	pemStr := `-----BEGIN DH PARAMETERS-----
+MEYCQQDqYxqs8sgWXLcLs5HZVD7fE82wpBzgK4SCgmm6vbBcz9V8mDFn5JNZAGqv
+-----END DH PARAMETERS-----`
+	if err := validateSAMLKeyPEM(context.Background(), pemStr, nil); err == nil {
+		t.Error("DH PARAMETERS block should reject — not a private key type")
+	}
+}

@@ -226,17 +226,33 @@ var Catalog = []Definition{
 	},
 	{
 		Key: "auth.saml.cert_file", Group: "Federated auth", Label: "SAML cert path",
-		Description: "Filesystem path to the SP signing certificate (PEM). Filesystem-based for v1; Wave 5 may promote to inline secret.",
+		Description: "Filesystem path to the SP signing certificate (PEM). Prefer auth.saml.cert_pem (inline PEM) for new deployments — that avoids filesystem ACLs and centralizes cert rotation in the super-admin UI. This path-based setting is kept for env-driven deployments.",
 		ValueType:   TypeString,
 		Scopes:      []ScopeType{ScopeInstance},
 		EnvFallback: "SAML_CERT_FILE",
+		Validate:    validateAbsolutePath,
 	},
 	{
 		Key: "auth.saml.key_file", Group: "Federated auth", Label: "SAML key path",
-		Description: "Filesystem path to the SP signing key (PEM). Filesystem-based for v1; Wave 5 may promote to inline secret.",
+		Description: "Filesystem path to the SP signing key (PEM). RESERVED — not yet consumed by the SAML ceremony; the SP key is only used for AuthnRequest signing, which is a follow-up feature. Configure now so the value is ready when the feature lands. Prefer auth.saml.key_pem (inline PEM) — see auth.saml.cert_file.",
 		ValueType:   TypeString,
 		Scopes:      []ScopeType{ScopeInstance},
 		EnvFallback: "SAML_KEY_FILE",
+		Validate:    validateAbsolutePath,
+	},
+	{
+		Key: "auth.saml.cert_pem", Group: "Federated auth", Label: "SAML cert (inline PEM)",
+		Description: "Service Provider signing certificate as a PEM-encoded X.509 block (-----BEGIN CERTIFICATE-----…). Stored encrypted. When set, takes precedence over auth.saml.cert_file — operators don't need to drop files on the server. Rotating the cert here takes effect on the next SAML ceremony with no restart.",
+		ValueType:   TypeSecret,
+		Scopes:      []ScopeType{ScopeInstance},
+		Validate:    validateSAMLCertPEM,
+	},
+	{
+		Key: "auth.saml.key_pem", Group: "Federated auth", Label: "SAML key (inline PEM)",
+		Description: "Service Provider signing key as a PEM-encoded private-key block. Stored encrypted. When set, takes precedence over auth.saml.key_file. RESERVED — not yet consumed by the SAML ceremony; required only when the IdP demands signed AuthnRequests (Paper LMS doesn't sign them today).",
+		ValueType:   TypeSecret,
+		Scopes:      []ScopeType{ScopeInstance},
+		Validate:    validateSAMLKeyPEM,
 	},
 
 	// ── Federated auth (OIDC redirect base) ─────────────────────────

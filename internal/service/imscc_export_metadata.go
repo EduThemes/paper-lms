@@ -84,18 +84,18 @@ func (e *IMSCCExporter) writeCanvasExportTxt(w *zip.Writer) error {
 // --- module_meta.xml ---
 
 type exportModuleMeta struct {
-	XMLName xml.Name             `xml:"modules"`
-	XMLNS   string               `xml:"xmlns,attr"`
+	XMLName xml.Name              `xml:"modules"`
+	XMLNS   string                `xml:"xmlns,attr"`
 	Modules []exportModuleMetaMod `xml:"module"`
 }
 
 type exportModuleMetaMod struct {
-	Identifier              string                  `xml:"identifier,attr"`
-	Title                   string                  `xml:"title"`
-	WorkflowState           string                  `xml:"workflow_state"`
-	Position                int                     `xml:"position"`
-	RequireSequentialProgress string                `xml:"require_sequential_progress"`
-	Items                   []exportModuleMetaItem  `xml:"items>item"`
+	Identifier                string                 `xml:"identifier,attr"`
+	Title                     string                 `xml:"title"`
+	WorkflowState             string                 `xml:"workflow_state"`
+	Position                  int                    `xml:"position"`
+	RequireSequentialProgress string                 `xml:"require_sequential_progress"`
+	Items                     []exportModuleMetaItem `xml:"items>item"`
 }
 
 type exportModuleMetaItem struct {
@@ -531,6 +531,10 @@ func (e *IMSCCExporter) writeAttachments(
 	for _, a := range atts.Items {
 		zipPath := path.Join("web_resources", sanitizeAttachmentName(a.DisplayName))
 		// Read file contents from the storage backend.
+		// FOLLOW-UP (Wave 10): stamp settingsctx.WithAccountID(ctx, accountID)
+		// here so per-tenant S3 buckets are honored on export. Requires
+		// threading accountID through IMSCCExporter.ExportCourse + ContentExport
+		// handler (which currently doesn't pass callerAccountID).
 		rc, getErr := e.fileService.StorageBackend().Get(ctx, a.StoragePath)
 		if getErr != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("could not read attachment %d (%q): %v", a.ID, a.DisplayName, getErr))

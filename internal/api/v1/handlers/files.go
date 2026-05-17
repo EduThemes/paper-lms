@@ -6,13 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/EduThemes/paper-lms/internal/settingsctx"
 	"github.com/EduThemes/paper-lms/internal/storage"
+	"github.com/gofiber/fiber/v2"
 )
 
 type FileHandler struct {
@@ -101,7 +102,11 @@ func (h *FileHandler) UploadCourseFile(c *fiber.Ctx) error {
 		Size:        fileHeader.Size,
 	}
 
-	if err := h.fileService.UploadFile(c.Context(), attachment, file); err != nil {
+	// Stamp the caller's account onto ctx so the S3 backend (Wave 6 lookup
+	// closure) resolves storage.s3.* at account scope first, falling back to
+	// instance/env. Enables per-district S3 buckets on the upload path.
+	uploadCtx := settingsctx.WithAccountID(c.Context(), callerAccountID(c))
+	if err := h.fileService.UploadFile(uploadCtx, attachment, file); err != nil {
 		return responses.InternalError(c, "Could not upload file")
 	}
 
@@ -185,8 +190,11 @@ func (h *FileHandler) DownloadFile(c *fiber.Ctx) error {
 		return c.Redirect(downloadURL, fiber.StatusTemporaryRedirect)
 	}
 
-	// For local backend, stream the file directly
-	reader, err := backend.Get(c.Context(), attachment.StoragePath)
+	// For local backend, stream the file directly. Stamp account on ctx so
+	// the storage backend's per-tenant config lookup (Wave 6) sees the
+	// caller; the local backend ignores ctx, S3 would resolve per-tenant.
+	downloadCtx := settingsctx.WithAccountID(c.Context(), callerAccountID(c))
+	reader, err := backend.Get(downloadCtx, attachment.StoragePath)
 	if err != nil {
 		return responses.InternalError(c, "Could not locate file")
 	}

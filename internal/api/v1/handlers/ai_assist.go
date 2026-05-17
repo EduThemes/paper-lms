@@ -11,10 +11,11 @@ package handlers
 import (
 	"errors"
 
-	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/EduThemes/paper-lms/internal/settingsctx"
+	"github.com/gofiber/fiber/v2"
 )
 
 // AIAssistHandler wires HTTP requests to AIAssistService.
@@ -73,7 +74,20 @@ func (h *AIAssistHandler) Dispatch(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "text is required")
 	}
 
-	ctx := c.Context()
+	// Wave 8: stamp the caller's account on the ctx so the settings
+	// lookup closure (cmd/server/main.go) walks account → parent chain
+	// → instance → env → default. This unlocks per-district Anthropic
+	// keys.
+	//
+	// Masquerade semantics: callerAccountID returns the IMPERSONATED
+	// tenant's account (the auth middleware writes the JWT's account_id
+	// claim — set to the target user's account during masquerade),
+	// not the impersonator's home tenant. AI Assist therefore bills
+	// the impersonated tenant's API key, which is the correct support
+	// workflow ("act as if you ARE this user"). The impersonator's
+	// home tenant is available via admin_account_id Locals for audit
+	// purposes but is intentionally not used for billing.
+	ctx := settingsctx.WithAccountID(c.Context(), callerAccountID(c))
 	var (
 		result string
 		err    error
