@@ -3,10 +3,10 @@ package middleware
 import (
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type AuthMiddleware struct {
@@ -92,9 +92,22 @@ func (m *AuthMiddleware) Protected() fiber.Handler {
 			// admin route, so a missing claim is safe (no escalation
 			// path), just degrades to the previous "DB lookup at
 			// permission middleware" behavior.
+			// JWT-claim path: populate user_role for UI personalization
+			// only. is_admin is derived from the claim as a soft hint
+			// — handlers that act on the value go through RequireAdmin
+			// (which re-fetches the user row and authoritatively sets
+			// is_admin after the DB check). The is_super_admin flag is
+			// NOT derived from the JWT claim: a demoted super_admin
+			// still carries the claim in their unexpired JWT, and any
+			// gate that trusted the claim would honor the stale role
+			// for up to the token's TTL. Only PermissionMiddleware's
+			// RequireAdmin (super_admin branch), RequireSuperAdmin, and
+			// the isAdmin helper — all DB re-checking — are authorized
+			// to set is_super_admin Locals. See the 2026-05-17 Wave 2
+			// audit, finding M3.
 			if role, ok := claims["role"].(string); ok {
 				c.Locals("user_role", role)
-				c.Locals("is_admin", role == "admin")
+				c.Locals("is_admin", role == "admin" || role == "super_admin")
 			}
 			// 13.1.B — tenant scope. New tokens carry account_id; old
 			// tokens don't. For an old token we look up the user once
@@ -141,8 +154,14 @@ func (m *AuthMiddleware) Protected() fiber.Handler {
 					if userErr == nil {
 						c.Locals("user_email", user.Email)
 						c.Locals("user_name", user.Name)
+						// Access-token path: same provenance contract as
+						// the JWT path. user_role + is_admin set as a
+						// soft hint; is_super_admin Locals is the
+						// exclusive output of RequireSuperAdmin / the
+						// isAdmin helper after their DB re-check. See
+						// 2026-05-17 Wave 2 audit finding M3.
 						c.Locals("user_role", user.Role)
-						c.Locals("is_admin", user.Role == "admin")
+						c.Locals("is_admin", user.Role == "admin" || user.Role == "super_admin")
 						// 13.1.B — tenant for access-token sessions.
 						if user.AccountID > 0 {
 							c.Locals("account_id", user.AccountID)

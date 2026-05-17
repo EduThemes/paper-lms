@@ -3,12 +3,12 @@ package handlers
 import (
 	"encoding/json"
 
-	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/gofiber/fiber/v2"
 )
 
 // CommonsHandler exposes the Commons content library — a Canvas-Commons
@@ -60,7 +60,16 @@ func sharedContentToJSON(s *models.SharedContent, includeSnapshot bool) fiber.Ma
 // 403) — 403 would leak the existence of the resource to a different
 // tenant. Per the Fiber `(result, wrote, err)` convention the caller
 // short-circuits when wrote=true.
+//
+// A super_admin (platform operator) is special-cased: the role is
+// strictly above account-admin and crosses tenant boundaries by
+// design, so cross-tenant access is permitted. The is_super_admin
+// Locals is set by the auth/permission middleware when the role on
+// the user row resolves to 'super_admin'.
 func assertSameTenant(c *fiber.Ctx, resourceAccountID uint) bool {
+	if isSuper, _ := c.Locals("is_super_admin").(bool); isSuper {
+		return false
+	}
 	if resourceAccountID != callerAccountID(c) {
 		_ = responses.NotFound(c, "resource")
 		return true

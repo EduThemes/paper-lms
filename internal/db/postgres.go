@@ -236,6 +236,10 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.GamificationBadge{},
 		&models.GamificationBadgeAward{},
 		&models.GamificationLeaderboardSnapshot{},
+		// Super-Admin Settings Engine Wave 1 (migration 000057). Key-value
+		// store backing the settings service in internal/service/settings/;
+		// catalog declares the typed vocabulary that maps to these rows.
+		&models.Setting{},
 	)
 }
 

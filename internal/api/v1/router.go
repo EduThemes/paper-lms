@@ -143,6 +143,12 @@ type Router struct {
 	// Phase 6: gamification
 	GamificationHandler *handlers.GamificationHandler
 
+	// Super-Admin Settings Engine — Wave 2 read-only surface for
+	// /api/v1/superadmin/settings*. Mounted via registerSuperAdminRoutes,
+	// which is the only authorized place to attach /superadmin/*
+	// routes; that helper carries the RequireSuperAdmin gate.
+	SuperAdminSettingsHandler *handlers.SuperAdminSettingsHandler
+
 	// Middleware
 	AuthMiddleware *middleware.AuthMiddleware
 	PermMiddleware *middleware.PermissionMiddleware
@@ -790,4 +796,5 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerP3FeatureRoutes(protected, admin, enrolled, instructor)
 	r.registerQuizExtensionRoutes(protected, enrolled, instructor)
 	r.registerGamificationRoutes(protected, admin, instructor, selfOrAdmin)
+	r.registerSuperAdminRoutes(protected)
 }

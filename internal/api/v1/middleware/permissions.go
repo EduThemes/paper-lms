@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/repository"
+	"github.com/gofiber/fiber/v2"
 )
 
 // PermissionMiddleware provides role-based access control for routes.
@@ -35,6 +35,9 @@ func forbidden(c *fiber.Ctx, msg string) error {
 // account_id is the root account) still passes for child accounts via
 // the accounts parent-chain traversal — document explicitly when
 // account hierarchy is wired (Phase 14).
+//
+// A super_admin (platform operator) also passes — the role is strictly
+// above account-admin and crosses tenant boundaries by design.
 func (pm *PermissionMiddleware) RequireAdmin() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		userID, ok := c.Locals("user_id").(uint)
@@ -45,6 +48,12 @@ func (pm *PermissionMiddleware) RequireAdmin() fiber.Handler {
 		user, err := pm.userRepo.FindByID(c.Context(), userID)
 		if err != nil {
 			return forbidden(c, "user not found")
+		}
+
+		if user.Role == "super_admin" {
+			c.Locals("is_admin", true)
+			c.Locals("is_super_admin", true)
+			return c.Next()
 		}
 
 		if user.Role != "admin" {
@@ -62,6 +71,37 @@ func (pm *PermissionMiddleware) RequireAdmin() fiber.Handler {
 		}
 
 		c.Locals("is_admin", true)
+		return c.Next()
+	}
+}
+
+// RequireSuperAdmin gates routes that only a platform operator may
+// hit. The Super-Admin Settings Engine (Wave 2 onward) uses this for
+// every /superadmin/* endpoint. A super_admin's account_id Locals is
+// special-cased — assertSameTenant treats this role as authorized for
+// any tenant so platform operators can manage settings for any
+// account in the deployment.
+//
+// Distinct from RequireAdmin: an account-admin (role='admin') is NOT
+// a super_admin and gets 403 here even on their own tenant.
+func (pm *PermissionMiddleware) RequireSuperAdmin() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userID, ok := c.Locals("user_id").(uint)
+		if !ok || userID == 0 {
+			return forbidden(c, "user not authenticated")
+		}
+
+		user, err := pm.userRepo.FindByID(c.Context(), userID)
+		if err != nil {
+			return forbidden(c, "user not found")
+		}
+
+		if user.Role != "super_admin" {
+			return forbidden(c, "super-admin role required")
+		}
+
+		c.Locals("is_admin", true)
+		c.Locals("is_super_admin", true)
 		return c.Next()
 	}
 }
@@ -208,8 +248,11 @@ func (pm *PermissionMiddleware) isAdmin(c *fiber.Ctx, userID uint) bool {
 		return false
 	}
 
-	isAdmin := user.Role == "admin"
+	isAdmin := user.Role == "admin" || user.Role == "super_admin"
 	c.Locals("is_admin", isAdmin)
+	if user.Role == "super_admin" {
+		c.Locals("is_super_admin", true)
+	}
 	return isAdmin
 }
 

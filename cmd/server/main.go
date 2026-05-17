@@ -24,15 +24,16 @@ import (
 	"github.com/EduThemes/paper-lms/internal/auth"
 	"github.com/EduThemes/paper-lms/internal/config"
 	"github.com/EduThemes/paper-lms/internal/db"
+	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/graphql"
 	"github.com/EduThemes/paper-lms/internal/obs"
 	"github.com/EduThemes/paper-lms/internal/repository/postgres"
-	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/scheduler"
 	"github.com/EduThemes/paper-lms/internal/service"
 	"github.com/EduThemes/paper-lms/internal/service/gamification"
 	gamificationEffects "github.com/EduThemes/paper-lms/internal/service/gamification/effects"
 	"github.com/EduThemes/paper-lms/internal/service/gamification/wiring"
+	"github.com/EduThemes/paper-lms/internal/service/settings"
 	storageLib "github.com/EduThemes/paper-lms/internal/storage"
 )
 
@@ -708,7 +709,19 @@ func main() {
 	questionBankHandler := handlers.NewQuestionBankHandler(questionBankService)
 	quizQuestionGroupHandler := handlers.NewQuizQuestionGroupHandler(quizService)
 	quizStatisticsHandler := handlers.NewQuizStatisticsHandler(quizService)
-	setupHandler := handlers.NewSetupHandler(userService, accountRepo, userRepo, cfg.JWTSecret, cfg.Environment)
+	setupHandler := handlers.NewSetupHandler(userService, accountRepo, userRepo, database, cfg.JWTSecret, cfg.Environment)
+
+	// Super-Admin Settings Engine (Wave 2 read-only surface). Reads
+	// settings rows from migration 000057; walks the account parent
+	// chain via accountRepo; emits audit_log rows via auditService.
+	// AccountRepo satisfies the narrow settings.AccountAncestry
+	// interface structurally — no adapter needed.
+	settingRepo := postgres.NewSettingRepository(database)
+	settingsService := settings.NewService(settingRepo, accountRepo, auditService)
+	// accountRepo satisfies the narrow accountExistenceChecker interface
+	// the write handler uses to validate account-scope writes. auditService
+	// satisfies settingsAuditSink for the setting.tested event class.
+	superAdminSettingsHandler := handlers.NewSuperAdminSettingsHandler(settingsService, accountRepo, auditService)
 	// P3 Feature handlers
 	featureFlagHandler := handlers.NewFeatureFlagHandler(featureFlagService, enrollmentRepo, userRepo)
 	customGradebookColumnHandler := handlers.NewCustomGradebookColumnHandler(customGradebookColumnService, auditService)
@@ -829,11 +842,12 @@ func main() {
 
 		CourseHomeHandler: courseHomeHandler,
 
-		PeerReviewHandler:        peerReviewHandler,
-		QuestionBankHandler:      questionBankHandler,
-		QuizQuestionGroupHandler: quizQuestionGroupHandler,
-		QuizStatisticsHandler:    quizStatisticsHandler,
-		SetupHandler:             setupHandler,
+		PeerReviewHandler:         peerReviewHandler,
+		QuestionBankHandler:       questionBankHandler,
+		QuizQuestionGroupHandler:  quizQuestionGroupHandler,
+		QuizStatisticsHandler:     quizStatisticsHandler,
+		SetupHandler:              setupHandler,
+		SuperAdminSettingsHandler: superAdminSettingsHandler,
 
 		FeatureFlagHandler:           featureFlagHandler,
 		CustomGradebookColumnHandler: customGradebookColumnHandler,
@@ -1025,4 +1039,3 @@ func parseHostFromRedisURL(raw string) string {
 	}
 	return u.Host
 }
-

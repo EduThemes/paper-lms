@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/auth"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/service"
 	"github.com/EduThemes/paper-lms/internal/testutil"
 	"github.com/EduThemes/paper-lms/internal/testutil/mocks"
+	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -226,3 +226,89 @@ func TestProtected_HeaderPriority(t *testing.T) {
 		"Authorization header should take priority over cookie")
 	assert.Equal(t, "alice@example.com", body["email"])
 }
+
+// ---------------------------------------------------------------------------
+// 2026-05-17 Wave 2 audit — finding M3 regression test.
+// ---------------------------------------------------------------------------
+//
+// The JWT/access-token path MUST NOT populate is_super_admin Locals
+// from the role claim. The Locals is the authoritative signal for
+// assertSameTenant's cross-tenant bypass, so trusting the claim
+// (which is only re-validated against the DB at the next request)
+// would mean a demoted super_admin retains cross-tenant access for
+// up to the token's TTL (24h).
+//
+// Only PermissionMiddleware.RequireSuperAdmin and the isAdmin helper
+// — both DB re-checking — are authorized to set is_super_admin Locals.
+
+// superAdminTestUser returns a user with role=super_admin used to
+// craft a JWT that carries the role claim. The test then verifies
+// that Protected does NOT set is_super_admin Locals from that claim.
+func superAdminTestUser() *models.User {
+	return &models.User{
+		ID:        99,
+		AccountID: 1,
+		Email:     "ops@example.com",
+		Name:      "Ops Person",
+		Role:      "super_admin",
+	}
+}
+
+// setupLocalsInspector mounts Protected() and a handler that
+// serializes the relevant Locals back to the response. Tests use
+// this to assert what the middleware did or did not set.
+func setupLocalsInspector(userRepo *mocks.MockUserRepository) *fiber.App {
+	app := testutil.SetupTestApp()
+	authMW := middleware.NewAuthMiddleware(testJWTSecret, nil, userRepo, nil)
+
+	app.Get("/inspect", authMW.Protected(), func(c *fiber.Ctx) error {
+		out := fiber.Map{
+			"user_id":   c.Locals("user_id"),
+			"user_role": c.Locals("user_role"),
+			"is_admin":  c.Locals("is_admin"),
+		}
+		// Surface the Locals as null when unset so the test can
+		// distinguish absent (correct for is_super_admin from JWT)
+		// from false (the wrong value to set).
+		if v := c.Locals("is_super_admin"); v != nil {
+			out["is_super_admin"] = v
+		} else {
+			out["is_super_admin"] = nil
+		}
+		return c.JSON(out)
+	})
+	return app
+}
+
+func TestProtected_JWTSuperAdminRole_DoesNotSetSuperAdminLocals(t *testing.T) {
+	app := setupLocalsInspector(nil)
+
+	token, err := auth.GenerateToken(superAdminTestUser(), testJWTSecret)
+	assert.NoError(t, err)
+
+	resp := testutil.MakeAuthenticatedRequest(app, http.MethodGet, "/inspect", token, nil)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body, err := testutil.ParseJSONMap(resp)
+	assert.NoError(t, err)
+
+	// user_role is set from the claim (UI personalization signal).
+	assert.Equal(t, "super_admin", body["user_role"])
+	// is_admin is also set — it's a soft hint that RequireAdmin
+	// re-checks against the DB. Not the authoritative gate.
+	assert.Equal(t, true, body["is_admin"])
+	// is_super_admin MUST be nil (Locals unset). If this assert
+	// flips to anything else, a future code change has re-introduced
+	// the demoted-super_admin-bypass window flagged in audit M3.
+	assert.Nil(t, body["is_super_admin"],
+		"is_super_admin Locals MUST be absent on the JWT path — only RequireSuperAdmin's DB re-check may set it")
+}
+
+// The access-token path mirrors the JWT path's role-derivation
+// logic line-for-line (auth.go:142-152). The JWT regression test
+// above is the canonical lock; we don't duplicate the same
+// assertion under a different transport because the code paths are
+// identical and a future change that re-introduces the
+// JWT-claim-derived is_super_admin Locals would also be reflected
+// in the access-token path. If the two paths ever diverge, copy
+// the test.
