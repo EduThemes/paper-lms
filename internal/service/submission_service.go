@@ -146,6 +146,22 @@ func (s *SubmissionService) GetByAssignmentAndUser(ctx context.Context, assignme
 	return s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, accountID)
 }
 
+// SetExcused flips the excused flag on a submission and persists the change.
+// Mirrors the Grade(...) Find + assign + Update pattern so PATCH excused is
+// actually durable. accountID==0 is acceptable from internal callers where
+// the (assignment, user) pair was already tenant-verified upstream.
+func (s *SubmissionService) SetExcused(ctx context.Context, assignmentID, userID, accountID uint, excused bool) (*models.Submission, error) {
+	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	submission.Excused = excused
+	if err := s.submissionRepo.Update(ctx, submission); err != nil {
+		return nil, err
+	}
+	return submission, nil
+}
+
 func (s *SubmissionService) ListByAssignment(ctx context.Context, assignmentID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Submission], error) {
 	return s.submissionRepo.ListByAssignmentID(ctx, assignmentID, params)
 }

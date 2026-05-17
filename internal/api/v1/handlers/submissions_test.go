@@ -253,6 +253,63 @@ func TestUpdateSubmission_Grade(t *testing.T) {
 	submissionRepo.AssertExpectations(t)
 }
 
+func TestUpdateSubmission_ExcusedPersists(t *testing.T) {
+	app, submissionRepo, _, _, _, _ := setupSubmissionTest()
+
+	subType := "online_text_entry"
+	now := time.Now()
+	submission := &models.Submission{
+		ID:             1,
+		AssignmentID:   1,
+		UserID:         2,
+		SubmissionType: &subType,
+		SubmittedAt:    &now,
+		Attempt:        1,
+		WorkflowState:  "submitted",
+		Excused:        false,
+	}
+
+	// SetExcused threads callerAccountID(c)=1 from the test's auth stub.
+	// PATCH excused=true: Find returns the row, then Update is called with Excused=true.
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2), uint(1)).Return(submission, nil).Once()
+	submissionRepo.On("Update", mock.Anything, mock.MatchedBy(func(s *models.Submission) bool {
+		return s.Excused == true
+	})).Return(nil).Once()
+
+	body := testutil.JSONBody(map[string]interface{}{
+		"submission": map[string]interface{}{
+			"excused": true,
+		},
+	})
+	resp := testutil.MakeRequest(app, http.MethodPut, "/api/v1/courses/1/assignments/1/submissions/2", body)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	result, err := testutil.ParseJSONMap(resp)
+	require.NoError(t, err)
+	assert.Equal(t, true, result["excused"], "PATCH response must reflect excused=true")
+
+	// PATCH excused=false: same submission (now Excused=true from the previous
+	// Update) is returned, then Update is called with Excused=false.
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2), uint(1)).Return(submission, nil).Once()
+	submissionRepo.On("Update", mock.Anything, mock.MatchedBy(func(s *models.Submission) bool {
+		return s.Excused == false
+	})).Return(nil).Once()
+
+	body2 := testutil.JSONBody(map[string]interface{}{
+		"submission": map[string]interface{}{
+			"excused": false,
+		},
+	})
+	resp2 := testutil.MakeRequest(app, http.MethodPut, "/api/v1/courses/1/assignments/1/submissions/2", body2)
+	assert.Equal(t, http.StatusOK, resp2.StatusCode)
+
+	result2, err := testutil.ParseJSONMap(resp2)
+	require.NoError(t, err)
+	assert.Equal(t, false, result2["excused"], "PATCH response must reflect excused=false")
+
+	submissionRepo.AssertExpectations(t)
+}
+
 func TestCreateSubmissionComment(t *testing.T) {
 	app, submissionRepo, _, _, commentRepo, userRepo := setupSubmissionTest()
 

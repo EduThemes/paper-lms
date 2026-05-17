@@ -334,11 +334,10 @@ func (h *SubmissionHandler) UpdateSubmission(c *fiber.Ctx) error {
 
 	// Handle excused update
 	if input.Submission.Excused != nil {
-		submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c))
+		submission, err := h.submissionService.SetExcused(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c), *input.Submission.Excused)
 		if err != nil {
 			return responses.NotFound(c, "submission")
 		}
-		submission.Excused = *input.Submission.Excused
 		return c.JSON(submissionToJSON(submission))
 	}
 
