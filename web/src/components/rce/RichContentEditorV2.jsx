@@ -18,6 +18,7 @@ import Underline from '@tiptap/extension-underline';
 import TextAlign from '@tiptap/extension-text-align';
 import Highlight from '@tiptap/extension-highlight';
 import { sanitizeHTML } from '../RichContentViewer';
+import { getCSRFToken } from '../../services/api';
 import RCEToolbar from './RCEToolbar';
 import RestoreAutosaveModal from './RestoreAutosaveModal';
 
@@ -214,7 +215,10 @@ export default function RichContentEditorV2({
       const res = await fetch(`/api/v1/ai_assist/${action}`, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': getCSRFToken(),
+        },
         body: JSON.stringify({ text, style: action === 'rewrite' ? 'clearer' : '' }),
       });
       if (!res.ok) {

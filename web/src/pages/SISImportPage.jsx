@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Upload, Download, AlertCircle, CheckCircle, Clock, RefreshCw, X, ChevronDown, FileText } from 'lucide-react';
 import Layout from '../components/Layout';
+import { getCSRFToken } from '../services/api';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 const ACCOUNT_ID = 1;
@@ -60,6 +61,7 @@ const SISImportPage = () => {
       const response = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/sis_imports`, {
         method: 'POST',
         credentials: 'include',
+        headers: { 'X-CSRF-Token': getCSRFToken() },
         body: formData,
       });
 
