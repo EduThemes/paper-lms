@@ -35,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-webauthn/webauthn/protocol"
 	wa "github.com/go-webauthn/webauthn/webauthn"
@@ -49,29 +50,128 @@ func b64DecodeURL(s string) ([]byte, error) {
 }
 
 // PasskeyEngine bundles the library config + the repos it needs to
-// resolve users and store/lookup credentials. Constructed once at
-// boot.
+// resolve users and store/lookup credentials.
+//
+// SECURITY MODEL (Wave 6 settings integration)
+// ─────────────────────────────────────────────
+// RPID is a HASH ANCHOR for every credential. The library hashes
+// the RPID into each credential during enrollment; if a super-admin
+// later changes the auth.passkey.rpid setting, every existing
+// passkey STOPS WORKING — the browser will not return them for
+// assertions against the new RPID, and any returned credentials
+// the server tries to verify will fail signature checks against
+// the new hash. There is no "rotate RPID gracefully" path — it's a
+// re-enrollment event for every user.
+//
+// We therefore:
+//   1. Resolve RPID + RPOrigins per ceremony so a super-admin CAN
+//      change them via the settings UI (e.g. when bringing up a
+//      fresh deployment before any user has enrolled).
+//   2. Document in the catalog Description that changing
+//      auth.passkey.rpid invalidates every existing passkey.
+//   3. Keep the construction-time fallback as the safety net so
+//      a settings-lookup transient failure doesn't break login.
+//
+// Cross-subdomain attack vector: the WebAuthn RPID MUST be a
+// registrable suffix of the deployment's origin (e.g. RPID
+// "paper.example.edu" for origin "https://paper.example.edu").
+// Setting RPID too BROAD (e.g. just "example.edu") would let a
+// malicious page at "other.example.edu" complete passkey
+// ceremonies with credentials enrolled on the LMS subdomain. The
+// library's wa.New() validates this match against RPOrigins on
+// configuration, so a mismatched RPID/origins pair fails at the
+// per-ceremony rebuild rather than silently downgrading security.
 type PasskeyEngine struct {
-	w     *wa.WebAuthn
+	displayName string
+	rpID        string   // construction-time fallback
+	rpOrigins   []string // construction-time fallback
+	lookup      SettingsLookupFunc
+
 	users repository.UserRepository
 	creds repository.UserWebauthnCredentialRepository
 }
 
-// NewPasskeyEngine builds the WebAuthn instance and binds the repos.
-// rpID is the registrable suffix of the site origin (e.g. "localhost"
-// for dev, "paper.example.edu" for prod). rpOrigins are the full
-// origins the user agent connects from.
-func NewPasskeyEngine(rpDisplayName, rpID string, rpOrigins []string, users repository.UserRepository, creds repository.UserWebauthnCredentialRepository) (*PasskeyEngine, error) {
-	cfg := &wa.Config{
+// NewPasskeyEngine builds the engine and binds the repos. rpID and
+// rpOrigins are the construction-time fallbacks — used when the
+// settings lookup returns empty (or is nil). lookup may be nil; in
+// that case every ceremony uses the boot values. Empty/invalid
+// settings DO NOT downgrade security — wa.New rejects mismatched
+// RPID/origins on every rebuild.
+//
+// Wave 6 (Settings Engine): rpID/rpOrigins moved from construction-
+// time-only to per-ceremony resolution. See SECURITY MODEL on
+// PasskeyEngine for the RPID-rotation footgun this enables.
+func NewPasskeyEngine(
+	rpDisplayName, rpID string, rpOrigins []string,
+	lookup SettingsLookupFunc,
+	users repository.UserRepository,
+	creds repository.UserWebauthnCredentialRepository,
+) (*PasskeyEngine, error) {
+	// Validate the bootstrap config eagerly so a misconfigured
+	// deployment fails at boot, not on the first registration
+	// attempt. The same validator runs on every per-ceremony
+	// rebuild — this is just the smoke test.
+	if _, err := wa.New(&wa.Config{
 		RPDisplayName: rpDisplayName,
 		RPID:          rpID,
 		RPOrigins:     rpOrigins,
+	}); err != nil {
+		return nil, fmt.Errorf("webauthn boot config: %w", err)
 	}
-	w, err := wa.New(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("webauthn config: %w", err)
+	return &PasskeyEngine{
+		displayName: rpDisplayName,
+		rpID:        rpID,
+		rpOrigins:   rpOrigins,
+		lookup:      lookup,
+		users:       users,
+		creds:       creds,
+	}, nil
+}
+
+// webauthnFor resolves the current RPID + RPOrigins from settings
+// (falling back to the construction-time values when the lookup
+// returns empty) and builds a fresh *wa.WebAuthn instance for one
+// ceremony. The library's New() is config-validation only — no
+// I/O, no per-instance state — so per-call construction is cheap.
+//
+// Returning a freshly-built engine on every ceremony means a
+// super-admin who updates auth.passkey.rpid via /superadmin/settings
+// takes effect on the very next register/login attempt. (Existing
+// passkeys break; see SECURITY MODEL.)
+func (e *PasskeyEngine) webauthnFor(ctx context.Context) (*wa.WebAuthn, error) {
+	rpID := e.rpID
+	rpOrigins := e.rpOrigins
+
+	if e.lookup != nil {
+		if v, err := e.lookup(ctx, "auth.passkey.rpid"); err == nil && v != "" {
+			rpID = v
+		}
+		if v, err := e.lookup(ctx, "auth.passkey.rporigins"); err == nil && v != "" {
+			// Comma-separated, matching the env-var format.
+			rpOrigins = splitOrigins(v)
+		}
 	}
-	return &PasskeyEngine{w: w, users: users, creds: creds}, nil
+
+	return wa.New(&wa.Config{
+		RPDisplayName: e.displayName,
+		RPID:          rpID,
+		RPOrigins:     rpOrigins,
+	})
+}
+
+// splitOrigins parses the comma-separated rporigins setting value.
+// Whitespace around each entry is trimmed; empty entries dropped.
+// Matches the original cmd/server/main.go parsing of
+// PASSKEY_RPORIGINS so env-driven deployments behave identically.
+func splitOrigins(raw string) []string {
+	parts := []string{}
+	for _, p := range strings.Split(raw, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return parts
 }
 
 // ----- User adapter -----
@@ -189,11 +289,15 @@ func (e *PasskeyEngine) BeginRegistration(ctx context.Context, user *models.User
 	if err != nil {
 		return nil, nil, err
 	}
+	w, err := e.webauthnFor(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("passkey config: %w", err)
+	}
 	opts := []wa.RegistrationOption{
 		wa.WithResidentKeyRequirement(protocol.ResidentKeyRequirementRequired),
 		wa.WithExclusions(wa.Credentials(u.WebAuthnCredentials()).CredentialDescriptors()),
 	}
-	return e.w.BeginRegistration(u, opts...)
+	return w.BeginRegistration(u, opts...)
 }
 
 // FinishRegistration validates the browser's response against the
@@ -208,7 +312,11 @@ func (e *PasskeyEngine) FinishRegistration(ctx context.Context, user *models.Use
 	if err != nil {
 		return nil, err
 	}
-	cred, err := e.w.FinishRegistration(u, *session, r)
+	w, err := e.webauthnFor(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("passkey config: %w", err)
+	}
+	cred, err := w.FinishRegistration(u, *session, r)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +349,11 @@ func credentialToModel(userID uint, cred *wa.Credential, nickname string) *model
 // dialog; the assertion comes back with the credential_id, which we
 // resolve to a user.
 func (e *PasskeyEngine) BeginLogin(ctx context.Context) (*protocol.CredentialAssertion, *wa.SessionData, error) {
-	return e.w.BeginDiscoverableLogin()
+	w, err := e.webauthnFor(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("passkey config: %w", err)
+	}
+	return w.BeginDiscoverableLogin()
 }
 
 // FinishLogin verifies the assertion, resolves the user via the
@@ -282,7 +394,11 @@ func (e *PasskeyEngine) FinishLogin(ctx context.Context, session *wa.SessionData
 		return e.buildWebauthnUser(ctx, user)
 	}
 
-	verifiedCred, err := e.w.FinishDiscoverableLogin(handler, *session, r)
+	w, err := e.webauthnFor(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("passkey config: %w", err)
+	}
+	verifiedCred, err := w.FinishDiscoverableLogin(handler, *session, r)
 	if err != nil {
 		return nil, nil, err
 	}

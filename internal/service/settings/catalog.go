@@ -226,7 +226,9 @@ var Catalog = []Definition{
 	// ── Passkeys ────────────────────────────────────────────────────
 	{
 		Key: "auth.passkey.rpid", Group: "Passkeys", Label: "WebAuthn RP ID",
-		Description: "Relying Party ID for WebAuthn. Usually the bare domain of the deployment (no scheme, no port).",
+		Description: "Relying Party ID for WebAuthn — the bare domain of the deployment (no scheme, no port). " +
+			"WARNING: changing this invalidates EVERY existing passkey on the deployment. The RPID is hashed into each enrolled credential and cannot be rotated without re-enrollment. " +
+			"Must be a registrable suffix of every entry in WebAuthn RP origins; setting it too broad (e.g. 'example.edu' when origin is 'lms.example.edu') would let other subdomains complete ceremonies with this deployment's credentials.",
 		ValueType:   TypeString,
 		Scopes:      []ScopeType{ScopeInstance},
 		EnvFallback: "PASSKEY_RPID",

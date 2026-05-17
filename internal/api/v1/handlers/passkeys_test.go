@@ -290,7 +290,11 @@ func newPasskeyTestApp(t *testing.T) (*handlers.PasskeyHandler, *fiber.App, *fak
 
 	users := newFakeUserRepo()
 	creds := newFakeCredsRepo()
-	engine, err := auth.NewPasskeyEngine("Paper LMS Test", "localhost", []string{"http://localhost:3000"}, users, creds)
+	// Wave 6: PasskeyEngine accepts a SettingsLookupFunc — nil here
+	// because the test exercises the boot-time fallback path
+	// (rpID/rpOrigins from the constructor args). Tests that want
+	// to exercise the settings-resolved path can pass a stub.
+	engine, err := auth.NewPasskeyEngine("Paper LMS Test", "localhost", []string{"http://localhost:3000"}, nil, users, creds)
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}

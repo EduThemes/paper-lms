@@ -365,7 +365,13 @@ func main() {
 			AccessKey: cfg.S3AccessKey,
 			SecretKey: cfg.S3SecretKey,
 		}
-		s3Backend, err := storageLib.NewS3Backend(context.Background(), s3Cfg)
+		// Wave 6: nil settings lookup at boot — the closure is constructed
+		// further down (it depends on settingsService, which is wired after
+		// the storage backend). We attach the lookup via SetSettingsLookup
+		// once settingsLookup exists. Env-only deployments are unaffected:
+		// the SDK client built here from cfg.* values is reused for every
+		// request, no per-request rebuild.
+		s3Backend, err := storageLib.NewS3Backend(context.Background(), s3Cfg, nil)
 		if err != nil {
 			log.Fatalf("Failed to initialize S3 storage: %v", err)
 		}
@@ -485,6 +491,14 @@ func main() {
 			return "", err
 		}
 		return ev.Value, nil
+	}
+	// Wave 6: attach the settings lookup to the S3 backend now that
+	// settingsService is wired. Per-request resolution rebuilds the
+	// underlying SDK client only when storage.s3.* values change (see
+	// internal/storage/s3.go S3Backend doc). The type assertion is safe:
+	// storageBackend is an *S3Backend only when cfg.StorageBackend=="s3".
+	if s3b, ok := storageBackend.(*storageLib.S3Backend); ok {
+		s3b.SetSettingsLookup(settingsLookup)
 	}
 	notificationDeliveryService := service.NewNotificationDeliveryService(
 		notificationDeliveryRepo, communicationChannelRepo, notificationPrefRepo,
@@ -661,7 +675,17 @@ func main() {
 		}
 	}
 	userWebauthnCredRepo := postgres.NewUserWebauthnCredentialRepository(database)
-	passkeyEngine, err := auth.NewPasskeyEngine("Paper LMS", passkeyRPID, passkeyOrigins, userRepo, userWebauthnCredRepo)
+	// Wave 6: Passkey engine resolves auth.passkey.{rpid,rporigins}
+	// per ceremony via the Settings Engine. The construction-time
+	// values above remain the safety net when the lookup returns
+	// empty. Reuses the shared settingsLookup closure declared near
+	// notificationDeliveryService.
+	//
+	// SECURITY: changing auth.passkey.rpid via the super-admin UI
+	// INVALIDATES every existing passkey on the deployment — the
+	// RPID is a hash anchor in each credential. See SECURITY MODEL
+	// on PasskeyEngine for the full reasoning.
+	passkeyEngine, err := auth.NewPasskeyEngine("Paper LMS", passkeyRPID, passkeyOrigins, settingsLookup, userRepo, userWebauthnCredRepo)
 	if err != nil {
 		log.Fatalf("Failed to initialize passkey engine: %v", err)
 	}

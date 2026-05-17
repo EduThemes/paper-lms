@@ -561,13 +561,17 @@ func (h *SuperAdminSettingsHandler) TestS3(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 20*time.Second)
 	defer cancel()
 
+	// Wave 6: this handler already resolves every storage.s3.* key via
+	// the Settings Engine above, so the per-request lookup is wired here
+	// as nil — the backend's boot snapshot already reflects the freshly
+	// resolved values and we don't want a second round-trip per Put/Get.
 	backend, err := storage.NewS3Backend(ctx, storage.S3Config{
 		Bucket:    bucket,
 		Region:    region,
 		Endpoint:  endpoint,
 		AccessKey: accessKey,
 		SecretKey: secretKey,
-	})
+	}, nil)
 	if err != nil {
 		result.Detail = "S3 client could not initialize"
 		return c.Status(fiber.StatusBadGateway).JSON(result)
