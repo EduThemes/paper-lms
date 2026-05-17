@@ -71,10 +71,12 @@ const AdminHomePage = React.lazy(() => import('./pages/AdminHomePage'));
 const AdminCoursesPage = React.lazy(() => import('./pages/AdminCoursesPage'));
 const AdminPeoplePage = React.lazy(() => import('./pages/AdminPeoplePage'));
 const AdminSettingsPage = React.lazy(() => import('./pages/AdminSettingsPage'));
+const SuperAdminSettingsPage = React.lazy(() => import('./pages/SuperAdminSettingsPage'));
 import PublicPageView from './pages/PublicPageView';
 import NotFoundPage from './pages/NotFoundPage';
 const CourseSettingsPage = React.lazy(() => import('./pages/CourseSettingsPage'));
 import ProtectedRoute from './components/ProtectedRoute';
+import SuperAdminGate from './components/SuperAdminGate';
 import { CourseUIProvider } from './contexts/CourseUIContext';
 import { useAuth } from './contexts/AuthContext';
 import { api } from './services/api';
@@ -395,6 +397,24 @@ const App = () => {
           element={
             <ProtectedRoute>
               <AdminSettingsPage />
+            </ProtectedRoute>
+          }
+        />
+        {/*
+          Super-Admin Settings Engine. ProtectedRoute (session check)
+          + SuperAdminGate (role==='super_admin' check) are layered;
+          the server's RequireSuperAdmin middleware is the
+          authoritative gate either way. UI gate is for UX only —
+          users without the role land on a clean explainer panel
+          instead of a half-rendered form that 403s on every call.
+        */}
+        <Route
+          path="/superadmin/settings"
+          element={
+            <ProtectedRoute>
+              <SuperAdminGate>
+                <SuperAdminSettingsPage />
+              </SuperAdminGate>
             </ProtectedRoute>
           }
         />

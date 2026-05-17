@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { User, Settings, Shield, KeyRound, Bell, Key, ShieldCheck, LogOut } from 'lucide-react';
+import { User, Settings, Shield, KeyRound, Bell, Key, ShieldCheck, LogOut, ServerCog } from 'lucide-react';
 
 // Compact dropdown anchored to the user-icon in the global sidebar.
 // All entries route into the account settings hub (or top-level pages
@@ -37,6 +37,14 @@ export default function UserMenu({ user, onLogout }) {
     { to: '/settings/notifications', icon: Bell, label: 'Notification preferences' },
     { to: '/profile/settings?tab=privacy', icon: Shield, label: 'Data & privacy' },
   ];
+
+  // Super-Admin entry — only visible when the logged-in user is a
+  // platform operator. The role-literal check matches the server's
+  // contract; the server's RequireSuperAdmin middleware is the
+  // authoritative gate, this is just UI discoverability.
+  if (user?.role === 'super_admin') {
+    items.push({ to: '/superadmin/settings', icon: ServerCog, label: 'Super-Admin settings' });
+  }
 
   return (
     <div ref={wrapperRef} className="relative flex items-center justify-center w-10 h-10">

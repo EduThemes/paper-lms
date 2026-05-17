@@ -2757,4 +2757,83 @@ export const api = {
       return data;
     },
   },
+
+  // ── Super-Admin Settings Engine ────────────────────────────────────
+  //
+  // Talks to /api/v1/superadmin/settings*. Every endpoint is gated by
+  // Protected + RequireSuperAdmin on the server; the UI also hides
+  // these routes behind <SuperAdminGate>. Two layers because a stale
+  // browser tab with a non-super-admin session should land on a clean
+  // 403 page, not a half-rendered settings panel.
+  //
+  // Secret values are ALWAYS masked server-side — `value` is omitted
+  // from the response when `is_secret: true`. Callers MUST NOT
+  // distinguish "secret with empty plaintext" from "secret with a
+  // value" by `.value` alone — `has_value` is the right signal.
+  superAdminSettings: {
+    listSettings: async (accountId) => {
+      const qs = accountId ? `?account_id=${encodeURIComponent(accountId)}` : '';
+      const { data } = await request(`/superadmin/settings${qs}`);
+      return data;
+    },
+    getSetting: async (key, accountId) => {
+      const qs = accountId ? `?account_id=${encodeURIComponent(accountId)}` : '';
+      const { data } = await request(`/superadmin/settings/${encodeURIComponent(key)}${qs}`);
+      return data;
+    },
+    getGroups: async () => {
+      const { data } = await request('/superadmin/settings/groups');
+      return data;
+    },
+    setSetting: async (key, body) => {
+      // body shape: { scope: 'instance'|'account'|'user', scope_id, value }
+      const { data } = await request(`/superadmin/settings/${encodeURIComponent(key)}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
+      return data;
+    },
+    clearSetting: async (key, body) => {
+      // body shape: { scope, scope_id } — scope is REQUIRED (Wave 3 audit H2).
+      const { data } = await request(`/superadmin/settings/${encodeURIComponent(key)}`, {
+        method: 'DELETE',
+        body: JSON.stringify(body),
+      });
+      return data;
+    },
+    // The test-action endpoints return structured diagnostics
+    // ({ok, detail, action, duration_ms}) on BOTH success and failure
+    // — a failed SMTP test is a 424 with a body explaining why, not
+    // an exception state. We bypass the throw-on-non-2xx behavior of
+    // `request` so the UI can render the diagnostic uniformly.
+    testEmail: () => testAction('/superadmin/settings/test/email'),
+    testOIDC: (issuer) => testAction('/superadmin/settings/test/oidc', { issuer }),
+    testAnthropic: () => testAction('/superadmin/settings/test/anthropic'),
+    testS3: () => testAction('/superadmin/settings/test/s3'),
+  },
 };
+
+// testAction is the bypass-throw helper for /superadmin/settings/test/*.
+// Returns the diagnostic body for any HTTP status; rate-limit responses
+// (429) surface naturally because the body shape includes the same
+// `detail` slot the UI already renders.
+async function testAction(path, body) {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: getHeaders(),
+    body: JSON.stringify(body || {}),
+  });
+  const parsed = await response.json().catch(() => ({
+    ok: false,
+    detail: `Request failed: ${response.status}`,
+  }));
+  // Normalize shape so the UI always has these fields.
+  return {
+    ok: !!parsed.ok,
+    detail: parsed.detail || (parsed.errors?.[0]?.message ?? ''),
+    duration_ms: parsed.duration_ms || 0,
+    action: parsed.action || '',
+    status: response.status,
+  };
+}
