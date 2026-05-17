@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/EduThemes/paper-lms/internal/auth/initialpassword"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"gorm.io/gorm"
@@ -209,8 +210,18 @@ func (s *SISImportService) processUsersCSV(ctx context.Context, batchID uint, re
 					continue
 				}
 			} else {
-				// Set a default hashed password
-				if err := user.HashPassword("changeme"); err != nil {
+				// No password supplied in the CSV — generate a
+				// cryptographically random initial password. The plaintext
+				// is irrecoverable; the user MUST go through the
+				// password-reset flow (or use SSO) before they can log in.
+				// Prior code stored bcrypt("changeme") for every such row,
+				// which is the canonical default-credential vulnerability.
+				initialPW, pwErr := initialpassword.GenerateInitialPassword()
+				if pwErr != nil {
+					s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to generate initial password: %v", pwErr), "users.csv")
+					continue
+				}
+				if err := user.HashPassword(initialPW); err != nil {
 					s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to hash default password: %v", err), "users.csv")
 					continue
 				}
