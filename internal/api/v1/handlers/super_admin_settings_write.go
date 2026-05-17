@@ -276,7 +276,17 @@ func (h *SuperAdminSettingsHandler) TestEmail(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(result)
 	}
 
-	hints := settings.ScopeHints{}
+	// Wave 8: scope SMTP resolution to the optional ?account_id
+	// hint OR (default) the caller's home account. A super-admin
+	// testing district SMTP can use ?account_id=<district> to
+	// resolve from that district's overrides; otherwise the test
+	// uses instance-scope plus the caller's account walk.
+	hints := hintsFromRequest(c)
+	if hints.AccountID == 0 {
+		if v, ok := c.Locals("account_id").(uint); ok {
+			hints.AccountID = v
+		}
+	}
 	host, _ := h.resolveString(c.Context(), "smtp.host", hints)
 	port, _ := h.resolveString(c.Context(), "smtp.port", hints)
 	user, _ := h.resolveString(c.Context(), "smtp.username", hints)

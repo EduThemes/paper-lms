@@ -34,6 +34,7 @@ import (
 	gamificationEffects "github.com/EduThemes/paper-lms/internal/service/gamification/effects"
 	"github.com/EduThemes/paper-lms/internal/service/gamification/wiring"
 	"github.com/EduThemes/paper-lms/internal/service/settings"
+	"github.com/EduThemes/paper-lms/internal/settingsctx"
 	storageLib "github.com/EduThemes/paper-lms/internal/storage"
 )
 
@@ -475,18 +476,28 @@ func main() {
 
 	// settingsLookup is the cycle-breaking closure shared by every
 	// consumer that resolves catalog keys through the Settings
-	// Engine — SMTP (notification_delivery_service), AI Assist
-	// (ai_assist_service), OIDC (auth.OIDCHandler), and the future
-	// Wave 6 S3 path. See service.SettingsLookupFunc / auth.SettingsLookupFunc
-	// docstrings for why function-typed (avoids the auth→service→settings→auth
-	// import cycle).
+	// Engine — SMTP, AI Assist, OIDC, Passkey, S3, SAML. See
+	// service.SettingsLookupFunc / auth.SettingsLookupFunc /
+	// storage.SettingsLookupFunc docstrings for why function-typed
+	// (avoids the auth→service→settings→auth import cycle).
 	//
-	// Per-tenant scope hints aren't threaded here — these consumers
-	// today resolve at instance scope; per-tenant SMTP/Anthropic/etc.
-	// is a Wave 5.B follow-up that needs per-request account context
-	// from the Fiber Ctx.
+	// Wave 8: per-tenant scope hints. The closure reads
+	// settings.AccountIDFromContext(ctx) so consumers can attach a
+	// per-request account via settings.WithAccountID(ctx, id). When
+	// no account is set in ctx (background workers, instance-only
+	// consumers), AccountIDFromContext returns 0 and resolution
+	// falls through to instance/env/default — preserving Wave 5/6
+	// behavior for consumers that haven't been per-tenant'd yet.
+	//
+	// The account-resolution chain (Wave 1) walks parent_account_id
+	// from the requested account up to root, so a district that
+	// sets SMTP at its root-account scope propagates to every
+	// sub-school unless the sub-school overrides.
 	settingsLookup := func(ctx context.Context, key string) (string, error) {
-		ev, err := settingsService.Get(ctx, key, settings.ScopeHints{})
+		hints := settings.ScopeHints{
+			AccountID: settingsctx.AccountIDFromContext(ctx),
+		}
+		ev, err := settingsService.Get(ctx, key, hints)
 		if err != nil {
 			return "", err
 		}

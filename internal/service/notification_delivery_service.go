@@ -14,6 +14,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/repository/postgres"
+	"github.com/EduThemes/paper-lms/internal/settingsctx"
 )
 
 // SMTPConfig holds the configuration for outbound email delivery.
@@ -83,6 +84,25 @@ func NewNotificationDeliveryService(
 		userRepo:     userRepo,
 		lookup:       lookup,
 	}
+}
+
+// scopeCtxFor stamps the per-tenant account hint onto ctx so the
+// SMTP resolution chain walks the recipient's account scope (and
+// the account's parent chain) before falling through to instance/
+// env/default. Wave 8 — unlocks per-district SMTP creds.
+//
+// A failed user lookup or a user with AccountID=0 falls through to
+// the unscoped ctx — back-compat with single-tenant deployments
+// where every recipient resolves the same SMTP.
+func (s *NotificationDeliveryService) scopeCtxFor(ctx context.Context, userID uint) context.Context {
+	if userID == 0 {
+		return ctx
+	}
+	u, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil || u == nil || u.AccountID == 0 {
+		return ctx
+	}
+	return settingsctx.WithAccountID(ctx, u.AccountID)
 }
 
 // resolveSMTPConfig fetches the live SMTP configuration via the
@@ -260,7 +280,13 @@ func (s *NotificationDeliveryService) ProcessPendingDeliveries(ctx context.Conte
 		var sendErr error
 		switch d.ChannelType {
 		case "email":
-			sendErr = s.SendEmail(ctx, d.Address, d.Subject, d.Body)
+			// Wave 8: per-tenant SMTP. Look up the recipient's
+			// account_id and stamp the lookup context so SMTP creds
+			// resolve at the account scope (walking parent chain to
+			// the district). A district that sets SMTP at its root
+			// account propagates to every sub-school unless the
+			// sub-school overrides.
+			sendErr = s.SendEmail(s.scopeCtxFor(ctx, d.UserID), d.Address, d.Subject, d.Body)
 		case "webhook":
 			sendErr = s.sendWebhook(d.Address, d.Subject, d.Body)
 		default:
@@ -363,7 +389,8 @@ func (s *NotificationDeliveryService) ProcessDigests(ctx context.Context, digest
 			var sendErr error
 			switch key.ChannelType {
 			case "email":
-				sendErr = s.SendEmail(ctx, key.Address, d.Subject, d.Body)
+				// Wave 8: per-tenant SMTP — see ProcessPendingDeliveries.
+				sendErr = s.SendEmail(s.scopeCtxFor(ctx, key.UserID), key.Address, d.Subject, d.Body)
 			case "webhook":
 				sendErr = s.sendWebhook(key.Address, d.Subject, d.Body)
 			}
@@ -394,7 +421,9 @@ func (s *NotificationDeliveryService) ProcessDigests(ctx context.Context, digest
 		var sendErr error
 		switch key.ChannelType {
 		case "email":
-			sendErr = s.SendEmail(ctx, key.Address, subject, digestBody)
+			// Wave 8: per-tenant SMTP. Digest emails go to one
+			// recipient; their account scope drives the SMTP creds.
+			sendErr = s.SendEmail(s.scopeCtxFor(ctx, key.UserID), key.Address, subject, digestBody)
 		case "webhook":
 			sendErr = s.sendWebhook(key.Address, subject, digestBody)
 		}

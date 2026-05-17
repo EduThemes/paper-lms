@@ -41,6 +41,26 @@ func TestIsRegistrableSuffixOf(t *testing.T) {
 		{"example.edu", "", false},
 		// Whitespace normalized.
 		{"  example.edu  ", "lms.example.edu", true},
+
+		// ── PSL upgrade (Wave 7 audit L1) ─────────────────────────────
+		// Just the public suffix — browser would reject at ceremony.
+		{"co.uk", "foo.co.uk", false},
+		{"uk", "foo.co.uk", false},
+		{"co.uk", "bar.foo.co.uk", false},
+		// Exact-host match where host IS the registrable domain (eTLD+1).
+		{"foo.co.uk", "foo.co.uk", true},
+		// Proper suffix at or below the registrable domain.
+		{"foo.co.uk", "bar.foo.co.uk", true},
+		{"bar.foo.co.uk", "baz.bar.foo.co.uk", true},
+		// edu is a public suffix; RPID="edu" with edu-suffixed host is rejected.
+		{"edu", "example.edu", false},
+		{"edu", "lms.paper.example.edu", false},
+		// example.edu is the registrable domain → still valid.
+		{"example.edu", "lms.paper.example.edu", true},
+		{"paper.example.edu", "lms.paper.example.edu", true},
+		// "com" is a public suffix.
+		{"com", "example.com", false},
+		{"com", "foo.bar.example.com", false},
 	}
 	for _, c := range cases {
 		got := isRegistrableSuffixOf(c.suffix, c.host)

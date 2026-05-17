@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 // This file holds catalog-level write-time validators. Each function
@@ -20,15 +22,12 @@ import (
 
 // validatePasskeyRPID enforces the WebAuthn cross-subdomain invariant:
 // the rpid value must be a registrable suffix of every host in
-// auth.passkey.rporigins. Closes Wave 6 audit H2.
-//
-// "Registrable suffix" here is implemented as the simple structural
-// check: rpid equals host, OR host ends with "." + rpid. This catches
-// the obvious mistakes (e.g. rpid="evil.com" with origin
-// "https://lms.example.edu" — rejected) without depending on the
-// Public Suffix List. A super-admin who configures a PSL-edge-case
-// suffix can still tank their deployment, but those are operator-
-// expert configurations that don't show up in typical district setups.
+// auth.passkey.rporigins. Closes Wave 6 audit H2; Wave 7 audit L1
+// upgraded the suffix check to be PSL-aware (see
+// isRegistrableSuffixOf) so pathological inputs like rpid="co.uk"
+// with host="foo.co.uk" — which pass the structural check but get
+// rejected by the browser at ceremony time — are now caught at
+// write time too.
 func validatePasskeyRPID(ctx context.Context, value string, peer func(key string) (string, error)) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -117,16 +116,28 @@ func hostFromOrigin(origin string) (string, error) {
 	return u.Hostname(), nil
 }
 
-// isRegistrableSuffixOf returns true when `suffix` is a structural
-// suffix of `host` per WebAuthn's RPID rules (simplified — no Public
-// Suffix List). Either suffix == host (exact match), or host ends
-// with "." + suffix.
+// isRegistrableSuffixOf returns true when `suffix` is a WebAuthn-valid
+// "registrable domain suffix" of `host`. This matches the browser's
+// RPID acceptance rules, which are defined by the Public Suffix List
+// (PSL): a host's registrable domain is the host minus its public
+// suffix, plus one label. A valid RPID is either the host itself OR
+// any structural suffix of the host that is at least as specific as
+// the registrable domain. The PSL itself (e.g. "co.uk", "edu") is
+// NOT a valid RPID because nobody can "own" a public suffix.
 //
-//	suffix="example.edu" host="paper.example.edu"  → true
-//	suffix="example.edu" host="example.edu"        → true
-//	suffix="example.edu" host="evil.example.com"   → false
-//	suffix="evil.com"    host="paper.example.edu"  → false
-//	suffix="lms.example.edu" host="example.edu"    → false (suffix is more specific than host)
+// Backed by golang.org/x/net/publicsuffix (the canonical Go PSL
+// library, with the list embedded at compile time — no runtime
+// download). Upgraded from the previous structural-only check that
+// would erroneously accept rpid="co.uk" for host="foo.co.uk".
+//
+//	suffix="example.edu" host="paper.example.edu"   → true
+//	suffix="example.edu" host="example.edu"         → true
+//	suffix="example.edu" host="evil.example.com"    → false
+//	suffix="evil.com"    host="paper.example.edu"   → false
+//	suffix="lms.example.edu" host="example.edu"     → false (suffix more specific than host)
+//	suffix="co.uk"       host="foo.co.uk"           → false (just the public suffix — PSL block)
+//	suffix="uk"          host="foo.co.uk"           → false (just a public suffix)
+//	suffix="bar.co.uk"   host="foo.bar.co.uk"       → true  (registrable domain of host)
 func isRegistrableSuffixOf(suffix, host string) bool {
 	suffix = strings.ToLower(strings.TrimSpace(suffix))
 	host = strings.ToLower(strings.TrimSpace(host))
@@ -136,7 +147,36 @@ func isRegistrableSuffixOf(suffix, host string) bool {
 	if suffix == host {
 		return true
 	}
-	return strings.HasSuffix(host, "."+suffix)
+	if !strings.HasSuffix(host, "."+suffix) {
+		return false
+	}
+	// Structural suffix matches. Now apply the PSL-based rules: suffix
+	// must NOT be just the public suffix, and must be at least as
+	// specific as the host's registrable domain (eTLD+1).
+	publicSuffixOfHost, _ := publicsuffix.PublicSuffix(host)
+	if suffix == publicSuffixOfHost {
+		return false
+	}
+	etldPlusOne, err := publicsuffix.EffectiveTLDPlusOne(host)
+	if err != nil {
+		// Pathological input — host has no registrable domain (e.g. it
+		// IS a public suffix). Reject defensively.
+		return false
+	}
+	if labelCount(suffix) < labelCount(etldPlusOne) {
+		return false
+	}
+	return true
+}
+
+// labelCount returns the number of DNS labels in a host string. Used
+// by isRegistrableSuffixOf to compare suffix specificity against the
+// registrable-domain (eTLD+1) specificity. An empty string returns 0.
+func labelCount(host string) int {
+	if host == "" {
+		return 0
+	}
+	return strings.Count(host, ".") + 1
 }
 
 // validateHTTPSURL is a small reusable validator for string-typed
