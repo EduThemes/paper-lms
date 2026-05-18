@@ -15,10 +15,15 @@ import (
 type AppointmentGroupHandler struct {
 	svc   *service.AppointmentGroupService
 	authz *ResourceAuthorizer
+	// Wave 5.2: 13.5 LogPIIAccess sweep. ListReservations is the only
+	// student-keyed read here — it surfaces every student who booked a
+	// given slot. Group/Slot detail reads are course-keyed metadata and
+	// don't fire LogPIIAccess.
+	auditService *service.AuditService
 }
 
-func NewAppointmentGroupHandler(svc *service.AppointmentGroupService, authz *ResourceAuthorizer) *AppointmentGroupHandler {
-	return &AppointmentGroupHandler{svc: svc, authz: authz}
+func NewAppointmentGroupHandler(svc *service.AppointmentGroupService, authz *ResourceAuthorizer, auditService *service.AuditService) *AppointmentGroupHandler {
+	return &AppointmentGroupHandler{svc: svc, authz: authz, auditService: auditService}
 }
 
 // ----- JSON serializers -----
@@ -317,6 +322,14 @@ func (h *AppointmentGroupHandler) ListReservations(c *fiber.Ctx) error {
 	for i, r := range items {
 		out[i] = reservationToJSON(&r)
 	}
+
+	// Wave 5.2 FERPA audit: instructor surfacing every student who
+	// booked a given slot. Bulk read (studentID=0) keyed on the
+	// appointment_slot resource per the convention.
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_appointment_reservations", "appointment_slots", uint(slotID), c.IP(), c.Get("User-Agent"))
+	}
+
 	return c.JSON(out)
 }
 

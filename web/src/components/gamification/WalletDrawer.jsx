@@ -1,7 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { Award, Settings, X } from 'lucide-react';
+import { Award, Settings } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogClose,
+} from '@/components/ui/dialog';
 import { api } from '../../services/api';
 import { CurrencyIcon } from './currencyIcon';
 
@@ -87,16 +92,15 @@ export default function WalletDrawer({ userId, balance, open, onOpenChange }) {
 
   const canLoadMore = transactions.length < totalCount;
 
+  // Side-drawer variant of the shared <Dialog>. We override the centering
+  // classes baked into DialogContent (left-[50%] top-[50%] translate-x/y)
+  // so the panel slides in from the right edge of the viewport.
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay
-          className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 motion-reduce:transition-none"
-        />
-        <DialogPrimitive.Content
-          className="fixed right-0 top-0 z-50 h-full w-full max-w-md bg-surface-0 shadow-xl border-l border-surface-raised flex flex-col data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right duration-200 motion-reduce:duration-0"
-          aria-describedby={undefined}
-        >
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="left-auto right-0 top-0 translate-x-0 translate-y-0 h-full w-full max-w-md max-w-none rounded-none border-0 border-l border-surface-raised bg-surface-0 shadow-xl flex flex-col p-0 gap-0 data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:rounded-none"
+        aria-describedby={undefined}
+      >
           <header className="flex items-center gap-3 px-5 py-4 border-b border-surface-raised">
             {balance && (
               <CurrencyIcon
@@ -107,9 +111,9 @@ export default function WalletDrawer({ userId, balance, open, onOpenChange }) {
               />
             )}
             <div className="flex-1 min-w-0">
-              <DialogPrimitive.Title className="text-base font-semibold text-text-primary truncate">
+              <DialogTitle className="text-base font-semibold text-text-primary truncate">
                 {balance?.display_label || 'Wallet'}
-              </DialogPrimitive.Title>
+              </DialogTitle>
               <div className="text-sm text-text-secondary tabular-nums">
                 {typeof balance?.balance === 'number'
                   ? `${balance.balance.toLocaleString()} ${balance.display_label_plural || balance.display_label}`
@@ -121,12 +125,6 @@ export default function WalletDrawer({ userId, balance, open, onOpenChange }) {
                 )}
               </div>
             </div>
-            <DialogPrimitive.Close
-              className="p-1.5 rounded-md text-text-secondary hover:bg-surface-2 hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-brand-400/60"
-              aria-label="Close"
-            >
-              <X className="w-4 h-4" />
-            </DialogPrimitive.Close>
           </header>
 
           <div className="flex-1 overflow-y-auto px-5 py-3">
@@ -177,7 +175,7 @@ export default function WalletDrawer({ userId, balance, open, onOpenChange }) {
           </div>
 
           <footer className="px-5 py-3 border-t border-surface-raised flex items-center gap-4">
-            <DialogPrimitive.Close asChild>
+            <DialogClose asChild>
               <Link
                 to="/profile/badges"
                 className="inline-flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary"
@@ -185,8 +183,8 @@ export default function WalletDrawer({ userId, balance, open, onOpenChange }) {
                 <Award className="w-3.5 h-3.5" />
                 My badges
               </Link>
-            </DialogPrimitive.Close>
-            <DialogPrimitive.Close asChild>
+            </DialogClose>
+            <DialogClose asChild>
               <Link
                 to="/profile/gamification"
                 className="inline-flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary"
@@ -194,10 +192,9 @@ export default function WalletDrawer({ userId, balance, open, onOpenChange }) {
                 <Settings className="w-3.5 h-3.5" />
                 Privacy settings
               </Link>
-            </DialogPrimitive.Close>
+            </DialogClose>
           </footer>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+      </DialogContent>
+    </Dialog>
   );
 }

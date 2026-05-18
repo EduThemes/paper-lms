@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { User, Settings, Shield, KeyRound, Bell, Key, ShieldCheck, LogOut, ServerCog } from 'lucide-react';
+import { useClickOutside } from '../hooks/useClickOutside';
 
 // Compact dropdown anchored to the user-icon in the global sidebar.
 // All entries route into the account settings hub (or top-level pages
@@ -9,25 +10,8 @@ export default function UserMenu({ user, onLogout }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
-        setOpen(false);
-      }
-    };
-    const onKey = (e) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  const close = () => setOpen(false);
+  const close = useCallback(() => setOpen(false), []);
+  useClickOutside(wrapperRef, close);
 
   const items = [
     { to: '/profile/settings', icon: Settings, label: 'Account settings' },

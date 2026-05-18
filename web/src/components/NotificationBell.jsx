@@ -5,6 +5,7 @@ import { api } from '../services/api';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import FocusTrap from './FocusTrap';
 import { useLiveRegion } from './LiveRegion';
+import { useClickOutside } from '../hooks/useClickOutside';
 
 const NOTIFICATION_ICONS = {
   submission_grade: '📝',
@@ -134,17 +135,13 @@ const NotificationBell = ({ position = 'sidebar' }) => {
     if (isOpen) fetchNotifications();
   }, [isOpen, fetchNotifications]);
 
-  // Click outside (skipped for mobile-sheet — it has its own backdrop)
-  useEffect(() => {
-    if (!isOpen || position === 'mobile-sheet') return;
-    const handleClickOutside = (e) => {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+  // Click outside / Escape dismissal (skipped for mobile-sheet — it has its
+  // own backdrop + FocusTrap handles Escape). Hook attaches a no-op when
+  // dismissal shouldn't apply.
+  const handleOutside = useCallback(() => {
+    if (isOpen && position !== 'mobile-sheet') setIsOpen(false);
   }, [isOpen, position]);
+  useClickOutside(containerRef, handleOutside);
 
   // Open / close lifecycle: track previously focused element + restore on close.
   const open = useCallback(() => {
