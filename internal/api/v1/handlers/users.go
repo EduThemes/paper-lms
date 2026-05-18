@@ -322,7 +322,13 @@ func (h *UserHandler) SetPassword(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "password must be at least 8 characters")
 	}
 
-	user, err := h.userService.GetByID(c.Context(), userID)
+	// AUTH-INTERNAL: SetPassword is mounted on the public (anonymous)
+	// route group — there is no JWT-attested account_id Local yet
+	// (the pending-reset token IS the credential, and it pre-dates
+	// the session JWT). accountID=0 is the documented boundary case
+	// for credential-resolution paths; the user's identity is
+	// attested by the pending token, not by tenant scope.
+	user, err := h.userService.GetByID(c.Context(), userID, 0)
 	if err != nil || user == nil {
 		return responses.Error(c, fiber.StatusNotFound, "user not found")
 	}

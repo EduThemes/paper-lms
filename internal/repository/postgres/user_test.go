@@ -133,7 +133,9 @@ func TestUserRequiresPasswordReset_RoundTrip(t *testing.T) {
 	if err := repo.Create(ctx, defaulted); err != nil {
 		t.Fatalf("create default user: %v", err)
 	}
-	got, err := repo.FindByID(ctx, defaulted.ID)
+	// Users default to AccountID=1 via BeforeCreate; pass that as the
+	// tenant scope (post-PR #60 FindByID requires it).
+	got, err := repo.FindByID(ctx, defaulted.ID, 1)
 	if err != nil {
 		t.Fatalf("find default user: %v", err)
 	}
@@ -149,7 +151,7 @@ func TestUserRequiresPasswordReset_RoundTrip(t *testing.T) {
 	if err := repo.Create(ctx, flagged); err != nil {
 		t.Fatalf("create flagged user: %v", err)
 	}
-	got, err = repo.FindByID(ctx, flagged.ID)
+	got, err = repo.FindByID(ctx, flagged.ID, 1)
 	if err != nil {
 		t.Fatalf("find flagged user: %v", err)
 	}
@@ -162,7 +164,7 @@ func TestUserRequiresPasswordReset_RoundTrip(t *testing.T) {
 	if err := repo.Update(ctx, got); err != nil {
 		t.Fatalf("update flagged user: %v", err)
 	}
-	after, err := repo.FindByID(ctx, flagged.ID)
+	after, err := repo.FindByID(ctx, flagged.ID, 1)
 	if err != nil {
 		t.Fatalf("re-find flagged user: %v", err)
 	}
