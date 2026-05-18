@@ -5,7 +5,7 @@ import "time"
 // CustomRole defines a custom role with granular permissions that extends the base Canvas role types.
 // Permissions are stored as a JSON object: {"permission_name": {"enabled": true, "locked": false}}
 type CustomRole struct {
-	ID              uint      `json:"id" gorm:"primaryKey"`
+	ID              uint      `json:"id" gorm:"column:id;primaryKey"`
 	AccountID       uint      `json:"account_id" gorm:"not null;index"`
 	Name            string    `json:"name" gorm:"not null"`
 	BaseRoleType    string    `json:"base_role_type" gorm:"not null;index"` // teacher, ta, student, observer, admin
@@ -49,11 +49,11 @@ const (
 
 // User Management permissions
 const (
-	PermSendMessages   = "send_messages"
-	PermViewAnalytics  = "view_analytics"
-	PermViewUserEmail  = "view_user_email"
+	PermSendMessages    = "send_messages"
+	PermViewAnalytics   = "view_analytics"
+	PermViewUserEmail   = "view_user_email"
 	PermManageUserNotes = "manage_user_notes"
-	PermReadRoster     = "read_roster"
+	PermReadRoster      = "read_roster"
 )
 
 // Administration permissions

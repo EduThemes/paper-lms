@@ -180,7 +180,7 @@ func (h *ContentMigrationHandler) UpdateMigration(c *fiber.Ctx) error {
 	}
 
 	if input.ContentMigration.WorkflowState != nil {
-		migration.WorkflowState = *input.ContentMigration.WorkflowState
+		migration.WorkflowState = models.ContentMigrationWorkflow(*input.ContentMigration.WorkflowState)
 	}
 	raw := input.ContentMigration.MigrationSettings
 	if len(raw) == 0 {

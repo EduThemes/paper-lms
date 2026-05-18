@@ -3,7 +3,7 @@ package models
 import "time"
 
 type LatePolicy struct {
-	ID                                  uint      `json:"id" gorm:"primaryKey"`
+	ID                                  uint      `json:"id" gorm:"column:id;primaryKey"`
 	CourseID                            uint      `json:"course_id" gorm:"not null;uniqueIndex"`
 	MissingSubmissionDeductionEnabled   bool      `json:"missing_submission_deduction_enabled" gorm:"default:false"`
 	MissingSubmissionDeduction          float64   `json:"missing_submission_deduction" gorm:"default:0"`

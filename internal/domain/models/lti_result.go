@@ -3,7 +3,7 @@ package models
 import "time"
 
 type LTIResult struct {
-	ID               uint       `json:"id" gorm:"primaryKey"`
+	ID               uint       `json:"id" gorm:"column:id;primaryKey"`
 	LineItemID       uint       `json:"line_item_id" gorm:"not null;index"`
 	UserID           uint       `json:"userId" gorm:"not null;index"`
 	ResultScore      *float64   `json:"resultScore"`

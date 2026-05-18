@@ -3,13 +3,13 @@ package models
 import "time"
 
 type Quiz struct {
-	ID                 uint       `json:"id" gorm:"primaryKey"`
+	ID                 uint       `json:"id" gorm:"column:id;primaryKey"`
 	CourseID           uint       `json:"course_id" gorm:"not null;index"`
 	Title              string     `json:"title" gorm:"not null"`
 	Description        string     `json:"description" gorm:"type:text"`
 	QuizType           string     `json:"quiz_type" gorm:"default:'assignment'"` // practice_quiz, assignment, graded_survey, survey
-	TimeLimit          *int       `json:"time_limit"`                             // minutes
-	AllowedAttempts    int        `json:"allowed_attempts" gorm:"default:1"`      // -1 = unlimited
+	TimeLimit          *int       `json:"time_limit"`                            // minutes
+	AllowedAttempts    int        `json:"allowed_attempts" gorm:"default:1"`     // -1 = unlimited
 	DueAt              *time.Time `json:"due_at"`
 	UnlockAt           *time.Time `json:"unlock_at"`
 	LockAt             *time.Time `json:"lock_at"`

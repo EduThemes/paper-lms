@@ -97,7 +97,7 @@ func (h *EnrollmentHandler) CreateEnrollment(c *fiber.Ctx) error {
 		CourseID:        uint(courseID),
 		CourseSectionID: input.Enrollment.CourseSectionID,
 		Type:            input.Enrollment.Type,
-		WorkflowState:   "active",
+		WorkflowState:   models.EnrollmentActive,
 	}
 
 	if err := h.enrollmentService.Create(c.Context(), enrollment, callerAccountID(c)); err != nil {

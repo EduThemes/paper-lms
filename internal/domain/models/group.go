@@ -3,7 +3,7 @@ package models
 import "time"
 
 type Group struct {
-	ID              uint      `json:"id" gorm:"primaryKey"`
+	ID              uint      `json:"id" gorm:"column:id;primaryKey"`
 	GroupCategoryID uint      `json:"group_category_id" gorm:"not null;index"`
 	Name            string    `json:"name" gorm:"not null"`
 	Description     string    `json:"description" gorm:"type:text"`

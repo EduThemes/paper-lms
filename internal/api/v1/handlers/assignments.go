@@ -118,9 +118,9 @@ func (h *AssignmentHandler) CreateAssignment(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Assignment name is required")
 	}
 
-	state := "unpublished"
+	state := models.AssignmentUnpublished
 	if input.Assignment.Published {
-		state = "published"
+		state = models.AssignmentPublished
 	}
 
 	submissionTypes := strings.Join(input.Assignment.SubmissionTypes, ",")

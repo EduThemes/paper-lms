@@ -17,21 +17,21 @@ import "time"
 //
 // Indexes are owned by the SQL chain; this model declares none.
 type GamificationBadge struct {
-	ID            uint                  `json:"id" gorm:"primaryKey"`
-	TenantID      uint                  `json:"tenant_id" gorm:"not null"`
-	ScopeType     GamificationScopeType `json:"scope_type" gorm:"not null;type:text"`
-	ScopeID       uint                  `json:"scope_id" gorm:"not null"`
-	Code          string                `json:"code" gorm:"not null"`
-	Name          string                `json:"name" gorm:"not null"`
-	Description   string                `json:"description"`
-	Icon          string                `json:"icon"`
-	ImageURL      string                `json:"image_url"`
-	Color         string                `json:"color"`
+	ID          uint                  `json:"id" gorm:"column:id;primaryKey"`
+	TenantID    uint                  `json:"tenant_id" gorm:"not null"`
+	ScopeType   GamificationScopeType `json:"scope_type" gorm:"not null;type:text"`
+	ScopeID     uint                  `json:"scope_id" gorm:"not null"`
+	Code        string                `json:"code" gorm:"not null"`
+	Name        string                `json:"name" gorm:"not null"`
+	Description string                `json:"description"`
+	Icon        string                `json:"icon"`
+	ImageURL    string                `json:"image_url"`
+	Color       string                `json:"color"`
 	// InternalOnly default TRUE per SYNTHESIS §5. No `default:` GORM tag —
 	// the repo Create writes every column explicitly so this bool never
 	// hits the bool-default elision class (W2-A lesson).
-	InternalOnly  bool                  `json:"internal_only"`
-	SystemOwned   bool                  `json:"system_owned"`
+	InternalOnly bool `json:"internal_only"`
+	SystemOwned  bool `json:"system_owned"`
 	// AudienceLevel is informational today (e.g., 'k5', 'm68', 'h912',
 	// 'higher_ed', 'corp', 'pro'). Wave 3's audience-filter rules can
 	// consult this; W2-D's CRUD just round-trips it. Aligned to the
@@ -58,7 +58,7 @@ func (GamificationBadge) TableName() string { return "gamification_badges" }
 // admin grant leaves it nil). Powers the audit trail in
 // /profile/badges → "earned for: [event]".
 type GamificationBadgeAward struct {
-	ID              uint      `json:"id" gorm:"primaryKey"`
+	ID              uint      `json:"id" gorm:"column:id;primaryKey"`
 	UserID          uint      `json:"user_id" gorm:"not null"`
 	BadgeID         uint      `json:"badge_id" gorm:"not null"`
 	AwardedAt       time.Time `json:"awarded_at" gorm:"not null;default:now()"`

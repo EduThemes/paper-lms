@@ -8,7 +8,7 @@ import "time"
 //
 // This is data-layer only: the quiz grader does not consume it yet.
 type QuizQuestionOutcomeAlignment struct {
-	ID               uint      `json:"id" gorm:"primaryKey"`
+	ID               uint      `json:"id" gorm:"column:id;primaryKey"`
 	QuizQuestionID   uint      `json:"quiz_question_id" gorm:"not null;uniqueIndex:idx_qq_outcome;index"`
 	OutcomeID        uint      `json:"outcome_id" gorm:"not null;uniqueIndex:idx_qq_outcome;index"`
 	MasteryThreshold float64   `json:"mastery_threshold" gorm:"not null;default:0.7"`

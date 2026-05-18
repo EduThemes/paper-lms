@@ -162,7 +162,7 @@ func (s *ObserverService) LinkObserverToStudent(ctx context.Context, observerUse
 
 	// Create an ObserverEnrollment in each course the student is enrolled in.
 	for _, se := range studentEnrollments {
-		if se.WorkflowState != "active" {
+		if se.WorkflowState != models.EnrollmentActive {
 			continue
 		}
 
@@ -172,7 +172,7 @@ func (s *ObserverService) LinkObserverToStudent(ctx context.Context, observerUse
 			CourseSectionID:  se.CourseSectionID,
 			Type:             "ObserverEnrollment",
 			Role:             "ObserverEnrollment",
-			WorkflowState:    "active",
+			WorkflowState:    models.EnrollmentActive,
 			AssociatedUserID: &studentUserID,
 		}
 

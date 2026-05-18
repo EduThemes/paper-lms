@@ -3,7 +3,7 @@ package models
 import "time"
 
 type Portfolio struct {
-	ID             uint       `json:"id" gorm:"primaryKey"`
+	ID             uint       `json:"id" gorm:"column:id;primaryKey"`
 	UserID         uint       `json:"user_id" gorm:"not null;index"`
 	Title          string     `json:"title" gorm:"not null"`
 	Slug           string     `json:"slug" gorm:"uniqueIndex;not null"` // URL-friendly identifier
@@ -27,7 +27,7 @@ type Portfolio struct {
 }
 
 type PortfolioSection struct {
-	ID          uint      `json:"id" gorm:"primaryKey"`
+	ID          uint      `json:"id" gorm:"column:id;primaryKey"`
 	PortfolioID uint      `json:"portfolio_id" gorm:"not null;index"`
 	Title       string    `json:"title" gorm:"not null"`
 	SectionType string    `json:"section_type" gorm:"not null"` // about, projects, experience, education, skills, gallery, blog, custom
@@ -40,7 +40,7 @@ type PortfolioSection struct {
 }
 
 type PortfolioArtifact struct {
-	ID           uint   `json:"id" gorm:"primaryKey"`
+	ID           uint   `json:"id" gorm:"column:id;primaryKey"`
 	PortfolioID  uint   `json:"portfolio_id" gorm:"not null;index"`
 	SectionID    *uint  `json:"section_id" gorm:"index"`
 	Title        string `json:"title" gorm:"not null"`
@@ -65,7 +65,7 @@ type PortfolioArtifact struct {
 }
 
 type PortfolioReflection struct {
-	ID         uint      `json:"id" gorm:"primaryKey"`
+	ID         uint      `json:"id" gorm:"column:id;primaryKey"`
 	ArtifactID uint      `json:"artifact_id" gorm:"not null;index"`
 	UserID     uint      `json:"user_id" gorm:"not null"`
 	PromptText string    `json:"prompt_text" gorm:"type:text"`      // teacher-provided reflection prompt
@@ -75,7 +75,7 @@ type PortfolioReflection struct {
 }
 
 type PortfolioTemplate struct {
-	ID          uint      `json:"id" gorm:"primaryKey"`
+	ID          uint      `json:"id" gorm:"column:id;primaryKey"`
 	AccountID   *uint     `json:"account_id" gorm:"index"` // nil = system template
 	CreatedByID uint      `json:"created_by_id"`
 	Name        string    `json:"name" gorm:"not null"`
@@ -90,7 +90,7 @@ type PortfolioTemplate struct {
 
 // PortfolioComment - for teacher/peer feedback
 type PortfolioComment struct {
-	ID          uint      `json:"id" gorm:"primaryKey"`
+	ID          uint      `json:"id" gorm:"column:id;primaryKey"`
 	PortfolioID uint      `json:"portfolio_id" gorm:"not null;index"`
 	SectionID   *uint     `json:"section_id" gorm:"index"`
 	ArtifactID  *uint     `json:"artifact_id" gorm:"index"`
