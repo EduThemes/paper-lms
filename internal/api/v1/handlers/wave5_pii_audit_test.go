@@ -242,7 +242,7 @@ func TestGetAccommodation_FiresLogPIIAccess(t *testing.T) {
 	assignmentSvc := service.NewAssignmentService(nil)
 	userMock := new(mocks.MockUserRepository)
 	// caller 7 is an admin so RequireOwnerOrAdmin passes (caller != student).
-	userMock.On("FindByID", mock.Anything, uint(7), uint(0)).Return(&models.User{ID: 7, Role: "admin"}, nil)
+	userMock.On("FindByID", mock.Anything, uint(7), mock.AnythingOfType("uint")).Return(&models.User{ID: 7, Role: "admin"}, nil)
 	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), userMock)
 	auditService := service.NewAuditService(nil, nil, sink)
 	h := handlers.NewAccommodationHandler(accomService, assignmentSvc, authz, auditService)
@@ -421,7 +421,7 @@ func TestListReservations_FiresBulkLogPIIAccess(t *testing.T) {
 
 	// Caller is an admin so RequireCourseInstructor passes without an
 	// enrollment lookup.
-	userRepo.On("FindByID", mock.Anything, uint(7), uint(0)).Return(&models.User{ID: 7, Role: "admin"}, nil)
+	userRepo.On("FindByID", mock.Anything, uint(7), mock.AnythingOfType("uint")).Return(&models.User{ID: 7, Role: "admin"}, nil)
 
 	appointmentService := service.NewAppointmentGroupService(groupRepo, slotRepo, resRepo, nil)
 	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo)
