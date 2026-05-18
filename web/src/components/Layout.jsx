@@ -4,6 +4,7 @@ import {
   LayoutDashboard, BookOpen, Calendar, Mail, LogOut,
   Briefcase, Eye, Settings, Home, Inbox, Menu, X, AlertTriangle, Library, Shield
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { useCourseUI } from '../contexts/CourseUIContext';
 import { api } from '../services/api';
@@ -19,27 +20,29 @@ import CurrencyPills from './gamification/CurrencyPills';
 import BrandLogo from './brand/BrandLogo';
 import UserMenu from './UserMenu';
 
-const baseNav = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/courses', icon: BookOpen, label: 'Courses' },
-  { to: '/calendar', icon: Calendar, label: 'Calendar' },
-  { to: '/inbox', icon: Mail, label: 'Inbox' },
-  { to: '/portfolios', icon: Briefcase, label: 'Portfolios' },
-  { to: '/commons', icon: Library, label: 'Commons' },
+// Nav items are built inside the component so labels translate when the
+// active language changes (useTranslation only runs in the render tree).
+const buildBaseNav = (t) => [
+  { to: '/', icon: LayoutDashboard, label: t('nav.dashboard') },
+  { to: '/courses', icon: BookOpen, label: t('nav.courses') },
+  { to: '/calendar', icon: Calendar, label: t('nav.calendar') },
+  { to: '/inbox', icon: Mail, label: t('nav.inbox') },
+  { to: '/portfolios', icon: Briefcase, label: t('nav.portfolios') },
+  { to: '/commons', icon: Library, label: t('nav.commons') },
 ];
 
-const adminLeadNav = [
-  { to: '/admin', icon: Shield, label: 'Admin' },
+const buildAdminLeadNav = (t) => [
+  { to: '/admin', icon: Shield, label: t('nav.admin') },
 ];
 
-const adminTrailNav = [
-  { to: '/observer', icon: Eye, label: 'Observer' },
+const buildAdminTrailNav = (t) => [
+  { to: '/observer', icon: Eye, label: t('nav.observer') },
 ];
 
-const simplifiedNav = [
-  { to: '/', icon: Home, label: 'Home' },
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/inbox', icon: Inbox, label: 'Inbox' },
+const buildSimplifiedNav = (t) => [
+  { to: '/', icon: Home, label: t('nav.home') },
+  { to: '/', icon: LayoutDashboard, label: t('nav.dashboard') },
+  { to: '/inbox', icon: Inbox, label: t('nav.inbox') },
 ];
 
 const NavItem = ({ to, icon: Icon, label, active }) => (
@@ -81,48 +84,56 @@ const isAdminRoute = (pathname) =>
   pathname === '/graphiql';
 
 // Masquerade banner shown when an admin is acting as another user
-const MasqueradeBanner = ({ userName, onStopMasquerade, stopping }) => (
-  <div
-    className="fixed top-0 left-0 right-0 z-[60] bg-accent-warning text-white px-4 py-2 flex items-center justify-center gap-3 shadow-md"
-    role="alert"
-    aria-live="polite"
-  >
-    <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-    <span className="text-sm font-medium">
-      Acting as <strong>{userName}</strong>
-    </span>
-    <button
-      onClick={onStopMasquerade}
-      disabled={stopping}
-      className="ml-2 px-3 py-1 text-xs font-semibold bg-black/20 text-white rounded hover:bg-black/30 disabled:opacity-50 transition-colors"
+const MasqueradeBanner = ({ userName, onStopMasquerade, stopping }) => {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="fixed top-0 left-0 right-0 z-[60] bg-accent-warning text-white px-4 py-2 flex items-center justify-center gap-3 shadow-md"
+      role="alert"
+      aria-live="polite"
     >
-      {stopping ? 'Restoring...' : 'Stop Masquerading'}
-    </button>
-  </div>
-);
+      <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+      <span className="text-sm font-medium">
+        {t('nav.actingAsPrefix')} <strong>{userName}</strong>
+      </span>
+      <button
+        onClick={onStopMasquerade}
+        disabled={stopping}
+        className="ml-2 px-3 py-1 text-xs font-semibold bg-black/20 text-white rounded hover:bg-black/30 disabled:opacity-50 transition-colors"
+      >
+        {stopping ? t('nav.restoring') : t('nav.stopMasquerading')}
+      </button>
+    </div>
+  );
+};
 
 // Preview banner shown when a staff user is opt-in previewing a course's K-2 / 3-5 layout.
-const PreviewBanner = ({ mode, onExit, offset }) => (
-  <div
-    className="fixed left-0 right-0 z-[60] bg-brand-600 text-white px-4 py-2 flex items-center justify-center gap-3 shadow-md"
-    style={{ top: offset }}
-    role="status"
-    aria-live="polite"
-  >
-    <Eye className="w-4 h-4 flex-shrink-0" />
-    <span className="text-sm font-medium">
-      Previewing student view ({mode === 'k2' ? 'K-2' : '3-5'})
-    </span>
-    <button
-      onClick={onExit}
-      className="ml-2 px-3 py-1 text-xs font-semibold bg-black/20 text-white rounded hover:bg-black/30 transition-colors"
+const PreviewBanner = ({ mode, onExit, offset }) => {
+  const { t } = useTranslation();
+  const modeLabel = mode === 'k2' ? t('nav.modeK2') : t('nav.mode35');
+  return (
+    <div
+      className="fixed left-0 right-0 z-[60] bg-brand-600 text-white px-4 py-2 flex items-center justify-center gap-3 shadow-md"
+      style={{ top: offset }}
+      role="status"
+      aria-live="polite"
     >
-      Exit preview
-    </button>
-  </div>
-);
+      <Eye className="w-4 h-4 flex-shrink-0" />
+      <span className="text-sm font-medium">
+        {t('nav.previewingStudentView', { mode: modeLabel })}
+      </span>
+      <button
+        onClick={onExit}
+        className="ml-2 px-3 py-1 text-xs font-semibold bg-black/20 text-white rounded hover:bg-black/30 transition-colors"
+      >
+        {t('nav.exitPreview')}
+      </button>
+    </div>
+  );
+};
 
 const Layout = ({ children }) => {
+  const { t } = useTranslation();
   const { user, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -132,6 +143,10 @@ const Layout = ({ children }) => {
   const [stoppingMasquerade, setStoppingMasquerade] = useState(false);
   const isAdmin = user?.role === 'admin';
   const isMasquerading = !!user?.masquerading_as;
+  const baseNav = buildBaseNav(t);
+  const adminLeadNav = buildAdminLeadNav(t);
+  const adminTrailNav = buildAdminTrailNav(t);
+  const simplifiedNav = buildSimplifiedNav(t);
   const primaryNav = isAdmin ? [...adminLeadNav, ...baseNav, ...adminTrailNav] : baseNav;
 
   // Banner stack: masquerade goes on top (40px), preview sits below it.
@@ -213,10 +228,10 @@ const Layout = ({ children }) => {
           className="fixed inset-y-0 left-0 z-30 flex flex-col items-center w-20 bg-chrome-sidebar"
           style={sidebarTopOffset}
           role="navigation"
-          aria-label="Global navigation"
+          aria-label={t('nav.globalNavigation')}
         >
           <div className="flex items-center justify-center h-14 border-b border-white/10 w-full">
-            <Link to="/" className="text-white" title="Paper LMS">
+            <Link to="/" className="text-white" title={t('nav.paperLms')}>
               <BrandLogo size={32} />
             </Link>
           </div>
@@ -230,11 +245,11 @@ const Layout = ({ children }) => {
           <div className="border-t border-white/10 py-2 flex flex-col items-center w-full">
             <button
               onClick={handleLogout}
-              title="Logout"
+              title={t('nav.logout')}
               className="flex flex-col items-center justify-center w-20 py-2 rounded-md text-gray-300 hover:bg-white/10 hover:text-white transition-colors"
             >
               <LogOut className="w-7 h-7" />
-              <span className="text-xs mt-1">Logout</span>
+              <span className="text-xs mt-1">{t('nav.logout')}</span>
             </button>
           </div>
         </aside>
@@ -259,10 +274,10 @@ const Layout = ({ children }) => {
     <>
       {/* Logo */}
       <div className="flex items-center justify-center h-14 border-b border-white/10 w-full">
-        <Link to="/" className="text-white relative group" title="Paper LMS" onClick={() => setMobileMenuOpen(false)}>
+        <Link to="/" className="text-white relative group" title={t('nav.paperLms')} onClick={() => setMobileMenuOpen(false)}>
           <BrandLogo size={28} />
           <span className="absolute left-full ml-2 px-2 py-1 rounded bg-chrome-tooltip text-chrome-tooltip-fg text-xs font-medium whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 hidden md:block">
-            Paper LMS
+            {t('nav.paperLms')}
           </span>
         </Link>
       </div>
@@ -322,7 +337,7 @@ const Layout = ({ children }) => {
         onClick={() => setMobileMenuOpen(true)}
         className="fixed left-3 z-40 md:hidden p-2 rounded-md bg-chrome-sidebar text-white shadow-lg"
         style={{ top: topPaddingPx ? topPaddingPx + 12 : 12 }}
-        aria-label="Open menu"
+        aria-label={t('nav.openMenu')}
       >
         <Menu className="w-5 h-5" />
       </button>
@@ -335,7 +350,7 @@ const Layout = ({ children }) => {
             className="fixed inset-y-0 left-0 z-50 flex flex-col items-center w-16 bg-chrome-sidebar"
             style={sidebarTopOffset}
             role="navigation"
-            aria-label="Global navigation"
+            aria-label={t('nav.globalNavigation')}
           >
             {sidebarContent}
           </aside>
@@ -343,7 +358,7 @@ const Layout = ({ children }) => {
             onClick={() => setMobileMenuOpen(false)}
             className="fixed left-[72px] z-50 p-1 rounded-full bg-surface-0 text-text-secondary shadow"
             style={{ top: topPaddingPx ? topPaddingPx + 12 : 12 }}
-            aria-label="Close menu"
+            aria-label={t('nav.closeMenu')}
           >
             <X className="w-4 h-4" />
           </button>
@@ -355,7 +370,7 @@ const Layout = ({ children }) => {
         className="hidden md:flex fixed inset-y-0 left-0 z-30 flex-col items-center w-16 bg-chrome-sidebar"
         style={sidebarTopOffset}
         role="navigation"
-        aria-label="Global navigation"
+        aria-label={t('nav.globalNavigation')}
       >
         {sidebarContent}
       </aside>

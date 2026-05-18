@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { BookOpen } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { sanitizeHTML } from '../components/RichContentViewer';
 
 const PublicPageView = () => {
+  const { t } = useTranslation();
   const { courseId, slug } = useParams();
   const [page, setPage] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -27,7 +29,7 @@ const PublicPageView = () => {
   if (loading) {
     return (
       <div className="min-h-screen bg-surface-1 flex items-center justify-center">
-        <div className="text-text-tertiary">Loading...</div>
+        <div className="text-text-tertiary">{t('common.loading')}</div>
       </div>
     );
   }
@@ -36,9 +38,9 @@ const PublicPageView = () => {
     return (
       <div className="min-h-screen bg-surface-1 flex items-center justify-center">
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-text-primary mb-2">Page Not Found</h1>
-          <p className="text-text-tertiary mb-4">This page doesn't exist or is not publicly available.</p>
-          <Link to="/login" className="text-brand-600 hover:underline">Go to login</Link>
+          <h1 className="text-2xl font-bold text-text-primary mb-2">{t('publicPage.notFoundTitle')}</h1>
+          <p className="text-text-tertiary mb-4">{t('publicPage.notFoundDescription')}</p>
+          <Link to="/login" className="text-brand-600 hover:underline">{t('publicPage.goToLogin')}</Link>
         </div>
       </div>
     );
@@ -56,7 +58,7 @@ const PublicPageView = () => {
           />
         </main>
         <footer className="border-t border-border-default py-4 text-center text-sm text-text-disabled">
-          Powered by Paper LMS
+          {t('publicPage.poweredBy')}
         </footer>
       </div>
     );
@@ -67,7 +69,7 @@ const PublicPageView = () => {
     <div className="min-h-screen bg-surface-1 flex">
       <aside className="fixed inset-y-0 left-0 z-30 flex flex-col items-center w-16 bg-[#2D3B45]">
         <div className="flex items-center justify-center h-14 border-b border-white/10 w-full">
-          <Link to="/" className="text-white" title="Paper LMS">
+          <Link to="/" className="text-white" title={t('nav.paperLms')}>
             <BookOpen className="w-6 h-6 text-accent-danger" />
           </Link>
         </div>

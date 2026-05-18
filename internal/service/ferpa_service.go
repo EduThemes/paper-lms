@@ -389,7 +389,7 @@ func (s *FERPAService) BuildExportZip(ctx context.Context, requestID, callerID u
 	// tokens via `json:"-"`, so the standard json.Marshal here is
 	// safe.
 
-	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, request.UserID)
+	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, request.UserID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("could not load enrollments: %w", err)
 	}

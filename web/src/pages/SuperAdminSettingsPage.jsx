@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Save, Trash2, Eye, EyeOff, Send, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import Layout from '../components/Layout';
 import { api } from '../services/api';
@@ -39,22 +40,23 @@ const GROUP_ORDER = [
   'Quotas & limits',
 ];
 
-const SOURCE_LABEL = {
-  user: 'User',
-  account: 'Account',
-  instance: 'Instance',
-  env: 'Environment variable',
-  default: 'Default',
-  none: 'Not set',
+const SOURCE_LABEL_KEYS = {
+  user: 'superAdminSettings.sourceUser',
+  account: 'superAdminSettings.sourceAccount',
+  instance: 'superAdminSettings.sourceInstance',
+  env: 'superAdminSettings.sourceEnv',
+  default: 'superAdminSettings.sourceDefault',
+  none: 'superAdminSettings.sourceNone',
 };
 
-const SOURCE_HINT = {
-  env: 'Configured via environment variable. Set a value here to override.',
-  default: 'No explicit value set anywhere; shipping default in use.',
-  none: 'Nothing in the resolution chain set this value.',
+const SOURCE_HINT_KEYS = {
+  env: 'superAdminSettings.hintEnv',
+  default: 'superAdminSettings.hintDefault',
+  none: 'superAdminSettings.hintNone',
 };
 
 export default function SuperAdminSettingsPage() {
+  const { t } = useTranslation();
   const [defs, setDefs] = useState([]);
   const [byKey, setByKey] = useState({});
   const [activeGroup, setActiveGroup] = useState('Email');
@@ -76,7 +78,7 @@ export default function SuperAdminSettingsPage() {
       (s.settings || []).forEach((row) => { map[row.key] = row; });
       setByKey(map);
     } catch (e) {
-      setError(e.message || 'Could not load settings');
+      setError(e.message || t('superAdminSettings.loadError'));
     } finally {
       setLoading(false);
     }
@@ -113,12 +115,11 @@ export default function SuperAdminSettingsPage() {
         <header className="mb-6">
           <div className="flex items-center gap-2 text-amber-600 text-sm font-medium mb-1">
             <AlertTriangle size={16} />
-            <span>Platform operator mode</span>
+            <span>{t('superAdminSettings.operatorMode')}</span>
           </div>
-          <h1 className="text-2xl font-semibold text-text-primary">Super-Admin Settings</h1>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('superAdminSettings.title')}</h1>
           <p className="text-text-secondary text-sm mt-1">
-            Changes here affect the entire deployment. Per-tenant overrides land at
-            account scope; per-deployment defaults land at instance scope.
+            {t('superAdminSettings.subtitle')}
           </p>
         </header>
 
@@ -129,7 +130,7 @@ export default function SuperAdminSettingsPage() {
         )}
 
         <div className="mb-4 p-4 rounded border border-amber-200 bg-amber-50">
-          <div className="text-sm font-medium text-amber-900 mb-2">Write scope</div>
+          <div className="text-sm font-medium text-amber-900 mb-2">{t('superAdminSettings.writeScope')}</div>
           <div className="flex flex-wrap gap-3 items-center text-sm">
             <label className="flex items-center gap-2">
               <input
@@ -137,7 +138,7 @@ export default function SuperAdminSettingsPage() {
                 checked={scopeForWrite === 'instance'}
                 onChange={(e) => setScopeForWrite(e.target.value)}
               />
-              <span>Instance (all tenants)</span>
+              <span>{t('superAdminSettings.instanceAllTenants')}</span>
             </label>
             <label className="flex items-center gap-2">
               <input
@@ -145,21 +146,21 @@ export default function SuperAdminSettingsPage() {
                 checked={scopeForWrite === 'account'}
                 onChange={(e) => setScopeForWrite(e.target.value)}
               />
-              <span>Account ID:</span>
+              <span>{t('superAdminSettings.accountIdLabel')}</span>
               <input
                 type="number" min="1"
                 className="border rounded px-2 py-1 w-24 text-sm"
                 placeholder="42"
                 value={accountIdForWrite}
                 onChange={(e) => setAccountIdForWrite(e.target.value)}
-                aria-label="Account ID for write scope"
+                aria-label={t('superAdminSettings.accountIdAria')}
               />
             </label>
           </div>
         </div>
 
         <div className="grid grid-cols-12 gap-6">
-          <nav aria-label="Settings groups" className="col-span-12 md:col-span-3">
+          <nav aria-label={t('superAdminSettings.groupsNavAria')} className="col-span-12 md:col-span-3">
             <ul className="space-y-1">
               {grouped.map(([name, items]) => (
                 <li key={name}>
@@ -182,7 +183,7 @@ export default function SuperAdminSettingsPage() {
 
           <main className="col-span-12 md:col-span-9">
             {loading ? (
-              <div className="text-text-secondary">Loading…</div>
+              <div className="text-text-secondary">{t('common.loading')}</div>
             ) : (
               <div className="space-y-4">
                 {activeDefs.map((def) => (
@@ -207,6 +208,7 @@ export default function SuperAdminSettingsPage() {
 // ── SettingRow ─────────────────────────────────────────────────────
 
 function SettingRow({ def, value, scope, scopeID, onChanged }) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState('');
   const [showSecretInput, setShowSecretInput] = useState(false);
   const [showSecretText, setShowSecretText] = useState(false);
@@ -217,8 +219,8 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
 
   const isSecret = def.is_secret;
   const source = value?.source || 'none';
-  const sourceLabel = SOURCE_LABEL[source] || source;
-  const sourceHint = SOURCE_HINT[source];
+  const sourceLabel = SOURCE_LABEL_KEYS[source] ? t(SOURCE_LABEL_KEYS[source]) : source;
+  const sourceHint = SOURCE_HINT_KEYS[source] ? t(SOURCE_HINT_KEYS[source]) : null;
   const hasValue = !!value?.has_value;
 
   const canEditAtScope = (def.scopes || []).includes(scope);
@@ -226,7 +228,7 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
   const handleSave = async () => {
     setLocalError(null);
     if (scope === 'account' && !scopeID) {
-      setLocalError('Choose an Account ID at the top of the page.');
+      setLocalError(t('superAdminSettings.chooseAccountId'));
       return;
     }
     setSaving(true);
@@ -249,7 +251,7 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
   const handleClear = async () => {
     setLocalError(null);
     if (scope === 'account' && !scopeID) {
-      setLocalError('Choose an Account ID at the top of the page.');
+      setLocalError(t('superAdminSettings.chooseAccountId'));
       return;
     }
     setSaving(true);
@@ -288,7 +290,7 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
           // setting being tested).
           const issuer = value?.value || '';
           if (!issuer) {
-            setActionResult({ ok: false, detail: 'Set the OIDC redirect base first.' });
+            setActionResult({ ok: false, detail: t('superAdminSettings.setOidcFirst') });
             return;
           }
           result = await api.superAdminSettings.testOIDC(issuer);
@@ -314,15 +316,15 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
             </code>
             {isSecret && (
               <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-900">
-                Secret
+                {t('superAdminSettings.secretBadge')}
               </span>
             )}
             <span className="text-xs px-1.5 py-0.5 rounded bg-surface-2 text-text-secondary">
-              Source: {sourceLabel}
+              {t('superAdminSettings.sourcePrefix', { source: sourceLabel })}
             </span>
             {!canEditAtScope && (
               <span className="text-xs text-text-secondary italic">
-                Not editable at {scope} scope
+                {t('superAdminSettings.notEditableAtScope', { scope })}
               </span>
             )}
           </div>
@@ -338,20 +340,20 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
               hasValue ? (
                 <div className="text-sm text-text-primary">
                   <CheckCircle2 size={14} className="inline mr-1 text-green-600" />
-                  Set
+                  {t('superAdminSettings.setBadge')}
                   {value?.updated_at && (
                     <span className="text-text-secondary ml-2 text-xs">
-                      (updated {new Date(value.updated_at).toLocaleString()})
+                      {t('superAdminSettings.updatedAt', { date: new Date(value.updated_at).toLocaleString() })}
                     </span>
                   )}
                 </div>
               ) : (
-                <div className="text-sm text-text-secondary">Not set</div>
+                <div className="text-sm text-text-secondary">{t('superAdminSettings.notSet')}</div>
               )
             ) : (
               <div className="text-sm font-mono break-all text-text-primary">
                 {hasValue ? (renderNonSecret(value, def.value_type)) : (
-                  <span className="text-text-secondary not-italic">— unset —</span>
+                  <span className="text-text-secondary not-italic">{t('superAdminSettings.unsetPlaceholder')}</span>
                 )}
               </div>
             )}
@@ -364,9 +366,9 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
             type="button"
             onClick={runTestAction}
             className="text-sm px-3 py-1.5 rounded border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 flex items-center gap-1"
-            title={`Run a live ${def.test_action} test using the current effective configuration`}
+            title={t('superAdminSettings.testTitle', { action: def.test_action })}
           >
-            <Send size={14} /> Test {def.test_action}
+            <Send size={14} /> {t('superAdminSettings.testPrefix', { action: def.test_action })}
           </button>
         )}
       </div>
@@ -380,9 +382,9 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
               : 'border-red-300 bg-red-50 text-red-900'
           }`}
         >
-          <strong>{actionResult.ok ? 'Success' : 'Failed'}:</strong> {actionResult.detail || 'No detail returned'}
+          <strong>{actionResult.ok ? t('superAdminSettings.successLabel') : t('superAdminSettings.failedLabel')}:</strong> {actionResult.detail || t('superAdminSettings.noDetail')}
           {actionResult.duration_ms ? (
-            <span className="ml-2 text-xs opacity-70">({actionResult.duration_ms} ms)</span>
+            <span className="ml-2 text-xs opacity-70">{t('superAdminSettings.durationMs', { ms: actionResult.duration_ms })}</span>
           ) : null}
         </div>
       )}
@@ -400,7 +402,7 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
                 onClick={() => { setShowSecretInput(true); setDraft(''); }}
                 className="text-sm px-3 py-1.5 rounded border border-surface-3 hover:bg-surface-2"
               >
-                {hasValue ? 'Replace…' : 'Set…'}
+                {hasValue ? t('superAdminSettings.replace') : t('superAdminSettings.setEllipsis')}
               </button>
               {hasValue && (
                 <button
@@ -408,7 +410,7 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
                   onClick={() => setConfirmClear(true)}
                   className="text-sm px-3 py-1.5 rounded border border-red-300 text-red-700 hover:bg-red-50 flex items-center gap-1"
                 >
-                  <Trash2 size={14} /> Clear
+                  <Trash2 size={14} /> {t('superAdminSettings.clear')}
                 </button>
               )}
             </div>
@@ -430,7 +432,7 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
                 disabled={saving || draft === ''}
                 className="text-sm px-3 py-1.5 rounded bg-surface-3 hover:bg-surface-4 disabled:opacity-50 flex items-center gap-1"
               >
-                <Save size={14} /> {saving ? 'Saving…' : 'Save'}
+                <Save size={14} /> {saving ? t('common.saving') : t('common.save')}
               </button>
               {hasValue && (
                 <button
@@ -439,7 +441,7 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
                   disabled={saving}
                   className="text-sm px-3 py-1.5 rounded border border-red-300 text-red-700 hover:bg-red-50 flex items-center gap-1"
                 >
-                  <Trash2 size={14} /> Clear at {scope}
+                  <Trash2 size={14} /> {t('superAdminSettings.clearAtScope', { scope })}
                 </button>
               )}
               {isSecret && (
@@ -448,7 +450,7 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
                   onClick={() => { setShowSecretInput(false); setDraft(''); }}
                   className="text-sm px-3 py-1.5 text-text-secondary hover:text-text-primary"
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               )}
             </div>
@@ -463,13 +465,12 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
           className="mt-3 p-3 rounded border border-red-300 bg-red-50"
         >
           <div id={`clear-${def.key}-title`} className="font-medium text-red-900 mb-1">
-            Clear {def.label} at {scope} scope?
+            {t('superAdminSettings.confirmTitle', { label: def.label, scope })}
           </div>
           <p className="text-sm text-red-800 mb-2">
-            The {scope} value will be removed.
-            {isSecret && ' The stored encrypted credential will be discarded.'}{' '}
-            Future reads will fall through to the next scope in the chain
-            (account → instance → env → default).
+            {t('superAdminSettings.confirmBody', { scope })}
+            {isSecret && ` ${t('superAdminSettings.confirmSecretSuffix')}`}{' '}
+            {t('superAdminSettings.confirmChainNote')}
           </p>
           <div className="flex gap-2">
             <button
@@ -477,14 +478,14 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
               onClick={handleClear}
               className="text-sm px-3 py-1.5 rounded bg-red-600 text-white hover:bg-red-700"
             >
-              {saving ? 'Clearing…' : 'Yes, clear'}
+              {saving ? t('superAdminSettings.clearing') : t('superAdminSettings.yesClear')}
             </button>
             <button
               type="button"
               onClick={() => setConfirmClear(false)}
               className="text-sm px-3 py-1.5 text-red-800 hover:text-red-900"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </div>
@@ -496,15 +497,16 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
 // SettingInput renders the right form control for each value_type.
 // String/Int/Secret use <input>; Bool uses <select>; JSON uses <textarea>.
 function SettingInput({ valueType, draft, setDraft, showText, setShowText, isSecret }) {
+  const { t } = useTranslation();
   if (valueType === 'bool') {
     return (
       <select
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         className="border rounded px-2 py-1 text-sm w-full max-w-sm"
-        aria-label="Boolean value"
+        aria-label={t('superAdminSettings.booleanValue')}
       >
-        <option value="">— select —</option>
+        <option value="">{t('superAdminSettings.selectOption')}</option>
         <option value="true">true</option>
         <option value="false">false</option>
       </select>
@@ -518,10 +520,13 @@ function SettingInput({ valueType, draft, setDraft, showText, setShowText, isSec
         rows={4}
         className="border rounded px-2 py-1 text-sm w-full font-mono"
         placeholder='{"key": "value"}'
-        aria-label="JSON value"
+        aria-label={t('superAdminSettings.jsonValue')}
       />
     );
   }
+  // The aria-label is asserted by the SuperAdminSettingsPage tests against
+  // /New string value/i — keep the English phrasing so the suite continues
+  // to pass while still routing through i18n for translation.
   return (
     <div className="flex items-center gap-2 max-w-xl">
       <input
@@ -531,14 +536,14 @@ function SettingInput({ valueType, draft, setDraft, showText, setShowText, isSec
         className="border rounded px-2 py-1 text-sm flex-1"
         autoComplete="off"
         spellCheck="false"
-        aria-label={`New ${valueType} value`}
+        aria-label={t('superAdminSettings.newValueAria', { valueType })}
       />
       {isSecret && (
         <button
           type="button"
           onClick={() => setShowText((v) => !v)}
           className="text-text-secondary hover:text-text-primary"
-          aria-label={showText ? 'Hide' : 'Show'}
+          aria-label={showText ? t('superAdminSettings.hide') : t('superAdminSettings.show')}
         >
           {showText ? <EyeOff size={16} /> : <Eye size={16} />}
         </button>
@@ -555,6 +560,9 @@ function SettingInput({ valueType, draft, setDraft, showText, setShowText, isSec
 // catalog definition said. Belt-and-suspenders for the Wave 4 audit
 // H1 finding.
 function renderNonSecret(ev, valueType) {
+  // Note: this helper is intentionally i18n-free so it can be called from
+  // anywhere without needing a t() reference. The masked placeholder is
+  // a fixed defense-in-depth sentinel, not translated UI copy.
   if (!ev) return '—';
   if (ev.is_secret) {
     // Defense-in-depth: catalog says non-secret but server marked the

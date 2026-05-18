@@ -510,10 +510,13 @@ func (h *GamificationHandler) UpdateCurrency(c *fiber.Ctx) error {
 	// Scope guard: route-derived scope must match the row's stored scope.
 	// Prevents an instructor on course A from PATCHing a currency that
 	// lives on course B (or at site scope).
+	// 13.1.E: existence leak — return 404 not 403 on cross-tenant (and
+	// on cross-scope; either reveals the row exists in some scope the
+	// caller isn't entitled to know about).
 	scopeType, scopeID := resolveScope(c)
 	tenantID := callerAccountID(c)
 	if row.TenantID != tenantID || row.ScopeType != scopeType || row.ScopeID != scopeID {
-		return responses.Error(c, fiber.StatusForbidden, "currency is not in the requested scope")
+		return responses.NotFound(c, "currency")
 	}
 
 	var in patchCurrencyInput
@@ -581,8 +584,9 @@ func (h *GamificationHandler) DeleteCurrency(c *fiber.Ctx) error {
 
 	scopeType, scopeID := resolveScope(c)
 	tenantID := callerAccountID(c)
+	// 13.1.E: existence leak — return 404 not 403 on cross-tenant.
 	if row.TenantID != tenantID || row.ScopeType != scopeType || row.ScopeID != scopeID {
-		return responses.Error(c, fiber.StatusForbidden, "currency is not in the requested scope")
+		return responses.NotFound(c, "currency")
 	}
 	if row.SystemOwned {
 		return responses.Error(c, fiber.StatusConflict, "system currencies cannot be deleted")
@@ -870,8 +874,9 @@ func (h *GamificationHandler) UpdateBadge(c *fiber.Ctx) error {
 
 	scopeType, scopeID := resolveScope(c)
 	tenantID := callerAccountID(c)
+	// 13.1.E: existence leak — return 404 not 403 on cross-tenant.
 	if row.TenantID != tenantID || row.ScopeType != scopeType || row.ScopeID != scopeID {
-		return responses.Error(c, fiber.StatusForbidden, "badge is not in the requested scope")
+		return responses.NotFound(c, "badge")
 	}
 
 	var in patchBadgeInput
@@ -932,8 +937,9 @@ func (h *GamificationHandler) DeleteBadge(c *fiber.Ctx) error {
 	}
 	scopeType, scopeID := resolveScope(c)
 	tenantID := callerAccountID(c)
+	// 13.1.E: existence leak — return 404 not 403 on cross-tenant.
 	if row.TenantID != tenantID || row.ScopeType != scopeType || row.ScopeID != scopeID {
-		return responses.Error(c, fiber.StatusForbidden, "badge is not in the requested scope")
+		return responses.NotFound(c, "badge")
 	}
 	if row.SystemOwned {
 		return responses.Error(c, fiber.StatusConflict, "system badges cannot be deleted")
@@ -1054,8 +1060,9 @@ func (h *GamificationHandler) AwardBadgeToUser(c *fiber.Ctx) error {
 	// tenant. (The middleware-set is_admin doesn't carry tenant info
 	// yet; this check uses callerAccountID for the same single-tenant
 	// fallback the rest of W2-B/C uses.)
+	// 13.1.E: existence leak — return 404 not 403 on cross-tenant.
 	if badge.TenantID != callerAccountID(c) {
-		return responses.Error(c, fiber.StatusForbidden, "badge is not in your tenant")
+		return responses.NotFound(c, "badge")
 	}
 
 	awarderID, _ := c.Locals("user_id").(uint)

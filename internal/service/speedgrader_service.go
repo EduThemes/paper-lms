@@ -70,7 +70,7 @@ func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, a
 
 	// Fetch all enrollments for the course to get students
 	params := repository.PaginationParams{Page: 1, PerPage: 1000}
-	enrollments, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, params)
+	enrollments, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, 0, params)
 	if err != nil {
 		return nil, fmt.Errorf("could not fetch enrollments: %w", err)
 	}

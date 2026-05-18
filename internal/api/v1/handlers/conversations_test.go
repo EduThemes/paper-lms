@@ -82,7 +82,7 @@ func TestCreateConversation_K5RefusesStudentToStudent(t *testing.T) {
 		CoppaStrict: false,
 	}, nil)
 	// Sender 10 has only StudentEnrollment in course 5.
-	enrollRepo.On("ListByUserID", mock.Anything, uint(10)).Return([]models.Enrollment{
+	enrollRepo.On("ListByUserID", mock.Anything, uint(10), mock.AnythingOfType("uint")).Return([]models.Enrollment{
 		{UserID: 10, CourseID: 5, Type: "StudentEnrollment", WorkflowState: "active"},
 	}, nil)
 
@@ -106,7 +106,7 @@ func TestCreateConversation_CoppaStrictRefuses(t *testing.T) {
 		TenantMode:  models.GamificationAudience("higher_ed"),
 		CoppaStrict: true,
 	}, nil)
-	enrollRepo.On("ListByUserID", mock.Anything, uint(10)).Return([]models.Enrollment{
+	enrollRepo.On("ListByUserID", mock.Anything, uint(10), mock.AnythingOfType("uint")).Return([]models.Enrollment{
 		{UserID: 10, CourseID: 5, Type: "StudentEnrollment", WorkflowState: "active"},
 	}, nil)
 
@@ -131,11 +131,11 @@ func TestCreateConversation_K5AllowsTeacherToStudent(t *testing.T) {
 		CoppaStrict: false,
 	}, nil)
 	// Sender 10 is Teacher in course 5.
-	enrollRepo.On("ListByUserID", mock.Anything, uint(10)).Return([]models.Enrollment{
+	enrollRepo.On("ListByUserID", mock.Anything, uint(10), mock.AnythingOfType("uint")).Return([]models.Enrollment{
 		{UserID: 10, CourseID: 5, Type: "TeacherEnrollment", WorkflowState: "active"},
 	}, nil)
 	// Recipient 20 is Student in course 5 — shared.
-	enrollRepo.On("ListByUserID", mock.Anything, uint(20)).Return([]models.Enrollment{
+	enrollRepo.On("ListByUserID", mock.Anything, uint(20), mock.AnythingOfType("uint")).Return([]models.Enrollment{
 		{UserID: 20, CourseID: 5, Type: "StudentEnrollment", WorkflowState: "active"},
 	}, nil)
 	convRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.Conversation")).Return(nil)

@@ -31,7 +31,7 @@ func NewDocumentAnnotationService(
 
 // isInstructor checks whether a user has an instructor or TA role in the given course.
 func (s *DocumentAnnotationService) isInstructor(ctx context.Context, userID, courseID uint) (bool, error) {
-	enrollment, err := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID)
+	enrollment, err := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID, 0)
 	if err != nil {
 		return false, nil
 	}

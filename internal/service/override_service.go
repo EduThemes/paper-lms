@@ -84,7 +84,7 @@ func (s *OverrideService) GetEffectiveDates(ctx context.Context, assignmentID, u
 
 	// 2. Check for section-based overrides
 	// Find the user's enrollment to determine their section
-	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, userID)
+	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, userID, 0)
 	if err == nil {
 		for _, enrollment := range enrollments {
 			if enrollment.CourseSectionID == nil {
