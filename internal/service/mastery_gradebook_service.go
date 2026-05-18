@@ -101,7 +101,11 @@ func (s *MasteryGradebookService) GetMasteryGradebook(ctx context.Context, cours
 	}
 
 	if len(studentIDs) > 0 {
-		users, err := s.userRepo.FindByIDs(ctx, studentIDs)
+		// Mastery gradebook: students were already tenant-scoped via
+		// the enrollment-by-course lookup. Wave 2 passes 0 to match
+		// pre-widening semantics; Sprint 2.3 leftover threads tenant
+		// from the mastery handler.
+		users, err := s.userRepo.FindByIDs(ctx, studentIDs, 0)
 		if err != nil {
 			return nil, err
 		}

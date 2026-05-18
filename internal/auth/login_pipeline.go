@@ -184,7 +184,12 @@ func (p *LoginPipeline) resolveUser(ctx context.Context, outcome SSOOutcome, met
 		if _, err := fmt.Sscanf(outcome.ExternalSubject, "%d", &userID); err != nil || userID == 0 {
 			return nil, false, errors.New("login outcome missing user id")
 		}
-		user, err := p.users.FindByID(ctx, userID)
+		// AUTH-INTERNAL: pre-authentication user resolution. accountID
+		// is unknown until the user row is loaded; pass 0 to skip
+		// tenant scope. The pipeline cannot enforce tenant here
+		// because the credential type (local/passkey) doesn't carry
+		// tenant context — the provider determines the tenant.
+		user, err := p.users.FindByID(ctx, userID, 0)
 		if err != nil {
 			return nil, false, err
 		}
@@ -198,7 +203,9 @@ func (p *LoginPipeline) resolveUser(ctx context.Context, outcome SSOOutcome, met
 			return nil, false, err
 		}
 		if fi != nil {
-			user, err := p.users.FindByID(ctx, fi.UserID)
+			// AUTH-INTERNAL: pre-authentication user resolution; see
+			// note above. accountID=0 is intentional.
+			user, err := p.users.FindByID(ctx, fi.UserID, 0)
 			if err != nil {
 				return nil, false, err
 			}

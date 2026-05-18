@@ -206,9 +206,9 @@ func TestGetByID_Success(t *testing.T) {
 		Name:  "Alice Wonderland",
 		Email: "alice@example.com",
 	}
-	mockRepo.On("FindByID", ctx, uint(42)).Return(expectedUser, nil)
+	mockRepo.On("FindByID", ctx, uint(42), uint(1)).Return(expectedUser, nil)
 
-	user, err := svc.GetByID(ctx, 42)
+	user, err := svc.GetByID(ctx, 42, 1)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, user)
@@ -252,9 +252,9 @@ func TestList_Success(t *testing.T) {
 		Page:       1,
 		PerPage:    10,
 	}
-	mockRepo.On("List", ctx, params).Return(expectedResult, nil)
+	mockRepo.On("List", ctx, params, uint(1)).Return(expectedResult, nil)
 
-	result, err := svc.List(ctx, params)
+	result, err := svc.List(ctx, params, 1)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)

@@ -109,7 +109,10 @@ func (h *SetupHandler) hasAdmin(c *fiber.Ctx) (bool, error) {
 	page := 1
 	perPage := 100
 	for {
-		result, err := h.userRepo.List(c.Context(), repository.PaginationParams{Page: page, PerPage: perPage})
+		// Setup wizard runs pre-auth (no JWT, no tenant context).
+		// accountID=0 means "search across the deployment" — the
+		// intent here is exactly "does ANY admin exist anywhere?"
+		result, err := h.userRepo.List(c.Context(), repository.PaginationParams{Page: page, PerPage: perPage}, 0)
 		if err != nil {
 			return false, err
 		}

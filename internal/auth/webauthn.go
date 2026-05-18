@@ -376,7 +376,11 @@ func (e *PasskeyEngine) FinishLogin(ctx context.Context, session *wa.SessionData
 		if row == nil {
 			return nil, fmt.Errorf("unknown credential")
 		}
-		user, err := e.users.FindByID(ctx, row.UserID)
+		// AUTH-INTERNAL: WebAuthn ceremony resolution runs before
+		// session establishment. The credential row IS the binding;
+		// tenant scope is enforced by the credential→user FK, not at
+		// this lookup. accountID=0 is intentional.
+		user, err := e.users.FindByID(ctx, row.UserID, 0)
 		if err != nil {
 			return nil, err
 		}
