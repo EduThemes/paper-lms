@@ -1,41 +1,33 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Bell, Settings, Save, Check, AlertTriangle, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
 
-const POLICY_OPTIONS = [
-  { value: 'immediately', label: 'Immediately' },
-  { value: 'daily', label: 'Daily Summary' },
-  { value: 'weekly', label: 'Weekly Summary' },
-  { value: 'never', label: 'Never' },
-];
+const POLICY_VALUES = ['immediately', 'daily', 'weekly', 'never'];
 
-const NOTIFICATION_TYPES = [
-  {
-    key: 'notify_new_message',
-    label: 'New Message',
-    description: 'Get notified when you receive a new message or conversation reply.',
-  },
-  {
-    key: 'notify_event_start',
-    label: 'Calendar Event Reminders',
-    description: 'Get reminded when a calendar event is about to start.',
-  },
-  {
-    key: 'notify_submission_grade',
-    label: 'Submission Grade Updates',
-    description: 'Get notified when an assignment or quiz submission is graded.',
-  },
-  {
-    key: 'notify_new_announcement',
-    label: 'New Announcements',
-    description: 'Get notified when a new announcement is posted in your courses.',
-  },
+const NOTIFICATION_KEYS = [
+  'notify_new_message',
+  'notify_event_start',
+  'notify_submission_grade',
+  'notify_new_announcement',
 ];
 
 const NotificationPreferencesPage = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
+
+  const POLICY_OPTIONS = useMemo(() => POLICY_VALUES.map((value) => ({
+    value,
+    label: t(`notificationPreferences.policy.${value}`),
+  })), [t]);
+
+  const NOTIFICATION_TYPES = useMemo(() => NOTIFICATION_KEYS.map((key) => ({
+    key,
+    label: t(`notificationPreferences.types.${key}.label`),
+    description: t(`notificationPreferences.types.${key}.description`),
+  })), [t]);
   const [preferences, setPreferences] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -94,7 +86,7 @@ const NotificationPreferencesPage = () => {
       <Layout>
         <div className="flex items-center justify-center py-12 gap-2 text-text-tertiary">
   <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-  Loading notification preferences...
+  {t('notificationPreferences.loading')}
 </div>
       </Layout>
     );
@@ -108,9 +100,9 @@ const NotificationPreferencesPage = () => {
             <Bell className="w-6 h-6 text-brand-600" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-text-primary">Notification Preferences</h2>
+            <h2 className="text-2xl font-bold text-text-primary">{t('notificationPreferences.title')}</h2>
             <p className="text-text-secondary mt-0.5 text-sm">
-              Control how and when you receive notifications.
+              {t('notificationPreferences.subtitle')}
             </p>
           </div>
         </div>
@@ -128,7 +120,7 @@ const NotificationPreferencesPage = () => {
         {success && (
           <div className="bg-accent-success/10 border border-accent-success/30 text-accent-success px-4 py-3 rounded-md mb-6 flex items-center gap-2">
             <Check className="w-4 h-4 flex-shrink-0" />
-            Notification preferences saved successfully.
+            {t('notificationPreferences.savedSuccess')}
           </div>
         )}
 
@@ -138,10 +130,10 @@ const NotificationPreferencesPage = () => {
             <div className="bg-surface-0 rounded-lg shadow p-6">
               <div className="flex items-center gap-2 mb-4">
                 <Settings className="w-5 h-5 text-text-tertiary" />
-                <h3 className="text-lg font-semibold text-text-primary">Delivery Policy</h3>
+                <h3 className="text-lg font-semibold text-text-primary">{t('notificationPreferences.deliveryPolicy')}</h3>
               </div>
               <p className="text-sm text-text-secondary mb-4">
-                Choose how frequently you want to receive notification summaries.
+                {t('notificationPreferences.deliveryPolicyDescription')}
               </p>
               <select
                 value={preferences.policy}
@@ -160,10 +152,10 @@ const NotificationPreferencesPage = () => {
             <div className="bg-surface-0 rounded-lg shadow p-6">
               <div className="flex items-center gap-2 mb-4">
                 <Bell className="w-5 h-5 text-text-tertiary" />
-                <h3 className="text-lg font-semibold text-text-primary">Notification Types</h3>
+                <h3 className="text-lg font-semibold text-text-primary">{t('notificationPreferences.notificationTypes')}</h3>
               </div>
               <p className="text-sm text-text-secondary mb-4">
-                Enable or disable specific notification categories.
+                {t('notificationPreferences.notificationTypesDescription')}
               </p>
               <div className="divide-y divide-gray-100">
                 {NOTIFICATION_TYPES.map((type) => (
@@ -199,16 +191,16 @@ const NotificationPreferencesPage = () => {
                 className="flex items-center gap-2 bg-brand-600 text-white px-6 py-2.5 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50 transition-colors"
               >
                 {saving ? (
-                  <>Saving...</>
+                  <>{t('common.saving')}</>
                 ) : success ? (
                   <>
                     <Check className="w-4 h-4" />
-                    Saved
+                    {t('notificationPreferences.saved')}
                   </>
                 ) : (
                   <>
                     <Save className="w-4 h-4" />
-                    Save Preferences
+                    {t('notificationPreferences.savePreferences')}
                   </>
                 )}
               </button>
