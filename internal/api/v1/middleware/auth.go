@@ -70,6 +70,21 @@ func (m *AuthMiddleware) Protected() fiber.Handler {
 					"errors": []fiber.Map{{"message": "Invalid token claims"}},
 				})
 			}
+			// Defense-in-depth: pending-purpose tokens (mfa_pending,
+			// password_reset_pending) are NOT session tokens — they
+			// only authorize their respective step-up endpoints. The
+			// purpose marker is encoded in the JWT ID (jti) claim as
+			// "purpose:<name>"; any token carrying one is rejected
+			// here so a leaked pending token can't be replayed
+			// against a protected route. The pending-token consumers
+			// (POST /auth/mfa/verify, POST /auth/password/set) use
+			// their typed verifiers and never go through this
+			// middleware.
+			if jti, ok := claims["jti"].(string); ok && strings.HasPrefix(jti, "purpose:") {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+					"errors": []fiber.Map{{"message": "Pending token cannot be used as session"}},
+				})
+			}
 			idFloat, ok := claims["id"].(float64)
 			if !ok {
 				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{

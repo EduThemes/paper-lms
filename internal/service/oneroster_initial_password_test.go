@@ -69,5 +69,11 @@ func TestOneRosterSyncUsers_NewUser_PasswordNotDerivedFromSourcedID(t *testing.T
 	assert.Error(t, err, "stored hash must NOT match the deterministic legacy string")
 	assert.ErrorIs(t, err, bcrypt.ErrMismatchedHashAndPassword)
 
+	// Wave 1.6 follow-up: the random password is irrecoverable, so
+	// the OneRoster path MUST set RequiresPasswordReset so the
+	// LoginPipeline gates session minting and forces the user to
+	// choose a real password before getting a session.
+	assert.True(t, captured.RequiresPasswordReset, "OneRoster-provisioned user must have RequiresPasswordReset=true")
+
 	mockUserRepo.AssertExpectations(t)
 }

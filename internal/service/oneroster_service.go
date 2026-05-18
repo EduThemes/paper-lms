@@ -630,6 +630,11 @@ func (s *OneRosterService) syncUsers(ctx context.Context, users []onerosterUser)
 				errs = append(errs, fmt.Sprintf("failed to hash initial password for %s: %v", orUser.SourcedID, hashErr))
 				continue
 			}
+			// Wave 1.6 follow-up: the random initial password is
+			// irrecoverable, so flag the row so the LoginPipeline
+			// gates session minting and forces a real password
+			// before the user gets any session.
+			newUser.RequiresPasswordReset = true
 
 			if err := s.userRepo.Create(ctx, newUser); err != nil {
 				errs = append(errs, fmt.Sprintf("failed to create user %s: %v", orUser.SourcedID, err))

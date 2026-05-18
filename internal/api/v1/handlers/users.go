@@ -127,6 +127,15 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		if err != nil {
 			return responses.InternalError(c, "Could not complete login")
 		}
+		// Password-reset gate (Wave 1.6 follow-up): user was
+		// provisioned with a random initial password. Withhold the
+		// session and direct the client to /auth/password-set.
+		if result.PasswordResetPendingToken != "" {
+			return c.JSON(fiber.Map{
+				"pending_token":       result.PasswordResetPendingToken,
+				"must_reset_password": true,
+			})
+		}
 		// MFA gate: pending token returned, real session withheld.
 		if result.PendingToken != "" {
 			return c.JSON(fiber.Map{
@@ -265,6 +274,100 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 			"short_name":    user.ShortName,
 			"login_id":      user.LoginID,
 			"email":         user.Email,
+			"locale":        user.Locale,
+			"role":          user.Role,
+		},
+	})
+}
+
+// setPasswordRequest is the body shape for POST /auth/password/set —
+// the pending-password-reset JWT lives in the Authorization Bearer
+// header so the body carries only the new password.
+type setPasswordRequest struct {
+	NewPassword string `json:"new_password"`
+}
+
+// SetPassword (Wave 1.6 follow-up) consumes a pending-password-reset
+// JWT, hashes the user-supplied password, clears the
+// RequiresPasswordReset flag, persists the row, and mints a real
+// session JWT. The caller (frontend PasswordResetRequiredPage) reads
+// the pending token out of sessionStorage and sends it as the Bearer
+// credential.
+//
+// The handler is anonymous at the middleware layer (mounted on the
+// public route group). The pending JWT IS the credential.
+func (h *UserHandler) SetPassword(c *fiber.Ctx) error {
+	// Bearer pending token.
+	authHeader := c.Get("Authorization")
+	pendingToken := ""
+	if authHeader != "" {
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) == 2 && parts[0] == "Bearer" {
+			pendingToken = parts[1]
+		}
+	}
+	if pendingToken == "" {
+		return responses.Error(c, fiber.StatusUnauthorized, "missing pending token")
+	}
+	userID, _, err := auth.VerifyPendingPasswordResetToken(h.jwtSecret, pendingToken)
+	if err != nil {
+		return responses.Error(c, fiber.StatusUnauthorized, "pending token invalid or expired: "+err.Error())
+	}
+
+	var body setPasswordRequest
+	if err := c.BodyParser(&body); err != nil {
+		return responses.BadRequest(c, "invalid body")
+	}
+	if len(body.NewPassword) < 8 {
+		return responses.BadRequest(c, "password must be at least 8 characters")
+	}
+
+	// AUTH-INTERNAL: SetPassword is mounted on the public (anonymous)
+	// route group — there is no JWT-attested account_id Local yet
+	// (the pending-reset token IS the credential, and it pre-dates
+	// the session JWT). accountID=0 is the documented boundary case
+	// for credential-resolution paths; the user's identity is
+	// attested by the pending token, not by tenant scope.
+	user, err := h.userService.GetByID(c.Context(), userID, 0)
+	if err != nil || user == nil {
+		return responses.Error(c, fiber.StatusNotFound, "user not found")
+	}
+	if !user.RequiresPasswordReset {
+		// Defensive: a leaked-but-not-yet-expired pending token
+		// shouldn't be replayable after the user already reset.
+		// Returning 409 here keeps the failure mode loud — the
+		// frontend either redirects to login (good) or surfaces an
+		// error (also good, vs. a silent "password changed again").
+		return responses.Error(c, fiber.StatusConflict, "no password-reset is pending for this user")
+	}
+	if err := user.HashPassword(body.NewPassword); err != nil {
+		return responses.InternalError(c, "failed to hash password")
+	}
+	user.RequiresPasswordReset = false
+	if err := h.userService.Update(c.Context(), user); err != nil {
+		return responses.InternalError(c, "failed to persist new password")
+	}
+
+	meta := auth.RequestMeta{IPAddress: c.IP(), UserAgent: c.Get("User-Agent")}
+	if h.authAudit != nil {
+		h.authAudit.PasswordSet(c.Context(), user.ID, meta)
+	}
+
+	token, err := auth.GenerateToken(user, h.jwtSecret)
+	if err != nil {
+		return responses.InternalError(c, "failed to mint session")
+	}
+	h.setAuthCookie(c, token)
+	return c.JSON(fiber.Map{
+		"token": token,
+		"user": fiber.Map{
+			"id":            user.ID,
+			"name":          user.Name,
+			"sortable_name": user.SortableName,
+			"short_name":    user.ShortName,
+			"login_id":      user.LoginID,
+			"email":         user.Email,
+			"avatar_url":    user.AvatarURL,
 			"locale":        user.Locale,
 			"role":          user.Role,
 		},

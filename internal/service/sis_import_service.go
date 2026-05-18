@@ -225,6 +225,15 @@ func (s *SISImportService) processUsersCSV(ctx context.Context, batchID uint, re
 					s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to hash default password: %v", err), "users.csv")
 					continue
 				}
+				// Wave 1.6 follow-up: the random initial password
+				// is irrecoverable, so flag the row so the
+				// LoginPipeline gates session minting and forces a
+				// real password before the user gets any session.
+				// Only set when the CSV did not supply a password —
+				// an admin who explicitly typed a password in the
+				// import file is expected to communicate it out-of-
+				// band and is not subject to the gate.
+				user.RequiresPasswordReset = true
 			}
 
 			if err := s.userRepo.Create(ctx, user); err != nil {

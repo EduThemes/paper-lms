@@ -95,6 +95,9 @@ const CourseLeaderboardPage = React.lazy(() => import('./pages/CourseLeaderboard
 // Phase 9-B — TOTP MFA enrollment + step-up.
 const MFAEnrollPage = React.lazy(() => import('./pages/MFAEnrollPage'));
 const MFAVerifyPage = React.lazy(() => import('./pages/MFAVerifyPage'));
+// Wave 1.6 follow-up — SIS / OneRoster-provisioned learner sets a
+// real password before getting a session.
+const PasswordResetRequiredPage = React.lazy(() => import('./pages/PasswordResetRequiredPage'));
 // Phase 10-B — passkey enrollment + management.
 const PasskeyEnrollPage = React.lazy(() => import('./pages/PasskeyEnrollPage'));
 const PasskeyListPage = React.lazy(() => import('./pages/PasskeyListPage'));
@@ -147,6 +150,9 @@ const App = () => {
             via Protected because the user must have a regular session. */}
         <Route path="/mfa/verify" element={<MFAVerifyPage />} />
         <Route path="/mfa/enroll" element={<ProtectedRoute><MFAEnrollPage /></ProtectedRoute>} />
+        {/* Wave 1.6 follow-up — anonymous (pending-password-reset
+            JWT is the credential). Mirrors /mfa/verify in spirit. */}
+        <Route path="/auth/password-set" element={<PasswordResetRequiredPage />} />
         <Route path="/users/self/passkeys" element={<ProtectedRoute><PasskeyListPage /></ProtectedRoute>} />
         <Route path="/users/self/passkeys/enroll" element={<ProtectedRoute><PasskeyEnrollPage /></ProtectedRoute>} />
         <Route path="/consent/verify/:token" element={<ParentalConsentPage />} />

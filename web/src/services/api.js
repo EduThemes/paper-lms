@@ -156,6 +156,21 @@ export const api = {
     return data;
   },
 
+  // Wave 1.6 follow-up — set the new password while holding a
+  // pending-password-reset JWT. Mirrors the MFA-pending → step-up
+  // pattern: anonymous endpoint, pending token sent as Bearer.
+  // Backend mints a real session JWT on success (cookie + body).
+  auth: {
+    setPassword: async ({ pendingToken, newPassword }) => {
+      const { data } = await request('/auth/password/set', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${pendingToken}` },
+        body: JSON.stringify({ new_password: newPassword }),
+      });
+      return data;
+    },
+  },
+
   changePassword: async (currentPassword, newPassword) => {
     const { data } = await request('/users/self/change_password', {
       method: 'POST',

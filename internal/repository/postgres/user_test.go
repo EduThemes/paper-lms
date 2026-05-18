@@ -106,6 +106,73 @@ func TestFilterPublicLeaderboardCandidates(t *testing.T) {
 	})
 }
 
+// Wave 1.6 follow-up — requires_password_reset column round-trip.
+// The column defaults to FALSE; setting it to TRUE and reading the
+// row back must preserve the flag. Migration 000061 adds the column;
+// this test pins the contract.
+func TestUserRequiresPasswordReset_RoundTrip(t *testing.T) {
+	g, cleanup := freshDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	repo := postgres.NewUserRepository(g)
+
+	if err := g.Exec(
+		`INSERT INTO accounts (id, name, workflow_state, mfa_policy, default_locale, tenant_mode, max_upload_size_mb)
+		 VALUES (1, 'Root', 'active', 'off', 'en', 'higher_ed', 500)
+		 ON CONFLICT (id) DO NOTHING`,
+	).Error; err != nil {
+		t.Fatalf("seed root account: %v", err)
+	}
+
+	// Default: flag is FALSE without an explicit set.
+	defaulted := &models.User{
+		Name: "Default User", LoginID: "default@in.test", Email: "default@in.test",
+		PasswordHash: "x", Role: "user",
+	}
+	if err := repo.Create(ctx, defaulted); err != nil {
+		t.Fatalf("create default user: %v", err)
+	}
+	// Users default to AccountID=1 via BeforeCreate; pass that as the
+	// tenant scope (post-PR #60 FindByID requires it).
+	got, err := repo.FindByID(ctx, defaulted.ID, 1)
+	if err != nil {
+		t.Fatalf("find default user: %v", err)
+	}
+	if got.RequiresPasswordReset {
+		t.Errorf("default RequiresPasswordReset should be false, got true")
+	}
+
+	// Explicit TRUE round-trips.
+	flagged := &models.User{
+		Name: "Flagged User", LoginID: "flagged@in.test", Email: "flagged@in.test",
+		PasswordHash: "x", Role: "user", RequiresPasswordReset: true,
+	}
+	if err := repo.Create(ctx, flagged); err != nil {
+		t.Fatalf("create flagged user: %v", err)
+	}
+	got, err = repo.FindByID(ctx, flagged.ID, 1)
+	if err != nil {
+		t.Fatalf("find flagged user: %v", err)
+	}
+	if !got.RequiresPasswordReset {
+		t.Errorf("RequiresPasswordReset should be true after set, got false")
+	}
+
+	// Clearing the flag via Update persists.
+	got.RequiresPasswordReset = false
+	if err := repo.Update(ctx, got); err != nil {
+		t.Fatalf("update flagged user: %v", err)
+	}
+	after, err := repo.FindByID(ctx, flagged.ID, 1)
+	if err != nil {
+		t.Fatalf("re-find flagged user: %v", err)
+	}
+	if after.RequiresPasswordReset {
+		t.Errorf("RequiresPasswordReset should be false after clearing, got true")
+	}
+}
+
 // assertSet checks two id slices have the same membership (order-free).
 // The filter is not required to preserve order — the caller already has
 // the ranking from its own leaderboard query.

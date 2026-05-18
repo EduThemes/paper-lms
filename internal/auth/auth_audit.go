@@ -110,6 +110,23 @@ func (a *AuthAudit) AccountLinkedViaFederation(ctx context.Context, userID uint,
 	}, meta)
 }
 
+// PasswordResetRequired (Wave 1.6 follow-up) fires when the
+// LoginPipeline gates a credential-verified login because the user's
+// RequiresPasswordReset flag is set. A pending-password-set JWT was
+// issued in place of a real session.
+func (a *AuthAudit) PasswordResetRequired(ctx context.Context, userID uint, providerType string, meta RequestMeta) {
+	a.emit(ctx, "auth.password_reset_required", userID, "User", userID, "password_reset_required", map[string]string{
+		"provider_type": providerType,
+	}, meta)
+}
+
+// PasswordSet (Wave 1.6 follow-up) fires when the user completes the
+// password-set step and the RequiresPasswordReset flag is cleared.
+// A real session JWT was minted at the same time.
+func (a *AuthAudit) PasswordSet(ctx context.Context, userID uint, meta RequestMeta) {
+	a.emit(ctx, "auth.password_set", userID, "User", userID, "password_set", nil, meta)
+}
+
 // RegistrationCompleted (Phase 13.4 / Wave C.2) fires when a public
 // signup creates a new user row. status is one of "active" or
 // "pending_parental_consent" — the latter when the tenant is
