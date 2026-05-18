@@ -392,7 +392,7 @@ func newFakeUserRepo() *fakePasskeyUserRepo {
 	return &fakePasskeyUserRepo{byID: map[uint]*models.User{}}
 }
 
-func (r *fakePasskeyUserRepo) FindByID(_ context.Context, id uint) (*models.User, error) {
+func (r *fakePasskeyUserRepo) FindByID(_ context.Context, id, _ uint) (*models.User, error) {
 	u, ok := r.byID[id]
 	if !ok {
 		return nil, gorm.ErrRecordNotFound
@@ -410,11 +410,11 @@ func (r *fakePasskeyUserRepo) FindByEmail(context.Context, string) (*models.User
 func (r *fakePasskeyUserRepo) FindBySISUserID(context.Context, string) (*models.User, error) {
 	panic("unused")
 }
-func (r *fakePasskeyUserRepo) FindByIDs(context.Context, []uint) ([]models.User, error) {
+func (r *fakePasskeyUserRepo) FindByIDs(context.Context, []uint, uint) ([]models.User, error) {
 	panic("unused")
 }
 func (r *fakePasskeyUserRepo) Update(context.Context, *models.User) error { panic("unused") }
-func (r *fakePasskeyUserRepo) List(context.Context, repository.PaginationParams) (*repository.PaginatedResult[models.User], error) {
+func (r *fakePasskeyUserRepo) List(context.Context, repository.PaginationParams, uint) (*repository.PaginatedResult[models.User], error) {
 	panic("unused")
 }
 func (r *fakePasskeyUserRepo) FindByResetToken(context.Context, string) (*models.User, error) {

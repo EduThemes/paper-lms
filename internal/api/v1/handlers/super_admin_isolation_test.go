@@ -63,7 +63,7 @@ func mountSuperAdminRoutes(t *testing.T, callerUserID, callerAccountID uint, rol
 		AccountID: callerAccountID,
 		Role:      role,
 	}
-	userRepo.On("FindByID", mock.Anything, callerUserID).Return(user, nil)
+	userRepo.On("FindByID", mock.Anything, callerUserID, uint(0)).Return(user, nil)
 
 	enrollmentRepo := new(mocks.MockEnrollmentRepository)
 	pm := middleware.NewPermissionMiddleware(enrollmentRepo, userRepo)

@@ -801,7 +801,7 @@ func TestDeleteCurrency_ScopeMismatch_404(t *testing.T) {
 
 func TestGetMyGamificationPreferences_HappyPath(t *testing.T) {
 	app, _, _, userRepo, _, _ := setupGamificationHandler(42, false)
-	userRepo.On("FindByID", mock.Anything, uint(42)).
+	userRepo.On("FindByID", mock.Anything, uint(42), uint(0)).
 		Return(&models.User{ID: 42, LeaderboardOptOut: true}, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodGet,
@@ -816,7 +816,7 @@ func TestGetMyGamificationPreferences_HappyPath(t *testing.T) {
 
 func TestGetMyGamificationPreferences_DefaultsToFalse(t *testing.T) {
 	app, _, _, userRepo, _, _ := setupGamificationHandler(42, false)
-	userRepo.On("FindByID", mock.Anything, uint(42)).
+	userRepo.On("FindByID", mock.Anything, uint(42), uint(0)).
 		Return(&models.User{ID: 42}, nil) // LeaderboardOptOut zero-value
 
 	resp := testutil.MakeRequest(app, http.MethodGet,
@@ -831,7 +831,7 @@ func TestUpdateMyGamificationPreferences_TogglesOn(t *testing.T) {
 	// learner opts IN (false→true) via a PUT with a single field.
 	app, _, _, userRepo, _, _ := setupGamificationHandler(42, false)
 	existing := &models.User{ID: 42, LeaderboardOptOut: false}
-	userRepo.On("FindByID", mock.Anything, uint(42)).Return(existing, nil)
+	userRepo.On("FindByID", mock.Anything, uint(42), uint(0)).Return(existing, nil)
 	userRepo.On("Update", mock.Anything, mock.MatchedBy(func(u *models.User) bool {
 		return u.ID == 42 && u.LeaderboardOptOut == true
 	})).Return(nil)
@@ -852,7 +852,7 @@ func TestUpdateMyGamificationPreferences_TogglesOff(t *testing.T) {
 	// omitted", so db.Save writes the false explicitly.
 	app, _, _, userRepo, _, _ := setupGamificationHandler(42, false)
 	existing := &models.User{ID: 42, LeaderboardOptOut: true}
-	userRepo.On("FindByID", mock.Anything, uint(42)).Return(existing, nil)
+	userRepo.On("FindByID", mock.Anything, uint(42), uint(0)).Return(existing, nil)
 	userRepo.On("Update", mock.Anything, mock.MatchedBy(func(u *models.User) bool {
 		return u.ID == 42 && u.LeaderboardOptOut == false
 	})).Return(nil)
@@ -870,7 +870,7 @@ func TestUpdateMyGamificationPreferences_OmittedFieldIsNoop(t *testing.T) {
 	// each PUT is a partial update, never a wipe.
 	app, _, _, userRepo, _, _ := setupGamificationHandler(42, false)
 	existing := &models.User{ID: 42, LeaderboardOptOut: true}
-	userRepo.On("FindByID", mock.Anything, uint(42)).Return(existing, nil)
+	userRepo.On("FindByID", mock.Anything, uint(42), uint(0)).Return(existing, nil)
 	userRepo.On("Update", mock.Anything, mock.MatchedBy(func(u *models.User) bool {
 		return u.ID == 42 && u.LeaderboardOptOut == true // unchanged
 	})).Return(nil)

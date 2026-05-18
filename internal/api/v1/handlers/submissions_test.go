@@ -325,7 +325,7 @@ func TestCreateSubmissionComment(t *testing.T) {
 	// CreateSubmissionComment threads callerAccountID(c)=1 from the test's authStub.
 	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2), uint(1)).Return(submission, nil)
 	commentRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.SubmissionComment")).Return(nil)
-	userRepo.On("FindByID", mock.Anything, uint(1)).Return(&models.User{ID: 1, Name: "Test Teacher"}, nil)
+	userRepo.On("FindByID", mock.Anything, uint(1), uint(1)).Return(&models.User{ID: 1, Name: "Test Teacher"}, nil)
 
 	body := testutil.JSONBody(map[string]interface{}{
 		"comment": map[string]interface{}{
@@ -368,8 +368,8 @@ func TestListSubmissionComments(t *testing.T) {
 	}
 
 	commentRepo.On("ListBySubmissionID", mock.Anything, uint(1), uint(1)).Return(comments, nil)
-	userRepo.On("FindByID", mock.Anything, uint(1)).Return(&models.User{ID: 1, Name: "Teacher One"}, nil)
-	userRepo.On("FindByID", mock.Anything, uint(3)).Return(&models.User{ID: 3, Name: "Teacher Two"}, nil)
+	userRepo.On("FindByID", mock.Anything, uint(1), uint(1)).Return(&models.User{ID: 1, Name: "Teacher One"}, nil)
+	userRepo.On("FindByID", mock.Anything, uint(3), uint(1)).Return(&models.User{ID: 3, Name: "Teacher Two"}, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/courses/1/assignments/1/submissions/2/comments", nil)
 

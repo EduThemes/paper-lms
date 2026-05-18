@@ -216,7 +216,7 @@ func TestGetUser_Success(t *testing.T) {
 		Locale:       "en",
 		TimeZone:     "America/New_York",
 	}
-	mockRepo.On("FindByID", mock.Anything, uint(1)).Return(user, nil)
+	mockRepo.On("FindByID", mock.Anything, uint(1), uint(1)).Return(user, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/users/1", nil)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -234,7 +234,7 @@ func TestGetUser_Success(t *testing.T) {
 func TestGetUser_NotFound(t *testing.T) {
 	app, mockRepo := setupUserHandler()
 
-	mockRepo.On("FindByID", mock.Anything, uint(999)).Return(nil, errors.New("not found"))
+	mockRepo.On("FindByID", mock.Anything, uint(999), uint(1)).Return(nil, errors.New("not found"))
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/users/999", nil)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
@@ -274,8 +274,9 @@ func TestGetSelf(t *testing.T) {
 		Locale:       "en",
 		TimeZone:     "America/New_York",
 	}
-	// The middleware sets user_id = 1, so GetSelf calls GetByID(1)
-	mockRepo.On("FindByID", mock.Anything, uint(1)).Return(user, nil)
+	// The middleware sets user_id = 1, so GetSelf calls GetByID(1).
+	// GetSelf passes accountID=0 (self lookup; userID IS the caller).
+	mockRepo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(user, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/users/self", nil)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -306,7 +307,7 @@ func TestUpdateUser(t *testing.T) {
 		Locale:       "en",
 		TimeZone:     "America/New_York",
 	}
-	mockRepo.On("FindByID", mock.Anything, uint(1)).Return(user, nil)
+	mockRepo.On("FindByID", mock.Anything, uint(1), uint(1)).Return(user, nil)
 	mockRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.User")).Return(nil)
 
 	body := testutil.JSONBody(map[string]interface{}{
@@ -364,7 +365,7 @@ func TestListUsers(t *testing.T) {
 		Page:       1,
 		PerPage:    10,
 	}
-	mockRepo.On("List", mock.Anything, repository.PaginationParams{Page: 1, PerPage: 10}).Return(expectedResult, nil)
+	mockRepo.On("List", mock.Anything, repository.PaginationParams{Page: 1, PerPage: 10}, uint(1)).Return(expectedResult, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/users", nil)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
