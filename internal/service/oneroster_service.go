@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EduThemes/paper-lms/internal/auth/initialpassword"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"gorm.io/gorm"
@@ -613,8 +614,22 @@ func (s *OneRosterService) syncUsers(ctx context.Context, users []onerosterUser)
 				Email:        email,
 				Role:         role,
 			}
-			// Set a random password — user will need to reset or use SSO
-			_ = newUser.HashPassword("OneRoster-" + orUser.SourcedID + "-changeme")
+			// Set a cryptographically random initial password. The plaintext
+			// is irrecoverable; the user MUST authenticate via SSO or use
+			// the password-reset flow before they can log in. See
+			// internal/auth/initialpassword for the operator-side contract.
+			// Prior code derived the password from the public sourcedID
+			// ("OneRoster-" + SourcedID + "-changeme"), which was
+			// trivially recoverable by anyone with the SIS roster.
+			initialPW, pwErr := initialpassword.GenerateInitialPassword()
+			if pwErr != nil {
+				errs = append(errs, fmt.Sprintf("failed to generate initial password for %s: %v", orUser.SourcedID, pwErr))
+				continue
+			}
+			if hashErr := newUser.HashPassword(initialPW); hashErr != nil {
+				errs = append(errs, fmt.Sprintf("failed to hash initial password for %s: %v", orUser.SourcedID, hashErr))
+				continue
+			}
 
 			if err := s.userRepo.Create(ctx, newUser); err != nil {
 				errs = append(errs, fmt.Sprintf("failed to create user %s: %v", orUser.SourcedID, err))
