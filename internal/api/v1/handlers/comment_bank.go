@@ -98,7 +98,10 @@ func (h *CommentBankHandler) UpdateItem(c *fiber.Ctx) error {
 	item, err := h.service.Update(c.Context(), userID, uint(id), input.Comment)
 	if err != nil {
 		if err.Error() == "unauthorized" {
-			return responses.Error(c, fiber.StatusForbidden, "You do not own this comment bank item")
+			// 13.1.E: existence leak — return 404 not 403. The item
+			// belongs to another user (potentially in another tenant);
+			// 403 confirms it exists.
+			return responses.NotFound(c, "comment bank item")
 		}
 		return responses.BadRequest(c, err.Error())
 	}
@@ -119,7 +122,9 @@ func (h *CommentBankHandler) DeleteItem(c *fiber.Ctx) error {
 
 	if err := h.service.Delete(c.Context(), userID, uint(id)); err != nil {
 		if err.Error() == "unauthorized" {
-			return responses.Error(c, fiber.StatusForbidden, "You do not own this comment bank item")
+			// 13.1.E: existence leak — return 404 not 403. Same
+			// rationale as UpdateItem above.
+			return responses.NotFound(c, "comment bank item")
 		}
 		return responses.BadRequest(c, err.Error())
 	}

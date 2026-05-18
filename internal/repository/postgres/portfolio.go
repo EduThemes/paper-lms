@@ -24,9 +24,14 @@ func (r *portfolioRepo) Create(ctx context.Context, portfolio *models.Portfolio)
 	return r.db.WithContext(ctx).Create(portfolio).Error
 }
 
-func (r *portfolioRepo) FindByID(ctx context.Context, id uint) (*models.Portfolio, error) {
+func (r *portfolioRepo) FindByID(ctx context.Context, id, accountID uint) (*models.Portfolio, error) {
 	var portfolio models.Portfolio
-	if err := r.db.WithContext(ctx).First(&portfolio, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Scope through portfolio.user_id -> users.account_id.
+		q = q.Where("user_id IN (SELECT id FROM users WHERE account_id = ?)", accountID)
+	}
+	if err := q.First(&portfolio, id).Error; err != nil {
 		return nil, err
 	}
 	return &portfolio, nil
@@ -116,9 +121,14 @@ func (r *portfolioSectionRepo) Create(ctx context.Context, section *models.Portf
 	return r.db.WithContext(ctx).Create(section).Error
 }
 
-func (r *portfolioSectionRepo) FindByID(ctx context.Context, id uint) (*models.PortfolioSection, error) {
+func (r *portfolioSectionRepo) FindByID(ctx context.Context, id, accountID uint) (*models.PortfolioSection, error) {
 	var section models.PortfolioSection
-	if err := r.db.WithContext(ctx).First(&section, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Scope through section.portfolio_id -> portfolios.user_id -> users.account_id.
+		q = q.Where("portfolio_id IN (SELECT id FROM portfolios WHERE user_id IN (SELECT id FROM users WHERE account_id = ?))", accountID)
+	}
+	if err := q.First(&section, id).Error; err != nil {
 		return nil, err
 	}
 	return &section, nil
@@ -167,9 +177,14 @@ func (r *portfolioArtifactRepo) Create(ctx context.Context, artifact *models.Por
 	return r.db.WithContext(ctx).Create(artifact).Error
 }
 
-func (r *portfolioArtifactRepo) FindByID(ctx context.Context, id uint) (*models.PortfolioArtifact, error) {
+func (r *portfolioArtifactRepo) FindByID(ctx context.Context, id, accountID uint) (*models.PortfolioArtifact, error) {
 	var artifact models.PortfolioArtifact
-	if err := r.db.WithContext(ctx).First(&artifact, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Scope through artifact.portfolio_id -> portfolios.user_id -> users.account_id.
+		q = q.Where("portfolio_id IN (SELECT id FROM portfolios WHERE user_id IN (SELECT id FROM users WHERE account_id = ?))", accountID)
+	}
+	if err := q.First(&artifact, id).Error; err != nil {
 		return nil, err
 	}
 	return &artifact, nil
@@ -235,9 +250,14 @@ func (r *portfolioReflectionRepo) Create(ctx context.Context, reflection *models
 	return r.db.WithContext(ctx).Create(reflection).Error
 }
 
-func (r *portfolioReflectionRepo) FindByID(ctx context.Context, id uint) (*models.PortfolioReflection, error) {
+func (r *portfolioReflectionRepo) FindByID(ctx context.Context, id, accountID uint) (*models.PortfolioReflection, error) {
 	var reflection models.PortfolioReflection
-	if err := r.db.WithContext(ctx).First(&reflection, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Scope through reflection.user_id -> users.account_id.
+		q = q.Where("user_id IN (SELECT id FROM users WHERE account_id = ?)", accountID)
+	}
+	if err := q.First(&reflection, id).Error; err != nil {
 		return nil, err
 	}
 	return &reflection, nil
@@ -345,9 +365,14 @@ func (r *portfolioCommentRepo) Create(ctx context.Context, comment *models.Portf
 	return r.db.WithContext(ctx).Create(comment).Error
 }
 
-func (r *portfolioCommentRepo) FindByID(ctx context.Context, id uint) (*models.PortfolioComment, error) {
+func (r *portfolioCommentRepo) FindByID(ctx context.Context, id, accountID uint) (*models.PortfolioComment, error) {
 	var comment models.PortfolioComment
-	if err := r.db.WithContext(ctx).First(&comment, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Scope through comment.portfolio_id -> portfolios.user_id -> users.account_id.
+		q = q.Where("portfolio_id IN (SELECT id FROM portfolios WHERE user_id IN (SELECT id FROM users WHERE account_id = ?))", accountID)
+	}
+	if err := q.First(&comment, id).Error; err != nil {
 		return nil, err
 	}
 	return &comment, nil

@@ -84,7 +84,7 @@ func (s *MasteryGradebookService) GetMasteryGradebook(ctx context.Context, cours
 	studentIDs := []uint{}
 	page := 1
 	for {
-		res, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, repository.PaginationParams{Page: page, PerPage: 100})
+		res, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, 0, repository.PaginationParams{Page: page, PerPage: 100})
 		if err != nil {
 			return nil, err
 		}

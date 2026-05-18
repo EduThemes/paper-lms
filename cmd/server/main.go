@@ -980,13 +980,21 @@ func main() {
 
 		AccountRepo:  accountRepo,
 		AuditService: auditService,
+
+		// Wave 4 (chore/wave4-upload-size-catalog) — EnforceUploadSize
+		// resolves `quotas.max_upload_size_mb` through the catalog
+		// instead of reading account.MaxUploadSizeMB directly. Shares
+		// the same settingsLookup closure as SMTP / AI Assist / OIDC.
+		SettingsLookup: settingsLookup,
 	}
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
-		// Per-account upload caps live on Account.MaxUploadSizeMB and are
-		// enforced by middleware.EnforceUploadSize on upload routes only
-		// (POST /courses/:id/files, POST /courses/:id/content_imports).
+		// Per-tenant upload caps resolve through the Settings Engine
+		// (catalog key `quotas.max_upload_size_mb`, default 5120 MB)
+		// and are enforced by middleware.EnforceUploadSize on upload
+		// routes only (POST /courses/:id/files,
+		// POST /courses/:id/content_imports).
 		// This BodyLimit is the global default for every OTHER route —
 		// JSON, form bodies, etc. 100 MB is far above any realistic
 		// non-file body and keeps DoS-class POST bombs out of fasthttp's

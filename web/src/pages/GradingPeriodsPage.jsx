@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, Trash2, Edit2, Calendar, ChevronDown, ChevronRight } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
 
 const GradingPeriodsPage = () => {
+  const { t } = useTranslation();
   const [groups, setGroups] = useState([]);
   const [expandedGroups, setExpandedGroups] = useState({});
   const [periods, setPeriods] = useState({});
@@ -62,7 +64,7 @@ const GradingPeriodsPage = () => {
   };
 
   const handleDeleteGroup = async (groupId) => {
-    if (!window.confirm('Delete this grading period group?')) return;
+    if (!window.confirm(t('gradingPeriods.deleteGroupConfirm'))) return;
     try {
       await api.deleteGradingPeriodGroup(accountId, groupId);
       fetchGroups();
@@ -88,7 +90,7 @@ const GradingPeriodsPage = () => {
   };
 
   const handleDeletePeriod = async (groupId, periodId) => {
-    if (!window.confirm('Delete this grading period?')) return;
+    if (!window.confirm(t('gradingPeriods.deletePeriodConfirm'))) return;
     try {
       await api.deleteGradingPeriod(accountId, groupId, periodId);
       fetchPeriods(groupId);
@@ -105,22 +107,22 @@ const GradingPeriodsPage = () => {
   if (loading) {
     return <Layout><div className="flex items-center justify-center py-12 gap-2 text-text-tertiary">
   <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-  Loading grading periods...
+  {t('gradingPeriods.loading')}
 </div></Layout>;
   }
 
   return (
     <Layout>
       <div className="mb-6">
-        <Link to="/" className="text-brand-600 hover:underline text-sm">← Back to Dashboard</Link>
+        <Link to="/" className="text-brand-600 hover:underline text-sm">{t('gradingPeriods.backToDashboard')}</Link>
         <div className="flex items-center justify-between mt-2">
-          <h2 className="text-2xl font-bold">Grading Periods</h2>
+          <h2 className="text-2xl font-bold">{t('gradingPeriods.title')}</h2>
           <button
             onClick={() => setShowCreateGroup(!showCreateGroup)}
             className="flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
           >
             <Plus className="w-4 h-4" />
-            <span>New Group</span>
+            <span>{t('gradingPeriods.newGroup')}</span>
           </button>
         </div>
       </div>
@@ -132,21 +134,21 @@ const GradingPeriodsPage = () => {
           <form onSubmit={handleCreateGroup} className="flex items-center space-x-3">
             <input
               type="text"
-              placeholder="Group title"
+              placeholder={t('gradingPeriods.groupTitlePlaceholder')}
               value={newGroupTitle}
               onChange={e => setNewGroupTitle(e.target.value)}
               className="flex-1 border border-border-strong rounded px-3 py-2 text-sm"
               required
             />
-            <button type="submit" className="bg-brand-600 text-white px-4 py-2 rounded text-sm hover:bg-brand-700">Create</button>
-            <button type="button" onClick={() => setShowCreateGroup(false)} className="text-text-tertiary text-sm">Cancel</button>
+            <button type="submit" className="bg-brand-600 text-white px-4 py-2 rounded text-sm hover:bg-brand-700">{t('common.create')}</button>
+            <button type="button" onClick={() => setShowCreateGroup(false)} className="text-text-tertiary text-sm">{t('common.cancel')}</button>
           </form>
         </div>
       )}
 
       <div className="space-y-3">
         {groups.length === 0 ? (
-          <div className="bg-surface-0 rounded-lg shadow p-8 text-center text-text-tertiary">No grading period groups yet.</div>
+          <div className="bg-surface-0 rounded-lg shadow p-8 text-center text-text-tertiary">{t('gradingPeriods.noGroups')}</div>
         ) : (
           groups.map(group => (
             <div key={group.id} className="bg-surface-0 rounded-lg shadow">
@@ -167,7 +169,7 @@ const GradingPeriodsPage = () => {
               {expandedGroups[group.id] && (
                 <div className="border-t px-4 py-3">
                   {periods[group.id]?.length === 0 && (
-                    <p className="text-sm text-text-tertiary mb-3">No grading periods in this group.</p>
+                    <p className="text-sm text-text-tertiary mb-3">{t('gradingPeriods.noPeriodsInGroup')}</p>
                   )}
                   {periods[group.id]?.map(period => (
                     <div key={period.id} className="flex items-center justify-between py-2 border-b last:border-0">
@@ -190,7 +192,7 @@ const GradingPeriodsPage = () => {
                     <form onSubmit={(e) => handleCreatePeriod(e, group.id)} className="mt-3 space-y-2">
                       <input
                         type="text"
-                        placeholder="Period title"
+                        placeholder={t('gradingPeriods.periodTitlePlaceholder')}
                         value={newPeriod.title}
                         onChange={e => setNewPeriod({ ...newPeriod, title: e.target.value })}
                         className="w-full border border-border-strong rounded px-3 py-2 text-sm"
@@ -213,8 +215,8 @@ const GradingPeriodsPage = () => {
                         />
                       </div>
                       <div className="flex space-x-2">
-                        <button type="submit" className="bg-brand-600 text-white px-3 py-1 rounded text-sm hover:bg-brand-700">Add</button>
-                        <button type="button" onClick={() => setShowCreatePeriod(null)} className="text-text-tertiary text-sm">Cancel</button>
+                        <button type="submit" className="bg-brand-600 text-white px-3 py-1 rounded text-sm hover:bg-brand-700">{t('common.add')}</button>
+                        <button type="button" onClick={() => setShowCreatePeriod(null)} className="text-text-tertiary text-sm">{t('common.cancel')}</button>
                       </div>
                     </form>
                   ) : (
@@ -222,7 +224,7 @@ const GradingPeriodsPage = () => {
                       onClick={() => setShowCreatePeriod(group.id)}
                       className="mt-2 text-brand-600 hover:underline text-sm"
                     >
-                      + Add Grading Period
+                      {t('gradingPeriods.addPeriod')}
                     </button>
                   )}
                 </div>

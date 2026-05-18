@@ -126,7 +126,7 @@ func (h *GamificationHandler) GetCourseLeaderboard(c *fiber.Ctx) error {
 	}
 
 	// Candidate set + opt-out filter.
-	enrollments, err := h.enrollmentRepo.ListActiveStudentEnrollmentsByCourse(c.Context(), courseID)
+	enrollments, err := h.enrollmentRepo.ListActiveStudentEnrollmentsByCourse(c.Context(), courseID, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "failed to list enrollments")
 	}
@@ -335,12 +335,15 @@ func (h *GamificationHandler) resolveViewerRoleInCourse(c *fiber.Ctx, viewerID, 
 	if isAdmin {
 		return gamification.ViewerAdmin, false, nil
 	}
-	viewerEnrollment, err := h.enrollmentRepo.FindByUserAndCourse(c.Context(), viewerID, courseID)
+	viewerEnrollment, err := h.enrollmentRepo.FindByUserAndCourse(c.Context(), viewerID, courseID, callerAccountID(c))
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", true, responses.InternalError(c, "failed to resolve enrollment")
 	}
 	if viewerEnrollment == nil || viewerEnrollment.WorkflowState != "active" {
-		return "", true, responses.Error(c, fiber.StatusForbidden, "not enrolled in this course")
+		// 13.1.E: existence leak — return 404 not 403. A 403 confirms
+		// the course exists (in this or another tenant) to a non-
+		// enrolled viewer; 404 keeps that signal silent.
+		return "", true, responses.NotFound(c, "course")
 	}
 	if viewerEnrollment.Type == "TeacherEnrollment" || viewerEnrollment.Type == "TaEnrollment" {
 		return gamification.ViewerTeacher, false, nil
@@ -430,7 +433,7 @@ func (h *GamificationHandler) serveSnapshotLeaderboard(
 
 	// Pseudonym substitution needs the enrollment context for each
 	// payload user. Pull them once.
-	enrollments, err := h.enrollmentRepo.ListActiveStudentEnrollmentsByCourse(c.Context(), courseID)
+	enrollments, err := h.enrollmentRepo.ListActiveStudentEnrollmentsByCourse(c.Context(), courseID, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "failed to list enrollments")
 	}

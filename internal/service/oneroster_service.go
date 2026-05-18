@@ -722,7 +722,7 @@ func (s *OneRosterService) syncEnrollments(ctx context.Context, enrollments []on
 
 		enrollType := mapOneRosterEnrollmentRole(orEnroll.Role)
 
-		existing, _ := s.enrollmentRepo.FindByUserAndCourse(ctx, user.ID, course.ID)
+		existing, _ := s.enrollmentRepo.FindByUserAndCourse(ctx, user.ID, course.ID, 0)
 		if existing != nil {
 			if existing.Type != enrollType {
 				existing.Type = enrollType

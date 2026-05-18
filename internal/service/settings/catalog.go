@@ -160,14 +160,16 @@ var Catalog = []Definition{
 	},
 
 	// ── File storage ────────────────────────────────────────────────
-	{
-		Key: "storage.backend", Group: "File storage", Label: "Storage backend",
-		Description: "Where uploaded files land. 'local' uses the server's filesystem; 's3' targets an S3-compatible bucket (AWS, Cloudflare R2, MinIO).",
-		ValueType:   TypeString,
-		Scopes:      []ScopeType{ScopeInstance},
-		EnvFallback: "STORAGE_BACKEND",
-		Default:     "local",
-	},
+	//
+	// NOTE: `storage.backend` is intentionally NOT in the catalog —
+	// it's a boot-time-only setting (the storage.Backend interface is
+	// constructed once at process start in cmd/server/main.go from
+	// cfg.StorageBackend). Promoting it to a runtime catalog entry
+	// would create the appearance of hot-swap support that doesn't
+	// exist; switching backends requires a redeploy. Read the value
+	// from STORAGE_BACKEND env at boot; the s3.* keys below stay in
+	// the catalog because the S3 SDK client IS rebuilt per request
+	// when those values change (see internal/storage/s3.go).
 	{
 		Key: "storage.s3.bucket", Group: "File storage", Label: "S3 bucket",
 		Description: "Name of the S3-compatible bucket files are written to.",
@@ -301,11 +303,11 @@ var Catalog = []Definition{
 	// ── Quotas & limits ─────────────────────────────────────────────
 	{
 		Key: "quotas.max_upload_size_mb", Group: "Quotas & limits", Label: "Max upload size (MB)",
-		Description: "Per-request file upload cap. Account-scoped overrides take precedence over the instance default. Reconciles with accounts.max_upload_size_mb (account-row column wins when set).",
+		Description: "Per-request file upload cap. Account-scoped overrides take precedence over the instance default. The Fiber-level BodyLimit (5 GB = 5120 MB) is the framework safety net; the catalog default matches it so teachers aren't surprised by per-request rejections on routine uploads.",
 		ValueType:   TypeInt,
 		Scopes:      []ScopeType{ScopeInstance, ScopeAccount},
 		EnvFallback: "MAX_UPLOAD_SIZE_MB",
-		Default:     "500",
+		Default:     "5120",
 	},
 }
 

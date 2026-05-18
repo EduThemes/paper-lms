@@ -24,7 +24,7 @@ import (
 var ErrUnknownKey = errors.New("settings: unknown key")
 
 // ErrScopeNotAllowed is returned when a write targets a scope the
-// catalog entry doesn't list. E.g. trying to set storage.backend at
+// catalog entry doesn't list. E.g. trying to set storage.s3.bucket at
 // account scope when the catalog declares it instance-only.
 var ErrScopeNotAllowed = errors.New("settings: scope not allowed for key")
 

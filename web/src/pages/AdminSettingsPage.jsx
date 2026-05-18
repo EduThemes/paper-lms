@@ -4,10 +4,23 @@ import { api } from '../services/api';
 import Layout from '../components/Layout';
 import { Skeleton } from '@/components/ui/skeleton';
 
-const ACCOUNT_ID = 1;
+// SETTING_KEY is the catalog key in internal/service/settings/catalog.go.
+// Bound at instance scope here; account-scoped overrides land in the
+// Super-Admin → Settings panel (Quotas & limits group).
+//
+// Wave 4 repoint (chore/wave4-upload-size-catalog 2026-05-17): this
+// page previously wrote to account.max_upload_size_mb directly, which
+// made the catalog entry a no-op. The form now reads/writes through
+// the Settings Engine — single source of truth, runtime configurable
+// without restart, per-tenant overridable at account scope.
+const SETTING_KEY = 'quotas.max_upload_size_mb';
+
+// FALLBACK_DEFAULT_MB matches the catalog default. The framework-level
+// BodyLimit is 5 GB, so this is the upper bound on what's actionable.
+const FALLBACK_DEFAULT_MB = 5120;
 
 const AdminSettingsPage = () => {
-  const [account, setAccount] = useState(null);
+  const [effective, setEffective] = useState(null); // EffectiveValue from /superadmin/settings/:key
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -18,12 +31,24 @@ const AdminSettingsPage = () => {
     let cancelled = false;
     const load = async () => {
       try {
-        const a = await api.getAccount(ACCOUNT_ID);
+        const ev = await api.superAdminSettings.getSetting(SETTING_KEY);
         if (cancelled) return;
-        setAccount(a);
-        setMaxUploadMB(String(a.max_upload_size_mb ?? 500));
+        setEffective(ev);
+        const current = parseInt(ev?.value, 10);
+        setMaxUploadMB(String(Number.isFinite(current) && current > 0 ? current : FALLBACK_DEFAULT_MB));
       } catch (err) {
-        if (!cancelled) setError(err.message);
+        if (cancelled) return;
+        // A non-super-admin viewing this page gets 403 from the
+        // server. We surface a friendly, non-blocking message — the
+        // catalog default is in effect; raising it is a super-admin
+        // operation. Don't show a scary error block for what's a UX
+        // path, not a system failure.
+        if (err?.status === 403 || /forbidden/i.test(err?.message || '')) {
+          setEffective({ value: String(FALLBACK_DEFAULT_MB), source: 'default', is_secret: false });
+          setMaxUploadMB(String(FALLBACK_DEFAULT_MB));
+        } else {
+          setError(err.message);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -39,19 +64,25 @@ const AdminSettingsPage = () => {
       setError('Upload size must be a positive whole number of megabytes.');
       return;
     }
-    if (n > 5120) {
-      setError('Maximum is 5120 MB (5 GB) — the framework-level safety net.');
+    if (n > FALLBACK_DEFAULT_MB) {
+      setError(`Maximum is ${FALLBACK_DEFAULT_MB} MB (5 GB) — the framework-level safety net.`);
       return;
     }
     setSaving(true);
     setError(null);
     setStatusMsg('');
     try {
-      const updated = await api.updateAccount(ACCOUNT_ID, {
-        settings: { max_upload_size_mb: n },
+      // Bind at instance scope (the existing semantics). Super-admin
+      // operators wanting per-district overrides do that in the
+      // dedicated Super-Admin Settings panel.
+      await api.superAdminSettings.setSetting(SETTING_KEY, {
+        scope: 'instance',
+        scope_id: 0,
+        value: String(n),
       });
-      setAccount(updated);
-      setMaxUploadMB(String(updated.max_upload_size_mb));
+      const refreshed = await api.superAdminSettings.getSetting(SETTING_KEY);
+      setEffective(refreshed);
+      setMaxUploadMB(String(parseInt(refreshed.value, 10) || n));
       setStatusMsg('Settings saved');
       setTimeout(() => setStatusMsg(''), 1800);
     } catch (err) {
@@ -60,6 +91,10 @@ const AdminSettingsPage = () => {
       setSaving(false);
     }
   };
+
+  const currentMB = parseInt(effective?.value, 10);
+  const currentDisplay = Number.isFinite(currentMB) && currentMB > 0 ? currentMB : FALLBACK_DEFAULT_MB;
+  const sourceLabel = effective?.source || 'default';
 
   return (
     <Layout>
@@ -74,7 +109,7 @@ const AdminSettingsPage = () => {
             <Skeleton className="h-6 w-40" />
             <Skeleton className="h-12 w-full" />
           </div>
-        ) : error && !account ? (
+        ) : error && !effective ? (
           <div className="rounded-md border border-accent-danger/30 bg-accent-danger/5 p-4">
             <p className="text-sm text-accent-danger">{error}</p>
           </div>
@@ -88,20 +123,21 @@ const AdminSettingsPage = () => {
               </label>
               <p className="text-xs text-text-tertiary mt-1 mb-2">
                 Per-request cap for course files and content imports (.imscc, .zip).
-                Allowed range: 1–5120 MB. Changes take effect within 30 seconds without
-                a server restart.
+                Allowed range: 1–{FALLBACK_DEFAULT_MB} MB. Changes take effect immediately
+                without a server restart.
               </p>
               <input
                 id="max-upload"
                 type="number"
                 min={1}
-                max={5120}
+                max={FALLBACK_DEFAULT_MB}
                 value={maxUploadMB}
                 onChange={(e) => setMaxUploadMB(e.target.value)}
                 className="w-40 rounded-md border border-border-strong bg-surface-0 px-3 py-2 text-sm"
               />
               <p className="text-xs text-text-tertiary mt-2">
-                Currently enforced: <span className="font-medium text-text-secondary">{account?.max_upload_size_mb ?? 500} MB</span>
+                Currently enforced: <span className="font-medium text-text-secondary">{currentDisplay} MB</span>
+                {' '}<span className="text-text-tertiary">(source: {sourceLabel})</span>
               </p>
             </fieldset>
 

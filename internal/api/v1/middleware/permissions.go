@@ -134,7 +134,8 @@ func (pm *PermissionMiddleware) RequireCourseRole(roles ...string) fiber.Handler
 			return forbidden(c, "invalid course_id")
 		}
 
-		enrollment, err := pm.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, courseID)
+		callerAccount, _ := c.Locals("account_id").(uint)
+		enrollment, err := pm.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, courseID, callerAccount)
 		if err != nil {
 			return forbidden(c, "user is not enrolled in this course")
 		}
@@ -171,7 +172,8 @@ func (pm *PermissionMiddleware) RequireEnrolled() fiber.Handler {
 			return forbidden(c, "invalid course_id")
 		}
 
-		enrollment, err := pm.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, courseID)
+		callerAccount, _ := c.Locals("account_id").(uint)
+		enrollment, err := pm.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, courseID, callerAccount)
 		if err != nil {
 			return forbidden(c, "user is not enrolled in this course")
 		}

@@ -444,7 +444,7 @@ func (r *Resolver) resolveCourseEnrollments(ctx context.Context, courseID uint, 
 	perPage := getIntArgOr(args, "perPage", 100)
 
 	params := repository.PaginationParams{Page: page, PerPage: perPage}
-	result, err := r.enrollmentService.ListByCourse(ctx, courseID, params)
+	result, err := r.enrollmentService.ListByCourse(ctx, courseID, AccountIDFromContext(ctx), params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list enrollments for course %d: %w", courseID, err)
 	}

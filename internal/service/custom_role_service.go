@@ -288,7 +288,7 @@ func (s *CustomRoleService) CheckPermission(ctx context.Context, userID, courseI
 // GetEffectivePermissions returns the full permission map for a user in a course context.
 // It starts with the base role defaults and then applies any custom role overrides.
 func (s *CustomRoleService) GetEffectivePermissions(ctx context.Context, userID, courseID uint) (map[string]bool, error) {
-	enrollment, err := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID)
+	enrollment, err := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID, 0)
 	if err != nil {
 		return nil, errors.New("user is not enrolled in this course")
 	}

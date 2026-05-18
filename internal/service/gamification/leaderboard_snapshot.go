@@ -68,7 +68,9 @@ func (s *LeaderboardSnapshotService) ComputeCourseWeekly(
 	}
 
 	// Candidate set: active StudentEnrollments for this course.
-	candidates, err := s.enrollments.ListActiveStudentUserIDsByCourse(ctx, courseID)
+	// accountID=0: internal background CLI; tenant ownership of the
+	// course is validated by the caller's tenant iteration.
+	candidates, err := s.enrollments.ListActiveStudentUserIDsByCourse(ctx, courseID, 0)
 	if err != nil {
 		return false, fmt.Errorf("list enrollments: %w", err)
 	}

@@ -158,9 +158,13 @@ func (h *FileHandler) DownloadFile(c *fiber.Ctx) error {
 	// Authorization: verify user is enrolled in the course that owns this file
 	if attachment.ContextType == "Course" {
 		userID, _ := c.Locals("user_id").(uint)
-		enrollment, _ := h.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, attachment.ContextID)
+		enrollment, _ := h.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, attachment.ContextID, callerAccountID(c))
 		if enrollment == nil || enrollment.WorkflowState != "active" {
-			return responses.Error(c, fiber.StatusForbidden, "You do not have access to this file")
+			// 13.1.E: existence leak — return 404 not 403. The file
+			// exists (the tenant filter on GetAttachment passed), but
+			// the caller has no enrollment in the course that owns it;
+			// 403 would confirm the file exists to an unenrolled user.
+			return responses.NotFound(c, "file")
 		}
 	}
 

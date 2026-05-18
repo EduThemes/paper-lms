@@ -65,7 +65,7 @@ func (h *CanvasAliasHandler) SelfCourses(c *fiber.Ctx) error {
 	for i, course := range result.Items {
 		courseIDs[i] = course.ID
 	}
-	studentCounts, _ := h.enrollmentService.CountStudentsByCourseIDs(c.Context(), courseIDs)
+	studentCounts, _ := h.enrollmentService.CountStudentsByCourseIDs(c.Context(), courseIDs, callerAccountID(c))
 	if studentCounts == nil {
 		studentCounts = map[uint]int64{}
 	}
@@ -88,7 +88,7 @@ func (h *CanvasAliasHandler) SelfEnrollments(c *fiber.Ctx) error {
 		return err
 	}
 
-	enrollments, err := h.enrollmentService.ListByUser(c.Context(), userID)
+	enrollments, err := h.enrollmentService.ListByUser(c.Context(), userID, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch enrollments")
 	}

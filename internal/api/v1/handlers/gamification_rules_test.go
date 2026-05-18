@@ -346,7 +346,11 @@ func TestPatchRule_TogglesEnabled(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
-func TestPatchRule_ScopeMismatch_403(t *testing.T) {
+// TestPatchRule_ScopeMismatch_404 locks the 13.1.E existence-leak
+// contract: a scope-mismatched PATCH must return 404, not 403. A 403
+// confirms the rule exists in some other scope (possibly another
+// tenant); 404 keeps the existence signal silent.
+func TestPatchRule_ScopeMismatch_404(t *testing.T) {
 	app, ruleRepo := setupRuleHandler(7, false) // course path will resolve to course scope
 	existing := &models.GamificationRule{
 		ID: 42, TenantID: 1, ScopeType: models.ScopeSite, ScopeID: 1,
@@ -358,7 +362,7 @@ func TestPatchRule_ScopeMismatch_403(t *testing.T) {
 	ruleRepo.On("FindByID", mock.Anything, uint(42)).Return(existing, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodPatch, "/api/v1/courses/99/gamification/rules/42", bytes.NewReader([]byte(`{"enabled":false}`)))
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
 func TestPatchRule_RejectsInvalidMergedState(t *testing.T) {
