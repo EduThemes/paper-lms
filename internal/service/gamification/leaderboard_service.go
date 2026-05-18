@@ -522,7 +522,7 @@ type PseudonymPoolSample struct {
 // the policy disallows the switcher.
 func (s *LeaderboardService) PseudonymCatalogForViewer(ctx context.Context, viewerID, courseID, tenantID uint, isAdminLocals bool) (catalog []PseudonymPoolSample, firstNameAvailable bool, current models.Enrollment, err error) {
 	enrollment, err := s.enrollmentRepo.FindByUserAndCourse(ctx, viewerID, courseID, tenantID)
-	if err != nil {
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, false, models.Enrollment{}, err
 	}
 	if enrollment == nil || enrollment.WorkflowState != "active" {
@@ -567,7 +567,7 @@ type PseudonymUpdateResult struct {
 // UpdatePseudonymForSelf is the learner-facing switcher (W3-B).
 func (s *LeaderboardService) UpdatePseudonymForSelf(ctx context.Context, viewerID, courseID, tenantID uint, isAdminLocals bool, req PseudonymUpdateRequest) (*PseudonymUpdateResult, error) {
 	enrollment, err := s.enrollmentRepo.FindByUserAndCourse(ctx, viewerID, courseID, tenantID)
-	if err != nil {
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 	if enrollment == nil || enrollment.WorkflowState != "active" {
