@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Trash2, Plus } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
@@ -26,6 +27,7 @@ const generateSlots = (date, startTime, endTime, durationMin) => {
 };
 
 const AppointmentGroupEditorPage = () => {
+  const { t } = useTranslation();
   const { courseId, groupId } = useParams();
   const navigate = useNavigate();
   const isEditing = Boolean(groupId);
@@ -119,7 +121,7 @@ const AppointmentGroupEditorPage = () => {
     return (
       <Layout>
         <CourseNav courseId={courseId} />
-        <div className="p-6 text-text-tertiary">Loading…</div>
+        <div className="p-6 text-text-tertiary">{t('common.loading')}</div>
       </Layout>
     );
   }
@@ -133,11 +135,11 @@ const AppointmentGroupEditorPage = () => {
           onClick={() => navigate(`/courses/${courseId}/appointment_groups`)}
           className="mb-4 inline-flex items-center gap-1 text-sm text-text-secondary hover:text-text-primary"
         >
-          <ArrowLeft className="h-4 w-4" /> Back
+          <ArrowLeft className="h-4 w-4" /> {t('common.back')}
         </button>
 
         <h1 className="mb-6 text-2xl font-semibold text-text-primary">
-          {isEditing ? 'Edit Appointment Group' : 'New Appointment Group'}
+          {isEditing ? t('appointmentGroupEditor.editTitle') : t('appointmentGroupEditor.newTitle')}
         </h1>
 
         {error && (
@@ -146,7 +148,7 @@ const AppointmentGroupEditorPage = () => {
 
         <form onSubmit={submit} className="space-y-6 rounded-lg border border-border-default bg-surface-0 p-6">
           <div>
-            <label className="mb-1 block text-sm font-medium text-text-secondary">Title</label>
+            <label className="mb-1 block text-sm font-medium text-text-secondary">{t('common.title')}</label>
             <input
               type="text"
               required
@@ -157,7 +159,7 @@ const AppointmentGroupEditorPage = () => {
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-text-secondary">Description</label>
+            <label className="mb-1 block text-sm font-medium text-text-secondary">{t('common.description')}</label>
             <textarea
               rows={3}
               value={form.description}
@@ -168,7 +170,7 @@ const AppointmentGroupEditorPage = () => {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-sm font-medium text-text-secondary">Location name</label>
+              <label className="mb-1 block text-sm font-medium text-text-secondary">{t('appointmentGroupEditor.locationName')}</label>
               <input
                 type="text"
                 value={form.location_name}
@@ -177,7 +179,7 @@ const AppointmentGroupEditorPage = () => {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-text-secondary">Location address</label>
+              <label className="mb-1 block text-sm font-medium text-text-secondary">{t('appointmentGroupEditor.locationAddress')}</label>
               <input
                 type="text"
                 value={form.location_address}
@@ -189,7 +191,7 @@ const AppointmentGroupEditorPage = () => {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-sm font-medium text-text-secondary">Participants per slot</label>
+              <label className="mb-1 block text-sm font-medium text-text-secondary">{t('appointmentGroupEditor.participantsPerSlot')}</label>
               <input
                 type="number"
                 min={1}
@@ -199,7 +201,7 @@ const AppointmentGroupEditorPage = () => {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-text-secondary">Max per student</label>
+              <label className="mb-1 block text-sm font-medium text-text-secondary">{t('appointmentGroupEditor.maxPerStudent')}</label>
               <input
                 type="number"
                 min={1}
@@ -212,10 +214,10 @@ const AppointmentGroupEditorPage = () => {
 
           {!isEditing && (
             <div className="rounded-md border border-border-default bg-surface-1 p-4">
-              <h2 className="mb-3 text-sm font-semibold text-text-secondary">Generate slots</h2>
+              <h2 className="mb-3 text-sm font-semibold text-text-secondary">{t('appointmentGroupEditor.generateSlots')}</h2>
               <div className="grid gap-3 sm:grid-cols-4">
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-text-secondary">Date</label>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">{t('common.date')}</label>
                   <input
                     type="date"
                     value={genDate}
@@ -224,7 +226,7 @@ const AppointmentGroupEditorPage = () => {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-text-secondary">Start</label>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">{t('appointmentGroupEditor.start')}</label>
                   <input
                     type="time"
                     value={genStart}
@@ -233,7 +235,7 @@ const AppointmentGroupEditorPage = () => {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-text-secondary">End</label>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">{t('appointmentGroupEditor.end')}</label>
                   <input
                     type="time"
                     value={genEnd}
@@ -242,7 +244,7 @@ const AppointmentGroupEditorPage = () => {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-text-secondary">Duration (min)</label>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">{t('appointmentGroupEditor.durationMin')}</label>
                   <input
                     type="number"
                     min={1}
@@ -254,7 +256,7 @@ const AppointmentGroupEditorPage = () => {
               </div>
               <div className="mt-3 flex items-center justify-between">
                 <span className="text-xs text-text-tertiary">
-                  {generated.length} slot{generated.length === 1 ? '' : 's'} preview
+                  {t('appointmentGroupEditor.slotsPreview', { count: generated.length })}
                 </span>
                 <button
                   type="button"
@@ -262,7 +264,7 @@ const AppointmentGroupEditorPage = () => {
                   disabled={!generated.length}
                   className="inline-flex items-center gap-1 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
                 >
-                  <Plus className="h-4 w-4" /> Add to group
+                  <Plus className="h-4 w-4" /> {t('appointmentGroupEditor.addToGroup')}
                 </button>
               </div>
 
@@ -293,14 +295,18 @@ const AppointmentGroupEditorPage = () => {
               onClick={() => navigate(`/courses/${courseId}/appointment_groups`)}
               className="rounded-md border border-border-strong bg-surface-0 px-4 py-2 text-sm font-medium text-text-secondary hover:bg-surface-1"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
               disabled={saving}
               className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
             >
-              {saving ? 'Saving…' : isEditing ? 'Save Changes' : 'Create Group'}
+              {saving
+                ? t('common.saving')
+                : isEditing
+                ? t('appointmentGroupEditor.saveChanges')
+                : t('appointmentGroupEditor.createGroup')}
             </button>
           </div>
         </form>
