@@ -20,10 +20,15 @@ type CalendarEventRepository interface {
 
 type ConversationRepository interface {
 	Create(ctx context.Context, conversation *models.Conversation) error
-	FindByID(ctx context.Context, id uint) (*models.Conversation, error)
+	// FindByID — 13.1.D: tenant-scope via the creator's account_id.
+	// Conversations carry no direct account_id column; the
+	// CreatedByUserID joins to users.account_id. Cross-tenant returns
+	// gorm.ErrRecordNotFound (handler surfaces as 404).
+	FindByID(ctx context.Context, id, accountID uint) (*models.Conversation, error)
 	Update(ctx context.Context, conversation *models.Conversation) error
 	Delete(ctx context.Context, id uint) error
-	ListByUserID(ctx context.Context, userID uint, params PaginationParams) (*PaginatedResult[models.Conversation], error)
+	// ListByUserID — caller's tenant; userID is the participant filter.
+	ListByUserID(ctx context.Context, userID, accountID uint, params PaginationParams) (*PaginatedResult[models.Conversation], error)
 }
 
 type ConversationParticipantRepository interface {
@@ -52,13 +57,16 @@ type NotificationPreferenceRepository interface {
 
 type NotificationRepository interface {
 	Create(ctx context.Context, notification *models.Notification) error
-	FindByID(ctx context.Context, id uint) (*models.Notification, error)
+	// FindByID — 13.1.D: tenant-scope via the notification's owning
+	// user. Notifications carry no direct account_id; UserID joins to
+	// users.account_id. Cross-tenant returns gorm.ErrRecordNotFound.
+	FindByID(ctx context.Context, id, accountID uint) (*models.Notification, error)
 	Update(ctx context.Context, notification *models.Notification) error
 	Delete(ctx context.Context, id uint) error
-	ListByUserID(ctx context.Context, userID uint, params PaginationParams) (*PaginatedResult[models.Notification], error)
-	MarkAsRead(ctx context.Context, userID, notificationID uint) error
-	MarkAllAsRead(ctx context.Context, userID uint) error
-	ListUnreadByUserID(ctx context.Context, userID uint, params PaginationParams) (*PaginatedResult[models.Notification], error)
+	ListByUserID(ctx context.Context, userID, accountID uint, params PaginationParams) (*PaginatedResult[models.Notification], error)
+	MarkAsRead(ctx context.Context, userID, notificationID, accountID uint) error
+	MarkAllAsRead(ctx context.Context, userID, accountID uint) error
+	ListUnreadByUserID(ctx context.Context, userID, accountID uint, params PaginationParams) (*PaginatedResult[models.Notification], error)
 }
 
 type PlannerNoteRepository interface {
