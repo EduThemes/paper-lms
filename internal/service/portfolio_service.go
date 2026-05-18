@@ -71,8 +71,11 @@ func (s *PortfolioService) CreatePortfolio(ctx context.Context, portfolio *model
 	return s.portfolioRepo.Create(ctx, portfolio)
 }
 
-func (s *PortfolioService) GetPortfolio(ctx context.Context, id uint) (*models.Portfolio, error) {
-	portfolio, err := s.portfolioRepo.FindByID(ctx, id)
+// GetPortfolio returns a portfolio by ID, scoped to the caller's tenant.
+// 13.1.D — accountID=0 means "no tenant scope" (internal callers only);
+// handler-routed callers MUST pass callerAccountID(c).
+func (s *PortfolioService) GetPortfolio(ctx context.Context, id, accountID uint) (*models.Portfolio, error) {
+	portfolio, err := s.portfolioRepo.FindByID(ctx, id, accountID)
 	if err != nil {
 		return nil, errors.New("portfolio not found")
 	}
@@ -95,16 +98,16 @@ func (s *PortfolioService) GetByPublicURL(ctx context.Context, url string) (*mod
 	return portfolio, nil
 }
 
-func (s *PortfolioService) UpdatePortfolio(ctx context.Context, portfolio *models.Portfolio) error {
-	_, err := s.portfolioRepo.FindByID(ctx, portfolio.ID)
+func (s *PortfolioService) UpdatePortfolio(ctx context.Context, portfolio *models.Portfolio, accountID uint) error {
+	_, err := s.portfolioRepo.FindByID(ctx, portfolio.ID, accountID)
 	if err != nil {
 		return errors.New("portfolio not found")
 	}
 	return s.portfolioRepo.Update(ctx, portfolio)
 }
 
-func (s *PortfolioService) PublishPortfolio(ctx context.Context, id uint) (*models.Portfolio, error) {
-	portfolio, err := s.portfolioRepo.FindByID(ctx, id)
+func (s *PortfolioService) PublishPortfolio(ctx context.Context, id, accountID uint) (*models.Portfolio, error) {
+	portfolio, err := s.portfolioRepo.FindByID(ctx, id, accountID)
 	if err != nil {
 		return nil, errors.New("portfolio not found")
 	}
@@ -121,8 +124,8 @@ func (s *PortfolioService) PublishPortfolio(ctx context.Context, id uint) (*mode
 	return portfolio, nil
 }
 
-func (s *PortfolioService) ArchivePortfolio(ctx context.Context, id uint) error {
-	portfolio, err := s.portfolioRepo.FindByID(ctx, id)
+func (s *PortfolioService) ArchivePortfolio(ctx context.Context, id, accountID uint) error {
+	portfolio, err := s.portfolioRepo.FindByID(ctx, id, accountID)
 	if err != nil {
 		return errors.New("portfolio not found")
 	}
@@ -167,25 +170,25 @@ func (s *PortfolioService) AddSection(ctx context.Context, section *models.Portf
 	return s.sectionRepo.Create(ctx, section)
 }
 
-func (s *PortfolioService) UpdateSection(ctx context.Context, section *models.PortfolioSection) error {
-	_, err := s.sectionRepo.FindByID(ctx, section.ID)
+func (s *PortfolioService) UpdateSection(ctx context.Context, section *models.PortfolioSection, accountID uint) error {
+	_, err := s.sectionRepo.FindByID(ctx, section.ID, accountID)
 	if err != nil {
 		return errors.New("section not found")
 	}
 	return s.sectionRepo.Update(ctx, section)
 }
 
-func (s *PortfolioService) RemoveSection(ctx context.Context, id uint) error {
-	_, err := s.sectionRepo.FindByID(ctx, id)
+func (s *PortfolioService) RemoveSection(ctx context.Context, id, accountID uint) error {
+	_, err := s.sectionRepo.FindByID(ctx, id, accountID)
 	if err != nil {
 		return errors.New("section not found")
 	}
 	return s.sectionRepo.Delete(ctx, id)
 }
 
-func (s *PortfolioService) ReorderSections(ctx context.Context, portfolioID uint, sectionIDs []uint) error {
+func (s *PortfolioService) ReorderSections(ctx context.Context, portfolioID uint, sectionIDs []uint, accountID uint) error {
 	for i, sectionID := range sectionIDs {
-		section, err := s.sectionRepo.FindByID(ctx, sectionID)
+		section, err := s.sectionRepo.FindByID(ctx, sectionID, accountID)
 		if err != nil {
 			return fmt.Errorf("section %d not found", sectionID)
 		}
@@ -221,16 +224,16 @@ func (s *PortfolioService) AddArtifact(ctx context.Context, artifact *models.Por
 	return s.artifactRepo.Create(ctx, artifact)
 }
 
-func (s *PortfolioService) UpdateArtifact(ctx context.Context, artifact *models.PortfolioArtifact) error {
-	_, err := s.artifactRepo.FindByID(ctx, artifact.ID)
+func (s *PortfolioService) UpdateArtifact(ctx context.Context, artifact *models.PortfolioArtifact, accountID uint) error {
+	_, err := s.artifactRepo.FindByID(ctx, artifact.ID, accountID)
 	if err != nil {
 		return errors.New("artifact not found")
 	}
 	return s.artifactRepo.Update(ctx, artifact)
 }
 
-func (s *PortfolioService) RemoveArtifact(ctx context.Context, id uint) error {
-	_, err := s.artifactRepo.FindByID(ctx, id)
+func (s *PortfolioService) RemoveArtifact(ctx context.Context, id, accountID uint) error {
+	_, err := s.artifactRepo.FindByID(ctx, id, accountID)
 	if err != nil {
 		return errors.New("artifact not found")
 	}
@@ -241,8 +244,8 @@ func (s *PortfolioService) ListArtifacts(ctx context.Context, portfolioID uint, 
 	return s.artifactRepo.ListByPortfolioID(ctx, portfolioID, params)
 }
 
-func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uint, courseID uint, submissionIDs []uint) ([]models.PortfolioArtifact, error) {
-	portfolio, err := s.portfolioRepo.FindByID(ctx, portfolioID)
+func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uint, courseID uint, submissionIDs []uint, accountID uint) ([]models.PortfolioArtifact, error) {
+	portfolio, err := s.portfolioRepo.FindByID(ctx, portfolioID, accountID)
 	if err != nil {
 		return nil, errors.New("portfolio not found")
 	}
@@ -250,14 +253,14 @@ func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uin
 	var imported []models.PortfolioArtifact
 
 	for _, submissionID := range submissionIDs {
-		submission, err := s.submissionRepo.FindByID(ctx, submissionID, 0)
+		submission, err := s.submissionRepo.FindByID(ctx, submissionID, accountID)
 		if err != nil {
 			continue // skip submissions that can't be found
 		}
 
 		// Look up the assignment name for the artifact title
 		artifactTitle := fmt.Sprintf("Submission #%d", submissionID)
-		assignment, assignErr := s.assignmentRepo.FindByID(ctx, submission.AssignmentID, 0)
+		assignment, assignErr := s.assignmentRepo.FindByID(ctx, submission.AssignmentID, accountID)
 		if assignErr == nil {
 			artifactTitle = assignment.Name
 		}
@@ -292,7 +295,7 @@ func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uin
 // Reflections
 // ---------------------------------------------------------------------------
 
-func (s *PortfolioService) AddReflection(ctx context.Context, reflection *models.PortfolioReflection) error {
+func (s *PortfolioService) AddReflection(ctx context.Context, reflection *models.PortfolioReflection, accountID uint) error {
 	if reflection.Content == "" {
 		return errors.New("reflection content is required")
 	}
@@ -303,7 +306,7 @@ func (s *PortfolioService) AddReflection(ctx context.Context, reflection *models
 		return errors.New("user_id is required")
 	}
 
-	_, err := s.artifactRepo.FindByID(ctx, reflection.ArtifactID)
+	_, err := s.artifactRepo.FindByID(ctx, reflection.ArtifactID, accountID)
 	if err != nil {
 		return errors.New("artifact not found")
 	}
@@ -311,8 +314,8 @@ func (s *PortfolioService) AddReflection(ctx context.Context, reflection *models
 	return s.reflectionRepo.Create(ctx, reflection)
 }
 
-func (s *PortfolioService) UpdateReflection(ctx context.Context, reflection *models.PortfolioReflection) error {
-	_, err := s.reflectionRepo.FindByID(ctx, reflection.ID)
+func (s *PortfolioService) UpdateReflection(ctx context.Context, reflection *models.PortfolioReflection, accountID uint) error {
+	_, err := s.reflectionRepo.FindByID(ctx, reflection.ID, accountID)
 	if err != nil {
 		return errors.New("reflection not found")
 	}
@@ -410,8 +413,8 @@ func (s *PortfolioService) ListTemplates(ctx context.Context, params repository.
 // Export
 // ---------------------------------------------------------------------------
 
-func (s *PortfolioService) ExportAsStaticSite(ctx context.Context, portfolioID uint) ([]byte, error) {
-	portfolio, err := s.portfolioRepo.FindByID(ctx, portfolioID)
+func (s *PortfolioService) ExportAsStaticSite(ctx context.Context, portfolioID, accountID uint) ([]byte, error) {
+	portfolio, err := s.portfolioRepo.FindByID(ctx, portfolioID, accountID)
 	if err != nil {
 		return nil, errors.New("portfolio not found")
 	}
@@ -455,8 +458,8 @@ func (s *PortfolioService) ExportAsStaticSite(ctx context.Context, portfolioID u
 	return buf.Bytes(), nil
 }
 
-func (s *PortfolioService) ExportAsPDF(ctx context.Context, portfolioID uint) ([]byte, error) {
-	portfolio, err := s.portfolioRepo.FindByID(ctx, portfolioID)
+func (s *PortfolioService) ExportAsPDF(ctx context.Context, portfolioID, accountID uint) ([]byte, error) {
+	portfolio, err := s.portfolioRepo.FindByID(ctx, portfolioID, accountID)
 	if err != nil {
 		return nil, errors.New("portfolio not found")
 	}
