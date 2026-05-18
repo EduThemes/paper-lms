@@ -124,7 +124,10 @@ type viewerRoleResolution struct {
 func (s *LeaderboardService) resolveViewerRoleInCourse(ctx context.Context, viewerID, courseID, tenantID uint, isAdminLocals bool) (ViewerRole, error) {
 	isAdmin := isAdminLocals
 	if !isAdmin && s.userRepo != nil {
-		if user, err := s.userRepo.FindByID(ctx, viewerID); err == nil && user != nil && user.Role == "admin" {
+		// AUTH-INTERNAL: viewer-role fallback. viewerID is the JWT
+		// subject; role check is tenant-independent. accountID=0 is
+		// correct (matches RequireAdmin middleware pattern).
+		if user, err := s.userRepo.FindByID(ctx, viewerID, 0); err == nil && user != nil && user.Role == "admin" {
 			isAdmin = true
 		}
 	}
@@ -251,7 +254,7 @@ func (s *LeaderboardService) GetCourseLeaderboard(ctx context.Context, in Course
 		if window.NextToBeat != nil {
 			idsForName = append(idsForName, window.NextToBeat.UserID)
 		}
-		nameByID := s.LoadNamesByID(ctx, idsForName)
+		nameByID := s.LoadNamesByID(ctx, idsForName, in.TenantID)
 
 		out.Rows = s.BuildRelativeRowsWithNames(window.Rows, enrollmentByUser, policy, in.ViewerID, nameByID)
 		if window.NextToBeat != nil {
@@ -269,7 +272,7 @@ func (s *LeaderboardService) GetCourseLeaderboard(ctx context.Context, in Course
 		if n > len(ranked) {
 			n = len(ranked)
 		}
-		out.Rows = s.BuildRows(ctx, ranked[:n], enrollmentByUser, policy, in.ViewerID)
+		out.Rows = s.BuildRows(ctx, ranked[:n], enrollmentByUser, policy, in.ViewerID, in.TenantID)
 	default:
 		out.WindowKind = "full"
 		end := offset + limit
@@ -282,7 +285,7 @@ func (s *LeaderboardService) GetCourseLeaderboard(ctx context.Context, in Course
 		} else {
 			page = nil
 		}
-		out.Rows = s.BuildRows(ctx, page, enrollmentByUser, policy, in.ViewerID)
+		out.Rows = s.BuildRows(ctx, page, enrollmentByUser, policy, in.ViewerID, in.TenantID)
 	}
 	return out, nil
 }
@@ -290,12 +293,12 @@ func (s *LeaderboardService) GetCourseLeaderboard(ctx context.Context, in Course
 // BuildRows materializes the leaderboard slice into rows, applying pseudonym
 // substitution where policy demands it. Public so the handler tests and
 // callers can compose the path.
-func (s *LeaderboardService) BuildRows(ctx context.Context, page []repository.RankRow, enrollmentByUser map[uint]models.Enrollment, policy LeaderboardRenderPolicy, viewerID uint) []LeaderboardRow {
+func (s *LeaderboardService) BuildRows(ctx context.Context, page []repository.RankRow, enrollmentByUser map[uint]models.Enrollment, policy LeaderboardRenderPolicy, viewerID, tenantID uint) []LeaderboardRow {
 	idsForName := make([]uint, 0, len(page))
 	for _, r := range page {
 		idsForName = append(idsForName, r.UserID)
 	}
-	nameByID := s.LoadNamesByID(ctx, idsForName)
+	nameByID := s.LoadNamesByID(ctx, idsForName, tenantID)
 	out := make([]LeaderboardRow, 0, len(page))
 	for _, r := range page {
 		legal := nameByID[r.UserID]
@@ -347,11 +350,11 @@ func (s *LeaderboardService) BuildRelativeRowsWithNames(window []RelativeRow, en
 // LoadNamesByID is the single FindByIDs entry point. Soft-fails to an empty
 // map on error so a name-lookup outage degrades to "User #N" rather than a
 // 500 from the caller's path.
-func (s *LeaderboardService) LoadNamesByID(ctx context.Context, ids []uint) map[uint]string {
+func (s *LeaderboardService) LoadNamesByID(ctx context.Context, ids []uint, tenantID uint) map[uint]string {
 	if len(ids) == 0 {
 		return map[uint]string{}
 	}
-	users, err := s.userRepo.FindByIDs(ctx, ids)
+	users, err := s.userRepo.FindByIDs(ctx, ids, tenantID)
 	if err != nil {
 		return map[uint]string{}
 	}
@@ -435,7 +438,7 @@ func (s *LeaderboardService) serveSnapshotLeaderboard(ctx context.Context, cours
 		enrollmentByUser[e.UserID] = e
 	}
 
-	nameByID := s.LoadNamesByID(ctx, candidateIDs)
+	nameByID := s.LoadNamesByID(ctx, candidateIDs, tenantID)
 	rows := make([]LeaderboardRow, 0, len(filtered))
 	for _, r := range filtered {
 		legal := nameByID[r.UserID]
@@ -634,7 +637,10 @@ func (s *LeaderboardService) policyForViewerInCourse(ctx context.Context, viewer
 func (s *LeaderboardService) roleFromAdminOrEnrollment(ctx context.Context, viewerID uint, enrollment *models.Enrollment, isAdminLocals bool) ViewerRole {
 	isAdmin := isAdminLocals
 	if !isAdmin && s.userRepo != nil && viewerID > 0 {
-		if user, err := s.userRepo.FindByID(ctx, viewerID); err == nil && user != nil && user.Role == "admin" {
+		// AUTH-INTERNAL: viewer-role fallback. viewerID is the JWT
+		// subject; role check is tenant-independent. accountID=0 is
+		// correct (matches RequireAdmin middleware pattern).
+		if user, err := s.userRepo.FindByID(ctx, viewerID, 0); err == nil && user != nil && user.Role == "admin" {
 			isAdmin = true
 		}
 	}

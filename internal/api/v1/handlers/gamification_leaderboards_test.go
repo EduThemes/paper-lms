@@ -89,7 +89,7 @@ func TestGetCourseLeaderboard_AdminSeesRealNamesAndTopN(t *testing.T) {
 		Return(course1ActiveEnrollments(), nil)
 	// Admin doesn't have a row in the candidate set; userRepo lookup is
 	// still required (no admin middleware on this route).
-	userRepo.On("FindByID", mock.Anything, uint(adminID)).
+	userRepo.On("FindByID", mock.Anything, uint(adminID), uint(0)).
 		Return(&models.User{ID: adminID, Name: "Avery Admin", Role: "admin"}, nil).Maybe()
 
 	candidateIDs := []uint{100, 101, 102, 103, 104, 105}
@@ -105,7 +105,7 @@ func TestGetCourseLeaderboard_AdminSeesRealNamesAndTopN(t *testing.T) {
 	}
 	walletRepo.On("RankByCurrency", mock.Anything, uint(1), candidateIDs).
 		Return(rankRows, nil)
-	userRepo.On("FindByIDs", mock.Anything, mock.Anything).
+	userRepo.On("FindByIDs", mock.Anything, mock.Anything, uint(1)).
 		Return([]models.User{
 			{ID: 100, Name: "Sofia Alvarez"},
 			{ID: 101, Name: "Ben Carter"},
@@ -144,7 +144,7 @@ func TestGetCourseLeaderboard_K5StudentSeesPseudonymsAndRelativeWindow(t *testin
 			Type: "StudentEnrollment", WorkflowState: "active",
 			PseudonymPoolCode: "animals_v1",
 		}, nil)
-	userRepo.On("FindByID", mock.Anything, uint(viewerID)).
+	userRepo.On("FindByID", mock.Anything, uint(viewerID), uint(0)).
 		Return(&models.User{ID: viewerID, Name: "Gabriel O'Donnell", Role: "user"}, nil).Maybe()
 
 	candidateIDs := []uint{100, 101, 102, 103, 104, 105}
@@ -160,7 +160,7 @@ func TestGetCourseLeaderboard_K5StudentSeesPseudonymsAndRelativeWindow(t *testin
 	}
 	walletRepo.On("RankByCurrency", mock.Anything, uint(1), candidateIDs).
 		Return(rankRows, nil)
-	userRepo.On("FindByIDs", mock.Anything, mock.Anything).
+	userRepo.On("FindByIDs", mock.Anything, mock.Anything, uint(1)).
 		Return([]models.User{
 			{ID: 103, Name: "Diego Martinez"},
 			{ID: 104, Name: "Emma Patel"},
@@ -221,7 +221,7 @@ func TestGetCourseLeaderboard_OptedOutStudentDroppedFromRanking(t *testing.T) {
 			Type: "StudentEnrollment", WorkflowState: "active",
 			PseudonymPoolCode: "animals_v1",
 		}, nil)
-	userRepo.On("FindByID", mock.Anything, uint(viewerID)).
+	userRepo.On("FindByID", mock.Anything, uint(viewerID), uint(0)).
 		Return(&models.User{ID: viewerID, Name: "Sofia Alvarez", Role: "user"}, nil).Maybe()
 
 	candidateIDs := []uint{100, 101, 102, 103, 104, 105}
@@ -238,7 +238,7 @@ func TestGetCourseLeaderboard_OptedOutStudentDroppedFromRanking(t *testing.T) {
 	}
 	walletRepo.On("RankByCurrency", mock.Anything, uint(1), filtered).
 		Return(rankRows, nil)
-	userRepo.On("FindByIDs", mock.Anything, mock.Anything).
+	userRepo.On("FindByIDs", mock.Anything, mock.Anything, uint(1)).
 		Return([]models.User{
 			{ID: 100, Name: "Sofia Alvarez"},
 			{ID: 101, Name: "Ben Carter"},
@@ -272,7 +272,7 @@ func TestGetCourseLeaderboard_UnknownCurrencyReturns400(t *testing.T) {
 			ID: 200, UserID: 100, CourseID: 1,
 			Type: "StudentEnrollment", WorkflowState: "active",
 		}, nil)
-	userRepo.On("FindByID", mock.Anything, uint(100)).
+	userRepo.On("FindByID", mock.Anything, uint(100), uint(0)).
 		Return(&models.User{ID: 100, Name: "Sofia Alvarez", Role: "user"}, nil).Maybe()
 
 	resp := requestLeaderboard(t, app, "/api/v1/courses/1/leaderboard?currency=doesnotexist")
@@ -285,7 +285,7 @@ func TestGetCourseLeaderboard_SnapshotMissingReturns404(t *testing.T) {
 
 	currencyRepo.On("FindByCode", mock.Anything, uint(1), models.ScopeSite, uint(1), "xp").
 		Return(xpCurrency(), nil)
-	userRepo.On("FindByID", mock.Anything, uint(adminID)).
+	userRepo.On("FindByID", mock.Anything, uint(adminID), uint(0)).
 		Return(&models.User{ID: adminID, Name: "Avery Admin", Role: "admin"}, nil).Maybe()
 	// Snapshot lookup returns nil → handler emits 404.
 	snapshotRepo.On("FindByWindow", mock.Anything, models.ScopeCourse, uint(1), uint(1), "weekly", mock.Anything).
@@ -303,7 +303,7 @@ func TestGetCourseLeaderboard_SnapshotReadAppliesOptOutAtReadTime(t *testing.T) 
 		Return(xpCurrency(), nil)
 	accountRepo.On("FindByID", mock.Anything, uint(1)).
 		Return(&models.Account{ID: 1, TenantMode: "higher_ed"}, nil)
-	userRepo.On("FindByID", mock.Anything, uint(adminID)).
+	userRepo.On("FindByID", mock.Anything, uint(adminID), uint(0)).
 		Return(&models.User{ID: adminID, Name: "Avery Admin", Role: "admin"}, nil).Maybe()
 
 	// Snapshot payload was written before user 103 opted out. The
@@ -336,7 +336,7 @@ func TestGetCourseLeaderboard_SnapshotReadAppliesOptOutAtReadTime(t *testing.T) 
 
 	enrollmentRepo.On("ListActiveStudentEnrollmentsByCourse", mock.Anything, uint(1), mock.AnythingOfType("uint")).
 		Return(course1ActiveEnrollments(), nil)
-	userRepo.On("FindByIDs", mock.Anything, mock.Anything).
+	userRepo.On("FindByIDs", mock.Anything, mock.Anything, uint(1)).
 		Return([]models.User{
 			{ID: 100, Name: "Sofia Alvarez"},
 			{ID: 101, Name: "Ben Carter"},
@@ -371,7 +371,7 @@ func TestGetCourseLeaderboard_NotEnrolledReturns404(t *testing.T) {
 
 	enrollmentRepo.On("FindByUserAndCourse", mock.Anything, uint(viewerID), uint(1), mock.AnythingOfType("uint")).
 		Return((*models.Enrollment)(nil), nil)
-	userRepo.On("FindByID", mock.Anything, uint(viewerID)).
+	userRepo.On("FindByID", mock.Anything, uint(viewerID), uint(0)).
 		Return(&models.User{ID: viewerID, Name: "Stranger", Role: "user"}, nil).Maybe()
 
 	resp := requestLeaderboard(t, app, "/api/v1/courses/1/leaderboard")

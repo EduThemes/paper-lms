@@ -391,7 +391,7 @@ func (h *SubmissionHandler) CreateSubmissionComment(c *fiber.Ctx) error {
 	}
 
 	j := submissionCommentToJSON(comment)
-	if author, err := h.userRepo.FindByID(c.Context(), authorID); err == nil {
+	if author, err := h.userRepo.FindByID(c.Context(), authorID, callerAccountID(c)); err == nil {
 		j["author_name"] = author.Name
 	}
 	return c.Status(fiber.StatusCreated).JSON(j)
@@ -423,7 +423,7 @@ func (h *SubmissionHandler) ListSubmissionComments(c *fiber.Ctx) error {
 	authorNames := make(map[uint]string)
 	for _, sc := range comments {
 		if _, ok := authorNames[sc.AuthorID]; !ok {
-			if author, err := h.userRepo.FindByID(c.Context(), sc.AuthorID); err == nil {
+			if author, err := h.userRepo.FindByID(c.Context(), sc.AuthorID, callerAccountID(c)); err == nil {
 				authorNames[sc.AuthorID] = author.Name
 			}
 		}

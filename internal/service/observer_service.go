@@ -129,14 +129,17 @@ func (s *ObserverService) SetOverviewDeps(
 // student is enrolled in. The AssociatedUserID on each enrollment is set to the
 // student's user ID so the observer is linked to that student.
 func (s *ObserverService) LinkObserverToStudent(ctx context.Context, observerUserID, studentUserID uint) error {
-	// Validate that the observer user exists.
-	_, err := s.userRepo.FindByID(ctx, observerUserID)
+	// Validate that the observer user exists. Observer linking
+	// (pairing-code flow) was already tenant-validated upstream via
+	// the pairing code. accountID=0 preserves pre-widening semantics;
+	// Sprint 2.3 leftover threads tenant from the observer handler.
+	_, err := s.userRepo.FindByID(ctx, observerUserID, 0)
 	if err != nil {
 		return errors.New("observer user not found")
 	}
 
 	// Validate that the student user exists.
-	_, err = s.userRepo.FindByID(ctx, studentUserID)
+	_, err = s.userRepo.FindByID(ctx, studentUserID, 0)
 	if err != nil {
 		return errors.New("student user not found")
 	}

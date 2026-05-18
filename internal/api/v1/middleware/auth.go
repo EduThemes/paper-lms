@@ -117,7 +117,12 @@ func (m *AuthMiddleware) Protected() fiber.Handler {
 			if acctFloat, ok := claims["account_id"].(float64); ok && acctFloat > 0 {
 				c.Locals("account_id", uint(acctFloat))
 			} else if m.userRepo != nil {
-				if user, lookupErr := m.userRepo.FindByID(c.Context(), uint(idFloat)); lookupErr == nil && user != nil {
+				// AUTH-INTERNAL: this lookup runs INSIDE the auth
+				// middleware to back-fill account_id Locals from the DB
+				// when an old JWT lacks the claim. accountID=0 is the
+				// only correct value here — we haven't set the Locals
+				// yet, and the user-id is the JWT-attested subject.
+				if user, lookupErr := m.userRepo.FindByID(c.Context(), uint(idFloat), 0); lookupErr == nil && user != nil {
 					if user.AccountID == 0 {
 						return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 							"errors": []fiber.Map{{"message": "session predates tenant assignment; please log in again"}},
@@ -150,7 +155,10 @@ func (m *AuthMiddleware) Protected() fiber.Handler {
 				// access-token path always does a user lookup anyway,
 				// adding the role is free.
 				if m.userRepo != nil {
-					user, userErr := m.userRepo.FindByID(c.Context(), accessToken.UserID)
+					// AUTH-INTERNAL: same justification as the JWT path
+					// above. accountID=0 is the correct value here;
+					// Locals is populated from this lookup downstream.
+					user, userErr := m.userRepo.FindByID(c.Context(), accessToken.UserID, 0)
 					if userErr == nil {
 						c.Locals("user_email", user.Email)
 						c.Locals("user_name", user.Name)

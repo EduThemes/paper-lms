@@ -98,7 +98,10 @@ func (s *NotificationDeliveryService) scopeCtxFor(ctx context.Context, userID ui
 	if userID == 0 {
 		return ctx
 	}
-	u, err := s.userRepo.FindByID(ctx, userID)
+	// Settings context derivation: the whole point of this lookup is
+	// to discover the user's account_id. accountID=0 is correct
+	// (we're learning the tenant, not enforcing it).
+	u, err := s.userRepo.FindByID(ctx, userID, 0)
 	if err != nil || u == nil || u.AccountID == 0 {
 		return ctx
 	}
@@ -217,7 +220,11 @@ func (s *NotificationDeliveryService) QueueNotification(
 	channels, err := s.channelRepo.ListByUserID(ctx, userID)
 	if err != nil || len(channels) == 0 {
 		// Fall back to user email if no explicit communication channels exist
-		user, userErr := s.userRepo.FindByID(ctx, userID)
+		// Notification fallback lookup: background job; tenant scope
+		// was already validated when the delivery was queued. Wave 2
+		// passes 0 to preserve pre-widening semantics; Sprint 2.3
+		// leftover threads tenant through notification flows.
+		user, userErr := s.userRepo.FindByID(ctx, userID, 0)
 		if userErr != nil {
 			return fmt.Errorf("failed to find user %d: %w", userID, userErr)
 		}

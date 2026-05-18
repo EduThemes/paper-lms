@@ -416,7 +416,7 @@ func TestTenantIsolation_GetConversation(t *testing.T) {
 		expectAccountIDPassThrough(&convRepo.Mock, "FindByID", resourceID, ownerOf(resourceID),
 			&models.Conversation{ID: resourceID, Subject: "s", WorkflowState: "active"})
 		// resolveParticipants makes a user lookup on the happy path.
-		userRepo.On("FindByID", mock.Anything, mock.AnythingOfType("uint")).Return(
+		userRepo.On("FindByID", mock.Anything, mock.AnythingOfType("uint"), mock.AnythingOfType("uint")).Return(
 			&models.User{ID: participant, Name: "U"}, nil,
 		).Maybe()
 
@@ -815,7 +815,117 @@ func TestTenantIsolation_ListPeerReviews(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 10) GET /portfolios/:id
+// 10) GET /users/:id (Wave 2 widening, 2026-05-17)
+// ---------------------------------------------------------------------------
+
+// TestTenantIsolation_GetUser locks the cross-tenant boundary on the
+// path-id user lookup. Before the Wave 2 widening, UserService.GetByID
+// took only (ctx, id) and the repo had no tenant filter, so any
+// authenticated user could fetch ANY user row by id (cross-tenant
+// PII leak). The fix threads callerAccountID(c) → service → repo,
+// matching the courseRepo.FindByID pattern.
+func TestTenantIsolation_GetUser(t *testing.T) {
+	statusFn := func(callerAccount, resourceID uint) int {
+		userRepo := new(mocks.MockUserRepository)
+
+		row := &models.User{
+			ID: resourceID, AccountID: ownerOf(resourceID),
+			Name: "U", Email: "u@test", LoginID: "u@test",
+		}
+		expectAccountIDPassThrough(&userRepo.Mock, "FindByID", resourceID, ownerOf(resourceID), row)
+
+		userSvc := service.NewUserService(userRepo)
+		h := handlers.NewUserHandler(userSvc, "test-jwt-secret", "test", nil, nil, nil)
+
+		app := testutil.SetupTestApp()
+		app.Use(authStub(callerFor(callerAccount), callerAccount), middleware.PaginationParams())
+		app.Get("/users/:id", h.GetUser)
+
+		resp := testutil.MakeRequest(app, http.MethodGet, fmt.Sprintf("/users/%d", resourceID), nil)
+		return resp.StatusCode
+	}
+
+	runMatrix(t, "GET /users/:id (Wave 2: tenant-scoped via UserService.GetByID)", standardMatrix(), statusFn)
+}
+
+// TestTenantIsolation_ListUsers locks the cross-tenant boundary on
+// the user-list endpoint when called WITHOUT a search term. Before
+// Wave 2 widening, the List call dropped to the repo without an
+// accountID arg, so any admin could enumerate users in any tenant.
+// The fix threads callerAccountID(c) → service.List → repo.List.
+func TestTenantIsolation_ListUsers(t *testing.T) {
+	type listResult struct {
+		statusCode int
+		bodyLen    int
+	}
+
+	run := func(callerAccount uint) listResult {
+		userRepo := new(mocks.MockUserRepository)
+
+		// Each tenant has exactly one user; the mock returns that user
+		// only when the caller's accountID matches.
+		userInA := models.User{ID: 10, AccountID: tenantA, Name: "Alice", Email: "alice@a", LoginID: "alice@a"}
+		userInB := models.User{ID: 20, AccountID: tenantB, Name: "Bob", Email: "bob@b", LoginID: "bob@b"}
+
+		userRepo.On("List", mock.Anything, mock.AnythingOfType("repository.PaginationParams"),
+			mock.MatchedBy(func(acct uint) bool { return acct == tenantA }),
+		).Return(&repository.PaginatedResult[models.User]{
+			Items: []models.User{userInA}, TotalCount: 1, Page: 1, PerPage: 25,
+		}, nil).Maybe()
+		userRepo.On("List", mock.Anything, mock.AnythingOfType("repository.PaginationParams"),
+			mock.MatchedBy(func(acct uint) bool { return acct == tenantB }),
+		).Return(&repository.PaginatedResult[models.User]{
+			Items: []models.User{userInB}, TotalCount: 1, Page: 1, PerPage: 25,
+		}, nil).Maybe()
+		// Any other accountID (including 0 — handler must NOT pass 0
+		// here per the 13.1.D contract) returns no rows. This is the
+		// leak detector: if the handler hardcodes 0, both tenants
+		// would see the empty set, failing the matrix.
+		userRepo.On("List", mock.Anything, mock.AnythingOfType("repository.PaginationParams"),
+			mock.MatchedBy(func(acct uint) bool { return acct != tenantA && acct != tenantB }),
+		).Return(&repository.PaginatedResult[models.User]{
+			Items: []models.User{}, TotalCount: 0, Page: 1, PerPage: 25,
+		}, nil).Maybe()
+
+		userSvc := service.NewUserService(userRepo)
+		h := handlers.NewUserHandler(userSvc, "test-jwt-secret", "test", nil, nil, nil)
+
+		app := testutil.SetupTestApp()
+		app.Use(authStub(callerFor(callerAccount), callerAccount), middleware.PaginationParams())
+		app.Get("/users", h.ListUsers)
+
+		resp := testutil.MakeRequest(app, http.MethodGet, "/users", nil)
+		out, _ := testutil.ParseJSONArray(resp)
+		return listResult{statusCode: resp.StatusCode, bodyLen: len(out)}
+	}
+
+	cases := []struct {
+		caller uint
+		want   int
+		desc   string
+	}{
+		{tenantA, 1, "tenantA caller — sees own user"},
+		{tenantB, 1, "tenantB caller — sees own user"},
+	}
+	for _, tc := range cases {
+		got := run(tc.caller)
+		if got.statusCode != http.StatusOK {
+			t.Errorf("GET /users: %s — expected 200, got %d", tc.desc, got.statusCode)
+			continue
+		}
+		if got.bodyLen != tc.want {
+			tag := ""
+			if tc.want > 0 && got.bodyLen == 0 {
+				tag = " — handler likely passed accountID=0 instead of callerAccountID(c)"
+			}
+			t.Errorf("GET /users: %s — expected %d rows, got %d%s",
+				tc.desc, tc.want, got.bodyLen, tag)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 11) GET /portfolios/:id
 // ---------------------------------------------------------------------------
 
 // TestTenantIsolation_GetPortfolio locks the Wave 2 widening of
@@ -1095,7 +1205,7 @@ func TestTenantIsolation_Leaderboard_NotEnrolled_Returns404(t *testing.T) {
 	// userRepo.FindByID for the admin check; not-admin path emits 404.
 	enrollRepo.On("FindByUserAndCourse", mock.Anything, userInA, uint(1), tenantA).
 		Return((*models.Enrollment)(nil), nil)
-	userRepo.On("FindByID", mock.Anything, userInA).
+	userRepo.On("FindByID", mock.Anything, userInA, mock.AnythingOfType("uint")).
 		Return(&models.User{ID: userInA, Name: "U", Role: "user"}, nil).Maybe()
 
 	h := handlers.NewGamificationHandler(walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo, ruleRepo, enrollRepo, accountRepo, snapshotRepo)

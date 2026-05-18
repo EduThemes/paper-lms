@@ -174,7 +174,12 @@ func (s *FERPAService) ProcessDeletion(ctx context.Context, requestID uint) erro
 
 	anonRows := 0
 	if s.userRepo != nil {
-		user, err := s.userRepo.FindByID(ctx, request.UserID)
+		// FERPA deletion processor: runs as a privileged background
+		// task; tenant scope is enforced at the deletion-request
+		// level (already validated by an admin in the request's home
+		// tenant). accountID=0 here matches the
+		// AUTH-INTERNAL / privileged-job semantics.
+		user, err := s.userRepo.FindByID(ctx, request.UserID, 0)
 		if err == nil && user != nil {
 			anon := fmt.Sprintf("deleted_user_%d", user.ID)
 			user.Name = anon
@@ -380,7 +385,9 @@ func (s *FERPAService) BuildExportZip(ctx context.Context, requestID, callerID u
 		return nil, ErrExportExpired
 	}
 
-	subject, err := s.userRepo.FindByID(ctx, request.UserID)
+	// FERPA export download: same privileged-job semantics as the
+	// deletion path above. accountID=0.
+	subject, err := s.userRepo.FindByID(ctx, request.UserID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("could not load subject user: %w", err)
 	}

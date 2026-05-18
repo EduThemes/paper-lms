@@ -63,7 +63,9 @@ func (h *LTIHandler) gateLTILaunchForCOPPA(c *fiber.Ctx, userID uint) bool {
 	if h.accountRepo == nil || h.userRepo == nil {
 		return false
 	}
-	user, err := h.userRepo.FindByID(c.Context(), userID)
+	// AUTH-INTERNAL: COPPA gate looks up the launching user's home
+	// account_id. userID is the JWT subject; accountID=0 is correct.
+	user, err := h.userRepo.FindByID(c.Context(), userID, 0)
 	if err != nil || user == nil {
 		// Unknown user — let the downstream launch fail naturally.
 		return false
