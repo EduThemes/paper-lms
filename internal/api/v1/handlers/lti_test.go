@@ -54,7 +54,7 @@ func jsonLaunchBody(loginHint string) interface{} {
 func TestLTIOIDCLogin_HigherEdAllows(t *testing.T) {
 	app, userRepo, accountRepo, _ := setupLTIHandlerForGate()
 
-	userRepo.On("FindByID", mock.Anything, uint(7)).Return(&models.User{ID: 7, AccountID: 1}, nil)
+	userRepo.On("FindByID", mock.Anything, uint(7), uint(0)).Return(&models.User{ID: 7, AccountID: 1}, nil)
 	accountRepo.On("FindByID", mock.Anything, uint(1)).Return(&models.Account{
 		ID:          1,
 		TenantMode:  models.GamificationAudience("higher_ed"),
@@ -71,7 +71,7 @@ func TestLTIOIDCLogin_HigherEdAllows(t *testing.T) {
 func TestLTIOIDCLogin_K5RefusesWithoutConsent(t *testing.T) {
 	app, userRepo, accountRepo, consentRepo := setupLTIHandlerForGate()
 
-	userRepo.On("FindByID", mock.Anything, uint(7)).Return(&models.User{ID: 7, AccountID: 1}, nil)
+	userRepo.On("FindByID", mock.Anything, uint(7), uint(0)).Return(&models.User{ID: 7, AccountID: 1}, nil)
 	accountRepo.On("FindByID", mock.Anything, uint(1)).Return(&models.Account{
 		ID:          1,
 		TenantMode:  models.GamificationAudience("k5"),
@@ -88,7 +88,7 @@ func TestLTIOIDCLogin_K5RefusesWithoutConsent(t *testing.T) {
 func TestLTIOIDCLogin_CoppaStrictRefuses(t *testing.T) {
 	app, userRepo, accountRepo, consentRepo := setupLTIHandlerForGate()
 
-	userRepo.On("FindByID", mock.Anything, uint(7)).Return(&models.User{ID: 7, AccountID: 1}, nil)
+	userRepo.On("FindByID", mock.Anything, uint(7), uint(0)).Return(&models.User{ID: 7, AccountID: 1}, nil)
 	accountRepo.On("FindByID", mock.Anything, uint(1)).Return(&models.Account{
 		ID:          1,
 		TenantMode:  models.GamificationAudience("higher_ed"),
@@ -105,7 +105,7 @@ func TestLTIOIDCLogin_CoppaStrictRefuses(t *testing.T) {
 func TestLTIOIDCLogin_K5AllowsWithGrantedConsent(t *testing.T) {
 	app, userRepo, accountRepo, consentRepo := setupLTIHandlerForGate()
 
-	userRepo.On("FindByID", mock.Anything, uint(7)).Return(&models.User{ID: 7, AccountID: 1}, nil)
+	userRepo.On("FindByID", mock.Anything, uint(7), uint(0)).Return(&models.User{ID: 7, AccountID: 1}, nil)
 	accountRepo.On("FindByID", mock.Anything, uint(1)).Return(&models.Account{
 		ID:          1,
 		TenantMode:  models.GamificationAudience("k5"),

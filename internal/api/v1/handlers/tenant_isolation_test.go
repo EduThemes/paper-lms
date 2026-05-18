@@ -416,7 +416,7 @@ func TestTenantIsolation_GetConversation(t *testing.T) {
 		expectAccountIDPassThrough(&convRepo.Mock, "FindByID", resourceID, ownerOf(resourceID),
 			&models.Conversation{ID: resourceID, Subject: "s", WorkflowState: "active"})
 		// resolveParticipants makes a user lookup on the happy path.
-		userRepo.On("FindByID", mock.Anything, mock.AnythingOfType("uint")).Return(
+		userRepo.On("FindByID", mock.Anything, mock.AnythingOfType("uint"), mock.AnythingOfType("uint")).Return(
 			&models.User{ID: participant, Name: "U"}, nil,
 		).Maybe()
 
@@ -1095,7 +1095,7 @@ func TestTenantIsolation_Leaderboard_NotEnrolled_Returns404(t *testing.T) {
 	// userRepo.FindByID for the admin check; not-admin path emits 404.
 	enrollRepo.On("FindByUserAndCourse", mock.Anything, userInA, uint(1), tenantA).
 		Return((*models.Enrollment)(nil), nil)
-	userRepo.On("FindByID", mock.Anything, userInA).
+	userRepo.On("FindByID", mock.Anything, userInA, mock.AnythingOfType("uint")).
 		Return(&models.User{ID: userInA, Name: "U", Role: "user"}, nil).Maybe()
 
 	h := handlers.NewGamificationHandler(walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo, ruleRepo, enrollRepo, accountRepo, snapshotRepo)
