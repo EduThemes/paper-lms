@@ -52,7 +52,7 @@ var validEnrollmentTypes = map[string]bool{
 	"DesignerEnrollment": true,
 }
 
-func (s *EnrollmentService) Create(ctx context.Context, enrollment *models.Enrollment) error {
+func (s *EnrollmentService) Create(ctx context.Context, enrollment *models.Enrollment, accountID uint) error {
 	if !validEnrollmentTypes[enrollment.Type] {
 		return errors.New("invalid enrollment type")
 	}
@@ -62,7 +62,7 @@ func (s *EnrollmentService) Create(ctx context.Context, enrollment *models.Enrol
 	}
 
 	// Check for existing enrollment
-	existing, _ := s.enrollmentRepo.FindByUserAndCourse(ctx, enrollment.UserID, enrollment.CourseID)
+	existing, _ := s.enrollmentRepo.FindByUserAndCourse(ctx, enrollment.UserID, enrollment.CourseID, accountID)
 	if existing != nil {
 		return errors.New("user is already enrolled in this course")
 	}
@@ -75,22 +75,22 @@ func (s *EnrollmentService) Create(ctx context.Context, enrollment *models.Enrol
 	return nil
 }
 
-func (s *EnrollmentService) ListByCourse(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Enrollment], error) {
-	return s.enrollmentRepo.ListByCourseID(ctx, courseID, params)
+func (s *EnrollmentService) ListByCourse(ctx context.Context, courseID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Enrollment], error) {
+	return s.enrollmentRepo.ListByCourseID(ctx, courseID, accountID, params)
 }
 
-func (s *EnrollmentService) ListByUser(ctx context.Context, userID uint) ([]models.Enrollment, error) {
-	return s.enrollmentRepo.ListByUserID(ctx, userID)
+func (s *EnrollmentService) ListByUser(ctx context.Context, userID, accountID uint) ([]models.Enrollment, error) {
+	return s.enrollmentRepo.ListByUserID(ctx, userID, accountID)
 }
 
-func (s *EnrollmentService) GetUserRole(ctx context.Context, userID, courseID uint) (string, error) {
-	enrollment, err := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID)
+func (s *EnrollmentService) GetUserRole(ctx context.Context, userID, courseID, accountID uint) (string, error) {
+	enrollment, err := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID, accountID)
 	if err != nil {
 		return "", err
 	}
 	return enrollment.Type, nil
 }
 
-func (s *EnrollmentService) CountStudentsByCourseIDs(ctx context.Context, courseIDs []uint) (map[uint]int64, error) {
-	return s.enrollmentRepo.CountByCourseIDs(ctx, courseIDs)
+func (s *EnrollmentService) CountStudentsByCourseIDs(ctx context.Context, courseIDs []uint, accountID uint) (map[uint]int64, error) {
+	return s.enrollmentRepo.CountByCourseIDs(ctx, courseIDs, accountID)
 }

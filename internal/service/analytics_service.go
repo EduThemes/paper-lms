@@ -104,7 +104,9 @@ func (s *AnalyticsService) GetCourseAssignmentStats(ctx context.Context, courseI
 
 // GetStudentSummaries returns analytics summaries for each enrolled student in a course.
 func (s *AnalyticsService) GetStudentSummaries(ctx context.Context, courseID uint, params repository.PaginationParams) ([]map[string]interface{}, error) {
-	enrollmentResult, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, params)
+	// accountID=0: service doesn't yet thread tenant context. Follow-up
+	// per Wave 2 — repo accepts accountID; service signature needs widening.
+	enrollmentResult, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, 0, params)
 	if err != nil {
 		return nil, err
 	}
@@ -165,8 +167,8 @@ func (s *AnalyticsService) GetStudentSummaries(ctx context.Context, courseID uin
 
 // GetStudentActivity returns page views for a specific student in a course.
 func (s *AnalyticsService) GetStudentActivity(ctx context.Context, courseID, userID uint) ([]map[string]interface{}, error) {
-	// Verify enrollment
-	_, err := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID)
+	// Verify enrollment. accountID=0: service doesn't yet thread tenant.
+	_, err := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID, 0)
 	if err != nil {
 		return nil, err
 	}

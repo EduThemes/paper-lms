@@ -288,7 +288,7 @@ func TestGetGradebook_Success(t *testing.T) {
 	groupRepo := new(mocks.MockAssignmentGroupRepository)
 	enrollmentRepo := new(mocks.MockEnrollmentRepository)
 
-	enrollmentRepo.On("ListByCourseID", mock.Anything, uint(1), mock.AnythingOfType("repository.PaginationParams")).
+	enrollmentRepo.On("ListByCourseID", mock.Anything, uint(1), uint(0), mock.AnythingOfType("repository.PaginationParams")).
 		Return(&repository.PaginatedResult[models.Enrollment]{
 			Items: []models.Enrollment{
 				{ID: 1, UserID: 10, CourseID: 1, Type: "StudentEnrollment", User: &models.User{ID: 10, Name: "Alice"}},
@@ -336,7 +336,7 @@ func TestGetGradebook_OnlyStudents(t *testing.T) {
 	groupRepo := new(mocks.MockAssignmentGroupRepository)
 	enrollmentRepo := new(mocks.MockEnrollmentRepository)
 
-	enrollmentRepo.On("ListByCourseID", mock.Anything, uint(1), mock.AnythingOfType("repository.PaginationParams")).
+	enrollmentRepo.On("ListByCourseID", mock.Anything, uint(1), uint(0), mock.AnythingOfType("repository.PaginationParams")).
 		Return(&repository.PaginatedResult[models.Enrollment]{
 			Items: []models.Enrollment{
 				{ID: 1, UserID: 10, CourseID: 1, Type: "TeacherEnrollment", User: &models.User{ID: 10, Name: "Prof. Smith"}},

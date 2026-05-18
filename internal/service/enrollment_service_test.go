@@ -25,10 +25,10 @@ func TestEnrollmentCreate_Valid(t *testing.T) {
 	}
 
 	// No existing enrollment
-	mockRepo.On("FindByUserAndCourse", ctx, uint(1), uint(1)).Return(nil, errors.New("not found"))
+	mockRepo.On("FindByUserAndCourse", ctx, uint(1), uint(1), uint(0)).Return(nil, errors.New("not found"))
 	mockRepo.On("Create", ctx, mock.AnythingOfType("*models.Enrollment")).Return(nil)
 
-	err := svc.Create(ctx, enrollment)
+	err := svc.Create(ctx, enrollment, 0)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "StudentEnrollment", enrollment.Role)
@@ -47,7 +47,7 @@ func TestEnrollmentCreate_InvalidType(t *testing.T) {
 		Type:     "BadType",
 	}
 
-	err := svc.Create(ctx, enrollment)
+	err := svc.Create(ctx, enrollment, 0)
 
 	assert.EqualError(t, err, "invalid enrollment type")
 	mockRepo.AssertExpectations(t)
@@ -65,10 +65,10 @@ func TestEnrollmentCreate_DefaultState(t *testing.T) {
 		WorkflowState: "",
 	}
 
-	mockRepo.On("FindByUserAndCourse", ctx, uint(1), uint(1)).Return(nil, errors.New("not found"))
+	mockRepo.On("FindByUserAndCourse", ctx, uint(1), uint(1), uint(0)).Return(nil, errors.New("not found"))
 	mockRepo.On("Create", ctx, mock.AnythingOfType("*models.Enrollment")).Return(nil)
 
-	err := svc.Create(ctx, enrollment)
+	err := svc.Create(ctx, enrollment, 0)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "active", enrollment.WorkflowState)
@@ -94,9 +94,9 @@ func TestEnrollmentCreate_Duplicate(t *testing.T) {
 		Type:     "StudentEnrollment",
 	}
 
-	mockRepo.On("FindByUserAndCourse", ctx, uint(1), uint(1)).Return(existing, nil)
+	mockRepo.On("FindByUserAndCourse", ctx, uint(1), uint(1), uint(0)).Return(existing, nil)
 
-	err := svc.Create(ctx, enrollment)
+	err := svc.Create(ctx, enrollment, 0)
 
 	assert.EqualError(t, err, "user is already enrolled in this course")
 	mockRepo.AssertExpectations(t)
@@ -123,10 +123,10 @@ func TestEnrollmentCreate_AllTypes(t *testing.T) {
 				Type:     enrollType,
 			}
 
-			mockRepo.On("FindByUserAndCourse", ctx, uint(1), uint(1)).Return(nil, errors.New("not found"))
+			mockRepo.On("FindByUserAndCourse", ctx, uint(1), uint(1), uint(0)).Return(nil, errors.New("not found"))
 			mockRepo.On("Create", ctx, mock.AnythingOfType("*models.Enrollment")).Return(nil)
 
-			err := svc.Create(ctx, enrollment)
+			err := svc.Create(ctx, enrollment, 0)
 
 			assert.NoError(t, err)
 			assert.Equal(t, enrollType, enrollment.Role)
@@ -148,10 +148,10 @@ func TestEnrollmentCreate_PreservesExistingState(t *testing.T) {
 		WorkflowState: "invited",
 	}
 
-	mockRepo.On("FindByUserAndCourse", ctx, uint(1), uint(1)).Return(nil, errors.New("not found"))
+	mockRepo.On("FindByUserAndCourse", ctx, uint(1), uint(1), uint(0)).Return(nil, errors.New("not found"))
 	mockRepo.On("Create", ctx, mock.AnythingOfType("*models.Enrollment")).Return(nil)
 
-	err := svc.Create(ctx, enrollment)
+	err := svc.Create(ctx, enrollment, 0)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "invited", enrollment.WorkflowState)
@@ -169,10 +169,10 @@ func TestEnrollmentCreate_RepoError(t *testing.T) {
 		Type:     "StudentEnrollment",
 	}
 
-	mockRepo.On("FindByUserAndCourse", ctx, uint(1), uint(1)).Return(nil, errors.New("not found"))
+	mockRepo.On("FindByUserAndCourse", ctx, uint(1), uint(1), uint(0)).Return(nil, errors.New("not found"))
 	mockRepo.On("Create", ctx, mock.AnythingOfType("*models.Enrollment")).Return(errors.New("db error"))
 
-	err := svc.Create(ctx, enrollment)
+	err := svc.Create(ctx, enrollment, 0)
 
 	assert.EqualError(t, err, "db error")
 	mockRepo.AssertExpectations(t)
@@ -194,9 +194,9 @@ func TestEnrollmentListByCourse(t *testing.T) {
 		PerPage:    10,
 	}
 
-	mockRepo.On("ListByCourseID", ctx, uint(5), params).Return(expectedResult, nil)
+	mockRepo.On("ListByCourseID", ctx, uint(5), uint(0), params).Return(expectedResult, nil)
 
-	result, err := svc.ListByCourse(ctx, 5, params)
+	result, err := svc.ListByCourse(ctx, 5, 0, params)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -217,9 +217,9 @@ func TestEnrollmentListByUser(t *testing.T) {
 		{ID: 2, UserID: 10, CourseID: 2, Type: "TaEnrollment", Role: "TaEnrollment", WorkflowState: "active"},
 	}
 
-	mockRepo.On("ListByUserID", ctx, uint(10)).Return(expectedEnrollments, nil)
+	mockRepo.On("ListByUserID", ctx, uint(10), uint(0)).Return(expectedEnrollments, nil)
 
-	result, err := svc.ListByUser(ctx, 10)
+	result, err := svc.ListByUser(ctx, 10, 0)
 
 	assert.NoError(t, err)
 	assert.Len(t, result, 2)
@@ -241,9 +241,9 @@ func TestEnrollmentGetUserRole(t *testing.T) {
 		Role:     "TeacherEnrollment",
 	}
 
-	mockRepo.On("FindByUserAndCourse", ctx, uint(10), uint(5)).Return(enrollment, nil)
+	mockRepo.On("FindByUserAndCourse", ctx, uint(10), uint(5), uint(0)).Return(enrollment, nil)
 
-	role, err := svc.GetUserRole(ctx, 10, 5)
+	role, err := svc.GetUserRole(ctx, 10, 5, 0)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "TeacherEnrollment", role)
@@ -255,9 +255,9 @@ func TestEnrollmentGetUserRole_NotFound(t *testing.T) {
 	svc := service.NewEnrollmentService(mockRepo)
 	ctx := context.Background()
 
-	mockRepo.On("FindByUserAndCourse", ctx, uint(10), uint(5)).Return(nil, errors.New("not found"))
+	mockRepo.On("FindByUserAndCourse", ctx, uint(10), uint(5), uint(0)).Return(nil, errors.New("not found"))
 
-	role, err := svc.GetUserRole(ctx, 10, 5)
+	role, err := svc.GetUserRole(ctx, 10, 5, 0)
 
 	assert.EqualError(t, err, "not found")
 	assert.Equal(t, "", role)

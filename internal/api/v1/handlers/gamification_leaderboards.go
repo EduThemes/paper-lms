@@ -126,7 +126,7 @@ func (h *GamificationHandler) GetCourseLeaderboard(c *fiber.Ctx) error {
 	}
 
 	// Candidate set + opt-out filter.
-	enrollments, err := h.enrollmentRepo.ListActiveStudentEnrollmentsByCourse(c.Context(), courseID)
+	enrollments, err := h.enrollmentRepo.ListActiveStudentEnrollmentsByCourse(c.Context(), courseID, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "failed to list enrollments")
 	}
@@ -335,7 +335,7 @@ func (h *GamificationHandler) resolveViewerRoleInCourse(c *fiber.Ctx, viewerID, 
 	if isAdmin {
 		return gamification.ViewerAdmin, false, nil
 	}
-	viewerEnrollment, err := h.enrollmentRepo.FindByUserAndCourse(c.Context(), viewerID, courseID)
+	viewerEnrollment, err := h.enrollmentRepo.FindByUserAndCourse(c.Context(), viewerID, courseID, callerAccountID(c))
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", true, responses.InternalError(c, "failed to resolve enrollment")
 	}
@@ -433,7 +433,7 @@ func (h *GamificationHandler) serveSnapshotLeaderboard(
 
 	// Pseudonym substitution needs the enrollment context for each
 	// payload user. Pull them once.
-	enrollments, err := h.enrollmentRepo.ListActiveStudentEnrollmentsByCourse(c.Context(), courseID)
+	enrollments, err := h.enrollmentRepo.ListActiveStudentEnrollmentsByCourse(c.Context(), courseID, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "failed to list enrollments")
 	}

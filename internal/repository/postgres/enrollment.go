@@ -17,23 +17,40 @@ func NewEnrollmentRepository(db *gorm.DB) repository.EnrollmentRepository {
 	return &enrollmentRepo{db: db}
 }
 
+// enrollments has no direct account_id column; tenant scope is enforced
+// by joining through course_id → courses.account_id. Pattern mirrors
+// submission.go's deep subquery used to scope submissions through
+// assignment → course → account. See Phase 13.1.D for the convention.
+// accountID==0 means "no tenant scope" — only internal callers
+// (background workers, seed scripts, gamification wiring) may pass 0.
+// Handler-routed callers MUST pass callerAccountID(c).
+func tenantScopedByCourse(q *gorm.DB, accountID uint) *gorm.DB {
+	if accountID == 0 {
+		return q
+	}
+	return q.Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID)
+}
+
 func (r *enrollmentRepo) Create(ctx context.Context, enrollment *models.Enrollment) error {
 	return r.db.WithContext(ctx).Create(enrollment).Error
 }
 
-func (r *enrollmentRepo) FindByID(ctx context.Context, id uint) (*models.Enrollment, error) {
+func (r *enrollmentRepo) FindByID(ctx context.Context, id, accountID uint) (*models.Enrollment, error) {
 	var enrollment models.Enrollment
-	if err := r.db.WithContext(ctx).Preload("User").First(&enrollment, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	q = tenantScopedByCourse(q, accountID)
+	if err := q.Preload("User").First(&enrollment, id).Error; err != nil {
 		return nil, err
 	}
 	return &enrollment, nil
 }
 
-func (r *enrollmentRepo) ListByCourseID(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Enrollment], error) {
+func (r *enrollmentRepo) ListByCourseID(ctx context.Context, courseID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Enrollment], error) {
 	var enrollments []models.Enrollment
 	var count int64
 
 	query := r.db.WithContext(ctx).Model(&models.Enrollment{}).Where("course_id = ? AND workflow_state != ?", courseID, "deleted")
+	query = tenantScopedByCourse(query, accountID)
 	query.Count(&count)
 
 	offset := (params.Page - 1) * params.PerPage
@@ -49,9 +66,11 @@ func (r *enrollmentRepo) ListByCourseID(ctx context.Context, courseID uint, para
 	}, nil
 }
 
-func (r *enrollmentRepo) ListByUserID(ctx context.Context, userID uint) ([]models.Enrollment, error) {
+func (r *enrollmentRepo) ListByUserID(ctx context.Context, userID, accountID uint) ([]models.Enrollment, error) {
 	var enrollments []models.Enrollment
-	if err := r.db.WithContext(ctx).Where("user_id = ? AND workflow_state = ?", userID, "active").Find(&enrollments).Error; err != nil {
+	q := r.db.WithContext(ctx).Where("user_id = ? AND workflow_state = ?", userID, "active")
+	q = tenantScopedByCourse(q, accountID)
+	if err := q.Find(&enrollments).Error; err != nil {
 		return nil, err
 	}
 	return enrollments, nil
@@ -61,15 +80,17 @@ func (r *enrollmentRepo) Update(ctx context.Context, enrollment *models.Enrollme
 	return r.db.WithContext(ctx).Save(enrollment).Error
 }
 
-func (r *enrollmentRepo) FindByUserAndCourse(ctx context.Context, userID, courseID uint) (*models.Enrollment, error) {
+func (r *enrollmentRepo) FindByUserAndCourse(ctx context.Context, userID, courseID, accountID uint) (*models.Enrollment, error) {
 	var enrollment models.Enrollment
-	if err := r.db.WithContext(ctx).Where("user_id = ? AND course_id = ? AND workflow_state = ?", userID, courseID, "active").First(&enrollment).Error; err != nil {
+	q := r.db.WithContext(ctx).Where("user_id = ? AND course_id = ? AND workflow_state = ?", userID, courseID, "active")
+	q = tenantScopedByCourse(q, accountID)
+	if err := q.First(&enrollment).Error; err != nil {
 		return nil, err
 	}
 	return &enrollment, nil
 }
 
-func (r *enrollmentRepo) CountByCourseIDs(ctx context.Context, courseIDs []uint) (map[uint]int64, error) {
+func (r *enrollmentRepo) CountByCourseIDs(ctx context.Context, courseIDs []uint, accountID uint) (map[uint]int64, error) {
 	if len(courseIDs) == 0 {
 		return map[uint]int64{}, nil
 	}
@@ -78,12 +99,12 @@ func (r *enrollmentRepo) CountByCourseIDs(ctx context.Context, courseIDs []uint)
 		Count    int64
 	}
 	var results []result
-	err := r.db.WithContext(ctx).
+	q := r.db.WithContext(ctx).
 		Model(&models.Enrollment{}).
 		Select("course_id, count(*) as count").
-		Where("course_id IN ? AND workflow_state = ? AND type = ?", courseIDs, "active", "StudentEnrollment").
-		Group("course_id").
-		Find(&results).Error
+		Where("course_id IN ? AND workflow_state = ? AND type = ?", courseIDs, "active", "StudentEnrollment")
+	q = tenantScopedByCourse(q, accountID)
+	err := q.Group("course_id").Find(&results).Error
 	if err != nil {
 		return nil, err
 	}
@@ -98,13 +119,13 @@ func (r *enrollmentRepo) CountByCourseIDs(ctx context.Context, courseIDs []uint)
 // StudentEnrollment rows for a course. The leaderboard candidate set
 // before any opt-out filter or ranking. Order is by enrollment id
 // ascending (stable but not load-bearing — the caller ranks).
-func (r *enrollmentRepo) ListActiveStudentUserIDsByCourse(ctx context.Context, courseID uint) ([]uint, error) {
+func (r *enrollmentRepo) ListActiveStudentUserIDsByCourse(ctx context.Context, courseID, accountID uint) ([]uint, error) {
 	var ids []uint
-	err := r.db.WithContext(ctx).
+	q := r.db.WithContext(ctx).
 		Model(&models.Enrollment{}).
-		Where("course_id = ? AND workflow_state = ? AND type = ?", courseID, "active", "StudentEnrollment").
-		Order("id ASC").
-		Pluck("user_id", &ids).Error
+		Where("course_id = ? AND workflow_state = ? AND type = ?", courseID, "active", "StudentEnrollment")
+	q = tenantScopedByCourse(q, accountID)
+	err := q.Order("id ASC").Pluck("user_id", &ids).Error
 	return ids, err
 }
 
@@ -112,12 +133,12 @@ func (r *enrollmentRepo) ListActiveStudentUserIDsByCourse(ctx context.Context, c
 // for the candidate set — same filter as the id-only variant, but
 // returns pseudonym + workflow + type fields the leaderboard render
 // path needs.
-func (r *enrollmentRepo) ListActiveStudentEnrollmentsByCourse(ctx context.Context, courseID uint) ([]models.Enrollment, error) {
+func (r *enrollmentRepo) ListActiveStudentEnrollmentsByCourse(ctx context.Context, courseID, accountID uint) ([]models.Enrollment, error) {
 	var rows []models.Enrollment
-	err := r.db.WithContext(ctx).
-		Where("course_id = ? AND workflow_state = ? AND type = ?", courseID, "active", "StudentEnrollment").
-		Order("id ASC").
-		Find(&rows).Error
+	q := r.db.WithContext(ctx).
+		Where("course_id = ? AND workflow_state = ? AND type = ?", courseID, "active", "StudentEnrollment")
+	q = tenantScopedByCourse(q, accountID)
+	err := q.Order("id ASC").Find(&rows).Error
 	return rows, err
 }
 
@@ -130,7 +151,7 @@ func (r *enrollmentRepo) ListActiveStudentEnrollmentsByCourse(ctx context.Contex
 // Empty `name` is serialized to SQL NULL (not the empty string) so it
 // stays out of the partial index — that's the "not yet assigned" and
 // the first_name special-case state.
-func (r *enrollmentRepo) UpdatePseudonymForSelf(ctx context.Context, userID, courseID uint, poolCode, name string) error {
+func (r *enrollmentRepo) UpdatePseudonymForSelf(ctx context.Context, userID, courseID, accountID uint, poolCode, name string) error {
 	updates := map[string]interface{}{
 		"pseudonym_pool_code": poolCode,
 	}
@@ -139,10 +160,11 @@ func (r *enrollmentRepo) UpdatePseudonymForSelf(ctx context.Context, userID, cou
 	} else {
 		updates["pseudonym_name"] = name
 	}
-	tx := r.db.WithContext(ctx).
+	q := r.db.WithContext(ctx).
 		Model(&models.Enrollment{}).
-		Where("user_id = ? AND course_id = ? AND workflow_state = ?", userID, courseID, "active").
-		Updates(updates)
+		Where("user_id = ? AND course_id = ? AND workflow_state = ?", userID, courseID, "active")
+	q = tenantScopedByCourse(q, accountID)
+	tx := q.Updates(updates)
 	if err := tx.Error; err != nil {
 		// Postgres surfaces unique violations as a string match in the
 		// driver error. We translate so handlers don't depend on the

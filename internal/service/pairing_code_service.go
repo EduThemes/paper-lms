@@ -106,7 +106,7 @@ func (s *PairingCodeService) GenerateForStudent(ctx context.Context, callerID, s
 // callerMayMintForStudent encodes the 12.6 consent rule. See
 // GenerateForStudent for the full description.
 func (s *PairingCodeService) callerMayMintForStudent(ctx context.Context, callerID, studentID uint) (bool, error) {
-	studentEnrollments, err := s.enrollmentRepo.ListByUserID(ctx, studentID)
+	studentEnrollments, err := s.enrollmentRepo.ListByUserID(ctx, studentID, 0)
 	if err != nil {
 		return false, errors.New("could not fetch student enrollments")
 	}
@@ -139,7 +139,7 @@ func (s *PairingCodeService) callerMayMintForStudent(ctx context.Context, caller
 
 	// Teacher path: caller has a TeacherEnrollment / TaEnrollment in any
 	// of the student's courses.
-	callerEnrollments, err := s.enrollmentRepo.ListByUserID(ctx, callerID)
+	callerEnrollments, err := s.enrollmentRepo.ListByUserID(ctx, callerID, 0)
 	if err != nil {
 		return false, errors.New("could not fetch caller enrollments")
 	}

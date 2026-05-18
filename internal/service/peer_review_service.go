@@ -37,7 +37,7 @@ func (s *PeerReviewService) AssignPeerReviews(ctx context.Context, courseID, ass
 	}
 
 	// Get all student enrollments
-	enrollments, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, repository.PaginationParams{Page: 1, PerPage: 1000})
+	enrollments, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, 0, repository.PaginationParams{Page: 1, PerPage: 1000})
 	if err != nil {
 		return nil, err
 	}

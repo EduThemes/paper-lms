@@ -105,8 +105,9 @@ func (s *AnnouncementService) ListCourseAnnouncements(ctx context.Context, cours
 		return nil, err
 	}
 
-	// Determine user enrollment type for audience filtering
-	enrollment, enrollErr := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID)
+	// Determine user enrollment type for audience filtering.
+	// accountID=0: service doesn't yet thread tenant context.
+	enrollment, enrollErr := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID, 0)
 
 	// If user has no enrollment, return all (admin or global context)
 	if enrollErr != nil || enrollment == nil {
@@ -225,7 +226,7 @@ func (s *AnnouncementService) GetAnnouncementStats(ctx context.Context, announce
 	var totalAudience int64
 	if announcement.CourseID != nil {
 		enrollParams := repository.PaginationParams{Page: 1, PerPage: 1}
-		enrollResult, err := s.enrollmentRepo.ListByCourseID(ctx, *announcement.CourseID, enrollParams)
+		enrollResult, err := s.enrollmentRepo.ListByCourseID(ctx, *announcement.CourseID, 0, enrollParams)
 		if err == nil {
 			totalAudience = enrollResult.TotalCount
 		}
