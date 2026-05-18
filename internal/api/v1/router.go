@@ -161,6 +161,13 @@ type Router struct {
 	// emit an audit_log row on every successful 2xx write inside the
 	// protected group. Single mount; covers ~333 write routes.
 	AuditService *service.AuditService
+
+	// SettingsLookup resolves catalog keys through the Settings Engine
+	// for middlewares mounted in Register. Today: EnforceUploadSize on
+	// the two upload routes reads `quotas.max_upload_size_mb`. Shared
+	// closure wired up in cmd/server/main.go alongside the SMTP / AI
+	// Assist / OIDC / passkey consumers.
+	SettingsLookup middleware.UploadSizeLookupFunc
 }
 
 // NewRouter is kept as an identity helper so callers reading older
@@ -355,7 +362,7 @@ func (r *Router) Register(app *fiber.App) {
 
 	// Files (view: enrolled; upload/delete: instructor)
 	protected.Get("/courses/:course_id/files", enrolled, r.FileHandler.ListCourseFiles)
-	protected.Post("/courses/:course_id/files", middleware.UploadRateLimit(), middleware.EnforceUploadSize(r.AccountRepo), instructor, r.FileHandler.UploadCourseFile)
+	protected.Post("/courses/:course_id/files", middleware.UploadRateLimit(), middleware.EnforceUploadSize(r.SettingsLookup), instructor, r.FileHandler.UploadCourseFile)
 	protected.Get("/courses/:course_id/files/:id", enrolled, r.FileHandler.GetFile)
 	protected.Delete("/courses/:course_id/files/:id", instructor, r.FileHandler.DeleteFile)
 	protected.Get("/files/:id/download", r.FileHandler.DownloadFile)
@@ -621,7 +628,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Put("/courses/:course_id/discussion_topics/:topic_id/entries/:entry_id/v2", enrolled, r.DiscussionV2Handler.UpdateEntryV2)
 
 	// Content Import (IMSCC/Common Cartridge)
-	protected.Post("/courses/:course_id/content_imports", middleware.ExpensiveOpRateLimit(), middleware.EnforceUploadSize(r.AccountRepo), instructor, r.ContentImportHandler.ImportPackage)
+	protected.Post("/courses/:course_id/content_imports", middleware.ExpensiveOpRateLimit(), middleware.EnforceUploadSize(r.SettingsLookup), instructor, r.ContentImportHandler.ImportPackage)
 
 	// Batch Operations (instructor/admin, rate-limited)
 	protected.Post("/courses/clone", middleware.ExpensiveOpRateLimit(), admin, r.BatchHandler.CloneCourse)

@@ -334,10 +334,11 @@ func TestSet_RejectsUnknownKey(t *testing.T) {
 }
 
 func TestSet_RejectsScopeNotAllowed(t *testing.T) {
-	// storage.backend is instance-only per the catalog; account scope
-	// should be rejected.
+	// storage.s3.bucket is instance-only per the catalog (Wave 4 drop
+	// the storage.backend orphan — boot-only settings don't belong in
+	// the runtime catalog); account scope should be rejected.
 	svc, _, _ := newServiceWithAudit(t, nil)
-	err := svc.Set(context.Background(), ScopeAccount, 42, "storage.backend", "s3", 1)
+	err := svc.Set(context.Background(), ScopeAccount, 42, "storage.s3.bucket", "mybucket", 1)
 	if !errors.Is(err, ErrScopeNotAllowed) {
 		t.Fatalf("expected ErrScopeNotAllowed, got %v", err)
 	}
