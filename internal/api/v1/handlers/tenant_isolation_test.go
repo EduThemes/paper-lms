@@ -569,3 +569,87 @@ func TestTenantIsolation_SearchUsers(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 9) GET /courses/:course_id/assignments/:id/peer_reviews
+// ---------------------------------------------------------------------------
+
+// TestTenantIsolation_ListPeerReviews locks the tenant-scope contract on
+// PeerReviewRepository.ListByAssignment (Wave 2 widening, 2026-05-17).
+// The repo filters via assignment_id -> course_id -> account_id; a
+// cross-tenant assignment_id returns an empty list without error. The
+// handler doesn't 404 on empty, so we assert the list contents directly:
+// out-of-tenant callers MUST get zero rows even when an in-tenant row
+// exists for the same assignment_id.
+func TestTenantIsolation_ListPeerReviews(t *testing.T) {
+	type listResult struct {
+		statusCode int
+		bodyLen    int
+	}
+
+	runList := func(callerAccount, assignmentID uint) listResult {
+		peerReviewRepo := new(mocks.MockPeerReviewRepository)
+		submissionRepo := new(mocks.MockSubmissionRepository)
+		enrollmentRepo := new(mocks.MockEnrollmentRepository)
+
+		// Simulate the repo's tenant filter: in-tenant returns the row,
+		// cross-tenant returns an empty slice (the real repo's WHERE filter
+		// matches no rows — no error, no panic).
+		ownerAccount := ownerOf(assignmentID)
+		match := []models.PeerReview{
+			{ID: 42, AssignmentID: assignmentID, ReviewerID: 10, RevieweeID: 11, WorkflowState: "assigned"},
+		}
+		peerReviewRepo.On("ListByAssignment", mock.Anything, assignmentID,
+			mock.MatchedBy(func(acct uint) bool {
+				return acct == 0 || acct == ownerAccount
+			}),
+		).Return(match, nil).Maybe()
+		peerReviewRepo.On("ListByAssignment", mock.Anything, assignmentID,
+			mock.MatchedBy(func(acct uint) bool {
+				return acct != 0 && acct != ownerAccount
+			}),
+		).Return([]models.PeerReview{}, nil).Maybe()
+
+		svc := service.NewPeerReviewService(peerReviewRepo, submissionRepo, enrollmentRepo)
+		h := handlers.NewPeerReviewHandler(svc, nil)
+
+		app := testutil.SetupTestApp()
+		app.Use(authStub(callerFor(callerAccount), callerAccount), middleware.PaginationParams())
+		app.Get("/courses/:course_id/assignments/:id/peer_reviews", h.ListPeerReviews)
+
+		resp := testutil.MakeRequest(app, http.MethodGet,
+			fmt.Sprintf("/courses/1/assignments/%d/peer_reviews", assignmentID), nil)
+
+		out, _ := testutil.ParseJSONArray(resp)
+		return listResult{statusCode: resp.StatusCode, bodyLen: len(out)}
+	}
+
+	cases := []struct {
+		caller     uint
+		assignment uint
+		want       int
+		desc       string
+	}{
+		{tenantA, resInA, 1, "tenantA caller, tenantA assignment (in-tenant)"},
+		{tenantA, resInB, 0, "tenantA caller, tenantB assignment (CROSS-TENANT — must be 0)"},
+		{tenantB, resInA, 0, "tenantB caller, tenantA assignment (CROSS-TENANT — must be 0)"},
+		{tenantB, resInB, 1, "tenantB caller, tenantB assignment (in-tenant)"},
+	}
+
+	for _, tc := range cases {
+		got := runList(tc.caller, tc.assignment)
+		if got.statusCode != http.StatusOK {
+			t.Errorf("GET /assignments/:id/peer_reviews: %s — expected 200, got %d",
+				tc.desc, got.statusCode)
+			continue
+		}
+		if got.bodyLen != tc.want {
+			tag := ""
+			if tc.want == 0 && got.bodyLen > 0 {
+				tag = " — CROSS-TENANT LEAK (peer review from another tenant surfaced)"
+			}
+			t.Errorf("GET /assignments/:id/peer_reviews: %s — expected %d result(s), got %d%s",
+				tc.desc, tc.want, got.bodyLen, tag)
+		}
+	}
+}
