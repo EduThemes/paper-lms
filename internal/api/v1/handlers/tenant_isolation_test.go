@@ -1093,7 +1093,7 @@ func TestTenantIsolation_Leaderboard_NotEnrolled_Returns404(t *testing.T) {
 
 	// Viewer is NOT enrolled. resolveViewerRoleInCourse falls back to
 	// userRepo.FindByID for the admin check; not-admin path emits 404.
-	enrollRepo.On("FindByUserAndCourse", mock.Anything, userInA, uint(1)).
+	enrollRepo.On("FindByUserAndCourse", mock.Anything, userInA, uint(1), tenantA).
 		Return((*models.Enrollment)(nil), nil)
 	userRepo.On("FindByID", mock.Anything, userInA).
 		Return(&models.User{ID: userInA, Name: "U", Role: "user"}, nil).Maybe()
@@ -1120,3 +1120,179 @@ func TestTenantIsolation_Leaderboard_NotEnrolled_Returns404(t *testing.T) {
 // call site. Keeps the test setup symmetric with the existing matrix
 // helpers above.
 func stringsReader(s string) io.Reader { return bytes.NewReader([]byte(s)) }
+
+// ---------------------------------------------------------------------------
+// 11) GET /courses/:course_id/enrollments
+// ---------------------------------------------------------------------------
+
+// TestTenantIsolation_ListEnrollments locks the Wave 2 fix:
+// EnrollmentRepository.ListByCourseID now accepts accountID, and
+// EnrollmentService.ListByCourse + EnrollmentHandler.ListEnrollments
+// thread `callerAccountID(c)` through. enrollments has no direct
+// account_id column — the repo scopes via course_id → courses.account_id
+// (parent-JOIN subquery pattern). A viewer in tenant A asking for a
+// tenant-B course's roster MUST receive an empty list (not 200 with
+// cross-tenant rows). The mock encodes the real Postgres behavior:
+// rows are returned only when the caller's accountID matches the
+// course owner's tenant, or accountID==0 (internal background).
+func TestTenantIsolation_ListEnrollments(t *testing.T) {
+	type listResult struct {
+		statusCode int
+		bodyLen    int
+	}
+
+	runList := func(callerAccount, courseID, courseOwner uint) listResult {
+		enrollmentRepo := new(mocks.MockEnrollmentRepository)
+
+		empty := &repository.PaginatedResult[models.Enrollment]{
+			Items: []models.Enrollment{}, TotalCount: 0, Page: 1, PerPage: 25,
+		}
+		match := &repository.PaginatedResult[models.Enrollment]{
+			Items: []models.Enrollment{
+				{ID: 1, UserID: 10, CourseID: courseID, Type: "StudentEnrollment", WorkflowState: "active"},
+			},
+			TotalCount: 1, Page: 1, PerPage: 25,
+		}
+		// In-tenant or internal-call hit: row visible.
+		enrollmentRepo.On("ListByCourseID", mock.Anything, courseID,
+			mock.MatchedBy(func(acct uint) bool {
+				return acct == 0 || acct == courseOwner
+			}),
+			mock.AnythingOfType("repository.PaginationParams"),
+		).Return(match, nil).Maybe()
+		// Cross-tenant hit: empty result (real repo's parent-JOIN
+		// subquery filters the row out — zero rows, no error).
+		enrollmentRepo.On("ListByCourseID", mock.Anything, courseID,
+			mock.MatchedBy(func(acct uint) bool {
+				return acct != 0 && acct != courseOwner
+			}),
+			mock.AnythingOfType("repository.PaginationParams"),
+		).Return(empty, nil).Maybe()
+
+		svc := service.NewEnrollmentService(enrollmentRepo)
+		h := handlers.NewEnrollmentHandler(svc)
+
+		app := testutil.SetupTestApp()
+		app.Use(authStub(callerFor(callerAccount), callerAccount), middleware.PaginationParams())
+		app.Get("/courses/:course_id/enrollments", h.ListEnrollments)
+
+		resp := testutil.MakeRequest(app, http.MethodGet,
+			fmt.Sprintf("/courses/%d/enrollments", courseID), nil)
+
+		out, _ := testutil.ParseJSONArray(resp)
+		return listResult{statusCode: resp.StatusCode, bodyLen: len(out)}
+	}
+
+	cases := []struct {
+		caller      uint
+		courseID    uint
+		courseOwner uint
+		want        int
+		desc        string
+	}{
+		{tenantA, resInA, tenantA, 1, "tenantA caller, tenantA course (in-tenant)"},
+		{tenantA, resInB, tenantB, 0, "tenantA caller, tenantB course (CROSS-TENANT — must be 0)"},
+		{tenantB, resInA, tenantA, 0, "tenantB caller, tenantA course (CROSS-TENANT — must be 0)"},
+		{tenantB, resInB, tenantB, 1, "tenantB caller, tenantB course (in-tenant)"},
+	}
+
+	for _, tc := range cases {
+		got := runList(tc.caller, tc.courseID, tc.courseOwner)
+		if got.statusCode != http.StatusOK {
+			t.Errorf("GET /courses/:id/enrollments: %s — expected 200, got %d", tc.desc, got.statusCode)
+			continue
+		}
+		if got.bodyLen != tc.want {
+			tag := ""
+			if tc.want == 0 && got.bodyLen > 0 {
+				tag = " — CROSS-TENANT LEAK (enrollment from another tenant surfaced)"
+			}
+			t.Errorf("GET /courses/:id/enrollments: %s — expected %d result(s), got %d%s",
+				tc.desc, tc.want, got.bodyLen, tag)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 12) GET /users/self/enrollments
+// ---------------------------------------------------------------------------
+
+// TestTenantIsolation_SelfEnrollments locks the Wave 2 fix on
+// EnrollmentRepository.ListByUserID — the canvas alias endpoint
+// `GET /users/self/enrollments` returns the caller's enrollment rows,
+// but each row is in a course belonging to some tenant. A viewer
+// federated across tenants (super_admin masquerading, edge cases)
+// MUST see only their in-tenant enrollments. The repo scopes the
+// `user_id = ?` filter to `course_id IN (SELECT id FROM courses
+// WHERE account_id = ?)`. The mock encodes this: rows are visible
+// only when accountID matches the row's tenant or accountID==0.
+func TestTenantIsolation_SelfEnrollments(t *testing.T) {
+	type listResult struct {
+		statusCode int
+		bodyLen    int
+	}
+
+	runList := func(callerAccount uint, enrolledIn uint) listResult {
+		enrollmentRepo := new(mocks.MockEnrollmentRepository)
+
+		// User has one enrollment in a course owned by `enrolledIn`.
+		// Mock returns it only when the caller's accountID matches that
+		// tenant; otherwise empty (the real repo's parent-JOIN filters
+		// the row out without raising an error).
+		rowInTenant := []models.Enrollment{
+			{ID: 1, UserID: callerFor(callerAccount), CourseID: 100, Type: "StudentEnrollment", WorkflowState: "active"},
+		}
+		enrollmentRepo.On("ListByUserID", mock.Anything, callerFor(callerAccount),
+			mock.MatchedBy(func(acct uint) bool {
+				return acct == 0 || acct == enrolledIn
+			}),
+		).Return(rowInTenant, nil).Maybe()
+		enrollmentRepo.On("ListByUserID", mock.Anything, callerFor(callerAccount),
+			mock.MatchedBy(func(acct uint) bool {
+				return acct != 0 && acct != enrolledIn
+			}),
+		).Return([]models.Enrollment{}, nil).Maybe()
+
+		svc := service.NewEnrollmentService(enrollmentRepo)
+		// CanvasAliasHandler needs CourseService + EnrollmentService.
+		// We only exercise the enrollment path so a nil CourseService
+		// is fine — the route handler doesn't touch courses for self.
+		h := handlers.NewCanvasAliasHandler(nil, svc, nil)
+
+		app := testutil.SetupTestApp()
+		app.Use(authStub(callerFor(callerAccount), callerAccount), middleware.PaginationParams())
+		app.Get("/users/self/enrollments", h.SelfEnrollments)
+
+		resp := testutil.MakeRequest(app, http.MethodGet, "/users/self/enrollments", nil)
+		out, _ := testutil.ParseJSONArray(resp)
+		return listResult{statusCode: resp.StatusCode, bodyLen: len(out)}
+	}
+
+	cases := []struct {
+		caller     uint
+		enrolledIn uint
+		want       int
+		desc       string
+	}{
+		{tenantA, tenantA, 1, "tenantA caller, enrollment in tenantA (in-tenant)"},
+		{tenantA, tenantB, 0, "tenantA caller, enrollment in tenantB (CROSS-TENANT — must be 0)"},
+		{tenantB, tenantA, 0, "tenantB caller, enrollment in tenantA (CROSS-TENANT — must be 0)"},
+		{tenantB, tenantB, 1, "tenantB caller, enrollment in tenantB (in-tenant)"},
+	}
+
+	for _, tc := range cases {
+		got := runList(tc.caller, tc.enrolledIn)
+		if got.statusCode != http.StatusOK {
+			t.Errorf("GET /users/self/enrollments: %s — expected 200, got %d", tc.desc, got.statusCode)
+			continue
+		}
+		if got.bodyLen != tc.want {
+			tag := ""
+			if tc.want == 0 && got.bodyLen > 0 {
+				tag = " — CROSS-TENANT LEAK (enrollment in another tenant surfaced)"
+			}
+			t.Errorf("GET /users/self/enrollments: %s — expected %d result(s), got %d%s",
+				tc.desc, tc.want, got.bodyLen, tag)
+		}
+	}
+}

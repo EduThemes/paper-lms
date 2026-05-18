@@ -30,26 +30,34 @@ type SectionRepository interface {
 
 type EnrollmentRepository interface {
 	Create(ctx context.Context, enrollment *models.Enrollment) error
-	FindByID(ctx context.Context, id uint) (*models.Enrollment, error)
+	// 13.1.D tenant-scoped read methods. accountID==0 means "no
+	// tenant scope" and is permitted only from internal callers that
+	// have already validated tenant ownership upstream (background
+	// workers, seed scripts, gamification wiring). Handler-routed
+	// callers MUST pass callerAccountID(c). The repo scopes via
+	// course_id → courses.account_id (enrollments has no direct
+	// account_id column) — same pattern as submission.go's deep
+	// subquery through assignment → course → account.
+	FindByID(ctx context.Context, id, accountID uint) (*models.Enrollment, error)
 	Update(ctx context.Context, enrollment *models.Enrollment) error
-	ListByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.Enrollment], error)
-	ListByUserID(ctx context.Context, userID uint) ([]models.Enrollment, error)
-	FindByUserAndCourse(ctx context.Context, userID, courseID uint) (*models.Enrollment, error)
-	CountByCourseIDs(ctx context.Context, courseIDs []uint) (map[uint]int64, error)
+	ListByCourseID(ctx context.Context, courseID, accountID uint, params PaginationParams) (*PaginatedResult[models.Enrollment], error)
+	ListByUserID(ctx context.Context, userID, accountID uint) ([]models.Enrollment, error)
+	FindByUserAndCourse(ctx context.Context, userID, courseID, accountID uint) (*models.Enrollment, error)
+	CountByCourseIDs(ctx context.Context, courseIDs []uint, accountID uint) (map[uint]int64, error)
 	// ListActiveStudentUserIDsByCourse (W3-A) returns user_ids of active
 	// StudentEnrollment rows for a course — the leaderboard candidate
 	// set. Uses idx_enrollments_course_active (migration 000042).
-	ListActiveStudentUserIDsByCourse(ctx context.Context, courseID uint) ([]uint, error)
+	ListActiveStudentUserIDsByCourse(ctx context.Context, courseID, accountID uint) ([]uint, error)
 	// ListActiveStudentEnrollmentsByCourse (W3-B) returns full
 	// Enrollment rows for the same set — needed when the caller
 	// also has to read per-enrollment pseudonym fields rather than
 	// just user_ids.
-	ListActiveStudentEnrollmentsByCourse(ctx context.Context, courseID uint) ([]models.Enrollment, error)
+	ListActiveStudentEnrollmentsByCourse(ctx context.Context, courseID, accountID uint) ([]models.Enrollment, error)
 	// UpdatePseudonymForSelf (W3-B) writes a learner-chosen pseudonym
 	// to their enrollment row in the given course. Returns
 	// repository.ErrPseudonymTaken on UNIQUE collision so the handler
 	// can map it to a 409.
-	UpdatePseudonymForSelf(ctx context.Context, userID, courseID uint, poolCode, name string) error
+	UpdatePseudonymForSelf(ctx context.Context, userID, courseID, accountID uint, poolCode, name string) error
 }
 
 // ErrPseudonymTaken indicates that another active enrollment in the

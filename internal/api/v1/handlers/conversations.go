@@ -51,7 +51,7 @@ func (h *ConversationHandler) senderIsTeacherInSharedCourseWithAll(c *fiber.Ctx,
 		// DM rather than leak past the policy.
 		return false
 	}
-	senderEnrollments, err := h.enrollmentRepo.ListByUserID(c.Context(), senderID)
+	senderEnrollments, err := h.enrollmentRepo.ListByUserID(c.Context(), senderID, callerAccountID(c))
 	if err != nil {
 		return false
 	}
@@ -67,7 +67,7 @@ func (h *ConversationHandler) senderIsTeacherInSharedCourseWithAll(c *fiber.Ctx,
 	}
 	// For every recipient, check they share at least one of those courses.
 	for _, rid := range recipients {
-		recipientEnrollments, err := h.enrollmentRepo.ListByUserID(c.Context(), rid)
+		recipientEnrollments, err := h.enrollmentRepo.ListByUserID(c.Context(), rid, callerAccountID(c))
 		if err != nil {
 			return false
 		}

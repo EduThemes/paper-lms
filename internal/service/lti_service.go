@@ -265,7 +265,7 @@ func (s *LTIService) BuildLaunchToken(ctx context.Context, userID uint, courseID
 
 // getLTIRolesForUser maps a user's enrollment in a course to LTI role URIs.
 func (s *LTIService) getLTIRolesForUser(ctx context.Context, userID uint, courseID uint) []string {
-	enrollment, err := s.enrollRepo.FindByUserAndCourse(ctx, userID, courseID)
+	enrollment, err := s.enrollRepo.FindByUserAndCourse(ctx, userID, courseID, 0)
 	if err != nil {
 		// If no enrollment found, return an empty role set
 		return []string{}

@@ -55,7 +55,7 @@ func (h *GamificationHandler) GetPseudonymPools(c *fiber.Ctx) error {
 		return responses.Unauthorized(c)
 	}
 
-	enrollment, err := h.enrollmentRepo.FindByUserAndCourse(c.Context(), viewerID, courseID)
+	enrollment, err := h.enrollmentRepo.FindByUserAndCourse(c.Context(), viewerID, courseID, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "failed to resolve enrollment")
 	}
@@ -127,7 +127,7 @@ func (h *GamificationHandler) UpdatePseudonymForSelf(c *fiber.Ctx) error {
 		return responses.Unauthorized(c)
 	}
 
-	enrollment, err := h.enrollmentRepo.FindByUserAndCourse(c.Context(), viewerID, courseID)
+	enrollment, err := h.enrollmentRepo.FindByUserAndCourse(c.Context(), viewerID, courseID, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "failed to resolve enrollment")
 	}
@@ -164,7 +164,7 @@ func (h *GamificationHandler) UpdatePseudonymForSelf(c *fiber.Ctx) error {
 		if !policy.AllowFirstName {
 			return responses.Error(c, fiber.StatusForbidden, "first-name mode is not allowed in this course")
 		}
-		if err := h.enrollmentRepo.UpdatePseudonymForSelf(c.Context(), viewerID, courseID, string(poolCode), ""); err != nil {
+		if err := h.enrollmentRepo.UpdatePseudonymForSelf(c.Context(), viewerID, courseID, callerAccountID(c), string(poolCode), ""); err != nil {
 			return responses.InternalError(c, "failed to set pseudonym")
 		}
 		return c.JSON(fiber.Map{"pool_code": string(poolCode), "name": ""})
@@ -186,7 +186,7 @@ func (h *GamificationHandler) UpdatePseudonymForSelf(c *fiber.Ctx) error {
 		// violations to ErrPseudonymTaken so we can iterate.
 		gen := pseudonym.NewGenerator()
 		name, err := gen.Generate(c.Context(), *pool, enrollment.ID, func(name string, attempt int) (bool, error) {
-			err := h.enrollmentRepo.UpdatePseudonymForSelf(c.Context(), viewerID, courseID, string(poolCode), name)
+			err := h.enrollmentRepo.UpdatePseudonymForSelf(c.Context(), viewerID, courseID, callerAccountID(c), string(poolCode), name)
 			if errors.Is(err, repository.ErrPseudonymTaken) {
 				return false, nil
 			}
@@ -206,7 +206,7 @@ func (h *GamificationHandler) UpdatePseudonymForSelf(c *fiber.Ctx) error {
 		if err := pseudonym.Validate(*pool, body.Name); err != nil {
 			return responses.BadRequest(c, err.Error())
 		}
-		if err := h.enrollmentRepo.UpdatePseudonymForSelf(c.Context(), viewerID, courseID, string(poolCode), body.Name); err != nil {
+		if err := h.enrollmentRepo.UpdatePseudonymForSelf(c.Context(), viewerID, courseID, callerAccountID(c), string(poolCode), body.Name); err != nil {
 			if errors.Is(err, repository.ErrPseudonymTaken) {
 				return responses.Error(c, fiber.StatusConflict, "another learner is already using that pseudonym in this course; pick another or regenerate")
 			}

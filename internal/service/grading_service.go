@@ -64,7 +64,7 @@ type StudentGrade struct {
 func (s *GradingService) GetGradebook(ctx context.Context, courseID uint) (*GradebookEntry, error) {
 	// Get all enrollments for the course (students)
 	params := repository.PaginationParams{Page: 1, PerPage: 1000}
-	enrollments, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, params)
+	enrollments, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, 0, params)
 	if err != nil {
 		return nil, err
 	}
