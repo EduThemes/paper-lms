@@ -130,7 +130,7 @@ func (h *ModuleItemHandler) CreateModuleItem(c *fiber.Ctx) error {
 		NewTab:          input.ModuleItem.NewTab,
 		Position:        input.ModuleItem.Position,
 		Indent:          input.ModuleItem.Indent,
-		WorkflowState:   "active",
+		WorkflowState:   models.ContentTagActive,
 	}
 
 	if err := h.moduleService.CreateItem(c.Context(), item); err != nil {

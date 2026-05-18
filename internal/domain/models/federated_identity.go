@@ -24,7 +24,7 @@ import (
 // first consent; later logins omit them. The snapshot lets us re-use
 // them without re-prompting.
 type FederatedIdentity struct {
-	ID              uint           `json:"id" gorm:"primaryKey"`
+	ID              uint           `json:"id" gorm:"column:id;primaryKey"`
 	UserID          uint           `json:"user_id" gorm:"not null;index"`
 	ProviderID      uint           `json:"provider_id" gorm:"not null"`
 	ExternalSubject string         `json:"external_subject" gorm:"not null"`

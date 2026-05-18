@@ -52,22 +52,22 @@ const (
 // doesn't try to fabricate a type tag the schema-parity diff would
 // otherwise flag as type drift. Indexes are owned by the SQL chain.
 type GamificationRule struct {
-	ID              uint                 `json:"id" gorm:"primaryKey"`
-	TenantID        uint                 `json:"tenant_id" gorm:"not null"`
+	ID              uint                  `json:"id" gorm:"column:id;primaryKey"`
+	TenantID        uint                  `json:"tenant_id" gorm:"not null"`
 	ScopeType       GamificationScopeType `json:"scope_type" gorm:"not null;type:text"`
-	ScopeID         uint                 `json:"scope_id" gorm:"not null"`
+	ScopeID         uint                  `json:"scope_id" gorm:"not null"`
 	AudienceLevel   GamificationAudience  `json:"audience_level" gorm:"not null;type:text"`
-	Name            string               `json:"name" gorm:"not null"`
-	Description     string               `json:"description"`
-	Enabled         bool                 `json:"enabled" gorm:"not null;default:true"`
-	TriggerEvent    datatypes.JSON       `json:"trigger_event" gorm:"type:jsonb;not null"`
-	ConditionSet    datatypes.JSON       `json:"condition_set" gorm:"type:jsonb;not null"`
-	Effects         datatypes.JSON       `json:"effects" gorm:"type:jsonb;not null"`
-	CooldownSeconds *int                 `json:"cooldown_seconds,omitempty"`
-	MaxPerWindow    datatypes.JSON       `json:"max_per_window,omitempty" gorm:"type:jsonb"`
-	CreatedBy       *uint                `json:"created_by,omitempty"`
-	CreatedAt       time.Time            `json:"created_at" gorm:"not null;default:now()"`
-	UpdatedAt       time.Time            `json:"updated_at" gorm:"not null;default:now()"`
+	Name            string                `json:"name" gorm:"not null"`
+	Description     string                `json:"description"`
+	Enabled         bool                  `json:"enabled" gorm:"not null;default:true"`
+	TriggerEvent    datatypes.JSON        `json:"trigger_event" gorm:"type:jsonb;not null"`
+	ConditionSet    datatypes.JSON        `json:"condition_set" gorm:"type:jsonb;not null"`
+	Effects         datatypes.JSON        `json:"effects" gorm:"type:jsonb;not null"`
+	CooldownSeconds *int                  `json:"cooldown_seconds,omitempty"`
+	MaxPerWindow    datatypes.JSON        `json:"max_per_window,omitempty" gorm:"type:jsonb"`
+	CreatedBy       *uint                 `json:"created_by,omitempty"`
+	CreatedAt       time.Time             `json:"created_at" gorm:"not null;default:now()"`
+	UpdatedAt       time.Time             `json:"updated_at" gorm:"not null;default:now()"`
 }
 
 func (GamificationRule) TableName() string { return "gamification_rules" }
@@ -80,7 +80,7 @@ func (GamificationRule) TableName() string { return "gamification_rules" }
 // at the SQL chain (uniq_gam_eval_rule_user_time). The Go field is
 // surrogate-keyed (ID bigserial) for clean repository ergonomics.
 type GamificationRuleEvaluation struct {
-	ID                uint           `json:"id" gorm:"primaryKey"`
+	ID                uint           `json:"id" gorm:"column:id;primaryKey"`
 	RuleID            uint           `json:"rule_id" gorm:"not null"`
 	UserID            uint           `json:"user_id" gorm:"not null"`
 	EvaluatedAt       time.Time      `json:"evaluated_at" gorm:"not null;default:now()"`

@@ -3,7 +3,7 @@ package models
 import "time"
 
 type GradingPeriod struct {
-	ID                   uint       `json:"id" gorm:"primaryKey"`
+	ID                   uint       `json:"id" gorm:"column:id;primaryKey"`
 	GradingPeriodGroupID uint       `json:"grading_period_group_id" gorm:"not null;index"`
 	Title                string     `json:"title" gorm:"not null"`
 	StartDate            time.Time  `json:"start_date" gorm:"not null"`

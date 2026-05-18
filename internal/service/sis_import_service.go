@@ -282,11 +282,11 @@ func (s *SISImportService) processCoursesCSV(ctx context.Context, batchID uint, 
 		}
 
 		// Map status to workflow state
-		workflowState := "available"
+		workflowState := models.CourseAvailable
 		if status == "active" {
-			workflowState = "available"
+			workflowState = models.CourseAvailable
 		} else if status == "deleted" {
-			workflowState = "deleted"
+			workflowState = models.CourseDeleted
 		}
 
 		accountID := uint(1)
@@ -492,11 +492,13 @@ func (s *SISImportService) processEnrollmentsCSV(ctx context.Context, batchID ui
 		}
 
 		// Determine workflow state from status
-		workflowState := "active"
-		if status == "deleted" || status == "inactive" {
-			workflowState = status
+		workflowState := models.EnrollmentActive
+		if status == "deleted" {
+			workflowState = models.EnrollmentDeleted
+		} else if status == "inactive" {
+			workflowState = models.EnrollmentInactive
 		} else if status == "completed" {
-			workflowState = "completed"
+			workflowState = models.EnrollmentCompleted
 		}
 
 		// Map role to enrollment type
@@ -737,7 +739,7 @@ func (s *SISImportService) ExportEnrollmentsCSV(ctx context.Context) ([]byte, er
 			sisSectionID = sectionMap[*e.CourseSectionID]
 		}
 
-		status := e.WorkflowState
+		status := string(e.WorkflowState)
 
 		writer.Write([]string{
 			sisCourseID,

@@ -3,7 +3,7 @@ package models
 import "time"
 
 type DiscussionTopicParticipant struct {
-	ID                uint       `json:"id" gorm:"primaryKey"`
+	ID                uint       `json:"id" gorm:"column:id;primaryKey"`
 	DiscussionTopicID uint       `json:"discussion_topic_id" gorm:"not null;uniqueIndex:idx_topic_user"`
 	UserID            uint       `json:"user_id" gorm:"not null;uniqueIndex:idx_topic_user"`
 	Subscribed        bool       `json:"subscribed" gorm:"default:true"`

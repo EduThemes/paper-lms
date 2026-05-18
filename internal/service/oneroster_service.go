@@ -672,7 +672,7 @@ func (s *OneRosterService) syncClasses(ctx context.Context, accountID uint, clas
 				Name:          class.Title,
 				CourseCode:     courseCode,
 				SISCourseID:   &sisCourseID,
-				WorkflowState: "available",
+				WorkflowState: models.CourseAvailable,
 			}
 			if err := s.courseRepo.Create(ctx, newCourse); err != nil {
 				errs = append(errs, fmt.Sprintf("failed to create course for class %s: %v", class.SourcedID, err))
@@ -739,7 +739,7 @@ func (s *OneRosterService) syncEnrollments(ctx context.Context, enrollments []on
 				CourseID:      course.ID,
 				Type:          enrollType,
 				Role:          enrollType,
-				WorkflowState: "active",
+				WorkflowState: models.EnrollmentActive,
 			}
 			if err := s.enrollmentRepo.Create(ctx, newEnroll); err != nil {
 				errs = append(errs, fmt.Sprintf("failed to create enrollment %s: %v", orEnroll.SourcedID, err))

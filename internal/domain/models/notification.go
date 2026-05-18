@@ -3,7 +3,7 @@ package models
 import "time"
 
 type Notification struct {
-	ID               uint       `json:"id" gorm:"primaryKey"`
+	ID               uint       `json:"id" gorm:"column:id;primaryKey"`
 	UserID           uint       `json:"user_id" gorm:"not null;index"`
 	NotificationType string     `json:"notification_type" gorm:"not null"`
 	Title            string     `json:"title" gorm:"not null"`

@@ -3,7 +3,7 @@ package models
 import "time"
 
 type Announcement struct {
-	ID             uint       `json:"id" gorm:"primaryKey"`
+	ID             uint       `json:"id" gorm:"column:id;primaryKey"`
 	CourseID       *uint      `json:"course_id" gorm:"index"`
 	AccountID      *uint      `json:"account_id" gorm:"index"`
 	UserID         uint       `json:"user_id"`
