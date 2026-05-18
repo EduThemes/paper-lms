@@ -26,9 +26,11 @@ package handlers_test
 // are the representative set; the remainder follow the same pattern.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 
@@ -860,3 +862,261 @@ func TestTenantIsolation_GetPortfolio(t *testing.T) {
 
 	runMatrix(t, "GET /portfolios/:id (Wave 2: tenant-scoped via PortfolioRepository.FindByID)", standardMatrix(), statusFn)
 }
+// Wave 2 — 13.1.E existence-leak conversions.
+//
+// The handlers below previously returned 403 on a cross-tenant /
+// cross-scope hit. The audit promoted the pattern to a load-bearing
+// contract: 403 leaks the existence of a resource in another tenant.
+// These cases lock the 404 conversion so a regression to 403 surfaces
+// as a test failure (the runMatrix helper tags 404 → 403 mismatches as
+// EXISTENCE LEAK so the CI log is unambiguous).
+//
+// Each test routes the request through the real handler with `mock`
+// repos seeded to return rows that DO exist but belong to a different
+// tenant / scope / owner. The handler MUST translate the mismatch to
+// 404 not 403.
+// ---------------------------------------------------------------------------
+
+// 9) PATCH /gamification/currencies/:id (cross-tenant)
+//
+// 13.1.E: a currency owned by tenant B must not 403 to a caller in
+// tenant A — that would confirm the row exists. The handler now
+// returns 404 in that case.
+func TestTenantIsolation_UpdateCurrency_CrossTenant_Returns404(t *testing.T) {
+	statusFn := func(callerAccount, resourceID uint) int {
+		currencyRepo := new(mockGamCurrencyRepo)
+		walletRepo := new(mockGamWalletRepo)
+		userRepo := new(mocks.MockUserRepository)
+		badgeRepo := new(mockGamBadgeRepo)
+		badgeAwardRepo := new(mockGamBadgeAwardRepo)
+		ruleRepo := new(mockGamRuleRepo)
+		enrollRepo := new(mocks.MockEnrollmentRepository)
+		accountRepo := new(mocks.MockAccountRepository)
+		snapshotRepo := new(mocks.MockGamificationLeaderboardSnapshotRepository)
+
+		// The currency row exists and belongs to ownerOf(resourceID).
+		// CurrencyRepository.FindByID is NOT tenant-aware on its
+		// signature today — the handler does the tenant check
+		// post-fetch via row.TenantID vs callerAccountID. So the mock
+		// returns the row regardless of caller.
+		currencyRepo.On("FindByID", mock.Anything, resourceID).
+			Return(&models.GamificationCurrencyType{
+				ID: resourceID, TenantID: ownerOf(resourceID),
+				ScopeType: models.ScopeSite, ScopeID: ownerOf(resourceID),
+				Code: "xp", DisplayLabel: "XP", SystemOwned: false,
+			}, nil)
+		// Update is only called on the in-tenant happy path; on
+		// cross-tenant the handler must short-circuit before this.
+		currencyRepo.On("Update", mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		h := handlers.NewGamificationHandler(walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo, ruleRepo, enrollRepo, accountRepo, snapshotRepo)
+
+		app := testutil.SetupTestApp()
+		app.Use(authStub(callerFor(callerAccount), callerAccount))
+		app.Patch("/api/v1/gamification/currencies/:id", h.UpdateCurrency)
+
+		resp := testutil.MakeRequest(app, "PATCH",
+			fmt.Sprintf("/api/v1/gamification/currencies/%d", resourceID),
+			stringsReader(`{"display_label":"X"}`))
+		return resp.StatusCode
+	}
+
+	runMatrix(t, "PATCH /gamification/currencies/:id (13.1.E — 404 not 403 cross-tenant)",
+		standardMatrix(), statusFn)
+}
+
+// 10) DELETE /gamification/badges/:id (cross-tenant)
+//
+// 13.1.E: deleting a badge from another tenant must 404, not 403.
+func TestTenantIsolation_DeleteBadge_CrossTenant_Returns404(t *testing.T) {
+	statusFn := func(callerAccount, resourceID uint) int {
+		currencyRepo := new(mockGamCurrencyRepo)
+		walletRepo := new(mockGamWalletRepo)
+		userRepo := new(mocks.MockUserRepository)
+		badgeRepo := new(mockGamBadgeRepo)
+		badgeAwardRepo := new(mockGamBadgeAwardRepo)
+		ruleRepo := new(mockGamRuleRepo)
+		enrollRepo := new(mocks.MockEnrollmentRepository)
+		accountRepo := new(mocks.MockAccountRepository)
+		snapshotRepo := new(mocks.MockGamificationLeaderboardSnapshotRepository)
+
+		// Badge exists, owned by ownerOf(resourceID).
+		badgeRepo.On("FindByID", mock.Anything, resourceID).
+			Return(&models.GamificationBadge{
+				ID: resourceID, TenantID: ownerOf(resourceID),
+				ScopeType: models.ScopeSite, ScopeID: ownerOf(resourceID),
+				Code: "first_quiz", Name: "First Quiz", SystemOwned: false,
+			}, nil)
+		badgeRepo.On("Delete", mock.Anything, resourceID).Return(nil).Maybe()
+
+		h := handlers.NewGamificationHandler(walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo, ruleRepo, enrollRepo, accountRepo, snapshotRepo)
+
+		app := testutil.SetupTestApp()
+		app.Use(authStub(callerFor(callerAccount), callerAccount))
+		app.Delete("/api/v1/gamification/badges/:id", h.DeleteBadge)
+
+		resp := testutil.MakeRequest(app, "DELETE",
+			fmt.Sprintf("/api/v1/gamification/badges/%d", resourceID), nil)
+		return resp.StatusCode
+	}
+
+	// In-tenant DELETE returns 204; the matrix asserts 200 by default
+	// (it's a generic OK code marker, not the literal status). Override
+	// the in-tenant cases to 204.
+	cases := []matrixCase{
+		{tenantA, resInA, http.StatusNoContent, "tenantA caller, tenantA resource"},
+		{tenantA, resInB, http.StatusNotFound, "tenantA caller, tenantB resource (cross-tenant)"},
+		{tenantB, resInA, http.StatusNotFound, "tenantB caller, tenantA resource (cross-tenant)"},
+		{tenantB, resInB, http.StatusNoContent, "tenantB caller, tenantB resource"},
+	}
+	runMatrix(t, "DELETE /gamification/badges/:id (13.1.E — 404 not 403 cross-tenant)",
+		cases, statusFn)
+}
+
+// 11) PATCH /gamification/rules/:id (cross-tenant)
+//
+// 13.1.E: rules carry a tenant_id; cross-tenant PATCH must 404.
+func TestTenantIsolation_PatchRule_CrossTenant_Returns404(t *testing.T) {
+	statusFn := func(callerAccount, resourceID uint) int {
+		currencyRepo := new(mockGamCurrencyRepo)
+		walletRepo := new(mockGamWalletRepo)
+		userRepo := new(mocks.MockUserRepository)
+		badgeRepo := new(mockGamBadgeRepo)
+		badgeAwardRepo := new(mockGamBadgeAwardRepo)
+		ruleRepo := new(mockGamRuleRepo)
+		enrollRepo := new(mocks.MockEnrollmentRepository)
+		accountRepo := new(mocks.MockAccountRepository)
+		snapshotRepo := new(mocks.MockGamificationLeaderboardSnapshotRepository)
+
+		// Rule exists in ownerOf(resourceID); route resolves to site
+		// scope under callerAccount (the rule's scope_id = its tenant
+		// per the SeedSystemCurrenciesForTenant convention).
+		// Trigger/condition/effects are seeded with valid JSON so the
+		// PatchRule validation pass on the in-tenant happy path
+		// reaches the Update call.
+		ruleRepo.On("FindByID", mock.Anything, resourceID).
+			Return(&models.GamificationRule{
+				ID: resourceID, TenantID: ownerOf(resourceID),
+				ScopeType: models.ScopeSite, ScopeID: ownerOf(resourceID),
+				AudienceLevel: models.AudienceHigherEd, Name: "r", Enabled: true,
+				TriggerEvent: []byte(`{"kind":"OnEvent","verb":"completed","object_type":"Quiz"}`),
+				ConditionSet: []byte(`{"kind":"ConditionSet","op":"AND","children":[]}`),
+				Effects:      []byte(`[{"kind":"AwardCurrency","code":"xp","amount":10}]`),
+			}, nil)
+		ruleRepo.On("Update", mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		h := handlers.NewGamificationHandler(walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo, ruleRepo, enrollRepo, accountRepo, snapshotRepo)
+
+		app := testutil.SetupTestApp()
+		app.Use(authStub(callerFor(callerAccount), callerAccount))
+		app.Patch("/api/v1/gamification/rules/:id", h.PatchRule)
+
+		resp := testutil.MakeRequest(app, "PATCH",
+			fmt.Sprintf("/api/v1/gamification/rules/%d", resourceID),
+			stringsReader(`{"enabled":false}`))
+		return resp.StatusCode
+	}
+
+	runMatrix(t, "PATCH /gamification/rules/:id (13.1.E — 404 not 403 cross-tenant)",
+		standardMatrix(), statusFn)
+}
+
+// 12) POST /users/:user_id/badges (cross-tenant badge award)
+//
+// 13.1.E: an admin in tenant A awarding tenant B's badge by ID must
+// see 404, not 403. The badge ID is enumerable; 403 confirms the
+// existence of an out-of-tenant row.
+func TestTenantIsolation_AwardBadge_CrossTenant_Returns404(t *testing.T) {
+	statusFn := func(callerAccount, resourceID uint) int {
+		currencyRepo := new(mockGamCurrencyRepo)
+		walletRepo := new(mockGamWalletRepo)
+		userRepo := new(mocks.MockUserRepository)
+		badgeRepo := new(mockGamBadgeRepo)
+		badgeAwardRepo := new(mockGamBadgeAwardRepo)
+		ruleRepo := new(mockGamRuleRepo)
+		enrollRepo := new(mocks.MockEnrollmentRepository)
+		accountRepo := new(mocks.MockAccountRepository)
+		snapshotRepo := new(mocks.MockGamificationLeaderboardSnapshotRepository)
+
+		badgeRepo.On("FindByID", mock.Anything, resourceID).
+			Return(&models.GamificationBadge{
+				ID: resourceID, TenantID: ownerOf(resourceID),
+				ScopeType: models.ScopeSite, ScopeID: ownerOf(resourceID),
+				Code: "first_quiz", Name: "First Quiz",
+			}, nil)
+		badgeAwardRepo.On("Award", mock.Anything, mock.Anything).
+			Run(func(args mock.Arguments) {
+				args.Get(1).(*models.GamificationBadgeAward).ID = 99
+			}).Return(true, nil).Maybe()
+
+		h := handlers.NewGamificationHandler(walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo, ruleRepo, enrollRepo, accountRepo, snapshotRepo)
+
+		app := testutil.SetupTestApp()
+		app.Use(authStub(callerFor(callerAccount), callerAccount))
+		app.Post("/api/v1/users/:user_id/badges", h.AwardBadgeToUser)
+
+		resp := testutil.MakeRequest(app, "POST",
+			fmt.Sprintf("/api/v1/users/42/badges"),
+			stringsReader(fmt.Sprintf(`{"badge_id":%d}`, resourceID)))
+		return resp.StatusCode
+	}
+
+	// In-tenant award returns 201; cross-tenant returns 404.
+	cases := []matrixCase{
+		{tenantA, resInA, http.StatusCreated, "tenantA caller, tenantA badge"},
+		{tenantA, resInB, http.StatusNotFound, "tenantA caller, tenantB badge (cross-tenant)"},
+		{tenantB, resInA, http.StatusNotFound, "tenantB caller, tenantA badge (cross-tenant)"},
+		{tenantB, resInB, http.StatusCreated, "tenantB caller, tenantB badge"},
+	}
+	runMatrix(t, "POST /users/:user_id/badges (13.1.E — 404 not 403 cross-tenant)",
+		cases, statusFn)
+}
+
+// 13) GET /courses/:course_id/leaderboard (non-enrolled viewer)
+//
+// 13.1.E: a viewer with no active enrollment in the course must see
+// 404, not 403. 403 confirms the course exists (in this or another
+// tenant); 404 keeps that signal silent.
+//
+// This is a single-case test (not a 2x2 matrix) because the mismatch
+// shape is "no enrollment row," not "row in wrong tenant."
+func TestTenantIsolation_Leaderboard_NotEnrolled_Returns404(t *testing.T) {
+	currencyRepo := new(mockGamCurrencyRepo)
+	walletRepo := new(mockGamWalletRepo)
+	userRepo := new(mocks.MockUserRepository)
+	badgeRepo := new(mockGamBadgeRepo)
+	badgeAwardRepo := new(mockGamBadgeAwardRepo)
+	ruleRepo := new(mockGamRuleRepo)
+	enrollRepo := new(mocks.MockEnrollmentRepository)
+	accountRepo := new(mocks.MockAccountRepository)
+	snapshotRepo := new(mocks.MockGamificationLeaderboardSnapshotRepository)
+
+	// Viewer is NOT enrolled. resolveViewerRoleInCourse falls back to
+	// userRepo.FindByID for the admin check; not-admin path emits 404.
+	enrollRepo.On("FindByUserAndCourse", mock.Anything, userInA, uint(1)).
+		Return((*models.Enrollment)(nil), nil)
+	userRepo.On("FindByID", mock.Anything, userInA).
+		Return(&models.User{ID: userInA, Name: "U", Role: "user"}, nil).Maybe()
+
+	h := handlers.NewGamificationHandler(walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo, ruleRepo, enrollRepo, accountRepo, snapshotRepo)
+
+	app := testutil.SetupTestApp()
+	app.Use(authStub(userInA, tenantA))
+	app.Get("/api/v1/courses/:course_id/leaderboard", h.GetCourseLeaderboard)
+
+	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/courses/1/leaderboard", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		tag := ""
+		if resp.StatusCode == http.StatusForbidden {
+			tag = " — EXISTENCE LEAK (403 reveals course exists to a non-enrolled viewer)"
+		}
+		t.Errorf("GET /courses/:course_id/leaderboard (not enrolled): expected 404, got %d%s",
+			resp.StatusCode, tag)
+	}
+}
+
+// stringsReader is a tiny inline helper that mirrors strings.NewReader
+// without forcing the file to import the strings package just for one
+// call site. Keeps the test setup symmetric with the existing matrix
+// helpers above.
+func stringsReader(s string) io.Reader { return bytes.NewReader([]byte(s)) }
