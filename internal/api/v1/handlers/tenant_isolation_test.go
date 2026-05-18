@@ -501,7 +501,42 @@ func TestTenantIsolation_GetFolder(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 8) GET /users?search_term=...
+// 8a) GET /accounts/:account_id/developer_keys/:id
+// ---------------------------------------------------------------------------
+
+// TestTenantIsolation_GetDeveloperKey locks the 13.1.D Wave 2 widening of
+// DeveloperKeyRepository.FindByID + DeveloperKeyService.GetByID. The repo
+// now applies a direct `account_id = ?` filter when accountID != 0, and the
+// handler threads `callerAccountID(c)` through. A tenant-A admin must not
+// be able to read a tenant-B developer key by ID (Canvas-CVE-class leak).
+func TestTenantIsolation_GetDeveloperKey(t *testing.T) {
+	statusFn := func(callerAccount, resourceID uint) int {
+		devKeyRepo := new(mocks.MockDeveloperKeyRepository)
+
+		row := &models.DeveloperKey{
+			ID: resourceID, AccountID: ownerOf(resourceID),
+			Name: "K", ClientID: fmt.Sprintf("dk_%d", resourceID),
+			WorkflowState: "active",
+		}
+		expectAccountIDPassThrough(&devKeyRepo.Mock, "FindByID", resourceID, ownerOf(resourceID), row)
+
+		svc := service.NewDeveloperKeyService(devKeyRepo)
+		h := handlers.NewDeveloperKeyHandler(svc)
+
+		app := testutil.SetupTestApp()
+		app.Use(authStub(callerFor(callerAccount), callerAccount), middleware.PaginationParams())
+		app.Get("/accounts/:account_id/developer_keys/:id", h.GetDeveloperKey)
+
+		resp := testutil.MakeRequest(app, http.MethodGet,
+			fmt.Sprintf("/accounts/%d/developer_keys/%d", callerAccount, resourceID), nil)
+		return resp.StatusCode
+	}
+
+	runMatrix(t, "GET /accounts/:account_id/developer_keys/:id (13.1.D Wave 2)", standardMatrix(), statusFn)
+}
+
+// ---------------------------------------------------------------------------
+// 9) GET /users?search_term=...
 // ---------------------------------------------------------------------------
 
 // TestTenantIsolation_SearchUsers locks the cross-tenant-leak fix in

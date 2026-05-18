@@ -8,10 +8,16 @@ import (
 
 type DeveloperKeyRepository interface {
 	Create(ctx context.Context, key *models.DeveloperKey) error
-	FindByID(ctx context.Context, id uint) (*models.DeveloperKey, error)
+	// FindByID — 13.1.D Wave 2: direct account_id filter. accountID==0 skips
+	// the filter (background callers such as OAuth2 token exchange).
+	FindByID(ctx context.Context, id, accountID uint) (*models.DeveloperKey, error)
+	// FindByClientID is the OAuth2/LTI external-entry-point lookup. ClientID
+	// is the lookup key from an external request body so we cannot pre-know
+	// the tenant here. Callers MUST validate the returned key's AccountID
+	// against the caller's tenant before exposing the record.
 	FindByClientID(ctx context.Context, clientID string) (*models.DeveloperKey, error)
 	Update(ctx context.Context, key *models.DeveloperKey) error
-	Delete(ctx context.Context, id uint) error
+	Delete(ctx context.Context, id, accountID uint) error
 	List(ctx context.Context, accountID uint, params PaginationParams) (*PaginatedResult[models.DeveloperKey], error)
 }
 
