@@ -669,7 +669,10 @@ func (h *UserHandler) ListUsers(c *fiber.Ctx) error {
 	var result *repository.PaginatedResult[models.User]
 	var err error
 	if searchTerm != "" {
-		result, err = h.userService.Search(c.Context(), searchTerm, params)
+		// 13.1.D: scope user search to the caller's tenant so an admin
+		// in one account cannot enumerate users in another via name or
+		// email substring.
+		result, err = h.userService.Search(c.Context(), searchTerm, callerAccountID(c), params)
 	} else {
 		result, err = h.userService.List(c.Context(), params)
 	}

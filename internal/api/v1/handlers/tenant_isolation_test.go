@@ -38,6 +38,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/api/v1/handlers"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
 	"github.com/EduThemes/paper-lms/internal/testutil"
 	"github.com/EduThemes/paper-lms/internal/testutil/mocks"
@@ -460,4 +461,111 @@ func TestTenantIsolation_GetFolder(t *testing.T) {
 	}
 
 	runMatrix(t, "GET /folders/:id", standardMatrix(), statusFn)
+}
+
+// ---------------------------------------------------------------------------
+// 8) GET /users?search_term=...
+// ---------------------------------------------------------------------------
+
+// TestTenantIsolation_SearchUsers locks the cross-tenant-leak fix in
+// `UserRepository.Search`. Before the fix the method ran
+// `WHERE name ILIKE ? OR email ILIKE ?` with no account_id filter, so
+// any admin in any tenant could enumerate users in any other tenant by
+// name/email substring (Canvas-CVE-class info leak).
+//
+// The matrix here is asymmetric vs. the standard 2x2 because Search is
+// a collection endpoint (returns 200 with a list), not a single-resource
+// GET. We assert the contract by inspecting which user rows the mock
+// repo was called for: the mock returns "B's user" only when the
+// caller's accountID matches the row's tenant. A viewer in tenant A
+// searching for a tenant-B user MUST come back with an empty list,
+// proving `callerAccountID(c)` reached the repo.
+func TestTenantIsolation_SearchUsers(t *testing.T) {
+	type searchResult struct {
+		statusCode int
+		bodyLen    int // number of users returned
+	}
+
+	runSearch := func(callerAccount uint, target *models.User) searchResult {
+		userRepo := new(mocks.MockUserRepository)
+
+		// Simulate the repo's tenant filter: return the target user only
+		// when the caller's accountID matches the target's account_id;
+		// otherwise return an empty result set. accountID == 0 (no scope)
+		// is not used by handler-routed callers post-13.1.D — but we
+		// still allow it for safety in case a background caller surfaces.
+		empty := &repository.PaginatedResult[models.User]{
+			Items: []models.User{}, TotalCount: 0, Page: 1, PerPage: 25,
+		}
+		match := &repository.PaginatedResult[models.User]{
+			Items: []models.User{*target}, TotalCount: 1, Page: 1, PerPage: 25,
+		}
+		// In-tenant or internal-call hit: return the user row.
+		userRepo.On("Search", mock.Anything, mock.AnythingOfType("string"),
+			mock.MatchedBy(func(acct uint) bool {
+				return acct == 0 || acct == target.AccountID
+			}),
+			mock.AnythingOfType("repository.PaginationParams"),
+		).Return(match, nil).Maybe()
+		// Cross-tenant hit: empty result (the real repo's WHERE filters
+		// the row out — no error, just zero rows).
+		userRepo.On("Search", mock.Anything, mock.AnythingOfType("string"),
+			mock.MatchedBy(func(acct uint) bool {
+				return acct != 0 && acct != target.AccountID
+			}),
+			mock.AnythingOfType("repository.PaginationParams"),
+		).Return(empty, nil).Maybe()
+
+		userSvc := service.NewUserService(userRepo)
+		h := handlers.NewUserHandler(userSvc, "test-jwt-secret", "test", nil, nil, nil)
+
+		app := testutil.SetupTestApp()
+		app.Use(authStub(callerFor(callerAccount), callerAccount), middleware.PaginationParams())
+		app.Get("/users", h.ListUsers)
+
+		// Search for the target user's email — the repo mock decides
+		// whether to surface it based on the accountID arg.
+		resp := testutil.MakeRequest(app, http.MethodGet,
+			"/users?search_term="+target.Email, nil)
+
+		out, _ := testutil.ParseJSONArray(resp)
+		return searchResult{statusCode: resp.StatusCode, bodyLen: len(out)}
+	}
+
+	userInTenantB := &models.User{
+		ID: userInB, AccountID: tenantB,
+		Name: "Bob in B", Email: "bob@tenantb.test", LoginID: "bob@tenantb.test",
+	}
+	userInTenantA := &models.User{
+		ID: userInA, AccountID: tenantA,
+		Name: "Alice in A", Email: "alice@tenanta.test", LoginID: "alice@tenanta.test",
+	}
+
+	cases := []struct {
+		caller uint
+		target *models.User
+		want   int // expected returned row count
+		desc   string
+	}{
+		{tenantA, userInTenantA, 1, "tenantA caller, tenantA user (in-tenant)"},
+		{tenantA, userInTenantB, 0, "tenantA caller, tenantB user (CROSS-TENANT — must be 0)"},
+		{tenantB, userInTenantA, 0, "tenantB caller, tenantA user (CROSS-TENANT — must be 0)"},
+		{tenantB, userInTenantB, 1, "tenantB caller, tenantB user (in-tenant)"},
+	}
+
+	for _, tc := range cases {
+		got := runSearch(tc.caller, tc.target)
+		if got.statusCode != http.StatusOK {
+			t.Errorf("GET /users?search_term=...: %s — expected 200, got %d", tc.desc, got.statusCode)
+			continue
+		}
+		if got.bodyLen != tc.want {
+			tag := ""
+			if tc.want == 0 && got.bodyLen > 0 {
+				tag = " — CROSS-TENANT LEAK (user from another tenant surfaced in search results)"
+			}
+			t.Errorf("GET /users?search_term=...: %s — expected %d result(s), got %d%s",
+				tc.desc, tc.want, got.bodyLen, tag)
+		}
+	}
 }

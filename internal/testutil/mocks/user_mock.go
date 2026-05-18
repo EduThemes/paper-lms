@@ -71,8 +71,8 @@ func (m *MockUserRepository) FindByResetToken(ctx context.Context, token string)
 	return args.Get(0).(*models.User), args.Error(1)
 }
 
-func (m *MockUserRepository) Search(ctx context.Context, searchTerm string, params repository.PaginationParams) (*repository.PaginatedResult[models.User], error) {
-	args := m.Called(ctx, searchTerm, params)
+func (m *MockUserRepository) Search(ctx context.Context, searchTerm string, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.User], error) {
+	args := m.Called(ctx, searchTerm, accountID, params)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

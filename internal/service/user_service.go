@@ -106,8 +106,12 @@ func (s *UserService) List(ctx context.Context, params repository.PaginationPara
 	return s.repo.List(ctx, params)
 }
 
-func (s *UserService) Search(ctx context.Context, searchTerm string, params repository.PaginationParams) (*repository.PaginatedResult[models.User], error) {
-	return s.repo.Search(ctx, searchTerm, params)
+// Search threads accountID from the handler (`callerAccountID(c)`)
+// down to the repo. accountID == 0 is reserved for background callers
+// that legitimately need cross-tenant search; handler-routed calls
+// MUST pass the authenticated caller's tenant. See Phase 13.1.D.
+func (s *UserService) Search(ctx context.Context, searchTerm string, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.User], error) {
+	return s.repo.Search(ctx, searchTerm, accountID, params)
 }
 
 func (s *UserService) RequestPasswordReset(ctx context.Context, email string) (string, error) {

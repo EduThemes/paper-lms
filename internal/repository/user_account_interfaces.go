@@ -16,7 +16,7 @@ type UserRepository interface {
 	Update(ctx context.Context, user *models.User) error
 	List(ctx context.Context, params PaginationParams) (*PaginatedResult[models.User], error)
 	FindByResetToken(ctx context.Context, token string) (*models.User, error)
-	Search(ctx context.Context, searchTerm string, params PaginationParams) (*PaginatedResult[models.User], error)
+	Search(ctx context.Context, searchTerm string, accountID uint, params PaginationParams) (*PaginatedResult[models.User], error)
 	// FilterPublicLeaderboardCandidates returns the subset of `candidateIDs`
 	// that have NOT opted out of public leaderboards (W2-C). Used by any
 	// leaderboard query path before projection. Stacks with the data-access

@@ -420,7 +420,7 @@ func (r *fakePasskeyUserRepo) List(context.Context, repository.PaginationParams)
 func (r *fakePasskeyUserRepo) FindByResetToken(context.Context, string) (*models.User, error) {
 	panic("unused")
 }
-func (r *fakePasskeyUserRepo) Search(context.Context, string, repository.PaginationParams) (*repository.PaginatedResult[models.User], error) {
+func (r *fakePasskeyUserRepo) Search(context.Context, string, uint, repository.PaginationParams) (*repository.PaginatedResult[models.User], error) {
 	panic("unused")
 }
 func (r *fakePasskeyUserRepo) FilterPublicLeaderboardCandidates(context.Context, []uint) ([]uint, error) {

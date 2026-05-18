@@ -113,7 +113,7 @@ func (f *fakeUserRepo) List(context.Context, repository.PaginationParams) (*repo
 func (f *fakeUserRepo) FindByResetToken(context.Context, string) (*models.User, error) {
 	return nil, nil
 }
-func (f *fakeUserRepo) Search(context.Context, string, repository.PaginationParams) (*repository.PaginatedResult[models.User], error) {
+func (f *fakeUserRepo) Search(context.Context, string, uint, repository.PaginationParams) (*repository.PaginatedResult[models.User], error) {
 	return nil, nil
 }
 func (f *fakeUserRepo) FilterPublicLeaderboardCandidates(context.Context, []uint) ([]uint, error) {
