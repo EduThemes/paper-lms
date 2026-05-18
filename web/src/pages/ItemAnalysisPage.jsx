@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link, Navigate } from 'react-router-dom';
 import { BarChart3, AlertCircle, FileQuestion } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
@@ -17,6 +18,7 @@ import { TYPE_LABELS, parseAnswers } from '../components/quiz/itemTypes/types';
  * Both paths feed the same render code.
  */
 const ItemAnalysisPage = () => {
+  const { t } = useTranslation();
   const { courseId, quizId } = useParams();
   const isTeacher = useIsTeacher(courseId);
   const [analysis, setAnalysis] = useState(null);
@@ -74,11 +76,11 @@ const ItemAnalysisPage = () => {
 
       <header className="mb-6">
         <Link to={`/courses/${courseId}/quizzes/${quizId}/edit`} className="text-brand-600 hover:underline text-sm">
-          &larr; Back to Quiz
+          {t('itemAnalysis.backToQuiz')}
         </Link>
         <h1 className="text-2xl font-bold text-text-primary flex items-center gap-2 mt-2">
           <BarChart3 className="w-6 h-6 text-brand-600" />
-          Item Analysis
+          {t('itemAnalysis.title')}
         </h1>
         {quiz && <p className="text-sm text-text-tertiary mt-1">{quiz.title}</p>}
       </header>
@@ -90,7 +92,7 @@ const ItemAnalysisPage = () => {
       )}
 
       {loading ? (
-        <div className="p-6 text-center text-text-tertiary text-sm">Loading…</div>
+        <div className="p-6 text-center text-text-tertiary text-sm">{t('common.loading')}</div>
       ) : stubMode || !analysis || analysis.questions?.length === 0 ? (
         <StubPlaceholder questions={questions} />
       ) : (
@@ -101,6 +103,7 @@ const ItemAnalysisPage = () => {
 };
 
 const ItemAnalysisTable = ({ analysis, questions }) => {
+  const { t } = useTranslation();
   const byId = useMemo(() => Object.fromEntries(questions.map(q => [String(q.id), q])), [questions]);
 
   return (
@@ -122,10 +125,10 @@ const ItemAnalysisTable = ({ analysis, questions }) => {
                      dangerouslySetInnerHTML={{ __html: String(q.question_text || '').slice(0, 240) }} />
               </div>
               <div className="text-right text-xs text-text-tertiary whitespace-nowrap">
-                <div>{totalAttempts} attempts</div>
-                <div className="mt-0.5">avg {(qStat.avg_points ?? 0).toFixed(2)} / {q.points_possible ?? 1} pts</div>
+                <div>{t('itemAnalysis.attempts', { count: totalAttempts })}</div>
+                <div className="mt-0.5">{t('itemAnalysis.avgPoints', { avg: (qStat.avg_points ?? 0).toFixed(2), total: q.points_possible ?? 1 })}</div>
                 {qStat.pending_review > 0 && (
-                  <div className="text-accent-warning mt-0.5">{qStat.pending_review} pending review</div>
+                  <div className="text-accent-warning mt-0.5">{t('itemAnalysis.pendingReview', { count: qStat.pending_review })}</div>
                 )}
               </div>
             </header>
@@ -148,7 +151,7 @@ const ItemAnalysisTable = ({ analysis, questions }) => {
                   return (
                     <div key={opt.id} className="flex items-center gap-2 text-xs">
                       <span className={`flex-1 truncate ${correct ? 'font-semibold text-accent-success' : 'text-text-secondary'}`}>
-                        {opt.text || opt.blank_id || '(option)'}
+                        {opt.text || opt.blank_id || t('itemAnalysis.optionFallback')}
                       </span>
                       <div className="w-32 h-2 bg-surface-1 rounded overflow-hidden">
                         <div className={`h-full ${correct ? 'bg-accent-success/70' : 'bg-text-tertiary/50'}`}
@@ -167,22 +170,23 @@ const ItemAnalysisTable = ({ analysis, questions }) => {
   );
 };
 
-const StubPlaceholder = ({ questions }) => (
-  <div className="bg-surface-0 rounded-lg shadow border border-border-default p-8 text-center">
-    <FileQuestion className="w-10 h-10 mx-auto text-text-disabled mb-3" />
-    <h2 className="text-lg font-semibold text-text-primary mb-1">No analysis data yet</h2>
-    <p className="text-sm text-text-tertiary max-w-md mx-auto">
-      Detailed item analysis appears here once students have submitted attempts. Aggregations include
-      % correct, per-option distribution (MC/MA/dropdown), average points earned, and items still
-      pending manual grading.
-    </p>
-    {questions.length > 0 && (
-      <p className="text-xs text-text-disabled mt-3">
-        {questions.length} question{questions.length !== 1 ? 's' : ''} configured on this quiz.
+const StubPlaceholder = ({ questions }) => {
+  const { t } = useTranslation();
+  return (
+    <div className="bg-surface-0 rounded-lg shadow border border-border-default p-8 text-center">
+      <FileQuestion className="w-10 h-10 mx-auto text-text-disabled mb-3" />
+      <h2 className="text-lg font-semibold text-text-primary mb-1">{t('itemAnalysis.noDataTitle')}</h2>
+      <p className="text-sm text-text-tertiary max-w-md mx-auto">
+        {t('itemAnalysis.noDataDescription')}
       </p>
-    )}
-  </div>
-);
+      {questions.length > 0 && (
+        <p className="text-xs text-text-disabled mt-3">
+          {t('itemAnalysis.questionsConfigured', { count: questions.length })}
+        </p>
+      )}
+    </div>
+  );
+};
 
 // Aggregates per-question metrics directly from submissions when the backend
 // item-analysis endpoint isn't available.
