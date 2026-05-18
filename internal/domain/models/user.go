@@ -10,25 +10,25 @@ import (
 )
 
 type User struct {
-	ID uint `json:"id" gorm:"primaryKey"`
+	ID uint `json:"id" gorm:"column:id;primaryKey"`
 	// AccountID is the tenant this user belongs to. Added in migration
 	// 000052 (Phase 13 / 13.1.A) — every prior user got backfilled from
 	// their primary enrollment's course→account, with account 1 as the
 	// legacy fallback for users with no enrollments. New users must
 	// carry an account_id; handlers/auth surfaces (13.1.C-F) assert
 	// this as the authoritative tenant scope.
-	AccountID           uint       `json:"account_id" gorm:"not null;index"`
-	Name                string     `json:"name" gorm:"not null"`
-	SortableName        string     `json:"sortable_name"`
-	ShortName           string     `json:"short_name"`
-	LoginID             string     `json:"login_id" gorm:"uniqueIndex;not null"`
-	SISUserID           *string    `json:"sis_user_id" gorm:"uniqueIndex"`
-	Email               string     `json:"email" gorm:"not null"`
-	PasswordHash        string     `json:"-" gorm:"not null"`
-	AvatarURL           string     `json:"avatar_url"`
-	Role                string     `json:"role" gorm:"not null;default:'user'"` // admin, user
-	Locale              string     `json:"locale" gorm:"default:'en'"`
-	TimeZone            string     `json:"time_zone" gorm:"default:'America/New_York'"`
+	AccountID    uint    `json:"account_id" gorm:"not null;index"`
+	Name         string  `json:"name" gorm:"not null"`
+	SortableName string  `json:"sortable_name"`
+	ShortName    string  `json:"short_name"`
+	LoginID      string  `json:"login_id" gorm:"uniqueIndex;not null"`
+	SISUserID    *string `json:"sis_user_id" gorm:"column:sis_user_id;uniqueIndex"`
+	Email        string  `json:"email" gorm:"not null"`
+	PasswordHash string  `json:"-" gorm:"not null"`
+	AvatarURL    string  `json:"avatar_url"`
+	Role         string  `json:"role" gorm:"not null;default:'user'"` // admin, user
+	Locale       string  `json:"locale" gorm:"default:'en'"`
+	TimeZone     string  `json:"time_zone" gorm:"default:'America/New_York'"`
 	// LeaderboardOptOut is the user-facing privacy toggle shipped in
 	// W2-C. When true, this user is excluded from public leaderboard
 	// surfaces — but their currencies / awards / mastery are unchanged
@@ -53,19 +53,19 @@ type User struct {
 	// secret (RFC 6238). Plaintext form lives only briefly during
 	// enrollment; the DB never sees it. NULL = user has not enrolled.
 	// See internal/auth/secretbox.go for the ciphertext format.
-	TOTPSecretEncrypted []byte `json:"-"`
+	TOTPSecretEncrypted []byte `json:"-" gorm:"column:totp_secret_encrypted"`
 
 	// TOTPVerifiedAt: set ONLY after the user proves they scanned the
 	// QR by entering a correct 6-digit code. Enrollment is not final
 	// until this timestamp is set. A stolen session that requests
 	// enrollment but never verifies cannot lock the real user out.
-	TOTPVerifiedAt *time.Time `json:"totp_verified_at,omitempty"`
+	TOTPVerifiedAt *time.Time `json:"totp_verified_at,omitempty" gorm:"column:totp_verified_at"`
 
 	// TOTPLastUsedWindow (Phase 10-A.5) is the most recently consumed
 	// TOTP step counter (Unix-seconds / 30). RFC 6238 §5.2 code-reuse
 	// protection: a code can only be used once per window. Default 0 =
 	// never used; every real-world TOTP code lands in a window > 0.
-	TOTPLastUsedWindow int64 `json:"-" gorm:"not null;default:0"`
+	TOTPLastUsedWindow int64 `json:"-" gorm:"column:totp_last_used_window;not null;default:0"`
 
 	// RequiresParentalConsent (Phase 13.4 / Wave C.2) — set true at
 	// signup when the tenant is coppa_strict and the user's age

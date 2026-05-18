@@ -29,7 +29,7 @@ func NewTestCourse() *models.Course {
 		AccountID:     1,
 		Name:          "Test Course",
 		CourseCode:    "TC101",
-		WorkflowState: "available",
+		WorkflowState: models.CourseAvailable,
 		DefaultView:   "modules",
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
@@ -44,7 +44,7 @@ func NewTestAssignment() *models.Assignment {
 		Name:           "Test Assignment",
 		PointsPossible: &points,
 		GradingType:    "points",
-		WorkflowState:  "published",
+		WorkflowState:  models.AssignmentPublished,
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 	}
@@ -60,7 +60,7 @@ func NewTestSubmission() *models.Submission {
 		SubmissionType: &subType,
 		Body:           &body,
 		Attempt:        1,
-		WorkflowState:  "submitted",
+		WorkflowState:  models.SubmissionSubmitted,
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 	}
@@ -73,7 +73,7 @@ func NewTestEnrollment() *models.Enrollment {
 		CourseID:      1,
 		Type:          "StudentEnrollment",
 		Role:          "StudentEnrollment",
-		WorkflowState: "active",
+		WorkflowState: models.EnrollmentActive,
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
 	}

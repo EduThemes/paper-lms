@@ -10,13 +10,13 @@ import "time"
 // Mirrors Canvas `conditional_release_rules` table (see
 // canvas-lms-master/app/models/conditional_release/rule.rb).
 type ConditionalReleaseRule struct {
-	ID                    uint                            `json:"id" gorm:"primaryKey"`
-	CourseID              uint                            `json:"course_id" gorm:"not null;index"`
-	TriggerAssignmentID   uint                            `json:"trigger_assignment_id" gorm:"not null;uniqueIndex:idx_cr_rule_trigger"`
-	WorkflowState         string                          `json:"workflow_state" gorm:"not null;default:'active';index"`
-	CreatedAt             time.Time                       `json:"created_at"`
-	UpdatedAt             time.Time                       `json:"updated_at"`
-	ScoringRanges         []ConditionalReleaseScoringRange `json:"scoring_ranges,omitempty" gorm:"foreignKey:RuleID"`
+	ID                  uint                             `json:"id" gorm:"column:id;primaryKey"`
+	CourseID            uint                             `json:"course_id" gorm:"not null;index"`
+	TriggerAssignmentID uint                             `json:"trigger_assignment_id" gorm:"not null;uniqueIndex:idx_cr_rule_trigger"`
+	WorkflowState       string                           `json:"workflow_state" gorm:"not null;default:'active';index"`
+	CreatedAt           time.Time                        `json:"created_at"`
+	UpdatedAt           time.Time                        `json:"updated_at"`
+	ScoringRanges       []ConditionalReleaseScoringRange `json:"scoring_ranges,omitempty" gorm:"foreignKey:RuleID"`
 }
 
 // ConditionalReleaseScoringRange defines one band of scores (e.g. 70-89%).
@@ -24,7 +24,7 @@ type ConditionalReleaseRule struct {
 // (Canvas stores them as decimal fractions). LowerBound is inclusive,
 // UpperBound is exclusive (with a special case for 1.0/100%).
 type ConditionalReleaseScoringRange struct {
-	ID             uint                              `json:"id" gorm:"primaryKey"`
+	ID             uint                              `json:"id" gorm:"column:id;primaryKey"`
 	RuleID         uint                              `json:"rule_id" gorm:"not null;index"`
 	LowerBound     float64                           `json:"lower_bound" gorm:"not null;default:0"`
 	UpperBound     float64                           `json:"upper_bound" gorm:"not null;default:1"`
@@ -39,7 +39,7 @@ type ConditionalReleaseScoringRange struct {
 // together. A scoring range may contain multiple sets (e.g. a "choose one"
 // pathway), but the typical case is a single set per range.
 type ConditionalReleaseAssignmentSet struct {
-	ID             uint                                         `json:"id" gorm:"primaryKey"`
+	ID             uint                                         `json:"id" gorm:"column:id;primaryKey"`
 	ScoringRangeID uint                                         `json:"scoring_range_id" gorm:"not null;index"`
 	Position       int                                          `json:"position" gorm:"not null;default:0"`
 	WorkflowState  string                                       `json:"workflow_state" gorm:"not null;default:'active'"`
@@ -51,7 +51,7 @@ type ConditionalReleaseAssignmentSet struct {
 // ConditionalReleaseAssignmentSetAssociation links an assignment set to a
 // concrete assignment that should be released when this set is chosen.
 type ConditionalReleaseAssignmentSetAssociation struct {
-	ID            uint      `json:"id" gorm:"primaryKey"`
+	ID            uint      `json:"id" gorm:"column:id;primaryKey"`
 	SetID         uint      `json:"assignment_set_id" gorm:"not null;index"`
 	AssignmentID  uint      `json:"assignment_id" gorm:"not null;index"`
 	Position      int       `json:"position" gorm:"not null;default:0"`
@@ -64,7 +64,7 @@ type ConditionalReleaseAssignmentSetAssociation struct {
 // later unassigned) to a specific student. Idempotency is enforced via the
 // (set_id, student_id, action_type) unique index.
 type ConditionalReleaseAssignmentSetAction struct {
-	ID         uint      `json:"id" gorm:"primaryKey"`
+	ID         uint      `json:"id" gorm:"column:id;primaryKey"`
 	SetID      uint      `json:"assignment_set_id" gorm:"not null;index;uniqueIndex:idx_cr_action_unique"`
 	StudentID  uint      `json:"student_id" gorm:"not null;index;uniqueIndex:idx_cr_action_unique"`
 	ActionType string    `json:"action_type" gorm:"not null;default:'assigned';uniqueIndex:idx_cr_action_unique"` // "assigned" | "unassigned"

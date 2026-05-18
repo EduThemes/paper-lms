@@ -136,7 +136,7 @@ func TestCourseCreate_TeacherEnrolled(t *testing.T) {
 	assert.Equal(t, uint(42), capturedEnrollment.UserID)
 	assert.Equal(t, "TeacherEnrollment", capturedEnrollment.Type)
 	assert.Equal(t, "TeacherEnrollment", capturedEnrollment.Role)
-	assert.Equal(t, "active", capturedEnrollment.WorkflowState)
+	assert.Equal(t, models.EnrollmentActive, capturedEnrollment.WorkflowState)
 	mockEnrollmentRepo.AssertExpectations(t)
 }
 

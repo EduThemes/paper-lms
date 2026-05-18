@@ -28,7 +28,7 @@ func (GamificationWalletBalance) TableName() string { return "gamification_walle
 // Every balance change in the system produces a row here; balance rows
 // are derived (or could be) from a sum of transactions.
 type GamificationWalletTransaction struct {
-	ID                uint           `json:"id" gorm:"primaryKey"`
+	ID                uint           `json:"id" gorm:"column:id;primaryKey"`
 	UserID            uint           `json:"user_id" gorm:"not null"`
 	CurrencyTypeID    uint           `json:"currency_type_id" gorm:"not null"`
 	Delta             int64          `json:"delta" gorm:"not null"`

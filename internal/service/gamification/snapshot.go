@@ -90,7 +90,7 @@ func LoadSnapshot(
 					// predicate only uses Score bounds in Wave 1. Leave it
 					// zero until Sprint D wires in the assignment lookup.
 					PointsPossible: 0,
-					WorkflowState:  s.WorkflowState,
+					WorkflowState:  string(s.WorkflowState),
 					OnTime:         !s.Late,
 					AttemptCount:   s.Attempt,
 				}

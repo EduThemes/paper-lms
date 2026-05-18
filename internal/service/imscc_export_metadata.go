@@ -142,7 +142,7 @@ func (e *IMSCCExporter) writeModuleMetaXML(
 					Identifier:    fmt.Sprintf("item_%d", it.ID),
 					ContentType:   exportModuleItemContentType(it.ContentType),
 					Title:         it.Title,
-					WorkflowState: valueOr(it.WorkflowState, "active"),
+					WorkflowState: valueOr(string(it.WorkflowState), "active"),
 					Position:      it.Position,
 					Indent:        it.Indent,
 					URL:           it.URL,

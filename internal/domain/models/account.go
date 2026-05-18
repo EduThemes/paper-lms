@@ -7,12 +7,12 @@ import (
 )
 
 type Account struct {
-	ID              uint      `json:"id" gorm:"primaryKey"`
-	Name            string    `json:"name" gorm:"not null"`
-	ParentAccountID *uint     `json:"parent_account_id"`
-	RootAccountID   *uint     `json:"root_account_id"`
-	SISAccountID    *string   `json:"sis_account_id" gorm:"uniqueIndex"`
-	WorkflowState   string    `json:"workflow_state" gorm:"not null;default:'active'"`
+	ID              uint            `json:"id" gorm:"column:id;primaryKey"`
+	Name            string          `json:"name" gorm:"not null"`
+	ParentAccountID *uint           `json:"parent_account_id"`
+	RootAccountID   *uint           `json:"root_account_id"`
+	SISAccountID    *string         `json:"sis_account_id" gorm:"column:sis_account_id;uniqueIndex"`
+	WorkflowState   AccountWorkflow `json:"workflow_state" gorm:"type:text;not null;default:'active'"`
 	// MaxUploadSizeMB caps file upload size (per request) for this account.
 	// Default 500. Editable by admins via the settings page; enforced by middleware.
 	MaxUploadSizeMB uint `json:"max_upload_size_mb" gorm:"not null;default:500"`
@@ -35,7 +35,7 @@ type Account struct {
 	// + DEFAULT 'off'. No `default:` GORM tag because the column is
 	// policy-bearing TEXT (see CLAUDE.md "Phase 7 patterns" — same
 	// class as the F1.6 lesson but for enum-shaped text).
-	MFAPolicy string `json:"mfa_policy" gorm:"not null"`
+	MFAPolicy string `json:"mfa_policy" gorm:"column:mfa_policy;not null"`
 
 	// DefaultLocale (Phase 13 / 13.11) — per-tenant UI language. Frontend
 	// reads this at session bootstrap; falls back to "en" for tenants
@@ -50,7 +50,7 @@ type Account struct {
 
 // BeforeCreate mirrors the SQL DEFAULTs from migrations 000046 and 000055
 // in Go. The DB columns have NOT NULL + DEFAULT, but GORM serializes empty
-// strings as '' rather than omitting them, which (for MFAPolicy) trips the
+// strings as ” rather than omitting them, which (for MFAPolicy) trips the
 // accounts_mfa_policy_check CHECK constraint. The GORM `default:` tag is
 // intentionally NOT used on these two fields per CLAUDE.md "Phase 7
 // patterns" (parity-test friendliness for policy-bearing TEXT columns);

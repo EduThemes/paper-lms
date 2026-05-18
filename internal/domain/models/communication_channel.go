@@ -3,10 +3,10 @@ package models
 import "time"
 
 type CommunicationChannel struct {
-	ID            uint       `json:"id" gorm:"primaryKey"`
+	ID            uint       `json:"id" gorm:"column:id;primaryKey"`
 	UserID        uint       `json:"user_id" gorm:"index"`
-	ChannelType   string     `json:"channel_type"`                    // email, webhook, push
-	Address       string     `json:"address"`                         // email address, webhook URL, push token
+	ChannelType   string     `json:"channel_type"` // email, webhook, push
+	Address       string     `json:"address"`      // email address, webhook URL, push token
 	Position      int        `json:"position" gorm:"default:1"`
 	Confirmed     bool       `json:"confirmed" gorm:"default:false"`
 	ConfirmCode   string     `json:"-"`

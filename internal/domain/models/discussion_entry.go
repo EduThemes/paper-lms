@@ -3,7 +3,7 @@ package models
 import "time"
 
 type DiscussionEntry struct {
-	ID                uint      `json:"id" gorm:"primaryKey"`
+	ID                uint      `json:"id" gorm:"column:id;primaryKey"`
 	DiscussionTopicID uint      `json:"discussion_topic_id" gorm:"not null;index"`
 	UserID            uint      `json:"user_id" gorm:"not null;index"`
 	ParentID          *uint     `json:"parent_id" gorm:"index"`

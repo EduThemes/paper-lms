@@ -3,7 +3,7 @@ package models
 import "time"
 
 type GroupMembership struct {
-	ID            uint      `json:"id" gorm:"primaryKey"`
+	ID            uint      `json:"id" gorm:"column:id;primaryKey"`
 	GroupID       uint      `json:"group_id" gorm:"not null;uniqueIndex:idx_group_user"`
 	UserID        uint      `json:"user_id" gorm:"not null;uniqueIndex:idx_group_user"`
 	WorkflowState string    `json:"workflow_state" gorm:"not null;default:'accepted'"` // accepted, invited, requested

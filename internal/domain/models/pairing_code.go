@@ -16,7 +16,7 @@ import (
 // separated by hyphens, e.g. "K7H-PQM-3RD". The character set excludes the
 // visually-confusing letters O/0 and I/1.
 type PairingCode struct {
-	ID         uint       `json:"id" gorm:"primaryKey"`
+	ID         uint       `json:"id" gorm:"column:id;primaryKey"`
 	Code       string     `json:"code" gorm:"uniqueIndex;not null"`
 	UserID     uint       `json:"user_id" gorm:"not null;index"`
 	CreatedAt  time.Time  `json:"created_at"`

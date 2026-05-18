@@ -6,7 +6,7 @@ import "time"
 // (e.g., notes, free-form text columns shown alongside assignment columns).
 // See: canvas-lms/app/models/custom_gradebook_column.rb
 type CustomGradebookColumn struct {
-	ID            uint      `gorm:"primaryKey" json:"id"`
+	ID            uint      `gorm:"column:id;primaryKey" json:"id"`
 	CourseID      uint      `gorm:"not null;index:idx_custom_gradebook_columns_course_pos" json:"course_id"`
 	Title         string    `gorm:"type:varchar(255);not null" json:"title"`
 	Position      int       `gorm:"not null;default:0;index:idx_custom_gradebook_columns_course_pos" json:"position"`
@@ -26,7 +26,7 @@ func (CustomGradebookColumn) TableName() string {
 // CustomColumnDatum stores the per-student value for a custom gradebook column.
 // Canvas stores Content as a string up to ~4KB.
 type CustomColumnDatum struct {
-	ID                      uint      `gorm:"primaryKey" json:"id"`
+	ID                      uint      `gorm:"column:id;primaryKey" json:"id"`
 	CustomGradebookColumnID uint      `gorm:"not null;uniqueIndex:idx_custom_column_data_col_user" json:"custom_gradebook_column_id"`
 	UserID                  uint      `gorm:"not null;uniqueIndex:idx_custom_column_data_col_user;index" json:"user_id"`
 	Content                 string    `gorm:"type:text" json:"content"`

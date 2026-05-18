@@ -3,7 +3,7 @@ package models
 import "time"
 
 type Conference struct {
-	ID             uint       `json:"id" gorm:"primaryKey"`
+	ID             uint       `json:"id" gorm:"column:id;primaryKey"`
 	ContextType    string     `json:"context_type" gorm:"not null;index:idx_conf_context"` // Course, Group
 	ContextID      uint       `json:"context_id" gorm:"not null;index:idx_conf_context"`
 	ConferenceType string     `json:"conference_type" gorm:"not null"` // BigBlueButton, Zoom

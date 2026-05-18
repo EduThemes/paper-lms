@@ -203,7 +203,7 @@ func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, gra
 			Grade:         &gradeStr,
 			GradedAt:      &now,
 			GraderID:      &graderID,
-			WorkflowState: "graded",
+			WorkflowState: models.SubmissionGraded,
 		}
 		if createErr := s.submissionRepo.Create(ctx, submission); createErr != nil {
 			return nil, createErr
@@ -288,7 +288,7 @@ func (s *SubmissionService) createGroupSubmissions(ctx context.Context, assignme
 				SubmittedAt:    submission.SubmittedAt,
 				Attempt:        1,
 				Late:           submission.Late,
-				WorkflowState:  "submitted",
+				WorkflowState:  models.SubmissionSubmitted,
 			}
 			_ = s.submissionRepo.Create(ctx, memberSubmission)
 		}
@@ -310,7 +310,7 @@ func (s *SubmissionService) gradeGroupMembers(ctx context.Context, assignment *m
 			existing.Grade = &memberGradeStr
 			existing.GradedAt = gradedAt
 			existing.GraderID = &graderID
-			existing.WorkflowState = "graded"
+			existing.WorkflowState = models.SubmissionGraded
 			_ = s.submissionRepo.Update(ctx, existing)
 		} else {
 			memberSubmission := &models.Submission{
@@ -320,7 +320,7 @@ func (s *SubmissionService) gradeGroupMembers(ctx context.Context, assignment *m
 				Grade:         &memberGradeStr,
 				GradedAt:      gradedAt,
 				GraderID:      &graderID,
-				WorkflowState: "graded",
+				WorkflowState: models.SubmissionGraded,
 			}
 			_ = s.submissionRepo.Create(ctx, memberSubmission)
 		}

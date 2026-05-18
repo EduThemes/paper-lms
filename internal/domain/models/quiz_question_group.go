@@ -3,7 +3,7 @@ package models
 import "time"
 
 type QuizQuestionGroup struct {
-	ID             uint      `json:"id" gorm:"primaryKey"`
+	ID             uint      `json:"id" gorm:"column:id;primaryKey"`
 	QuizID         uint      `json:"quiz_id" gorm:"not null;index"`
 	Name           string    `json:"name"`
 	PickCount      int       `json:"pick_count" gorm:"not null;default:1"` // how many questions to randomly pick

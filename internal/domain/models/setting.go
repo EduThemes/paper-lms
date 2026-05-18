@@ -24,7 +24,7 @@ import (
 // per-export key supplied by the requester rather than re-emitted in
 // plaintext. See plan §"Open questions" #4.
 type Setting struct {
-	ID uint `json:"id" gorm:"primaryKey"`
+	ID uint `json:"id" gorm:"column:id;primaryKey"`
 
 	// ScopeType is one of 'instance', 'account', 'user'. The DB
 	// settings_scope_type_check CHECK constraint enforces this.
