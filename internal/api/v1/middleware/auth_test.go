@@ -178,7 +178,7 @@ func TestProtected_ValidAccessToken(t *testing.T) {
 	mockTokenRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.AccessToken")).Return(nil)
 
 	// Middleware looks up user after successful token validation
-	mockUserRepo.On("FindByID", mock.Anything, uint(99)).Return(storedUser, nil)
+	mockUserRepo.On("FindByID", mock.Anything, uint(99), uint(0)).Return(storedUser, nil)
 
 	resp := testutil.MakeAuthenticatedRequest(app, http.MethodGet, "/protected", rawToken, nil)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)

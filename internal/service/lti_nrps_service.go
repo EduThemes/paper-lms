@@ -38,7 +38,12 @@ func (s *LTINRPSService) GetMemberships(ctx context.Context, courseID uint, para
 
 	for _, enrollment := range enrollments.Items {
 		// Fetch the user details for each enrollment
-		user, err := s.userRepo.FindByID(ctx, enrollment.UserID)
+		// LTI NRPS member lookup. The enrollment was already scoped to
+		// the LTI launch context (course → tenant), so a cross-tenant
+		// user.id can't appear here. accountID=0 preserves
+		// pre-widening semantics. Sprint 2.3 leftover: thread tenant
+		// from the LTI handler context.
+		user, err := s.userRepo.FindByID(ctx, enrollment.UserID, 0)
 		if err != nil {
 			// Skip enrollments where the user cannot be found
 			continue

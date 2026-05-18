@@ -78,7 +78,7 @@ func (f *fakeUserRepo) Create(ctx context.Context, u *models.User) error {
 	return nil
 }
 
-func (f *fakeUserRepo) FindByID(ctx context.Context, id uint) (*models.User, error) {
+func (f *fakeUserRepo) FindByID(ctx context.Context, id, _ uint) (*models.User, error) {
 	u, ok := f.byID[id]
 	if !ok {
 		return nil, errors.New("user not found")
@@ -103,11 +103,11 @@ func (f *fakeUserRepo) FindByLoginID(context.Context, string) (*models.User, err
 func (f *fakeUserRepo) FindBySISUserID(context.Context, string) (*models.User, error) {
 	return nil, errors.New("not implemented")
 }
-func (f *fakeUserRepo) FindByIDs(context.Context, []uint) ([]models.User, error) {
+func (f *fakeUserRepo) FindByIDs(context.Context, []uint, uint) ([]models.User, error) {
 	return nil, nil
 }
 func (f *fakeUserRepo) Update(context.Context, *models.User) error                 { return nil }
-func (f *fakeUserRepo) List(context.Context, repository.PaginationParams) (*repository.PaginatedResult[models.User], error) {
+func (f *fakeUserRepo) List(context.Context, repository.PaginationParams, uint) (*repository.PaginatedResult[models.User], error) {
 	return nil, nil
 }
 func (f *fakeUserRepo) FindByResetToken(context.Context, string) (*models.User, error) {

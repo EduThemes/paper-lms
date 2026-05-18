@@ -45,7 +45,11 @@ func (pm *PermissionMiddleware) RequireAdmin() fiber.Handler {
 			return forbidden(c, "user not authenticated")
 		}
 
-		user, err := pm.userRepo.FindByID(c.Context(), userID)
+		// AUTH-INTERNAL: role gate runs as part of the authorization
+		// pipeline. accountID=0 is correct — the tenant check happens
+		// explicitly below (callerAccount vs user.AccountID), and the
+		// user-id is the JWT subject.
+		user, err := pm.userRepo.FindByID(c.Context(), userID, 0)
 		if err != nil {
 			return forbidden(c, "user not found")
 		}
@@ -91,7 +95,10 @@ func (pm *PermissionMiddleware) RequireSuperAdmin() fiber.Handler {
 			return forbidden(c, "user not authenticated")
 		}
 
-		user, err := pm.userRepo.FindByID(c.Context(), userID)
+		// AUTH-INTERNAL: super-admin gate. accountID=0 is required —
+		// super_admin role crosses tenant boundaries by definition,
+		// and the user-id is the JWT subject.
+		user, err := pm.userRepo.FindByID(c.Context(), userID, 0)
 		if err != nil {
 			return forbidden(c, "user not found")
 		}
@@ -245,7 +252,9 @@ func (pm *PermissionMiddleware) isAdmin(c *fiber.Ctx, userID uint) bool {
 		return cached
 	}
 
-	user, err := pm.userRepo.FindByID(c.Context(), userID)
+	// AUTH-INTERNAL: cached role lookup. accountID=0 is correct;
+	// userID is the JWT subject and role is tenant-independent.
+	user, err := pm.userRepo.FindByID(c.Context(), userID, 0)
 	if err != nil {
 		return false
 	}

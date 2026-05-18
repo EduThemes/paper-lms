@@ -81,7 +81,8 @@ func (h *PasskeyHandler) BeginRegistration(c *fiber.Ctx) error {
 	if userID == 0 {
 		return responses.Unauthorized(c)
 	}
-	user, err := h.users.FindByID(c.Context(), userID)
+	// Self lookup: userID is the JWT subject. accountID=0 is correct.
+	user, err := h.users.FindByID(c.Context(), userID, 0)
 	if err != nil || user == nil {
 		return responses.Error(c, fiber.StatusNotFound, "user not found")
 	}
@@ -113,7 +114,8 @@ func (h *PasskeyHandler) FinishRegistration(c *fiber.Ctx) error {
 	if userID == 0 {
 		return responses.Unauthorized(c)
 	}
-	user, err := h.users.FindByID(c.Context(), userID)
+	// Self lookup: userID is the JWT subject. accountID=0 is correct.
+	user, err := h.users.FindByID(c.Context(), userID, 0)
 	if err != nil || user == nil {
 		return responses.Error(c, fiber.StatusNotFound, "user not found")
 	}
