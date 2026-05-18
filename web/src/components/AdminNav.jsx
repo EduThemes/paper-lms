@@ -6,6 +6,7 @@ import {
   Shield, UserCog, RefreshCw, Key, Bell, Code, Coins, Award, Sparkles,
   Trophy,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 // The five admin pages teachers/admins reach daily live in the sidebar's
@@ -13,44 +14,49 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 // data sync, raw GraphiQL — is rare enough that it's hidden behind a
 // "More…" popover so the sidebar stays scannable. Mirrors how Canvas tucks
 // account-level admin behind their own sub-navigation.
-const frequentLinks = [
-  { to: '/admin',                icon: Home,     label: 'Home' },
-  { to: '/admin/courses',        icon: BookOpen, label: 'Courses' },
-  { to: '/admin/people',         icon: Users,    label: 'People' },
-  { to: '/admin/settings',       icon: Sliders,  label: 'Settings' },
-  { to: '/admin/feature_flags',  icon: Flag,     label: 'Feature Flags' },
+//
+// Nav items are built inside the component (via buildFrequentLinks(t) /
+// buildSecondaryGroups(t)) so labels translate when the active language
+// changes — useTranslation only runs in the render tree, so module-load
+// arrays would freeze the labels at import time.
+const buildFrequentLinks = (t) => [
+  { to: '/admin',                icon: Home,     label: t('adminNav.home') },
+  { to: '/admin/courses',        icon: BookOpen, label: t('adminNav.courses') },
+  { to: '/admin/people',         icon: Users,    label: t('adminNav.people') },
+  { to: '/admin/settings',       icon: Sliders,  label: t('adminNav.settings') },
+  { to: '/admin/feature_flags',  icon: Flag,     label: t('adminNav.featureFlags') },
 ];
 
-const secondaryGroups = [
+const buildSecondaryGroups = (t) => [
   {
-    label: 'Compliance',
+    label: t('adminNav.groups.compliance'),
     items: [
-      { to: '/admin/ferpa',           icon: FileText,       label: 'FERPA' },
-      { to: '/admin/roles',           icon: UserCog,        label: 'Custom Roles' },
+      { to: '/admin/ferpa',           icon: FileText,       label: t('adminNav.ferpa') },
+      { to: '/admin/roles',           icon: UserCog,        label: t('adminNav.customRoles') },
     ],
   },
   {
-    label: 'Identity',
+    label: t('adminNav.groups.identity'),
     items: [
-      { to: '/admin/auth_providers',  icon: Shield,         label: 'Auth Providers' },
-      { to: '/admin/developer_keys',  icon: KeyRound,       label: 'Developer Keys' },
-      { to: '/settings/tokens',       icon: Key,            label: 'Access Tokens' },
+      { to: '/admin/auth_providers',  icon: Shield,         label: t('adminNav.authProviders') },
+      { to: '/admin/developer_keys',  icon: KeyRound,       label: t('adminNav.developerKeys') },
+      { to: '/settings/tokens',       icon: Key,            label: t('adminNav.accessTokens') },
     ],
   },
   {
-    label: 'Data',
+    label: t('adminNav.groups.data'),
     items: [
-      { to: '/admin/sis_import',      icon: Upload,         label: 'SIS Import' },
-      { to: '/admin/oneroster',       icon: RefreshCw,      label: 'OneRoster' },
-      { to: '/admin/terms',           icon: GraduationCap,  label: 'Terms' },
-      { to: '/admin/grading_periods', icon: ClipboardCheck, label: 'Grading Periods' },
+      { to: '/admin/sis_import',      icon: Upload,         label: t('adminNav.sisImport') },
+      { to: '/admin/oneroster',       icon: RefreshCw,      label: t('adminNav.oneRoster') },
+      { to: '/admin/terms',           icon: GraduationCap,  label: t('adminNav.terms') },
+      { to: '/admin/grading_periods', icon: ClipboardCheck, label: t('adminNav.gradingPeriods') },
     ],
   },
   {
-    label: 'Developer',
+    label: t('adminNav.groups.developer'),
     items: [
-      { to: '/graphiql',              icon: Code,           label: 'GraphiQL' },
-      { to: '/settings/notifications', icon: Bell,          label: 'Notifications' },
+      { to: '/graphiql',              icon: Code,           label: t('adminNav.graphiql') },
+      { to: '/settings/notifications', icon: Bell,          label: t('adminNav.notifications') },
     ],
   },
   // Phase 6 Wave 2 gamification chrome. Lives in the More… popover for
@@ -60,21 +66,24 @@ const secondaryGroups = [
   // leaderboard/pseudonym defaults home — used to live on /admin/settings
   // but admins look for it here first.
   {
-    label: 'Gamification',
+    label: t('adminNav.groups.gamification'),
     items: [
-      { to: '/admin/gamification/currencies', icon: Coins,    label: 'Currencies' },
-      { to: '/admin/gamification/badges',     icon: Award,    label: 'Badges' },
-      { to: '/admin/gamification/recipes',    icon: Sparkles, label: 'Recipes' },
-      { to: '/admin/gamification/settings',   icon: Trophy,   label: 'Settings' },
+      { to: '/admin/gamification/currencies', icon: Coins,    label: t('adminNav.currencies') },
+      { to: '/admin/gamification/badges',     icon: Award,    label: t('adminNav.badges') },
+      { to: '/admin/gamification/recipes',    icon: Sparkles, label: t('adminNav.recipes') },
+      { to: '/admin/gamification/settings',   icon: Trophy,   label: t('adminNav.gamification.settings') },
     ],
   },
 ];
 
-const allSecondaryRoutes = secondaryGroups.flatMap((g) => g.items.map((i) => i.to));
-
 const AdminNav = () => {
+  const { t } = useTranslation();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
+
+  const frequentLinks = buildFrequentLinks(t);
+  const secondaryGroups = buildSecondaryGroups(t);
+  const allSecondaryRoutes = secondaryGroups.flatMap((g) => g.items.map((i) => i.to));
 
   const isActive = (path) => location.pathname === path;
   const isInSecondary = allSecondaryRoutes.some((r) => location.pathname.startsWith(r));
@@ -94,7 +103,7 @@ const AdminNav = () => {
       aria-label="Admin navigation"
     >
       <div className="px-4 py-4 border-b border-border-default">
-        <h2 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Admin</h2>
+        <h2 className="text-sm font-semibold text-text-primary uppercase tracking-wider">{t('adminNav.title')}</h2>
       </div>
       <nav className="py-2">
         {frequentLinks.map(({ to, icon: Icon, label }) => (
@@ -109,10 +118,10 @@ const AdminNav = () => {
             <button
               type="button"
               className={linkClasses(isInSecondary || moreOpen) + ' w-full text-left'}
-              aria-label="More admin tools"
+              aria-label={t('adminNav.moreAriaLabel')}
             >
               <MoreHorizontal className="w-4 h-4 flex-shrink-0" />
-              <span>More…</span>
+              <span>{t('adminNav.more')}</span>
             </button>
           </PopoverTrigger>
           <PopoverContent

@@ -767,5 +767,39 @@
         "description": "Get notified when a new announcement is posted in your courses."
       }
     }
+  },
+  "adminNav": {
+    "title": "Admin",
+    "home": "Home",
+    "courses": "Courses",
+    "people": "People",
+    "settings": "Settings",
+    "featureFlags": "Feature Flags",
+    "more": "More…",
+    "moreAriaLabel": "More admin tools",
+    "groups": {
+      "compliance": "Compliance",
+      "identity": "Identity",
+      "data": "Data",
+      "developer": "Developer",
+      "gamification": "Gamification"
+    },
+    "ferpa": "FERPA",
+    "customRoles": "Custom Roles",
+    "authProviders": "Auth Providers",
+    "developerKeys": "Developer Keys",
+    "accessTokens": "Access Tokens",
+    "sisImport": "SIS Import",
+    "oneRoster": "OneRoster",
+    "terms": "Terms",
+    "gradingPeriods": "Grading Periods",
+    "graphiql": "GraphiQL",
+    "notifications": "Notifications",
+    "currencies": "Currencies",
+    "badges": "Badges",
+    "recipes": "Recipes",
+    "gamification": {
+      "settings": "Settings"
+    }
   }
 }

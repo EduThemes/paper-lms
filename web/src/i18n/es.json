@@ -767,5 +767,39 @@
         "description": "Recibe una notificación cuando se publique un nuevo anuncio en tus cursos."
       }
     }
+  },
+  "adminNav": {
+    "title": "Administración",
+    "home": "Inicio",
+    "courses": "Cursos",
+    "people": "Personas",
+    "settings": "Configuración",
+    "featureFlags": "Banderas de funciones",
+    "more": "Más…",
+    "moreAriaLabel": "Más herramientas de administración",
+    "groups": {
+      "compliance": "Cumplimiento",
+      "identity": "Identidad",
+      "data": "Datos",
+      "developer": "Desarrollador",
+      "gamification": "Gamificación"
+    },
+    "ferpa": "FERPA",
+    "customRoles": "Roles personalizados",
+    "authProviders": "Proveedores de autenticación",
+    "developerKeys": "Claves de desarrollador",
+    "accessTokens": "Tokens de acceso",
+    "sisImport": "Importación de SIS",
+    "oneRoster": "OneRoster",
+    "terms": "Períodos académicos",
+    "gradingPeriods": "Períodos de calificación",
+    "graphiql": "GraphiQL",
+    "notifications": "Notificaciones",
+    "currencies": "Monedas",
+    "badges": "Insignias",
+    "recipes": "Recetas",
+    "gamification": {
+      "settings": "Configuración"
+    }
   }
 }
