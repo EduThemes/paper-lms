@@ -20,9 +20,13 @@ func (r *developerKeyRepo) Create(ctx context.Context, key *models.DeveloperKey)
 	return r.db.WithContext(ctx).Create(key).Error
 }
 
-func (r *developerKeyRepo) FindByID(ctx context.Context, id uint) (*models.DeveloperKey, error) {
+func (r *developerKeyRepo) FindByID(ctx context.Context, id, accountID uint) (*models.DeveloperKey, error) {
 	var key models.DeveloperKey
-	if err := r.db.WithContext(ctx).Where("workflow_state != ?", "deleted").First(&key, id).Error; err != nil {
+	q := r.db.WithContext(ctx).Where("workflow_state != ?", "deleted")
+	if accountID != 0 {
+		q = q.Where("account_id = ?", accountID)
+	}
+	if err := q.First(&key, id).Error; err != nil {
 		return nil, err
 	}
 	return &key, nil
@@ -40,8 +44,12 @@ func (r *developerKeyRepo) Update(ctx context.Context, key *models.DeveloperKey)
 	return r.db.WithContext(ctx).Save(key).Error
 }
 
-func (r *developerKeyRepo) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Model(&models.DeveloperKey{}).Where("id = ?", id).Update("workflow_state", "deleted").Error
+func (r *developerKeyRepo) Delete(ctx context.Context, id, accountID uint) error {
+	q := r.db.WithContext(ctx).Model(&models.DeveloperKey{}).Where("id = ?", id)
+	if accountID != 0 {
+		q = q.Where("account_id = ?", accountID)
+	}
+	return q.Update("workflow_state", "deleted").Error
 }
 
 func (r *developerKeyRepo) List(ctx context.Context, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DeveloperKey], error) {

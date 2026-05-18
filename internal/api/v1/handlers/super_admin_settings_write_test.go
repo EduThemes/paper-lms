@@ -200,12 +200,14 @@ func TestSet_UnknownKey_404(t *testing.T) {
 }
 
 func TestSet_DisallowedScope_400(t *testing.T) {
-	// storage.backend is instance-only per the catalog.
+	// storage.s3.bucket is instance-only per the catalog (Wave 4
+	// dropped storage.backend from the catalog — boot-only settings
+	// don't belong in the runtime store).
 	f := setupWriteFixture(t, []uint{42}, "ops@example.com")
-	resp := putJSON(f.app, "/superadmin/settings/storage.backend", map[string]interface{}{
+	resp := putJSON(f.app, "/superadmin/settings/storage.s3.bucket", map[string]interface{}{
 		"scope":    "account",
 		"scope_id": 42,
-		"value":    "s3",
+		"value":    "mybucket",
 	})
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }

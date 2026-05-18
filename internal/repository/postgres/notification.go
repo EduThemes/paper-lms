@@ -16,13 +16,24 @@ func NewNotificationRepository(db *gorm.DB) repository.NotificationRepository {
 	return &notificationRepo{db: db}
 }
 
+// notificationTenantFilter scopes a notifications query to a tenant
+// via the owning user's account_id. Notifications carry no direct
+// account_id column; user_id → users.account_id is the join. The
+// subquery shape matches the parent-table pattern used elsewhere
+// (e.g. submissions → assignments → courses). accountID==0 disables.
+const notificationTenantFilter = `user_id IN (SELECT id FROM users WHERE account_id = ?)`
+
 func (r *notificationRepo) Create(ctx context.Context, notification *models.Notification) error {
 	return r.db.WithContext(ctx).Create(notification).Error
 }
 
-func (r *notificationRepo) FindByID(ctx context.Context, id uint) (*models.Notification, error) {
+func (r *notificationRepo) FindByID(ctx context.Context, id, accountID uint) (*models.Notification, error) {
 	var notification models.Notification
-	if err := r.db.WithContext(ctx).First(&notification, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		q = q.Where(notificationTenantFilter, accountID)
+	}
+	if err := q.First(&notification, id).Error; err != nil {
 		return nil, err
 	}
 	return &notification, nil
@@ -36,11 +47,14 @@ func (r *notificationRepo) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(&models.Notification{}, id).Error
 }
 
-func (r *notificationRepo) ListByUserID(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Notification], error) {
+func (r *notificationRepo) ListByUserID(ctx context.Context, userID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Notification], error) {
 	var notifications []models.Notification
 	var count int64
 
 	query := r.db.WithContext(ctx).Model(&models.Notification{}).Where("user_id = ?", userID)
+	if accountID != 0 {
+		query = query.Where(notificationTenantFilter, accountID)
+	}
 	query.Count(&count)
 
 	offset := (params.Page - 1) * params.PerPage
@@ -56,23 +70,32 @@ func (r *notificationRepo) ListByUserID(ctx context.Context, userID uint, params
 	}, nil
 }
 
-func (r *notificationRepo) MarkAsRead(ctx context.Context, userID, notificationID uint) error {
-	return r.db.WithContext(ctx).Model(&models.Notification{}).
-		Where("id = ? AND user_id = ?", notificationID, userID).
-		Update("is_read", true).Error
+func (r *notificationRepo) MarkAsRead(ctx context.Context, userID, notificationID, accountID uint) error {
+	q := r.db.WithContext(ctx).Model(&models.Notification{}).
+		Where("id = ? AND user_id = ?", notificationID, userID)
+	if accountID != 0 {
+		q = q.Where(notificationTenantFilter, accountID)
+	}
+	return q.Update("is_read", true).Error
 }
 
-func (r *notificationRepo) MarkAllAsRead(ctx context.Context, userID uint) error {
-	return r.db.WithContext(ctx).Model(&models.Notification{}).
-		Where("user_id = ? AND is_read = ?", userID, false).
-		Update("is_read", true).Error
+func (r *notificationRepo) MarkAllAsRead(ctx context.Context, userID, accountID uint) error {
+	q := r.db.WithContext(ctx).Model(&models.Notification{}).
+		Where("user_id = ? AND is_read = ?", userID, false)
+	if accountID != 0 {
+		q = q.Where(notificationTenantFilter, accountID)
+	}
+	return q.Update("is_read", true).Error
 }
 
-func (r *notificationRepo) ListUnreadByUserID(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Notification], error) {
+func (r *notificationRepo) ListUnreadByUserID(ctx context.Context, userID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Notification], error) {
 	var notifications []models.Notification
 	var count int64
 
 	query := r.db.WithContext(ctx).Model(&models.Notification{}).Where("user_id = ? AND is_read = ?", userID, false)
+	if accountID != 0 {
+		query = query.Where(notificationTenantFilter, accountID)
+	}
 	query.Count(&count)
 
 	offset := (params.Page - 1) * params.PerPage

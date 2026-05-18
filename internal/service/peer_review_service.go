@@ -29,7 +29,9 @@ func NewPeerReviewService(
 
 // AssignPeerReviews automatically assigns peer reviews for an assignment.
 // Each student who has submitted gets `count` reviewers from the pool of other submitters.
-func (s *PeerReviewService) AssignPeerReviews(ctx context.Context, courseID, assignmentID uint, count int) ([]models.PeerReview, error) {
+// accountID scopes the parent assignment to a single tenant — 0 means no tenant scope
+// (internal callers only).
+func (s *PeerReviewService) AssignPeerReviews(ctx context.Context, courseID, assignmentID uint, count int, accountID uint) ([]models.PeerReview, error) {
 	if count <= 0 {
 		return nil, errors.New("peer review count must be positive")
 	}
@@ -46,7 +48,7 @@ func (s *PeerReviewService) AssignPeerReviews(ctx context.Context, courseID, ass
 		if e.Type != "StudentEnrollment" {
 			continue
 		}
-		sub, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, e.UserID, 0)
+		sub, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, e.UserID, accountID)
 		if err == nil && sub != nil && sub.WorkflowState == "submitted" {
 			submitterIDs = append(submitterIDs, e.UserID)
 		}
@@ -57,7 +59,7 @@ func (s *PeerReviewService) AssignPeerReviews(ctx context.Context, courseID, ass
 	}
 
 	// Delete existing assignments
-	_ = s.peerReviewRepo.DeleteByAssignment(ctx, assignmentID)
+	_ = s.peerReviewRepo.DeleteByAssignment(ctx, assignmentID, accountID)
 
 	// Assign reviews: each student reviews `count` other students
 	var created []models.PeerReview
@@ -79,7 +81,7 @@ func (s *PeerReviewService) AssignPeerReviews(ctx context.Context, courseID, ass
 
 		for _, revieweeID := range pool[:n] {
 			// Get the submission for the reviewee
-			sub, _ := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, revieweeID, 0)
+			sub, _ := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, revieweeID, accountID)
 			submissionID := uint(0)
 			if sub != nil {
 				submissionID = sub.ID
@@ -102,16 +104,16 @@ func (s *PeerReviewService) AssignPeerReviews(ctx context.Context, courseID, ass
 	return created, nil
 }
 
-func (s *PeerReviewService) ListByAssignment(ctx context.Context, assignmentID uint) ([]models.PeerReview, error) {
-	return s.peerReviewRepo.ListByAssignment(ctx, assignmentID)
+func (s *PeerReviewService) ListByAssignment(ctx context.Context, assignmentID, accountID uint) ([]models.PeerReview, error) {
+	return s.peerReviewRepo.ListByAssignment(ctx, assignmentID, accountID)
 }
 
-func (s *PeerReviewService) ListByReviewer(ctx context.Context, assignmentID, reviewerID uint) ([]models.PeerReview, error) {
-	return s.peerReviewRepo.ListByReviewer(ctx, assignmentID, reviewerID)
+func (s *PeerReviewService) ListByReviewer(ctx context.Context, assignmentID, reviewerID, accountID uint) ([]models.PeerReview, error) {
+	return s.peerReviewRepo.ListByReviewer(ctx, assignmentID, reviewerID, accountID)
 }
 
-func (s *PeerReviewService) SubmitReview(ctx context.Context, reviewID uint, score float64, comments string) (*models.PeerReview, error) {
-	pr, err := s.peerReviewRepo.FindByID(ctx, reviewID)
+func (s *PeerReviewService) SubmitReview(ctx context.Context, reviewID uint, score float64, comments string, accountID uint) (*models.PeerReview, error) {
+	pr, err := s.peerReviewRepo.FindByID(ctx, reviewID, accountID)
 	if err != nil {
 		return nil, errors.New("peer review not found")
 	}
@@ -127,6 +129,6 @@ func (s *PeerReviewService) SubmitReview(ctx context.Context, reviewID uint, sco
 	return pr, nil
 }
 
-func (s *PeerReviewService) GetByID(ctx context.Context, id uint) (*models.PeerReview, error) {
-	return s.peerReviewRepo.FindByID(ctx, id)
+func (s *PeerReviewService) GetByID(ctx context.Context, id, accountID uint) (*models.PeerReview, error) {
+	return s.peerReviewRepo.FindByID(ctx, id, accountID)
 }

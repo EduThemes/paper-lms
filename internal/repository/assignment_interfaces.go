@@ -18,7 +18,8 @@ type AssignmentRepository interface {
 
 type AssignmentGroupRepository interface {
 	Create(ctx context.Context, group *models.AssignmentGroup) error
-	FindByID(ctx context.Context, id uint) (*models.AssignmentGroup, error)
+	// 13.1.D — tenant scope via parent course's account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.AssignmentGroup, error)
 	Update(ctx context.Context, group *models.AssignmentGroup) error
 	Delete(ctx context.Context, id uint) error
 	ListByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.AssignmentGroup], error)

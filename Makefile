@@ -1,7 +1,53 @@
-.PHONY: build run test lint vet clean docker migrate-up migrate-down migrate-version migrate-baseline migrate-create schema-diff schema-diff-sql stale-cols dev backup restore dex-up dex-down dex-logs
+.PHONY: help build run test lint vet clean docker migrate-up migrate-down migrate-version migrate-baseline migrate-create schema-diff schema-diff-sql stale-cols dev backup restore dex-up dex-down dex-logs frontend-build frontend-dev
+
+# Default target: print the help screen.
+.DEFAULT_GOAL := help
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS = -ldflags "-X main.Version=$(VERSION)"
+
+# Help — list non-obvious targets with a one-line description each.
+help:
+	@echo "Paper LMS — Makefile targets"
+	@echo ""
+	@echo "Build & run:"
+	@echo "  build              Build the server + migrate binaries into ./bin"
+	@echo "  run                Build then run the server"
+	@echo "  dev                Run backend + frontend dev servers concurrently"
+	@echo "  clean              Remove build artifacts (bin/, web/dist/)"
+	@echo ""
+	@echo "Quality:"
+	@echo "  test               go test ./..."
+	@echo "  vet                go vet ./..."
+	@echo "  lint               vet + golangci-lint (if installed)"
+	@echo ""
+	@echo "Frontend:"
+	@echo "  frontend-build     Build the Vite React bundle (web/dist)"
+	@echo "  frontend-dev       Start the Vite dev server (HMR on :5174)"
+	@echo ""
+	@echo "Database migrations (prod requires AUTO_MIGRATE=false):"
+	@echo "  migrate-up         Apply all pending migrations"
+	@echo "  migrate-down       Roll back the last migration"
+	@echo "  migrate-version    Print current migration version"
+	@echo "  migrate-baseline   Mark current schema as baseline (existing prod DB)"
+	@echo "  migrate-create     Scaffold a new NNNNNN_name.{up,down}.sql migration pair"
+	@echo ""
+	@echo "Schema parity (run before merging a model change):"
+	@echo "  schema-diff        Report tables/indexes the SQL chain is missing vs GORM AutoMigrate"
+	@echo "  schema-diff-sql    Same, but emit paste-ready CREATE TABLE/INDEX statements"
+	@echo "  stale-cols         Categorize SQL-chain columns AutoMigrate doesn't know about; writes STALE_COLUMNS.md"
+	@echo ""
+	@echo "Local OIDC (Phase 10-A.7 — Dex testing):"
+	@echo "  dex-up             Start the local Dex OIDC server (docker-compose --profile dex)"
+	@echo "  dex-down           Stop the local Dex server"
+	@echo "  dex-logs           Tail Dex logs"
+	@echo ""
+	@echo "Docker & ops:"
+	@echo "  docker             docker build -t paper-lms ."
+	@echo "  backup             Run scripts/backup.sh"
+	@echo "  restore            Run scripts/restore.sh BACKUP_FILE=<path>"
+	@echo ""
+	@echo "See PROJECT.md and docs/adr/ for the 'why' behind these targets."
 
 # Build
 build:

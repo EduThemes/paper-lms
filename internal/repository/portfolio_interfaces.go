@@ -8,7 +8,10 @@ import (
 
 type PortfolioRepository interface {
 	Create(ctx context.Context, portfolio *models.Portfolio) error
-	FindByID(ctx context.Context, id uint) (*models.Portfolio, error)
+	// 13.1.D — tenant-scoped via portfolios.user_id -> users.account_id.
+	// accountID=0 means "no tenant scope" — reserved for internal background
+	// callers; handler-routed callers MUST pass callerAccountID(c).
+	FindByID(ctx context.Context, id, accountID uint) (*models.Portfolio, error)
 	FindBySlug(ctx context.Context, slug string) (*models.Portfolio, error)
 	FindByPublicURL(ctx context.Context, publicURL string) (*models.Portfolio, error)
 	Update(ctx context.Context, portfolio *models.Portfolio) error
@@ -20,7 +23,8 @@ type PortfolioRepository interface {
 
 type PortfolioSectionRepository interface {
 	Create(ctx context.Context, section *models.PortfolioSection) error
-	FindByID(ctx context.Context, id uint) (*models.PortfolioSection, error)
+	// 13.1.D — tenant-scoped via section.portfolio_id -> portfolios.user_id -> users.account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.PortfolioSection, error)
 	FindByIDs(ctx context.Context, ids []uint) ([]models.PortfolioSection, error)
 	Update(ctx context.Context, section *models.PortfolioSection) error
 	Delete(ctx context.Context, id uint) error
@@ -29,7 +33,8 @@ type PortfolioSectionRepository interface {
 
 type PortfolioArtifactRepository interface {
 	Create(ctx context.Context, artifact *models.PortfolioArtifact) error
-	FindByID(ctx context.Context, id uint) (*models.PortfolioArtifact, error)
+	// 13.1.D — tenant-scoped via artifact.portfolio_id -> portfolios.user_id -> users.account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.PortfolioArtifact, error)
 	Update(ctx context.Context, artifact *models.PortfolioArtifact) error
 	Delete(ctx context.Context, id uint) error
 	ListByPortfolioID(ctx context.Context, portfolioID uint, params PaginationParams) (*PaginatedResult[models.PortfolioArtifact], error)
@@ -39,7 +44,8 @@ type PortfolioArtifactRepository interface {
 
 type PortfolioReflectionRepository interface {
 	Create(ctx context.Context, reflection *models.PortfolioReflection) error
-	FindByID(ctx context.Context, id uint) (*models.PortfolioReflection, error)
+	// 13.1.D — tenant-scoped via reflection.user_id -> users.account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.PortfolioReflection, error)
 	Update(ctx context.Context, reflection *models.PortfolioReflection) error
 	ListByArtifactID(ctx context.Context, artifactID uint) ([]models.PortfolioReflection, error)
 }
@@ -57,7 +63,8 @@ type PortfolioTemplateRepository interface {
 
 type PortfolioCommentRepository interface {
 	Create(ctx context.Context, comment *models.PortfolioComment) error
-	FindByID(ctx context.Context, id uint) (*models.PortfolioComment, error)
+	// 13.1.D — tenant-scoped via comment.portfolio_id -> portfolios.user_id -> users.account_id.
+	FindByID(ctx context.Context, id, accountID uint) (*models.PortfolioComment, error)
 	Update(ctx context.Context, comment *models.PortfolioComment) error
 	Delete(ctx context.Context, id uint) error
 	ListByPortfolioID(ctx context.Context, portfolioID uint, params PaginationParams) (*PaginatedResult[models.PortfolioComment], error)
