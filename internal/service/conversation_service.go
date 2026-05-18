@@ -72,16 +72,18 @@ func (s *ConversationService) CreateConversation(ctx context.Context, conv *mode
 	return nil
 }
 
-func (s *ConversationService) GetConversation(ctx context.Context, id uint) (*models.Conversation, error) {
-	return s.convRepo.FindByID(ctx, id)
+// GetConversation — 13.1.D: accountID threads from handler.
+// Cross-tenant returns gorm.ErrRecordNotFound; the handler surfaces 404.
+func (s *ConversationService) GetConversation(ctx context.Context, id, accountID uint) (*models.Conversation, error) {
+	return s.convRepo.FindByID(ctx, id, accountID)
 }
 
 func (s *ConversationService) UpdateConversation(ctx context.Context, conv *models.Conversation) error {
 	return s.convRepo.Update(ctx, conv)
 }
 
-func (s *ConversationService) ListByUser(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Conversation], error) {
-	return s.convRepo.ListByUserID(ctx, userID, params)
+func (s *ConversationService) ListByUser(ctx context.Context, userID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Conversation], error) {
+	return s.convRepo.ListByUserID(ctx, userID, accountID, params)
 }
 
 // Participant methods
@@ -117,8 +119,11 @@ func (s *ConversationService) CreateMessage(ctx context.Context, msg *models.Con
 		return err
 	}
 
-	// Update conversation's LastMessageAt
-	conv, err := s.convRepo.FindByID(ctx, msg.ConversationID)
+	// Update conversation's LastMessageAt. Internal callback — pass
+	// accountID=0 so the lookup isn't scoped (the caller has already
+	// passed the participant gate, and the repo lookup here is a
+	// best-effort metadata refresh, not a tenant-keyed read).
+	conv, err := s.convRepo.FindByID(ctx, msg.ConversationID, 0)
 	if err != nil {
 		return err
 	}

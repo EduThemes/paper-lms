@@ -55,11 +55,12 @@ func (h *NotificationHandler) ListNotifications(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+	accountID := callerAccountID(c)
 	params := middleware.GetPagination(c)
 
 	unread := c.Query("unread")
 	if unread == "true" {
-		r, err := h.notificationService.ListUnreadByUser(c.Context(), userID, params)
+		r, err := h.notificationService.ListUnreadByUser(c.Context(), userID, accountID, params)
 		if err != nil {
 			return responses.InternalError(c, "Could not fetch notifications")
 		}
@@ -71,7 +72,7 @@ func (h *NotificationHandler) ListNotifications(c *fiber.Ctx) error {
 		return c.JSON(items)
 	}
 
-	r, err := h.notificationService.ListByUser(c.Context(), userID, params)
+	r, err := h.notificationService.ListByUser(c.Context(), userID, accountID, params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch notifications")
 	}
@@ -99,7 +100,8 @@ func (h *NotificationHandler) MarkAsRead(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid notification ID")
 	}
 
-	if err := h.notificationService.MarkAsRead(c.Context(), userID, uint(notificationID)); err != nil {
+	accountID := callerAccountID(c)
+	if err := h.notificationService.MarkAsRead(c.Context(), userID, uint(notificationID), accountID); err != nil {
 		return responses.InternalError(c, "Could not mark notification as read")
 	}
 
@@ -114,7 +116,8 @@ func (h *NotificationHandler) MarkAllAsRead(c *fiber.Ctx) error {
 		return err
 	}
 
-	if err := h.notificationService.MarkAllAsRead(c.Context(), userID); err != nil {
+	accountID := callerAccountID(c)
+	if err := h.notificationService.MarkAllAsRead(c.Context(), userID, accountID); err != nil {
 		return responses.InternalError(c, "Could not mark notifications as read")
 	}
 

@@ -16,13 +16,26 @@ func NewConversationRepository(db *gorm.DB) repository.ConversationRepository {
 	return &conversationRepo{db: db}
 }
 
+// conversationTenantFilter scopes conversations through the creator's
+// account_id. The model has no direct account_id column; the
+// CreatedByUserID FK joins to users.account_id. The handler-side
+// participant gate (requireParticipant → 404) is the primary
+// existence-leak boundary; this filter is the defense-in-depth layer
+// the 13.1.D contract requires on every tenant-keyed read.
+// accountID==0 disables (internal callers / background jobs).
+const conversationTenantFilter = `created_by_user_id IN (SELECT id FROM users WHERE account_id = ?)`
+
 func (r *conversationRepo) Create(ctx context.Context, conversation *models.Conversation) error {
 	return r.db.WithContext(ctx).Create(conversation).Error
 }
 
-func (r *conversationRepo) FindByID(ctx context.Context, id uint) (*models.Conversation, error) {
+func (r *conversationRepo) FindByID(ctx context.Context, id, accountID uint) (*models.Conversation, error) {
 	var conversation models.Conversation
-	if err := r.db.WithContext(ctx).First(&conversation, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		q = q.Where(conversationTenantFilter, accountID)
+	}
+	if err := q.First(&conversation, id).Error; err != nil {
 		return nil, err
 	}
 	return &conversation, nil
@@ -36,7 +49,7 @@ func (r *conversationRepo) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Model(&models.Conversation{}).Where("id = ?", id).Update("workflow_state", "deleted").Error
 }
 
-func (r *conversationRepo) ListByUserID(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Conversation], error) {
+func (r *conversationRepo) ListByUserID(ctx context.Context, userID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Conversation], error) {
 	var conversations []models.Conversation
 	var count int64
 
@@ -44,6 +57,11 @@ func (r *conversationRepo) ListByUserID(ctx context.Context, userID uint, params
 		Joins("JOIN conversation_participants ON conversation_participants.conversation_id = conversations.id").
 		Where("conversation_participants.user_id = ? AND conversation_participants.workflow_state != ?", userID, "deleted").
 		Where("conversations.workflow_state != ?", "deleted")
+
+	if accountID != 0 {
+		// Tenant filter must reference the qualified column when joining.
+		query = query.Where("conversations.created_by_user_id IN (SELECT id FROM users WHERE account_id = ?)", accountID)
+	}
 
 	query.Count(&count)
 
