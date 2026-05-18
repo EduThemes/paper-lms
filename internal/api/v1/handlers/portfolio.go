@@ -207,7 +207,7 @@ func (h *PortfolioHandler) GetPortfolio(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -228,7 +228,7 @@ func (h *PortfolioHandler) UpdatePortfolio(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -291,7 +291,7 @@ func (h *PortfolioHandler) UpdatePortfolio(c *fiber.Ctx) error {
 		portfolio.CustomDomain = *input.Portfolio.CustomDomain
 	}
 
-	if err := h.portfolioService.UpdatePortfolio(c.Context(), portfolio); err != nil {
+	if err := h.portfolioService.UpdatePortfolio(c.Context(), portfolio, callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not update portfolio")
 	}
 
@@ -304,7 +304,7 @@ func (h *PortfolioHandler) DeletePortfolio(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -313,7 +313,7 @@ func (h *PortfolioHandler) DeletePortfolio(c *fiber.Ctx) error {
 		return err
 	}
 
-	if err := h.portfolioService.ArchivePortfolio(c.Context(), uint(portfolioID)); err != nil {
+	if err := h.portfolioService.ArchivePortfolio(c.Context(), uint(portfolioID), callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not archive portfolio")
 	}
 
@@ -327,7 +327,7 @@ func (h *PortfolioHandler) PublishPortfolio(c *fiber.Ctx) error {
 	}
 
 	// Fetch first to check ownership before publishing
-	existing, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	existing, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -336,7 +336,7 @@ func (h *PortfolioHandler) PublishPortfolio(c *fiber.Ctx) error {
 		return err
 	}
 
-	portfolio, err := h.portfolioService.PublishPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.PublishPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
@@ -350,7 +350,10 @@ func (h *PortfolioHandler) GetPublicPortfolio(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	// Public endpoint: no auth, no tenant Locals. Pass accountID=0 so the
+	// repo returns the row regardless of owning tenant; the
+	// WorkflowState==published gate below is the visibility check.
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), 0)
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -386,7 +389,7 @@ func (h *PortfolioHandler) AddSection(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -436,7 +439,7 @@ func (h *PortfolioHandler) UpdateSection(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -499,7 +502,7 @@ func (h *PortfolioHandler) UpdateSection(c *fiber.Ctx) error {
 		section.Position = *input.Section.Position
 	}
 
-	if err := h.portfolioService.UpdateSection(c.Context(), section); err != nil {
+	if err := h.portfolioService.UpdateSection(c.Context(), section, callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not update section")
 	}
 
@@ -512,7 +515,7 @@ func (h *PortfolioHandler) DeleteSection(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -526,7 +529,7 @@ func (h *PortfolioHandler) DeleteSection(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid section ID")
 	}
 
-	if err := h.portfolioService.RemoveSection(c.Context(), uint(sectionID)); err != nil {
+	if err := h.portfolioService.RemoveSection(c.Context(), uint(sectionID), callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not delete section")
 	}
 
@@ -539,7 +542,7 @@ func (h *PortfolioHandler) ReorderSections(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -560,7 +563,7 @@ func (h *PortfolioHandler) ReorderSections(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "order array is required")
 	}
 
-	if err := h.portfolioService.ReorderSections(c.Context(), uint(portfolioID), input.Order); err != nil {
+	if err := h.portfolioService.ReorderSections(c.Context(), uint(portfolioID), input.Order, callerAccountID(c)); err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 
@@ -577,7 +580,7 @@ func (h *PortfolioHandler) AddArtifact(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -636,7 +639,7 @@ func (h *PortfolioHandler) UpdateArtifact(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -711,7 +714,7 @@ func (h *PortfolioHandler) UpdateArtifact(c *fiber.Ctx) error {
 		artifact.IsFeatured = *input.Artifact.IsFeatured
 	}
 
-	if err := h.portfolioService.UpdateArtifact(c.Context(), artifact); err != nil {
+	if err := h.portfolioService.UpdateArtifact(c.Context(), artifact, callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not update artifact")
 	}
 
@@ -724,7 +727,7 @@ func (h *PortfolioHandler) DeleteArtifact(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -738,7 +741,7 @@ func (h *PortfolioHandler) DeleteArtifact(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid artifact ID")
 	}
 
-	if err := h.portfolioService.RemoveArtifact(c.Context(), uint(artifactID)); err != nil {
+	if err := h.portfolioService.RemoveArtifact(c.Context(), uint(artifactID), callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not delete artifact")
 	}
 
@@ -755,7 +758,7 @@ func (h *PortfolioHandler) AddReflection(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -788,7 +791,7 @@ func (h *PortfolioHandler) AddReflection(c *fiber.Ctx) error {
 		Content:    input.Reflection.Content,
 	}
 
-	if err := h.portfolioService.AddReflection(c.Context(), reflection); err != nil {
+	if err := h.portfolioService.AddReflection(c.Context(), reflection, callerAccountID(c)); err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 
@@ -805,7 +808,7 @@ func (h *PortfolioHandler) ImportFromCourse(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -831,7 +834,7 @@ func (h *PortfolioHandler) ImportFromCourse(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "submission_ids is required")
 	}
 
-	imported, err := h.portfolioService.ImportFromCourse(c.Context(), uint(portfolioID), uint(courseID), input.SubmissionIDs)
+	imported, err := h.portfolioService.ImportFromCourse(c.Context(), uint(portfolioID), uint(courseID), input.SubmissionIDs, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not import from course")
 	}
@@ -857,7 +860,7 @@ func (h *PortfolioHandler) ExportAsHTML(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -866,7 +869,7 @@ func (h *PortfolioHandler) ExportAsHTML(c *fiber.Ctx) error {
 		return err
 	}
 
-	zipData, err := h.portfolioService.ExportAsStaticSite(c.Context(), uint(portfolioID))
+	zipData, err := h.portfolioService.ExportAsStaticSite(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not export portfolio")
 	}
@@ -882,7 +885,7 @@ func (h *PortfolioHandler) ExportAsPDF(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -891,7 +894,7 @@ func (h *PortfolioHandler) ExportAsPDF(c *fiber.Ctx) error {
 		return err
 	}
 
-	htmlData, err := h.portfolioService.ExportAsPDF(c.Context(), uint(portfolioID))
+	htmlData, err := h.portfolioService.ExportAsPDF(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not export portfolio")
 	}
@@ -911,7 +914,7 @@ func (h *PortfolioHandler) AddComment(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
@@ -956,7 +959,7 @@ func (h *PortfolioHandler) ListComments(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid portfolio ID")
 	}
 
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID))
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "portfolio")
 	}
