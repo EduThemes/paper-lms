@@ -3,7 +3,7 @@ package models
 import "time"
 
 type LearningOutcomeResult struct {
-	ID                  uint       `json:"id" gorm:"primaryKey"`
+	ID                  uint       `json:"id" gorm:"column:id;primaryKey"`
 	UserID              uint       `json:"user_id" gorm:"not null;index"`
 	LearningOutcomeID   uint       `json:"learning_outcome_id" gorm:"not null;index"`
 	ContextType         string     `json:"context_type" gorm:"not null"`

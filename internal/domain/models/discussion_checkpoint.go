@@ -19,7 +19,7 @@ const (
 // attached to a graded discussion topic (e.g., "post initial reply by Tue,
 // reply twice by Fri"). Canvas added this in 2024.
 type DiscussionCheckpoint struct {
-	ID                uint       `json:"id" gorm:"primaryKey"`
+	ID                uint       `json:"id" gorm:"column:id;primaryKey"`
 	DiscussionTopicID uint       `json:"discussion_topic_id" gorm:"not null;index"`
 	CheckpointType    string     `json:"checkpoint_type" gorm:"not null"` // reply_to_topic | reply_to_entry
 	DueAt             *time.Time `json:"due_at"`
@@ -34,7 +34,7 @@ type DiscussionCheckpoint struct {
 // single checkpoint. ReplyCount stores how many qualifying replies the user
 // has made (>= RequiredReplies on the parent checkpoint => completed).
 type DiscussionCheckpointSubmission struct {
-	ID                     uint       `json:"id" gorm:"primaryKey"`
+	ID                     uint       `json:"id" gorm:"column:id;primaryKey"`
 	DiscussionCheckpointID uint       `json:"discussion_checkpoint_id" gorm:"not null;index;uniqueIndex:idx_dcs_checkpoint_user"`
 	UserID                 uint       `json:"user_id" gorm:"not null;index;uniqueIndex:idx_dcs_checkpoint_user"`
 	ReplyCount             int        `json:"reply_count" gorm:"not null;default:0"`

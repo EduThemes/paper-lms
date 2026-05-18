@@ -4,7 +4,7 @@ import "time"
 
 // BlueprintMigration tracks a sync operation from a blueprint template to its associated courses.
 type BlueprintMigration struct {
-	ID                  uint       `json:"id" gorm:"primaryKey"`
+	ID                  uint       `json:"id" gorm:"column:id;primaryKey"`
 	BlueprintTemplateID uint       `json:"blueprint_template_id" gorm:"not null;index"`
 	UserID              uint       `json:"user_id" gorm:"not null"`
 	WorkflowState       string     `json:"workflow_state" gorm:"not null;default:'queued'"` // queued, running, completed, failed

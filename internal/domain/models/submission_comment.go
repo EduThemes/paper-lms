@@ -3,7 +3,7 @@ package models
 import "time"
 
 type SubmissionComment struct {
-	ID           uint      `json:"id" gorm:"primaryKey"`
+	ID           uint      `json:"id" gorm:"column:id;primaryKey"`
 	SubmissionID uint      `json:"submission_id" gorm:"not null"`
 	AuthorID     uint      `json:"author_id" gorm:"not null"`
 	Comment      string    `json:"comment" gorm:"type:text;not null"`

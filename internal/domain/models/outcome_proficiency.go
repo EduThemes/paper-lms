@@ -7,7 +7,7 @@ import "time"
 // all courses under that account) or overridden at the Course level. Modeled
 // after Canvas LMS `OutcomeProficiency`.
 type OutcomeProficiency struct {
-	ID            uint                       `json:"id" gorm:"primaryKey"`
+	ID            uint                       `json:"id" gorm:"column:id;primaryKey"`
 	ContextType   string                     `json:"context_type" gorm:"not null;index:idx_outcome_proficiency_context"` // Account | Course
 	ContextID     uint                       `json:"context_id" gorm:"not null;index:idx_outcome_proficiency_context"`
 	WorkflowState string                     `json:"workflow_state" gorm:"not null;default:'active'"`
@@ -24,7 +24,7 @@ func (OutcomeProficiency) TableName() string {
 // One rating per scale is flagged Mastery=true to signal the threshold at which a
 // student is considered proficient.
 type OutcomeProficiencyRating struct {
-	ID                   uint      `json:"id" gorm:"primaryKey"`
+	ID                   uint      `json:"id" gorm:"column:id;primaryKey"`
 	OutcomeProficiencyID uint      `json:"outcome_proficiency_id" gorm:"not null;index"`
 	Description          string    `json:"description" gorm:"not null"`
 	Points               float64   `json:"points" gorm:"not null"`

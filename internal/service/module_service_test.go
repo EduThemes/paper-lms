@@ -66,7 +66,7 @@ func TestModuleCreateItem_Success(t *testing.T) {
 	err := svc.CreateItem(context.Background(), item)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "active", item.WorkflowState)
+	assert.Equal(t, models.ContentTagActive, item.WorkflowState)
 	itemRepo.AssertExpectations(t)
 }
 

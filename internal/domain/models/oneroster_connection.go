@@ -3,7 +3,7 @@ package models
 import "time"
 
 type OneRosterConnection struct {
-	ID               uint       `json:"id" gorm:"primaryKey"`
+	ID               uint       `json:"id" gorm:"column:id;primaryKey"`
 	AccountID        uint       `json:"account_id" gorm:"not null;index"`
 	Name             string     `json:"name" gorm:"not null"`
 	BaseURL          string     `json:"base_url" gorm:"not null"`

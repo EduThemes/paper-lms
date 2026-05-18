@@ -3,7 +3,7 @@ package models
 import "time"
 
 type RubricAssociation struct {
-	ID                 uint      `json:"id" gorm:"primaryKey"`
+	ID                 uint      `json:"id" gorm:"column:id;primaryKey"`
 	RubricID           uint      `json:"rubric_id" gorm:"not null;index"`
 	AssociationID      uint      `json:"association_id" gorm:"not null"`
 	AssociationType    string    `json:"association_type" gorm:"not null"` // Assignment

@@ -33,7 +33,7 @@ const (
 // FeatureFlag is the persisted override of a feature for a particular context.
 // Mirrors Canvas's `feature_flags` table layout.
 type FeatureFlag struct {
-	ID          uint      `json:"id" gorm:"primaryKey"`
+	ID          uint      `json:"id" gorm:"column:id;primaryKey"`
 	Feature     string    `json:"feature" gorm:"not null;index;size:255"`
 	State       string    `json:"state" gorm:"not null;default:'allowed';size:32"`
 	ContextType string    `json:"context_type" gorm:"not null;index;size:32"`

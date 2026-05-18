@@ -15,7 +15,7 @@ import "time"
 // users out — the exact failure mode recovery codes are supposed to
 // prevent.
 type UserRecoveryCode struct {
-	ID        uint       `json:"id" gorm:"primaryKey"`
+	ID        uint       `json:"id" gorm:"column:id;primaryKey"`
 	UserID    uint       `json:"user_id" gorm:"not null;index"`
 	CodeHash  string     `json:"-" gorm:"not null"`
 	UsedAt    *time.Time `json:"used_at,omitempty"`

@@ -6,7 +6,7 @@ import "time"
 // When a submission for the aligned assignment is graded, a LearningOutcomeResult is
 // automatically created/updated for the student.
 type OutcomeAlignment struct {
-	ID                uint      `json:"id" gorm:"primaryKey"`
+	ID                uint      `json:"id" gorm:"column:id;primaryKey"`
 	LearningOutcomeID uint      `json:"learning_outcome_id" gorm:"not null;uniqueIndex:idx_outcome_assignment"`
 	AssignmentID      uint      `json:"assignment_id" gorm:"not null;uniqueIndex:idx_outcome_assignment;index"`
 	CourseID          uint      `json:"course_id" gorm:"not null;index"`

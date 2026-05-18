@@ -23,7 +23,7 @@ import (
 // shadow indexes (no DESC, no partial WHERE) that the parity test would
 // flag as drift.
 type GamificationEvent struct {
-	ID            uint           `json:"id" gorm:"primaryKey"`
+	ID            uint           `json:"id" gorm:"column:id;primaryKey"`
 	OccurredAt    time.Time      `json:"occurred_at" gorm:"not null"`
 	EmittedAt     time.Time      `json:"emitted_at" gorm:"not null;default:now()"`
 	TenantID      uint           `json:"tenant_id" gorm:"not null"`

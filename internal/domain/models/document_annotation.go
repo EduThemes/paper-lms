@@ -3,7 +3,7 @@ package models
 import "time"
 
 type DocumentAnnotation struct {
-	ID                 uint       `json:"id" gorm:"primaryKey"`
+	ID                 uint       `json:"id" gorm:"column:id;primaryKey"`
 	SubmissionID       uint       `json:"submission_id" gorm:"not null;index;index:idx_annotation_submission_page,priority:1"`
 	UserID             uint       `json:"user_id" gorm:"not null;index"`
 	AnnotationType     string     `json:"annotation_type" gorm:"not null"` // highlight, comment, strikethrough, freehand, point
@@ -16,7 +16,7 @@ type DocumentAnnotation struct {
 	Y                  float64    `json:"y" gorm:"default:0"`
 	Width              float64    `json:"width" gorm:"default:0"`
 	Height             float64    `json:"height" gorm:"default:0"`
-	PathData           string     `json:"path_data" gorm:"type:text"`  // SVG path data for freehand
+	PathData           string     `json:"path_data" gorm:"type:text"`        // SVG path data for freehand
 	ParentAnnotationID *uint      `json:"parent_annotation_id" gorm:"index"` // for replies to annotations
 	ResolvedAt         *time.Time `json:"resolved_at"`
 	ResolvedByUserID   *uint      `json:"resolved_by_user_id"`
