@@ -30,8 +30,12 @@ func (s *AssignmentGroupService) Create(ctx context.Context, group *models.Assig
 	return s.groupRepo.Create(ctx, group)
 }
 
-func (s *AssignmentGroupService) GetByID(ctx context.Context, id uint) (*models.AssignmentGroup, error) {
-	return s.groupRepo.FindByID(ctx, id)
+// GetByID — Wave F. See CourseService.GetByID for the accountID contract.
+// accountID==0 means "no tenant scope" (internal/background callers
+// that have already validated tenant ownership upstream). Handler
+// callers MUST pass callerAccountID(c).
+func (s *AssignmentGroupService) GetByID(ctx context.Context, id, accountID uint) (*models.AssignmentGroup, error) {
+	return s.groupRepo.FindByID(ctx, id, accountID)
 }
 
 func (s *AssignmentGroupService) Update(ctx context.Context, group *models.AssignmentGroup) error {
