@@ -148,10 +148,11 @@ func (h *ConversationHandler) resolveParticipants(c *fiber.Ctx, conversationID u
 
 func (h *ConversationHandler) ListConversations(c *fiber.Ctx) error {
 	userID, _ := c.Locals("user_id").(uint)
+	accountID := callerAccountID(c)
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.conversationService.ListByUser(c.Context(), userID, params)
+	result, err := h.conversationService.ListByUser(c.Context(), userID, accountID, params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch conversations")
 	}
@@ -178,7 +179,7 @@ func (h *ConversationHandler) GetConversation(c *fiber.Ctx) error {
 		return err
 	}
 
-	conv, err := h.conversationService.GetConversation(c.Context(), uint(id))
+	conv, err := h.conversationService.GetConversation(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "conversation")
 	}
@@ -251,7 +252,7 @@ func (h *ConversationHandler) UpdateConversation(c *fiber.Ctx) error {
 		return err
 	}
 
-	conv, err := h.conversationService.GetConversation(c.Context(), uint(id))
+	conv, err := h.conversationService.GetConversation(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "conversation")
 	}

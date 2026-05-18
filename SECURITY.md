@@ -2,6 +2,28 @@
 
 Paper LMS handles student data — including for minors — and we take security seriously.
 
+## Threat model
+
+Paper LMS is multi-tenant, ingests Canvas-format content, and runs LTI
+launches against third-party tools — three attack surfaces that share a
+common failure mode: **a missing tenant scope leaks data across school
+districts**. We defend against the Canvas-CVE class of bugs (e.g.
+[CVE-2024-25358](https://nvd.nist.gov/vuln/detail/CVE-2024-25358) and
+the related family of cross-tenant IDOR issues) by enforcing
+`account_id` filtering at the repository layer and returning 404 (not
+403) on cross-tenant access so resource existence never leaks.
+
+The verification harness lives at
+`internal/api/v1/handlers/tenant_isolation_test.go` (28-case 2×2 matrix
+across 7 endpoints, runs in CI). The settings engine carries the same
+defense at `internal/api/v1/handlers/super_admin_isolation_test.go`.
+
+For the full audit of the gamification surface — currencies, badges,
+leaderboards, ranking queries, FERPA classification — see
+[`docs/audits/2026-05-15-gamification-audit.md`](./docs/audits/2026-05-15-gamification-audit.md).
+The audit covers four sections (correctness, security, FERPA, ergonomics)
+and tracks the remediation backlog that closed Sprint 7-A.
+
 ## Reporting a vulnerability
 
 Please **do not open a public issue** for security reports. Email:

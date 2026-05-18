@@ -112,9 +112,9 @@ func (h *ExternalToolHandler) CreateExternalTool(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "External tool name is required")
 	}
 
-	// Validate developer key exists if provided
+	// Validate developer key exists if provided (tenant-scoped)
 	if input.ExternalTool.DeveloperKeyID != 0 {
-		_, err := h.devKeyService.GetByID(c.Context(), input.ExternalTool.DeveloperKeyID)
+		_, err := h.devKeyService.GetByID(c.Context(), input.ExternalTool.DeveloperKeyID, callerAccountID(c))
 		if err != nil {
 			return responses.BadRequest(c, "Invalid developer_key_id")
 		}
@@ -193,8 +193,8 @@ func (h *ExternalToolHandler) UpdateExternalTool(c *fiber.Ctx) error {
 		tool.CustomFields = *input.ExternalTool.CustomFields
 	}
 	if input.ExternalTool.DeveloperKeyID != nil {
-		// Validate the new developer key exists
-		_, dkErr := h.devKeyService.GetByID(c.Context(), *input.ExternalTool.DeveloperKeyID)
+		// Validate the new developer key exists (tenant-scoped)
+		_, dkErr := h.devKeyService.GetByID(c.Context(), *input.ExternalTool.DeveloperKeyID, callerAccountID(c))
 		if dkErr != nil {
 			return responses.BadRequest(c, "Invalid developer_key_id")
 		}

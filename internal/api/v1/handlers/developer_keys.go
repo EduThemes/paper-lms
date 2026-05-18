@@ -71,7 +71,7 @@ func (h *DeveloperKeyHandler) GetDeveloperKey(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid developer key ID")
 	}
 
-	key, err := h.devKeyService.GetByID(c.Context(), uint(id))
+	key, err := h.devKeyService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "developer key")
 	}
@@ -148,7 +148,7 @@ func (h *DeveloperKeyHandler) UpdateDeveloperKey(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid developer key ID")
 	}
 
-	key, err := h.devKeyService.GetByID(c.Context(), uint(id))
+	key, err := h.devKeyService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "developer key")
 	}
@@ -207,7 +207,7 @@ func (h *DeveloperKeyHandler) UpdateDeveloperKey(c *fiber.Ctx) error {
 		key.IsLTIKey = *input.DeveloperKey.IsLTIKey
 	}
 
-	if err := h.devKeyService.Update(c.Context(), key); err != nil {
+	if err := h.devKeyService.Update(c.Context(), key, callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not update developer key")
 	}
 
@@ -222,7 +222,7 @@ func (h *DeveloperKeyHandler) DeleteDeveloperKey(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid developer key ID")
 	}
 
-	if err := h.devKeyService.Delete(c.Context(), uint(id)); err != nil {
+	if err := h.devKeyService.Delete(c.Context(), uint(id), callerAccountID(c)); err != nil {
 		return responses.NotFound(c, "developer key")
 	}
 

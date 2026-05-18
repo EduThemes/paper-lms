@@ -18,8 +18,8 @@ func (m *MockConversationRepository) Create(ctx context.Context, conversation *m
 	return args.Error(0)
 }
 
-func (m *MockConversationRepository) FindByID(ctx context.Context, id uint) (*models.Conversation, error) {
-	args := m.Called(ctx, id)
+func (m *MockConversationRepository) FindByID(ctx context.Context, id, accountID uint) (*models.Conversation, error) {
+	args := m.Called(ctx, id, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -36,8 +36,8 @@ func (m *MockConversationRepository) Delete(ctx context.Context, id uint) error 
 	return args.Error(0)
 }
 
-func (m *MockConversationRepository) ListByUserID(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Conversation], error) {
-	args := m.Called(ctx, userID, params)
+func (m *MockConversationRepository) ListByUserID(ctx context.Context, userID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Conversation], error) {
+	args := m.Called(ctx, userID, accountID, params)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

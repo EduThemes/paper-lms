@@ -46,8 +46,10 @@ func (s *ExternalToolService) Create(ctx context.Context, tool *models.ContextEx
 		return errors.New("developer_key_id is required")
 	}
 
-	// Verify the developer key exists
-	_, err := s.devKeyRepo.FindByID(ctx, tool.DeveloperKeyID)
+	// Verify the developer key exists. accountID==0 is intentional: this is
+	// an internal validation invoked by the external-tool create path; the
+	// handler already gates the call by tenant via its own tool repo filter.
+	_, err := s.devKeyRepo.FindByID(ctx, tool.DeveloperKeyID, 0)
 	if err != nil {
 		return errors.New("developer key not found")
 	}

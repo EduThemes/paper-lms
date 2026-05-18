@@ -32,7 +32,7 @@ func (h *PeerReviewHandler) AssignPeerReviews(c *fiber.Ctx) error {
 		input.Count = 1
 	}
 
-	reviews, err := h.peerReviewService.AssignPeerReviews(c.Context(), uint(courseID), uint(assignmentID), input.Count)
+	reviews, err := h.peerReviewService.AssignPeerReviews(c.Context(), uint(courseID), uint(assignmentID), input.Count, callerAccountID(c))
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
@@ -46,7 +46,7 @@ func (h *PeerReviewHandler) ListPeerReviews(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid assignment ID")
 	}
 
-	reviews, err := h.peerReviewService.ListByAssignment(c.Context(), uint(assignmentID))
+	reviews, err := h.peerReviewService.ListByAssignment(c.Context(), uint(assignmentID), callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not list peer reviews")
 	}
@@ -66,7 +66,7 @@ func (h *PeerReviewHandler) ListMyPeerReviews(c *fiber.Ctx) error {
 
 	userID := c.Locals("user_id").(uint)
 
-	reviews, err := h.peerReviewService.ListByReviewer(c.Context(), uint(assignmentID), userID)
+	reviews, err := h.peerReviewService.ListByReviewer(c.Context(), uint(assignmentID), userID, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not list peer reviews")
 	}
@@ -88,7 +88,7 @@ func (h *PeerReviewHandler) SubmitPeerReview(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 
-	review, err := h.peerReviewService.SubmitReview(c.Context(), uint(reviewID), input.Score, input.Comments)
+	review, err := h.peerReviewService.SubmitReview(c.Context(), uint(reviewID), input.Score, input.Comments, callerAccountID(c))
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}

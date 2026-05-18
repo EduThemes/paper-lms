@@ -36,12 +36,22 @@ type SubmissionCommentRepository interface {
 
 type PeerReviewRepository interface {
 	Create(ctx context.Context, pr *models.PeerReview) error
-	FindByID(ctx context.Context, id uint) (*models.PeerReview, error)
+	// 13.1.D — tenant scope via parent assignment->course->account_id.
+	// 0 means no tenant scope (internal callers only).
+	FindByID(ctx context.Context, id, accountID uint) (*models.PeerReview, error)
 	Update(ctx context.Context, pr *models.PeerReview) error
-	ListByAssignment(ctx context.Context, assignmentID uint) ([]models.PeerReview, error)
-	ListByReviewer(ctx context.Context, assignmentID, reviewerID uint) ([]models.PeerReview, error)
-	FindByAssignmentAndReviewerAndReviewee(ctx context.Context, assignmentID, reviewerID, revieweeID uint) (*models.PeerReview, error)
-	DeleteByAssignment(ctx context.Context, assignmentID uint) error
+	// 13.1.D — tenant scope via parent assignment->course->account_id.
+	// 0 means no tenant scope (internal callers only).
+	ListByAssignment(ctx context.Context, assignmentID, accountID uint) ([]models.PeerReview, error)
+	// 13.1.D — tenant scope via parent assignment->course->account_id.
+	// 0 means no tenant scope (internal callers only).
+	ListByReviewer(ctx context.Context, assignmentID, reviewerID, accountID uint) ([]models.PeerReview, error)
+	// 13.1.D — tenant scope via parent assignment->course->account_id.
+	// 0 means no tenant scope (internal callers only).
+	FindByAssignmentAndReviewerAndReviewee(ctx context.Context, assignmentID, reviewerID, revieweeID, accountID uint) (*models.PeerReview, error)
+	// 13.1.D — tenant scope via parent assignment->course->account_id.
+	// 0 means no tenant scope (internal callers only).
+	DeleteByAssignment(ctx context.Context, assignmentID, accountID uint) error
 }
 
 type DocumentAnnotationRepository interface {

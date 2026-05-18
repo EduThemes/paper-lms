@@ -114,7 +114,7 @@ func (m *FnAssignmentRepository) ListByCourseID(ctx context.Context, courseID ui
 // FnAssignmentGroupRepository implements repository.AssignmentGroupRepository using function fields for testing.
 type FnAssignmentGroupRepository struct {
 	CreateFn         func(ctx context.Context, group *models.AssignmentGroup) error
-	FindByIDFn       func(ctx context.Context, id uint) (*models.AssignmentGroup, error)
+	FindByIDFn       func(ctx context.Context, id, accountID uint) (*models.AssignmentGroup, error)
 	UpdateFn         func(ctx context.Context, group *models.AssignmentGroup) error
 	DeleteFn         func(ctx context.Context, id uint) error
 	ListByCourseIDFn func(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.AssignmentGroup], error)
@@ -127,9 +127,9 @@ func (m *FnAssignmentGroupRepository) Create(ctx context.Context, group *models.
 	return nil
 }
 
-func (m *FnAssignmentGroupRepository) FindByID(ctx context.Context, id uint) (*models.AssignmentGroup, error) {
+func (m *FnAssignmentGroupRepository) FindByID(ctx context.Context, id, accountID uint) (*models.AssignmentGroup, error) {
 	if m.FindByIDFn != nil {
-		return m.FindByIDFn(ctx, id)
+		return m.FindByIDFn(ctx, id, accountID)
 	}
 	return nil, nil
 }

@@ -20,9 +20,15 @@ func (r *assignmentGroupRepo) Create(ctx context.Context, group *models.Assignme
 	return r.db.WithContext(ctx).Create(group).Error
 }
 
-func (r *assignmentGroupRepo) FindByID(ctx context.Context, id uint) (*models.AssignmentGroup, error) {
+func (r *assignmentGroupRepo) FindByID(ctx context.Context, id, accountID uint) (*models.AssignmentGroup, error) {
 	var group models.AssignmentGroup
-	if err := r.db.WithContext(ctx).First(&group, id).Error; err != nil {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		// Scope through the parent course's account_id. Mirrors the
+		// child-table pattern from module.go / page.go (13.1.D).
+		q = q.Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID)
+	}
+	if err := q.First(&group, id).Error; err != nil {
 		return nil, err
 	}
 	return &group, nil
