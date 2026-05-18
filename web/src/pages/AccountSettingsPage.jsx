@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   User, KeyRound, ShieldCheck, Bell, Key, Shield, Save, Check, AlertTriangle,
-  Smartphone, Fingerprint, ChevronRight,
+  Smartphone, Fingerprint, ChevronRight, Globe,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
@@ -32,6 +33,7 @@ function Banner({ kind, children }) {
 }
 
 function ProfileTab({ user, onSaved }) {
+  const { t } = useTranslation();
   const [name, setName] = useState(user?.name || '');
   const [locale, setLocale] = useState(user?.locale || 'en');
   const [timeZone, setTimeZone] = useState(user?.time_zone || '');
@@ -56,63 +58,80 @@ function ProfileTab({ user, onSaved }) {
   };
 
   return (
-    <form onSubmit={submit} className="space-y-4 max-w-xl">
-      <h2 className="text-lg font-semibold">Profile</h2>
-      <Banner kind="success">{success}</Banner>
-      <Banner kind="error">{error}</Banner>
-      <div>
-        <label className="block text-sm font-medium mb-1">Name</label>
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="w-full rounded-md border border-border-default bg-surface-0 px-3 py-2 text-sm"
-        />
-      </div>
-      <div>
-        <label className="block text-sm font-medium mb-1">Email</label>
-        <input
-          type="email"
-          value={user?.email || ''}
-          disabled
-          className="w-full rounded-md border border-border-default bg-surface-1 px-3 py-2 text-sm text-text-secondary"
-        />
-        <p className="mt-1 text-xs text-text-secondary">
-          Email changes go through your administrator.
-        </p>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div className="space-y-6 max-w-xl">
+      <form onSubmit={submit} className="space-y-4">
+        <h2 className="text-lg font-semibold">Profile</h2>
+        <Banner kind="success">{success}</Banner>
+        <Banner kind="error">{error}</Banner>
         <div>
-          <label className="block text-sm font-medium mb-1">Locale</label>
-          <select
-            value={locale}
-            onChange={(e) => setLocale(e.target.value)}
-            className="w-full rounded-md border border-border-default bg-surface-0 px-3 py-2 text-sm"
-          >
-            <option value="en">English</option>
-            <option value="es">Español</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Time zone</label>
+          <label className="block text-sm font-medium mb-1">Name</label>
           <input
             type="text"
-            value={timeZone}
-            onChange={(e) => setTimeZone(e.target.value)}
-            placeholder="America/Chicago"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
             className="w-full rounded-md border border-border-default bg-surface-0 px-3 py-2 text-sm"
           />
         </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Email</label>
+          <input
+            type="email"
+            value={user?.email || ''}
+            disabled
+            className="w-full rounded-md border border-border-default bg-surface-1 px-3 py-2 text-sm text-text-secondary"
+          />
+          <p className="mt-1 text-xs text-text-secondary">
+            Email changes go through your administrator.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Locale</label>
+            <select
+              value={locale}
+              onChange={(e) => setLocale(e.target.value)}
+              className="w-full rounded-md border border-border-default bg-surface-0 px-3 py-2 text-sm"
+            >
+              <option value="en">English</option>
+              <option value="es">Español</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Time zone</label>
+            <input
+              type="text"
+              value={timeZone}
+              onChange={(e) => setTimeZone(e.target.value)}
+              placeholder="America/Chicago"
+              className="w-full rounded-md border border-border-default bg-surface-0 px-3 py-2 text-sm"
+            />
+          </div>
+        </div>
+        <button
+          type="submit"
+          disabled={saving}
+          className="inline-flex items-center gap-2 rounded-md bg-brand-primary text-white px-4 py-2 text-sm font-medium disabled:opacity-50"
+        >
+          <Save className="w-4 h-4" />
+          {saving ? 'Saving…' : 'Save profile'}
+        </button>
+      </form>
+
+      {/* Personal preferences — language used to live in the main left-rail
+          as a globe icon; it's a per-user preference, not a navigation item,
+          so it now lives here. */}
+      <div className="space-y-2">
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-text-secondary">
+          Preferences
+        </h3>
+        <LinkCard
+          to="/settings/language"
+          icon={Globe}
+          title={t('pages.accountSettings.language.title')}
+          description={t('pages.accountSettings.language.description')}
+        />
       </div>
-      <button
-        type="submit"
-        disabled={saving}
-        className="inline-flex items-center gap-2 rounded-md bg-brand-primary text-white px-4 py-2 text-sm font-medium disabled:opacity-50"
-      >
-        <Save className="w-4 h-4" />
-        {saving ? 'Saving…' : 'Save profile'}
-      </button>
-    </form>
+    </div>
   );
 }
 

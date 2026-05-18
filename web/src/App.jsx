@@ -91,6 +91,7 @@ const OutcomeProficiencyPage = React.lazy(() => import('./pages/OutcomeProficien
 const MasteryGradebookPage = React.lazy(() => import('./pages/MasteryGradebookPage'));
 const ReadingPreferencesPage = React.lazy(() => import('./pages/ReadingPreferencesPage'));
 const GamificationPreferencesPage = React.lazy(() => import('./pages/GamificationPreferencesPage'));
+const LanguagePreferencesPage = React.lazy(() => import('./pages/LanguagePreferencesPage'));
 const CourseLeaderboardPage = React.lazy(() => import('./pages/CourseLeaderboardPage'));
 // Phase 9-B — TOTP MFA enrollment + step-up.
 const MFAEnrollPage = React.lazy(() => import('./pages/MFAEnrollPage'));
@@ -308,6 +309,14 @@ const App = () => {
           element={
             <ProtectedRoute>
               <NotificationPreferencesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings/language"
+          element={
+            <ProtectedRoute>
+              <LanguagePreferencesPage />
             </ProtectedRoute>
           }
         />
