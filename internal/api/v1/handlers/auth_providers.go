@@ -192,6 +192,26 @@ func (h *AuthProviderHandler) CreateProvider(c *fiber.Ctx) error {
 		oidcSecretEncrypted = ct
 	}
 
+	// Phase 9-PRE encryption-at-rest contract (mirrors the OIDC pattern
+	// above): the LDAP service-account bind password gets sealed via
+	// secretbox before it touches the DB. The legacy plaintext
+	// LDAPBindPassword field stays in the model for one release (the
+	// reader still falls back to it for un-backfilled rows) but on
+	// every Create the encrypted column is the canonical write and the
+	// plaintext field is cleared so no new row ever ships with a
+	// plaintext bind password.
+	var ldapBindPasswordEncrypted []byte
+	if input.AuthType == "ldap" && input.LDAPBindPassword != "" {
+		ct, err := auth.Encrypt([]byte(input.LDAPBindPassword))
+		if err != nil {
+			return responses.InternalError(c, "failed to encrypt ldap bind password: "+err.Error())
+		}
+		ldapBindPasswordEncrypted = ct
+		// Clear the plaintext field so the encrypted column is the
+		// sole on-disk representation for newly-created rows.
+		input.LDAPBindPassword = ""
+	}
+
 	provider := &models.AuthenticationProvider{
 		AccountID:                 uint(accountID),
 		AuthType:                  input.AuthType,
@@ -206,6 +226,7 @@ func (h *AuthProviderHandler) CreateProvider(c *fiber.Ctx) error {
 		LDAPFilter:                input.LDAPFilter,
 		LDAPBindDN:                input.LDAPBindDN,
 		LDAPBindPassword:          input.LDAPBindPassword,
+		LDAPBindPasswordEncrypted: ldapBindPasswordEncrypted,
 		LDAPUseTLS:                input.LDAPUseTLS,
 		LDAPLoginAttribute:        input.LDAPLoginAttribute,
 		CASBaseURL:                input.CASBaseURL,
@@ -283,6 +304,22 @@ func (h *AuthProviderHandler) UpdateProvider(c *fiber.Ctx) error {
 		oidcSecretEncrypted = ct
 	}
 
+	// Mirror of Create — when the admin types a new LDAP bind password
+	// into the rotation field we encrypt it via secretbox; if the field
+	// is empty the service layer's "leave existing column unchanged"
+	// pattern preserves the stored ciphertext (see auth_provider_service
+	// UpdateProvider). Plaintext field is cleared so a rotation never
+	// re-poisons the row.
+	var ldapBindPasswordEncrypted []byte
+	if input.LDAPBindPassword != "" {
+		ct, err := auth.Encrypt([]byte(input.LDAPBindPassword))
+		if err != nil {
+			return responses.InternalError(c, "failed to encrypt ldap bind password: "+err.Error())
+		}
+		ldapBindPasswordEncrypted = ct
+		input.LDAPBindPassword = ""
+	}
+
 	updates := &models.AuthenticationProvider{
 		AuthType:                  input.AuthType,
 		Position:                  input.Position,
@@ -296,6 +333,7 @@ func (h *AuthProviderHandler) UpdateProvider(c *fiber.Ctx) error {
 		LDAPFilter:                input.LDAPFilter,
 		LDAPBindDN:                input.LDAPBindDN,
 		LDAPBindPassword:          input.LDAPBindPassword,
+		LDAPBindPasswordEncrypted: ldapBindPasswordEncrypted,
 		LDAPUseTLS:                input.LDAPUseTLS,
 		LDAPLoginAttribute:        input.LDAPLoginAttribute,
 		CASBaseURL:                input.CASBaseURL,
