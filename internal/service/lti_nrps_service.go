@@ -29,7 +29,7 @@ func NewLTINRPSService(enrollmentRepo repository.EnrollmentRepository, userRepo 
 // with LTI role URIs, user identity fields, and status.
 func (s *LTINRPSService) GetMemberships(ctx context.Context, courseID uint, params repository.PaginationParams) ([]map[string]interface{}, error) {
 	// Fetch enrollments for the course
-	enrollments, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, params)
+	enrollments, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, 0, params)
 	if err != nil {
 		return nil, errors.New("failed to fetch course enrollments")
 	}

@@ -189,7 +189,7 @@ func TestListCourses_Default(t *testing.T) {
 		PerPage:    10,
 	}
 	mockCourseRepo.On("ListByUserID", mock.Anything, uint(1), uint(0), repository.PaginationParams{Page: 1, PerPage: 10}).Return(expectedResult, nil)
-	mockEnrollmentRepo.On("CountByCourseIDs", mock.Anything, mock.AnythingOfType("[]uint")).Return(map[uint]int64{1: 25, 2: 30}, nil)
+	mockEnrollmentRepo.On("CountByCourseIDs", mock.Anything, mock.AnythingOfType("[]uint"), mock.AnythingOfType("uint")).Return(map[uint]int64{1: 25, 2: 30}, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/courses", nil)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -220,7 +220,7 @@ func TestListCourses_WithEnrollmentType(t *testing.T) {
 		PerPage:    10,
 	}
 	mockCourseRepo.On("ListByUserID", mock.Anything, uint(1), uint(0), repository.PaginationParams{Page: 1, PerPage: 10}).Return(expectedResult, nil)
-	mockEnrollmentRepo.On("CountByCourseIDs", mock.Anything, mock.AnythingOfType("[]uint")).Return(map[uint]int64{1: 15}, nil)
+	mockEnrollmentRepo.On("CountByCourseIDs", mock.Anything, mock.AnythingOfType("[]uint"), mock.AnythingOfType("uint")).Return(map[uint]int64{1: 15}, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/courses?enrollment_type=TeacherEnrollment", nil)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)

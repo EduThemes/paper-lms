@@ -42,7 +42,7 @@ func (a *ResourceAuthorizer) RequireCourseInstructor(c *fiber.Ctx, courseID uint
 	if !ok {
 		return authzForbidden(c, "authentication required")
 	}
-	enrollment, err := a.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, courseID)
+	enrollment, err := a.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, courseID, callerAccountID(c))
 	if err != nil || enrollment.WorkflowState != "active" {
 		return authzForbidden(c, "not enrolled in this course")
 	}
@@ -62,7 +62,7 @@ func (a *ResourceAuthorizer) RequireCourseEnrolled(c *fiber.Ctx, courseID uint) 
 	if !ok {
 		return authzForbidden(c, "authentication required")
 	}
-	enrollment, err := a.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, courseID)
+	enrollment, err := a.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, courseID, callerAccountID(c))
 	if err != nil || enrollment.WorkflowState != "active" {
 		return authzForbidden(c, "not enrolled in this course")
 	}
