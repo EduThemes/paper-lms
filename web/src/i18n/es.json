@@ -801,5 +801,20 @@
     "gamification": {
       "settings": "Configuración"
     }
+  },
+  "pages": {
+    "passwordReset": {
+      "title": "Establece una nueva contraseña",
+      "subtitle": "Tu cuenta fue creada con una contraseña temporal. Elige una nueva contraseña para continuar.",
+      "newPasswordLabel": "Nueva contraseña",
+      "confirmLabel": "Confirma la nueva contraseña",
+      "submitButton": "Establecer contraseña y continuar",
+      "cancelButton": "Cancelar y volver al inicio de sesión",
+      "errors": {
+        "tooShort": "La contraseña debe tener al menos 8 caracteres.",
+        "mismatch": "Las contraseñas no coinciden.",
+        "noPending": "No se encontró un restablecimiento de contraseña pendiente. Inicia sesión nuevamente."
+      }
+    }
   }
 }

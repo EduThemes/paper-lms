@@ -51,16 +51,23 @@ type AuthProviderLookup interface {
 	FindByID(ctx context.Context, id uint) (*models.AuthenticationProvider, error)
 }
 
-// PipelineResult is what the pipeline returns. Exactly one of Token
-// or PendingToken is non-empty:
+// PipelineResult is what the pipeline returns. Exactly one of Token,
+// PendingToken, or PasswordResetPendingToken is non-empty:
 //   - Token != "" → caller mints session cookies, returns dashboard
 //   - PendingToken != "" → caller returns {pending_token} to the
 //     client, which routes to /mfa/verify
+//   - PasswordResetPendingToken != "" → caller returns
+//     {pending_token, must_reset_password: true} to the client, which
+//     routes to /auth/password-set. Set when the user was provisioned
+//     with a random initial password (SIS / OneRoster — Wave 1.6) and
+//     hasn't yet chosen a real one.
 type PipelineResult struct {
-	Token        string       // full session JWT, set when no MFA gate
-	PendingToken string       // short-lived JWT for /mfa/verify step
-	User         *models.User // resolved user row, always set
-	MustEnroll   bool         // tenant policy requires MFA but user is not enrolled
+	Token                     string       // full session JWT, set when no gate fires
+	PendingToken              string       // short-lived JWT for /mfa/verify step
+	PasswordResetPendingToken string       // short-lived JWT for /auth/password-set step
+	User                      *models.User // resolved user row, always set
+	MustEnroll                bool         // tenant policy requires MFA but user is not enrolled
+	MustResetPassword         bool         // RequiresPasswordReset flag is set; client must reset before session
 }
 
 // LoginPipeline orchestrates post-credential-verification work for
@@ -114,7 +121,38 @@ func (p *LoginPipeline) Execute(ctx context.Context, outcome SSOOutcome, meta Re
 		return nil, err
 	}
 
-	// 2. MFA policy gate.
+	// 2. Password-reset gate (Wave 1.6 follow-up).
+	//
+	// SIS / OneRoster importers generate a random initial password
+	// the learner can't recover. Their User row carries
+	// RequiresPasswordReset=true, and the LoginPipeline issues a
+	// short-lived pending JWT instead of a session: the client must
+	// route the user to /auth/password-set and POST a real password
+	// before getting a session.
+	//
+	// Federated paths (SAML/LDAP/CAS/OIDC/passkey) bypass this gate
+	// — those users authenticated against their IdP and don't have a
+	// local password to set. The flag only meaningfully applies to
+	// the local-password path, where the credential check succeeded
+	// against the random-import value (which means either the
+	// learner has the printed value an admin handed them, or the
+	// random value leaked — both cases benefit from forcing a real
+	// password before session mint).
+	if user.RequiresPasswordReset && outcome.ProviderType == "local" {
+		pending, err := IssuePendingPasswordResetToken(p.jwtSecret, user.ID, user.AccountID)
+		if err != nil {
+			return nil, err
+		}
+		p.audit.PasswordResetRequired(ctx, user.ID, outcome.ProviderType, meta)
+		_ = isNew
+		return &PipelineResult{
+			PasswordResetPendingToken: pending,
+			User:                      user,
+			MustResetPassword:         true,
+		}, nil
+	}
+
+	// 3. MFA policy gate.
 	//
 	// Sprint 10-B — passkey-as-primary: a verified WebAuthn assertion
 	// proves possession of the device PLUS the device's user

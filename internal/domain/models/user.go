@@ -77,6 +77,18 @@ type User struct {
 	// enforcement is a Phase 13.4 follow-up).
 	RequiresParentalConsent bool `json:"requires_parental_consent" gorm:"not null;default:false"`
 
+	// RequiresPasswordReset (Wave 1.6 follow-up / migration 000061) — set
+	// true at provisioning time by the SIS / OneRoster importers, which
+	// generate a cryptographically random initial password the learner
+	// has no way to recover. The LoginPipeline gates session minting on
+	// this flag: a credential-valid login with the flag set returns a
+	// short-lived password-set pending JWT instead of a session token.
+	// The user redirects to /auth/password-set, chooses a new password,
+	// and the handler clears the flag + mints the real session. The flag
+	// is NOT auto-applied to existing users — only new SIS / OneRoster
+	// provisioning sets it.
+	RequiresPasswordReset bool `json:"requires_password_reset" gorm:"column:requires_password_reset;not null;default:false"`
+
 	ResetToken          string     `json:"-"`
 	ResetTokenExpiresAt *time.Time `json:"-"`
 	CreatedAt           time.Time  `json:"created_at"`

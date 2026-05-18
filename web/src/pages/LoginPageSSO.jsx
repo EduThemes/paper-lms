@@ -293,6 +293,14 @@ const LoginPageSSO = () => {
       // verify page. If must_enroll_mfa is set, real session was
       // issued but the user needs to enroll before continuing.
       const data = await login(email, password);
+      // Wave 1.6 follow-up: SIS / OneRoster-provisioned learners
+      // must choose a real password before getting a session.
+      // AuthContext stashes the pending token; route to the
+      // password-set page.
+      if (data?.must_reset_password) {
+        navigate('/auth/password-set');
+        return;
+      }
       if (data?.mfa_required) {
         navigate('/mfa/verify');
         return;

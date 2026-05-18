@@ -54,6 +54,16 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const data = await api.login(email, password);
+    // Wave 1.6 follow-up: SIS / OneRoster-provisioned learners
+    // carry RequiresPasswordReset=true. The backend returns
+    // {pending_token, must_reset_password: true} instead of a
+    // session; stash the token in sessionStorage (same convention
+    // as MFA pending — clears on tab close) and let the caller
+    // route to /auth/password-set.
+    if (data.must_reset_password && data.pending_token) {
+      sessionStorage.setItem('password_reset_pending_token', data.pending_token);
+      return data;
+    }
     // Phase 9-B: when MFA gates this login, the backend returns
     // {pending_token, mfa_required: true} instead of {token, user}.
     // Stash the pending token in sessionStorage (NOT localStorage —
@@ -67,6 +77,26 @@ export const AuthProvider = ({ children }) => {
     // routes to /mfa/enroll based on this flag.
     setUser(data.user);
     applyAccountDefaultLocale(data.user);
+    return data;
+  };
+
+  // Wave 1.6 follow-up — finalize the password-set step.
+  // PasswordResetRequiredPage calls this with the pending token from
+  // sessionStorage and the user's chosen new password. On success
+  // the backend has set the paper_session cookie + returned the
+  // user payload; mirror the login() success path so navigation can
+  // proceed.
+  const finalizePasswordReset = async (newPassword) => {
+    const pendingToken = sessionStorage.getItem('password_reset_pending_token');
+    if (!pendingToken) {
+      throw new Error('No pending password-reset found. Please log in again.');
+    }
+    const data = await api.auth.setPassword({ pendingToken, newPassword });
+    sessionStorage.removeItem('password_reset_pending_token');
+    if (data?.user) {
+      setUser(data.user);
+      applyAccountDefaultLocale(data.user);
+    }
     return data;
   };
 
@@ -103,7 +133,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, setUser, login, register, logout, loading, refreshUser }}>
+    <AuthContext.Provider value={{ user, setUser, login, register, logout, loading, refreshUser, finalizePasswordReset }}>
       {children}
     </AuthContext.Provider>
   );

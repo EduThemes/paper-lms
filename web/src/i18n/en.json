@@ -801,5 +801,20 @@
     "gamification": {
       "settings": "Settings"
     }
+  },
+  "pages": {
+    "passwordReset": {
+      "title": "Set a new password",
+      "subtitle": "Your account was provisioned with a temporary password. Choose a new password to continue.",
+      "newPasswordLabel": "New password",
+      "confirmLabel": "Confirm new password",
+      "submitButton": "Set password and continue",
+      "cancelButton": "Cancel and return to login",
+      "errors": {
+        "tooShort": "Password must be at least 8 characters.",
+        "mismatch": "Passwords do not match.",
+        "noPending": "No pending password-reset found. Please log in again."
+      }
+    }
   }
 }

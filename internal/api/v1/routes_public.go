@@ -26,6 +26,11 @@ func (r *Router) registerPublicRoutes(api fiber.Router, authLimit fiber.Handler)
 	api.Post("/logout", r.UserHandler.Logout)
 	api.Post("/password/reset", authLimit, r.UserHandler.RequestPasswordReset)
 	api.Post("/password/reset/confirm", authLimit, r.UserHandler.ResetPassword)
+	// Wave 1.6 follow-up — password-set after SIS / OneRoster
+	// provisioning. Anonymous: the pending JWT (purpose=
+	// password_reset_pending) IS the credential. Rate-limited like
+	// the rest of the auth surface.
+	api.Post("/auth/password/set", authLimit, r.UserHandler.SetPassword)
 
 	// Public OAuth2 token endpoint (no auth required)
 	api.Post("/login/oauth2/token", r.OAuth2Handler.Token)

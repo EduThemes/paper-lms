@@ -85,6 +85,14 @@ func TestSISImportUsersCSV_DefaultPasswordIsRandom(t *testing.T) {
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte("changeme")); err == nil {
 		t.Fatalf("CVE-class regression: SIS-imported user's password hash matches the static default 'changeme'")
 	}
+
+	// Wave 1.6 follow-up: the random password is irrecoverable, so
+	// the SIS path MUST set RequiresPasswordReset so the LoginPipeline
+	// gates session minting and forces the user to choose a real
+	// password before getting a session.
+	if !user.RequiresPasswordReset {
+		t.Fatal("SIS-imported user with a random default password must have RequiresPasswordReset=true")
+	}
 }
 
 // --- DB plumbing — mirrors internal/service/gamification/seed_test.go ---

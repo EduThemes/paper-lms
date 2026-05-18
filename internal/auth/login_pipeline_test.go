@@ -741,6 +741,110 @@ func TestPipeline_CAS_EmailAutoLink_OnlyWhenEmailVerified(t *testing.T) {
 	}
 }
 
+// Wave 1.6 follow-up — password-reset gate. A user provisioned with
+// RequiresPasswordReset=true must get a password-set pending token,
+// NOT a session, NOT an MFA pending token. The gate fires BEFORE
+// any MFA logic; an SIS-imported learner who hasn't chosen a real
+// password yet never even reaches the MFA matrix.
+func TestPipeline_Local_RequiresPasswordReset_GatesToPasswordSet(t *testing.T) {
+	h := newHarness(t, "off")
+	u := enrolledUser(1, "sis-user@paper.test", "user")
+	u.RequiresPasswordReset = true
+	h.users.put(u)
+
+	res, err := h.pipeline.Execute(context.Background(), SSOOutcome{
+		ProviderType: "local", ExternalSubject: "1", Email: u.Email, EmailVerified: true,
+	}, RequestMeta{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if res.Token != "" {
+		t.Error("must NOT mint a session for a flagged user")
+	}
+	if res.PendingToken != "" {
+		t.Error("must NOT mint an MFA pending token; password-reset gate fires first")
+	}
+	if res.PasswordResetPendingToken == "" {
+		t.Error("expected PasswordResetPendingToken")
+	}
+	if !res.MustResetPassword {
+		t.Error("expected MustResetPassword=true")
+	}
+}
+
+// Password-reset gate is checked BEFORE MFA — even when the tenant
+// MFA policy says "required_all" the flagged user gets the
+// password-set step first. The MFA step happens after the user has
+// a real password and logs in again.
+func TestPipeline_Local_RequiresPasswordReset_PrecedesMFAGate(t *testing.T) {
+	h := newHarness(t, "required_all")
+	u := enrolledUser(1, "sis-user@paper.test", "user")
+	u.RequiresPasswordReset = true
+	h.users.put(u)
+
+	res, err := h.pipeline.Execute(context.Background(), SSOOutcome{
+		ProviderType: "local", ExternalSubject: "1", Email: u.Email, EmailVerified: true,
+	}, RequestMeta{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if res.PasswordResetPendingToken == "" {
+		t.Error("password-reset gate must fire before MFA gate")
+	}
+	if res.PendingToken != "" {
+		t.Error("MFA pending must NOT be issued; password-reset must run first")
+	}
+}
+
+// Federated paths (OIDC/SAML/LDAP/CAS/passkey) are NOT affected by
+// the flag — those users authenticated against their IdP and have
+// no local password to reset. The flag only meaningfully applies to
+// the local-password path.
+func TestPipeline_OIDC_RequiresPasswordReset_FlagIgnoredForFederated(t *testing.T) {
+	h := newHarness(t, "off")
+	u := enrolledUser(50, "alice@paper.test", "user")
+	u.RequiresPasswordReset = true // shouldn't matter
+	h.users.put(u)
+	h.providers.byID[5] = provider(5, "oidc", false)
+	h.feds.bySubject[fedKey(5, "google-sub-abc")] = &models.FederatedIdentity{
+		ID: 1, UserID: u.ID, ProviderID: 5, ExternalSubject: "google-sub-abc",
+		ClaimsSnapshot: datatypes.JSON([]byte(`{}`)),
+	}
+
+	res, err := h.pipeline.Execute(context.Background(), SSOOutcome{
+		ProviderType: "oidc", ProviderID: 5, ExternalSubject: "google-sub-abc",
+		Email: u.Email, EmailVerified: true,
+	}, RequestMeta{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if res.Token == "" {
+		t.Error("federated path should still mint a session even with the flag set")
+	}
+	if res.PasswordResetPendingToken != "" {
+		t.Error("federated path must NOT trigger the password-reset gate")
+	}
+}
+
+// Once the flag is cleared the user gets the normal session-mint
+// path. Confirms the gate is strictly conditional on the flag.
+func TestPipeline_Local_PasswordReset_AfterFlagCleared_MintsSession(t *testing.T) {
+	h := newHarness(t, "off")
+	u := enrolledUser(1, "alice@paper.test", "user")
+	u.RequiresPasswordReset = false
+	h.users.put(u)
+
+	res, err := h.pipeline.Execute(context.Background(), SSOOutcome{
+		ProviderType: "local", ExternalSubject: "1", Email: u.Email, EmailVerified: true,
+	}, RequestMeta{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if res.Token == "" || res.PasswordResetPendingToken != "" {
+		t.Errorf("flag cleared should mint session, got %+v", res)
+	}
+}
+
 // JIT-created user's role default.
 func TestPipeline_JIT_DefaultsToUserRole(t *testing.T) {
 	h := newHarness(t, "off")
