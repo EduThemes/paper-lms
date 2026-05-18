@@ -17,6 +17,26 @@ func NewPortfolioHandler(portfolioService *service.PortfolioService, authz *Reso
 	return &PortfolioHandler{portfolioService: portfolioService, authz: authz}
 }
 
+// loadOwnedPortfolio is the repeated load + owner-or-admin authz lift used by
+// most write handlers. Returns (portfolio, wrote, err) per the Fiber-style
+// (result, wrote, err) helper pattern: when `wrote=true` the helper has
+// already emitted an HTTP response and the caller MUST return `err`
+// immediately. Eliminates 14 copies of the same prologue.
+func (h *PortfolioHandler) loadOwnedPortfolio(c *fiber.Ctx, paramName string) (*models.Portfolio, bool, error) {
+	portfolioID, err := c.ParamsInt(paramName)
+	if err != nil {
+		return nil, true, responses.BadRequest(c, "Invalid portfolio ID")
+	}
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
+	if err != nil {
+		return nil, true, responses.NotFound(c, "portfolio")
+	}
+	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+		return nil, true, err
+	}
+	return portfolio, false, nil
+}
+
 // ---------------------------------------------------------------------------
 // JSON serializers
 // ---------------------------------------------------------------------------
@@ -223,17 +243,8 @@ func (h *PortfolioHandler) GetPortfolio(c *fiber.Ctx) error {
 }
 
 func (h *PortfolioHandler) UpdatePortfolio(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
 		return err
 	}
 
@@ -299,48 +310,25 @@ func (h *PortfolioHandler) UpdatePortfolio(c *fiber.Ctx) error {
 }
 
 func (h *PortfolioHandler) DeletePortfolio(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
 		return err
 	}
-
-	if err := h.portfolioService.ArchivePortfolio(c.Context(), uint(portfolioID), callerAccountID(c)); err != nil {
+	if err := h.portfolioService.ArchivePortfolio(c.Context(), portfolio.ID, callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not archive portfolio")
 	}
-
 	return c.JSON(fiber.Map{"delete": true})
 }
 
 func (h *PortfolioHandler) PublishPortfolio(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	// Fetch first to check ownership before publishing
-	existing, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if err := h.authz.RequireOwnerOrAdmin(c, existing.UserID); err != nil {
+	existing, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
 		return err
 	}
-
-	portfolio, err := h.portfolioService.PublishPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
+	portfolio, err := h.portfolioService.PublishPortfolio(c.Context(), existing.ID, callerAccountID(c))
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
-
 	return c.JSON(portfolioToJSON(portfolio))
 }
 
@@ -384,17 +372,8 @@ func (h *PortfolioHandler) GetPublicPortfolio(c *fiber.Ctx) error {
 // ---------------------------------------------------------------------------
 
 func (h *PortfolioHandler) AddSection(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
 		return err
 	}
 
@@ -407,7 +386,6 @@ func (h *PortfolioHandler) AddSection(c *fiber.Ctx) error {
 			IsVisible   *bool  `json:"is_visible"`
 		} `json:"section"`
 	}
-
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
@@ -416,38 +394,25 @@ func (h *PortfolioHandler) AddSection(c *fiber.Ctx) error {
 	if input.Section.IsVisible != nil {
 		isVisible = *input.Section.IsVisible
 	}
-
 	section := &models.PortfolioSection{
-		PortfolioID: uint(portfolioID),
+		PortfolioID: portfolio.ID,
 		Title:       input.Section.Title,
 		SectionType: input.Section.SectionType,
 		Content:     input.Section.Content,
 		Layout:      input.Section.Layout,
 		IsVisible:   isVisible,
 	}
-
 	if err := h.portfolioService.AddSection(c.Context(), section); err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
-
 	return c.Status(fiber.StatusCreated).JSON(portfolioSectionToJSON(section))
 }
 
 func (h *PortfolioHandler) UpdateSection(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+	_, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
 		return err
 	}
-
 	sectionID, err := c.ParamsInt("section_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid section ID")
@@ -510,63 +475,37 @@ func (h *PortfolioHandler) UpdateSection(c *fiber.Ctx) error {
 }
 
 func (h *PortfolioHandler) DeleteSection(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+	_, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
 		return err
 	}
-
 	sectionID, err := c.ParamsInt("section_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid section ID")
 	}
-
 	if err := h.portfolioService.RemoveSection(c.Context(), uint(sectionID), callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not delete section")
 	}
-
 	return c.JSON(fiber.Map{"delete": true})
 }
 
 func (h *PortfolioHandler) ReorderSections(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
 		return err
 	}
-
 	var input struct {
 		Order []uint `json:"order"`
 	}
-
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
-
 	if len(input.Order) == 0 {
 		return responses.BadRequest(c, "order array is required")
 	}
-
-	if err := h.portfolioService.ReorderSections(c.Context(), uint(portfolioID), input.Order, callerAccountID(c)); err != nil {
+	if err := h.portfolioService.ReorderSections(c.Context(), portfolio.ID, input.Order, callerAccountID(c)); err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
-
 	return c.JSON(fiber.Map{"reorder": true})
 }
 
@@ -575,17 +514,8 @@ func (h *PortfolioHandler) ReorderSections(c *fiber.Ctx) error {
 // ---------------------------------------------------------------------------
 
 func (h *PortfolioHandler) AddArtifact(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
 		return err
 	}
 
@@ -611,7 +541,7 @@ func (h *PortfolioHandler) AddArtifact(c *fiber.Ctx) error {
 	}
 
 	artifact := &models.PortfolioArtifact{
-		PortfolioID:   uint(portfolioID),
+		PortfolioID:   portfolio.ID,
 		SectionID:     input.Artifact.SectionID,
 		Title:         input.Artifact.Title,
 		Description:   input.Artifact.Description,
@@ -634,20 +564,10 @@ func (h *PortfolioHandler) AddArtifact(c *fiber.Ctx) error {
 }
 
 func (h *PortfolioHandler) UpdateArtifact(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+	_, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
 		return err
 	}
-
 	artifactID, err := c.ParamsInt("artifact_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid artifact ID")
@@ -722,29 +642,17 @@ func (h *PortfolioHandler) UpdateArtifact(c *fiber.Ctx) error {
 }
 
 func (h *PortfolioHandler) DeleteArtifact(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+	_, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
 		return err
 	}
-
 	artifactID, err := c.ParamsInt("artifact_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid artifact ID")
 	}
-
 	if err := h.portfolioService.RemoveArtifact(c.Context(), uint(artifactID), callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not delete artifact")
 	}
-
 	return c.JSON(fiber.Map{"delete": true})
 }
 
@@ -753,20 +661,10 @@ func (h *PortfolioHandler) DeleteArtifact(c *fiber.Ctx) error {
 // ---------------------------------------------------------------------------
 
 func (h *PortfolioHandler) AddReflection(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+	_, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
 		return err
 	}
-
 	artifactID, err := c.ParamsInt("artifact_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid artifact ID")
@@ -803,20 +701,10 @@ func (h *PortfolioHandler) AddReflection(c *fiber.Ctx) error {
 // ---------------------------------------------------------------------------
 
 func (h *PortfolioHandler) ImportFromCourse(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
 		return err
 	}
-
 	courseID, err := c.ParamsInt("course_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid course ID")
@@ -834,7 +722,7 @@ func (h *PortfolioHandler) ImportFromCourse(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "submission_ids is required")
 	}
 
-	imported, err := h.portfolioService.ImportFromCourse(c.Context(), uint(portfolioID), uint(courseID), input.SubmissionIDs, callerAccountID(c))
+	imported, err := h.portfolioService.ImportFromCourse(c.Context(), portfolio.ID, uint(courseID), input.SubmissionIDs, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not import from course")
 	}
@@ -855,50 +743,28 @@ func (h *PortfolioHandler) ImportFromCourse(c *fiber.Ctx) error {
 // ---------------------------------------------------------------------------
 
 func (h *PortfolioHandler) ExportAsHTML(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
 		return err
 	}
-
-	zipData, err := h.portfolioService.ExportAsStaticSite(c.Context(), uint(portfolioID), callerAccountID(c))
+	zipData, err := h.portfolioService.ExportAsStaticSite(c.Context(), portfolio.ID, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not export portfolio")
 	}
-
 	c.Set("Content-Type", "application/zip")
 	c.Set("Content-Disposition", "attachment; filename=portfolio-export.zip")
 	return c.Send(zipData)
 }
 
 func (h *PortfolioHandler) ExportAsPDF(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
 		return err
 	}
-
-	htmlData, err := h.portfolioService.ExportAsPDF(c.Context(), uint(portfolioID), callerAccountID(c))
+	htmlData, err := h.portfolioService.ExportAsPDF(c.Context(), portfolio.ID, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not export portfolio")
 	}
-
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	c.Set("Content-Disposition", "attachment; filename=portfolio.html")
 	return c.Send(htmlData)
@@ -909,17 +775,8 @@ func (h *PortfolioHandler) ExportAsPDF(c *fiber.Ctx) error {
 // ---------------------------------------------------------------------------
 
 func (h *PortfolioHandler) AddComment(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
 		return err
 	}
 
@@ -938,7 +795,7 @@ func (h *PortfolioHandler) AddComment(c *fiber.Ctx) error {
 	}
 
 	comment := &models.PortfolioComment{
-		PortfolioID: uint(portfolioID),
+		PortfolioID: portfolio.ID,
 		SectionID:   input.Comment.SectionID,
 		ArtifactID:  input.Comment.ArtifactID,
 		UserID:      input.Comment.UserID,
