@@ -88,7 +88,7 @@ func (v *Vector) Scan(src interface{}) error {
 // `vector(384)` when the pgvector extension is installed; otherwise the
 // migration falls back to TEXT and the same text encoding round-trips.
 type ContentEmbedding struct {
-	ID          uint   `json:"id" gorm:"primaryKey"`
+	ID          uint   `json:"id" gorm:"column:id;primaryKey"`
 	CourseID    uint   `json:"course_id" gorm:"not null;index"`
 	ContentType string `json:"content_type" gorm:"not null;size:32;index:idx_content_embeddings_type_id"`
 	ContentID   uint   `json:"content_id" gorm:"not null;index:idx_content_embeddings_type_id"`

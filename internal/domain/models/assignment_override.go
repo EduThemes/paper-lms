@@ -3,7 +3,7 @@ package models
 import "time"
 
 type AssignmentOverride struct {
-	ID              uint       `json:"id" gorm:"primaryKey"`
+	ID              uint       `json:"id" gorm:"column:id;primaryKey"`
 	AssignmentID    uint       `json:"assignment_id" gorm:"not null;index"`
 	Title           string     `json:"title"`
 	DueAt           *time.Time `json:"due_at"`

@@ -3,7 +3,7 @@ package models
 import "time"
 
 type AttendanceRecord struct {
-	ID         uint      `json:"id" gorm:"primaryKey"`
+	ID         uint      `json:"id" gorm:"column:id;primaryKey"`
 	CourseID   uint      `json:"course_id" gorm:"not null;index"`
 	SectionID  *uint     `json:"section_id" gorm:"index"`
 	UserID     uint      `json:"user_id" gorm:"not null;index"`

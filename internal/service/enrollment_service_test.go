@@ -32,7 +32,7 @@ func TestEnrollmentCreate_Valid(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, "StudentEnrollment", enrollment.Role)
-	assert.Equal(t, "active", enrollment.WorkflowState)
+	assert.Equal(t, models.EnrollmentActive, enrollment.WorkflowState)
 	mockRepo.AssertExpectations(t)
 }
 
@@ -71,7 +71,7 @@ func TestEnrollmentCreate_DefaultState(t *testing.T) {
 	err := svc.Create(ctx, enrollment)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "active", enrollment.WorkflowState)
+	assert.Equal(t, models.EnrollmentActive, enrollment.WorkflowState)
 	mockRepo.AssertExpectations(t)
 }
 
@@ -130,11 +130,12 @@ func TestEnrollmentCreate_AllTypes(t *testing.T) {
 
 			assert.NoError(t, err)
 			assert.Equal(t, enrollType, enrollment.Role)
-			assert.Equal(t, "active", enrollment.WorkflowState)
+			assert.Equal(t, models.EnrollmentActive, enrollment.WorkflowState)
 			mockRepo.AssertExpectations(t)
 		})
 	}
 }
+
 
 func TestEnrollmentCreate_PreservesExistingState(t *testing.T) {
 	mockRepo := new(mocks.MockEnrollmentRepository)
@@ -154,7 +155,7 @@ func TestEnrollmentCreate_PreservesExistingState(t *testing.T) {
 	err := svc.Create(ctx, enrollment)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "invited", enrollment.WorkflowState)
+	assert.Equal(t, models.EnrollmentInvited, enrollment.WorkflowState)
 	mockRepo.AssertExpectations(t)
 }
 

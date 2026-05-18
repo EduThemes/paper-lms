@@ -3,11 +3,11 @@ package models
 import "time"
 
 type PageView struct {
-	ID                 uint      `json:"id" gorm:"primaryKey"`
+	ID                 uint      `json:"id" gorm:"column:id;primaryKey"`
 	UserID             uint      `json:"user_id" gorm:"not null;index"`
 	ContextType        string    `json:"context_type" gorm:"not null"`
 	ContextID          uint      `json:"context_id" gorm:"not null;index"`
-	URL                string    `json:"url"`
+	URL                string    `json:"url" gorm:"column:url"`
 	Action             string    `json:"action"`
 	Participated       bool      `json:"participated" gorm:"default:false"`
 	InteractionSeconds int       `json:"interaction_seconds" gorm:"default:0"`

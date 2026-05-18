@@ -125,7 +125,7 @@ func (s *BatchService) CloneCourse(
 		AccountID:     accountID,
 		Name:          destName,
 		CourseCode:    sourceCourse.CourseCode + "-copy",
-		WorkflowState: "unpublished",
+		WorkflowState: models.CourseUnpublished,
 		DefaultView:   sourceCourse.DefaultView,
 		SyllabusBody:  sourceCourse.SyllabusBody,
 		License:       sourceCourse.License,
@@ -210,7 +210,7 @@ func (s *BatchService) cloneAssignments(ctx context.Context, sourceCourseID, des
 			GradingType:     a.GradingType,
 			SubmissionTypes: a.SubmissionTypes,
 			Position:        a.Position,
-			WorkflowState:   "unpublished",
+			WorkflowState:   models.AssignmentUnpublished,
 			Published:       false,
 		}
 		if err := s.assignmentRepo.Create(ctx, newAssignment); err != nil {
@@ -320,7 +320,7 @@ func (s *BatchService) cloneDiscussions(ctx context.Context, sourceCourseID, des
 			OnlyGradersCanRate: d.OnlyGradersCanRate,
 			SortByRating:       d.SortByRating,
 			RequireInitialPost: d.RequireInitialPost,
-			WorkflowState:      "unpublished",
+			WorkflowState:      models.DiscussionTopicUnpublished,
 		}
 		if err := s.discussionTopicRepo.Create(ctx, newDiscussion); err != nil {
 			return fmt.Errorf("failed to clone discussion %d: %w", oldID, err)
@@ -369,7 +369,7 @@ func (s *BatchService) cloneModules(
 				URL:             item.URL,
 				Indent:          item.Indent,
 				NewTab:          item.NewTab,
-				WorkflowState:   "unpublished",
+				WorkflowState:   models.ContentTagUnpublished,
 			}
 
 			// Remap content IDs to cloned resources
@@ -643,7 +643,7 @@ func (s *BatchService) BulkEnrollUsers(
 			CourseSectionID: req.SectionID,
 			Type:            req.Type,
 			Role:            req.Type,
-			WorkflowState:   "active",
+			WorkflowState:   models.EnrollmentActive,
 		}
 
 		if err := s.enrollmentRepo.Create(ctx, enrollment); err != nil {

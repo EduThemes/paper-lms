@@ -18,7 +18,7 @@ import "time"
 // likewise lives in the SQL chain — Postgres creates the underlying index
 // implicitly, which IncrementView's ON CONFLICT clause targets by name.
 type ContentView struct {
-	ID            uint      `json:"id" gorm:"primaryKey"`
+	ID            uint      `json:"id" gorm:"column:id;primaryKey"`
 	UserID        uint      `json:"user_id" gorm:"not null"`
 	ObjectType    string    `json:"object_type" gorm:"not null"`
 	ObjectID      uint      `json:"object_id" gorm:"not null"`

@@ -245,7 +245,7 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 		course.UIMode = *input.Course.UIMode
 	}
 	if input.Course.WorkflowState != nil {
-		course.WorkflowState = *input.Course.WorkflowState
+		course.WorkflowState = models.CourseWorkflow(*input.Course.WorkflowState)
 	}
 	if input.Course.ApplyGroupWeights != nil {
 		course.ApplyGroupWeights = *input.Course.ApplyGroupWeights

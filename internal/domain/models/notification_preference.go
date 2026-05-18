@@ -3,7 +3,7 @@ package models
 import "time"
 
 type NotificationPreference struct {
-	ID                    uint      `json:"id" gorm:"primaryKey"`
+	ID                    uint      `json:"id" gorm:"column:id;primaryKey"`
 	UserID                uint      `json:"user_id" gorm:"not null;uniqueIndex"`
 	Policy                string    `json:"policy" gorm:"default:'daily'"`
 	NotifyNewMessage      bool      `json:"notify_new_message" gorm:"default:true"`
