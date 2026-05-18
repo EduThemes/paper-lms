@@ -93,7 +93,7 @@ func (h *AssignmentGroupHandler) GetAssignmentGroup(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid assignment group ID")
 	}
 
-	group, err := h.groupService.GetByID(c.Context(), uint(id))
+	group, err := h.groupService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "assignment group")
 	}
@@ -107,7 +107,7 @@ func (h *AssignmentGroupHandler) UpdateAssignmentGroup(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid assignment group ID")
 	}
 
-	group, err := h.groupService.GetByID(c.Context(), uint(id))
+	group, err := h.groupService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "assignment group")
 	}

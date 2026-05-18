@@ -153,23 +153,38 @@ func TestGradeSubmission_TriggersRuleViaCallback(t *testing.T) {
 		t.Fatalf("expected delta=50, got %d", tx.Delta)
 	}
 
+	// Poll for the rule_evaluation row separately. The dispatcher writes
+	// the wallet transaction (inside AwardCurrency.Apply) BEFORE it writes
+	// the rule_evaluation audit row (at the tail of dispatchOne). On slow
+	// CI runners the wallet tx becomes visible to this goroutine before
+	// the dispatcher's goroutine reaches recordEvaluation, so we cannot
+	// piggy-back the rule_evaluation assertion on the wallet poll above —
+	// we need an independent sync point on the artifact we're asserting.
+	var evalCount int64
+	for {
+		if err := g.Model(&models.GamificationRuleEvaluation{}).
+			Where("rule_id = ? AND user_id = ?", rule.ID, learnerID).
+			Count(&evalCount).Error; err != nil {
+			t.Fatalf("count evals: %v", err)
+		}
+		if evalCount >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected 1 rule_evaluation row, got %d", evalCount)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if evalCount != 1 {
+		t.Fatalf("expected 1 rule_evaluation row, got %d", evalCount)
+	}
+
 	var balance models.GamificationWalletBalance
 	if err := g.Where("user_id = ? AND currency_type_id = ?", learnerID, xp.ID).First(&balance).Error; err != nil {
 		t.Fatalf("get balance: %v", err)
 	}
 	if balance.Balance != 50 {
 		t.Fatalf("expected balance=50, got %+v", balance)
-	}
-
-	// rule_evaluation row should exist.
-	var evalCount int64
-	if err := g.Model(&models.GamificationRuleEvaluation{}).
-		Where("rule_id = ? AND user_id = ?", rule.ID, learnerID).
-		Count(&evalCount).Error; err != nil {
-		t.Fatalf("count evals: %v", err)
-	}
-	if evalCount != 1 {
-		t.Fatalf("expected 1 rule_evaluation row, got %d", evalCount)
 	}
 
 	// strconv is imported because future variations might parse the

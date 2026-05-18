@@ -312,8 +312,9 @@ func (h *GamificationHandler) GetRule(c *fiber.Ctx) error {
 	if row == nil {
 		return responses.NotFound(c, "rule")
 	}
+	// 13.1.E: existence leak — return 404 not 403 on cross-tenant.
 	if !ruleInScope(c, row) {
-		return responses.Error(c, fiber.StatusForbidden, "rule is not in the requested scope")
+		return responses.NotFound(c, "rule")
 	}
 	return c.JSON(ruleJSONFor(row))
 }
@@ -376,8 +377,9 @@ func (h *GamificationHandler) PatchRule(c *fiber.Ctx) error {
 	if row == nil {
 		return responses.NotFound(c, "rule")
 	}
+	// 13.1.E: existence leak — return 404 not 403 on cross-tenant.
 	if !ruleInScope(c, row) {
-		return responses.Error(c, fiber.StatusForbidden, "rule is not in the requested scope")
+		return responses.NotFound(c, "rule")
 	}
 
 	var in patchRuleInput
@@ -457,8 +459,9 @@ func (h *GamificationHandler) DeleteRule(c *fiber.Ctx) error {
 	if row == nil {
 		return responses.NotFound(c, "rule")
 	}
+	// 13.1.E: existence leak — return 404 not 403 on cross-tenant.
 	if !ruleInScope(c, row) {
-		return responses.Error(c, fiber.StatusForbidden, "rule is not in the requested scope")
+		return responses.NotFound(c, "rule")
 	}
 	if err := h.ruleRepo.Delete(c.Context(), row.ID); err != nil {
 		return responses.InternalError(c, "could not delete rule")

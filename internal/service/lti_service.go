@@ -176,8 +176,10 @@ func (s *LTIService) BuildLaunchToken(ctx context.Context, userID uint, courseID
 		return "", errors.New("platform key has not been initialized")
 	}
 
-	// Look up the developer key to get the client_id (audience)
-	devKey, err := s.devKeyRepo.FindByID(ctx, toolConfig.DeveloperKeyID)
+	// Look up the developer key to get the client_id (audience). accountID==0
+	// is intentional: LTI launch-token construction is an internal background
+	// step on a request that was already authorized by tool-config lookup.
+	devKey, err := s.devKeyRepo.FindByID(ctx, toolConfig.DeveloperKeyID, 0)
 	if err != nil {
 		return "", errors.New("developer key not found for tool configuration")
 	}

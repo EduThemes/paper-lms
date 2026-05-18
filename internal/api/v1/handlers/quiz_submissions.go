@@ -115,7 +115,11 @@ func (h *QuizSubmissionHandler) GetSubmission(c *fiber.Ctx) error {
 			isObserver, _ = h.observerService.IsObserverOf(c.Context(), userID, submission.UserID)
 		}
 		if !isTeacherOrTA && !isObserver {
-			return responses.Error(c, fiber.StatusForbidden, "You do not have permission to view this submission")
+			// 13.1.E: existence leak — return 404 not 403. The
+			// submission exists but belongs to a different student in a
+			// course where the caller has no role; 403 confirms the
+			// row exists.
+			return responses.NotFound(c, "quiz submission")
 		}
 	}
 
@@ -157,7 +161,9 @@ func (h *QuizSubmissionHandler) AnswerQuestion(c *fiber.Ctx) error {
 		return responses.NotFound(c, "quiz submission")
 	}
 	if submission.UserID != userID {
-		return responses.Error(c, fiber.StatusForbidden, "You do not have permission to modify this submission")
+		// 13.1.E: existence leak — return 404 not 403. The submission
+		// exists but belongs to another student; 403 confirms existence.
+		return responses.NotFound(c, "quiz submission")
 	}
 
 	var input struct {
@@ -291,7 +297,9 @@ func (h *QuizSubmissionHandler) GetSubmissionQuestions(c *fiber.Ctx) error {
 			isObserver, _ = h.observerService.IsObserverOf(c.Context(), userID, submission.UserID)
 		}
 		if !isTeacherOrTA && !isObserver {
-			return responses.Error(c, fiber.StatusForbidden, "You do not have permission to view this submission's questions")
+			// 13.1.E: existence leak — return 404 not 403. Same
+			// rationale as GetSubmission above.
+			return responses.NotFound(c, "quiz submission")
 		}
 	}
 

@@ -361,7 +361,11 @@ func TestGetCourseLeaderboard_SnapshotReadAppliesOptOutAtReadTime(t *testing.T) 
 	}
 }
 
-func TestGetCourseLeaderboard_NotEnrolledReturns403(t *testing.T) {
+// TestGetCourseLeaderboard_NotEnrolledReturns404 locks the 13.1.E
+// existence-leak contract: a non-enrolled viewer must NOT receive a 403
+// — that would confirm the course exists (potentially in another tenant)
+// to a non-member. The handler returns 404 to keep that signal silent.
+func TestGetCourseLeaderboard_NotEnrolledReturns404(t *testing.T) {
 	const viewerID = 999
 	app, _, userRepo, enrollmentRepo, _, _, _ := setupLeaderboardHandler(viewerID, false)
 
@@ -371,7 +375,7 @@ func TestGetCourseLeaderboard_NotEnrolledReturns403(t *testing.T) {
 		Return(&models.User{ID: viewerID, Name: "Stranger", Role: "user"}, nil).Maybe()
 
 	resp := requestLeaderboard(t, app, "/api/v1/courses/1/leaderboard")
-	requireStatus(t, resp, http.StatusForbidden)
+	requireStatus(t, resp, http.StatusNotFound)
 }
 
 // ---------------------------------------------------------------------------

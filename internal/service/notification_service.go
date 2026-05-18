@@ -67,22 +67,24 @@ func (s *NotificationService) CreateNotification(ctx context.Context, notificati
 	return s.notifRepo.Create(ctx, notification)
 }
 
-func (s *NotificationService) GetNotification(ctx context.Context, id uint) (*models.Notification, error) {
-	return s.notifRepo.FindByID(ctx, id)
+// GetNotification — 13.1.D: accountID threads from handler to repo.
+// 0 disables tenant scope (background callers / migration scripts).
+func (s *NotificationService) GetNotification(ctx context.Context, id, accountID uint) (*models.Notification, error) {
+	return s.notifRepo.FindByID(ctx, id, accountID)
 }
 
-func (s *NotificationService) ListByUser(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Notification], error) {
-	return s.notifRepo.ListByUserID(ctx, userID, params)
+func (s *NotificationService) ListByUser(ctx context.Context, userID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Notification], error) {
+	return s.notifRepo.ListByUserID(ctx, userID, accountID, params)
 }
 
-func (s *NotificationService) ListUnreadByUser(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Notification], error) {
-	return s.notifRepo.ListUnreadByUserID(ctx, userID, params)
+func (s *NotificationService) ListUnreadByUser(ctx context.Context, userID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Notification], error) {
+	return s.notifRepo.ListUnreadByUserID(ctx, userID, accountID, params)
 }
 
-func (s *NotificationService) MarkAsRead(ctx context.Context, userID, notificationID uint) error {
-	return s.notifRepo.MarkAsRead(ctx, userID, notificationID)
+func (s *NotificationService) MarkAsRead(ctx context.Context, userID, notificationID, accountID uint) error {
+	return s.notifRepo.MarkAsRead(ctx, userID, notificationID, accountID)
 }
 
-func (s *NotificationService) MarkAllAsRead(ctx context.Context, userID uint) error {
-	return s.notifRepo.MarkAllAsRead(ctx, userID)
+func (s *NotificationService) MarkAllAsRead(ctx context.Context, userID, accountID uint) error {
+	return s.notifRepo.MarkAllAsRead(ctx, userID, accountID)
 }

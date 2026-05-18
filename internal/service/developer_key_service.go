@@ -47,9 +47,11 @@ func (s *DeveloperKeyService) Create(ctx context.Context, key *models.DeveloperK
 	return s.devKeyRepo.Create(ctx, key)
 }
 
-// GetByID retrieves a developer key by its primary key ID.
-func (s *DeveloperKeyService) GetByID(ctx context.Context, id uint) (*models.DeveloperKey, error) {
-	key, err := s.devKeyRepo.FindByID(ctx, id)
+// GetByID retrieves a developer key by its primary key ID, scoped to the
+// caller's tenant. accountID==0 skips the filter (internal background callers
+// such as the OAuth2 token exchange path or the LTI launch builder).
+func (s *DeveloperKeyService) GetByID(ctx context.Context, id, accountID uint) (*models.DeveloperKey, error) {
+	key, err := s.devKeyRepo.FindByID(ctx, id, accountID)
 	if err != nil {
 		return nil, errors.New("developer key not found")
 	}
@@ -66,8 +68,9 @@ func (s *DeveloperKeyService) GetByClientID(ctx context.Context, clientID string
 }
 
 // Update modifies a developer key. ClientID and ClientSecret cannot be changed.
-func (s *DeveloperKeyService) Update(ctx context.Context, key *models.DeveloperKey) error {
-	existing, err := s.devKeyRepo.FindByID(ctx, key.ID)
+// Tenant-scoped via accountID; accountID==0 skips the filter (internal callers).
+func (s *DeveloperKeyService) Update(ctx context.Context, key *models.DeveloperKey, accountID uint) error {
+	existing, err := s.devKeyRepo.FindByID(ctx, key.ID, accountID)
 	if err != nil {
 		return errors.New("developer key not found")
 	}
@@ -80,14 +83,13 @@ func (s *DeveloperKeyService) Update(ctx context.Context, key *models.DeveloperK
 }
 
 // Delete performs a soft delete by setting workflow_state to "deleted".
-func (s *DeveloperKeyService) Delete(ctx context.Context, id uint) error {
-	key, err := s.devKeyRepo.FindByID(ctx, id)
-	if err != nil {
+// Tenant-scoped via accountID; accountID==0 skips the filter (internal callers).
+func (s *DeveloperKeyService) Delete(ctx context.Context, id, accountID uint) error {
+	if _, err := s.devKeyRepo.FindByID(ctx, id, accountID); err != nil {
 		return errors.New("developer key not found")
 	}
 
-	key.WorkflowState = "deleted"
-	return s.devKeyRepo.Update(ctx, key)
+	return s.devKeyRepo.Delete(ctx, id, accountID)
 }
 
 // List returns a paginated list of developer keys for the given account.
