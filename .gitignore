@@ -71,6 +71,7 @@ logs/
 .claude/
 memory/
 CLAUDE.md
+.simplicity-audit/
 # Defensive: never let phase-progress notes land in the tree even if a copy
 # ends up outside .claude/ or memory/.
 project_phase_progress.md
