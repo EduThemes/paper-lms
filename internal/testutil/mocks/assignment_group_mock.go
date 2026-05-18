@@ -18,8 +18,8 @@ func (m *MockAssignmentGroupRepository) Create(ctx context.Context, group *model
 	return args.Error(0)
 }
 
-func (m *MockAssignmentGroupRepository) FindByID(ctx context.Context, id uint) (*models.AssignmentGroup, error) {
-	args := m.Called(ctx, id)
+func (m *MockAssignmentGroupRepository) FindByID(ctx context.Context, id, accountID uint) (*models.AssignmentGroup, error) {
+	args := m.Called(ctx, id, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

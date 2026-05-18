@@ -242,6 +242,43 @@ func TestTenantIsolation_GetAssignment(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// 2b) GET /courses/:course_id/assignment_groups/:id
+// ---------------------------------------------------------------------------
+
+func TestTenantIsolation_GetAssignmentGroup(t *testing.T) {
+	statusFn := func(callerAccount, resourceID uint) int {
+		groupRepo := new(mocks.MockAssignmentGroupRepository)
+		assignmentRepo := new(mocks.MockAssignmentRepository)
+
+		row := &models.AssignmentGroup{
+			ID: resourceID, CourseID: 1, Name: "G", WorkflowState: "available",
+		}
+		expectAccountIDPassThrough(&groupRepo.Mock, "FindByID", resourceID, ownerOf(resourceID), row)
+
+		svc := service.NewAssignmentGroupService(groupRepo, assignmentRepo)
+		h := handlers.NewAssignmentGroupHandler(svc)
+
+		app := testutil.SetupTestApp()
+		app.Use(authStub(callerFor(callerAccount), callerAccount), middleware.PaginationParams())
+		app.Get("/courses/:course_id/assignment_groups/:id", h.GetAssignmentGroup)
+
+		resp := testutil.MakeRequest(app, http.MethodGet, fmt.Sprintf("/courses/1/assignment_groups/%d", resourceID), nil)
+		return resp.StatusCode
+	}
+
+	// Wave 2 (2026-05-17): AssignmentGroupService.GetByID now threads
+	// accountID; AssignmentGroupRepository.FindByID applies the parent-
+	// JOIN subquery against courses.account_id. Matches the Wave F
+	// pattern from CourseService/AssignmentService/DiscussionService.
+	runMatrix(t, "GET /assignment_groups/:id (Wave 2 tenant-scoped via AssignmentGroupService.GetByID)", []matrixCase{
+		{tenantA, resInA, http.StatusOK, "tenantA caller, tenantA resource"},
+		{tenantA, resInB, http.StatusNotFound, "tenantA caller, tenantB resource"},
+		{tenantB, resInA, http.StatusNotFound, "tenantB caller, tenantA resource"},
+		{tenantB, resInB, http.StatusOK, "tenantB caller, tenantB resource"},
+	}, statusFn)
+}
+
+// ---------------------------------------------------------------------------
 // 3) GET /courses/:course_id/assignments/:assignment_id/submissions/:user_id
 // ---------------------------------------------------------------------------
 
