@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Lock, ListChecks, Settings2 } from 'lucide-react';
+import { Lock, ListChecks, Settings2, X } from 'lucide-react';
 import { api } from '../services/api';
-import useDismissable from '../hooks/useDismissable';
-import FocusTrap from './FocusTrap';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 const COMPLETION_TYPES = {
   Assignment: [
@@ -49,24 +52,10 @@ const ModuleSettingsModal = ({ courseId, module, modules, prerequisites, onClose
   const [itemRequirements, setItemRequirements] = useState({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const modalRef = useRef(null);
-  const previouslyFocusedRef = useRef(null);
   const tabRefs = useRef({});
 
-  // Escape + outside-click dismissal. The overlay below also calls onClose
-  // directly via onClick; both routes converge to the same handler.
-  useDismissable(modalRef, true, onClose);
-
-  // Save the previously-focused element on mount; restore focus to it on unmount.
-  useEffect(() => {
-    previouslyFocusedRef.current = document.activeElement;
-    return () => {
-      const prev = previouslyFocusedRef.current;
-      if (prev && typeof prev.focus === 'function') {
-        try { prev.focus(); } catch (e) { /* element may be gone */ }
-      }
-    };
-  }, []);
+  // Escape + outside-click dismissal + focus-trap + focus-restore are all
+  // handled by the shadcn <Dialog> wrapper (Radix Dialog underneath).
 
   // Arrow-key navigation between tabs (per WAI-ARIA Authoring Practices for tabs).
   const handleTabKeyDown = useCallback((e, index) => {
@@ -170,22 +159,16 @@ const ModuleSettingsModal = ({ courseId, module, modules, prerequisites, onClose
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <FocusTrap ariaLabelledBy="module-settings-title">
-        <div ref={modalRef} className="relative bg-surface-0 rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col z-10">
+    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent
+        className="max-w-2xl max-h-[85vh] bg-surface-0 rounded-lg shadow-xl flex flex-col p-0 gap-0"
+        aria-describedby={undefined}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b">
-          <h2 id="module-settings-title" className="text-lg font-semibold text-text-primary">
+          <DialogTitle id="module-settings-title" className="text-lg font-semibold text-text-primary">
             Module Settings — {module.name}
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-1 text-text-secondary hover:text-text-secondary rounded"
-            aria-label="Close module settings"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          </DialogTitle>
         </div>
 
         {/* Tabs */}
@@ -388,9 +371,8 @@ const ModuleSettingsModal = ({ courseId, module, modules, prerequisites, onClose
             </button>
           </div>
         </div>
-        </div>
-      </FocusTrap>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 };
 

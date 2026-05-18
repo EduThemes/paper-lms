@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Link, useParams, useLocation } from 'react-router-dom';
 import { ChevronDown, Home, CheckSquare, BarChart2 } from 'lucide-react';
 import { useCourseUI } from '../contexts/CourseUIContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useClickOutside } from '../hooks/useClickOutside';
 import { api } from '../services/api';
 
 const isInstructorOrAdmin = (user, enrollments) => {
@@ -97,6 +98,11 @@ const CourseNav = () => {
       .catch(() => setEnrollments([]));
   }, [courseId, user]);
 
+  // Close the "More" dropdown on outside click / Escape. Hook must sit above
+  // the conditional `return null` paths below to keep hook order stable.
+  const closeMore = useCallback(() => setMoreOpen(false), []);
+  useClickOutside(moreRef, closeMore);
+
   if (!courseId) return null;
 
   // K-2 mode: no course navigation at all
@@ -152,16 +158,6 @@ const CourseNav = () => {
   };
 
   const isMoreActive = moreTabs.some((tab) => isTabActive(tab.path));
-
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (moreRef.current && !moreRef.current.contains(e.target)) {
-        setMoreOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   // 3-5 mode: simplified tabs with icons
   if (is35) {

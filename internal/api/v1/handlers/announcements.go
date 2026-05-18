@@ -15,11 +15,16 @@ import (
 type AnnouncementHandler struct {
 	announcementService *service.AnnouncementService
 	authz               *ResourceAuthorizer
+	// Wave 5.2: 13.5 LogPIIAccess sweep. Announcement body/list reads
+	// are course-keyed content (not student PII). The student-keyed
+	// read is GetReadReceipts, which returns per-student read/ack
+	// state for an announcement (instructor view).
+	auditService *service.AuditService
 }
 
 // NewAnnouncementHandler creates a new AnnouncementHandler.
-func NewAnnouncementHandler(announcementService *service.AnnouncementService, authz *ResourceAuthorizer) *AnnouncementHandler {
-	return &AnnouncementHandler{announcementService: announcementService, authz: authz}
+func NewAnnouncementHandler(announcementService *service.AnnouncementService, authz *ResourceAuthorizer, auditService *service.AuditService) *AnnouncementHandler {
+	return &AnnouncementHandler{announcementService: announcementService, authz: authz, auditService: auditService}
 }
 
 func announcementToJSON(a *models.Announcement, isRead bool, isAcknowledged bool) fiber.Map {
@@ -346,6 +351,13 @@ func (h *AnnouncementHandler) GetReadReceipts(c *fiber.Ctx) error {
 
 	// Also include stats
 	stats, _ := h.announcementService.GetAnnouncementStats(c.Context(), uint(id))
+
+	// Wave 5.2 FERPA audit: read-receipts expose which specific
+	// students have read/acknowledged an announcement. Bulk read
+	// (studentID=0) keyed on the announcement resource.
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "announcement_read_receipts", "announcements", uint(id), c.IP(), c.Get("User-Agent"))
+	}
 
 	return c.JSON(fiber.Map{
 		"receipts": receipts,
