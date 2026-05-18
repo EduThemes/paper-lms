@@ -811,3 +811,52 @@ func TestTenantIsolation_ListPeerReviews(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 10) GET /portfolios/:id
+// ---------------------------------------------------------------------------
+
+// TestTenantIsolation_GetPortfolio locks the Wave 2 widening of
+// PortfolioRepository.FindByID. The repo joins through
+// `portfolio.user_id -> users.account_id`, so the row is invisible
+// across tenants when accountID is set. The handler now passes
+// `callerAccountID(c)` through PortfolioService.GetPortfolio.
+//
+// Setting IsPublic=true on the fixture row bypasses the handler-level
+// RequireOwnerOrAdmin check; the matrix is then driven purely by the
+// repo's tenant scope.
+func TestTenantIsolation_GetPortfolio(t *testing.T) {
+	statusFn := func(callerAccount, resourceID uint) int {
+		portfolioRepo := new(mocks.MockPortfolioRepository)
+		sectionRepo := new(mocks.MockPortfolioSectionRepository)
+		artifactRepo := new(mocks.MockPortfolioArtifactRepository)
+		reflectionRepo := new(mocks.MockPortfolioReflectionRepository)
+		templateRepo := new(mocks.MockPortfolioTemplateRepository)
+		commentRepo := new(mocks.MockPortfolioCommentRepository)
+		submissionRepo := new(mocks.MockSubmissionRepository)
+		assignmentRepo := new(mocks.MockAssignmentRepository)
+		enrollRepo := new(mocks.MockEnrollmentRepository)
+		userRepo := new(mocks.MockUserRepository)
+
+		// IsPublic=true bypasses RequireOwnerOrAdmin so the matrix
+		// surfaces only the tenant-scope behavior.
+		row := &models.Portfolio{
+			ID: resourceID, UserID: callerFor(ownerOf(resourceID)),
+			Title: "P", Slug: "p", WorkflowState: "published", IsPublic: true,
+		}
+		expectAccountIDPassThrough(&portfolioRepo.Mock, "FindByID", resourceID, ownerOf(resourceID), row)
+
+		svc := service.NewPortfolioService(portfolioRepo, sectionRepo, artifactRepo, reflectionRepo, templateRepo, commentRepo, submissionRepo, assignmentRepo)
+		authz := handlers.NewResourceAuthorizer(enrollRepo, userRepo)
+		h := handlers.NewPortfolioHandler(svc, authz)
+
+		app := testutil.SetupTestApp()
+		app.Use(authStub(callerFor(callerAccount), callerAccount), middleware.PaginationParams())
+		app.Get("/portfolios/:id", h.GetPortfolio)
+
+		resp := testutil.MakeRequest(app, http.MethodGet, fmt.Sprintf("/portfolios/%d", resourceID), nil)
+		return resp.StatusCode
+	}
+
+	runMatrix(t, "GET /portfolios/:id (Wave 2: tenant-scoped via PortfolioRepository.FindByID)", standardMatrix(), statusFn)
+}
