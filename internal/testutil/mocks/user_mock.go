@@ -18,8 +18,8 @@ func (m *MockUserRepository) Create(ctx context.Context, user *models.User) erro
 	return args.Error(0)
 }
 
-func (m *MockUserRepository) FindByID(ctx context.Context, id uint) (*models.User, error) {
-	args := m.Called(ctx, id)
+func (m *MockUserRepository) FindByID(ctx context.Context, id, accountID uint) (*models.User, error) {
+	args := m.Called(ctx, id, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -55,8 +55,8 @@ func (m *MockUserRepository) Update(ctx context.Context, user *models.User) erro
 	return args.Error(0)
 }
 
-func (m *MockUserRepository) List(ctx context.Context, params repository.PaginationParams) (*repository.PaginatedResult[models.User], error) {
-	args := m.Called(ctx, params)
+func (m *MockUserRepository) List(ctx context.Context, params repository.PaginationParams, accountID uint) (*repository.PaginatedResult[models.User], error) {
+	args := m.Called(ctx, params, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -79,8 +79,8 @@ func (m *MockUserRepository) Search(ctx context.Context, searchTerm string, acco
 	return args.Get(0).(*repository.PaginatedResult[models.User]), args.Error(1)
 }
 
-func (m *MockUserRepository) FindByIDs(ctx context.Context, ids []uint) ([]models.User, error) {
-	args := m.Called(ctx, ids)
+func (m *MockUserRepository) FindByIDs(ctx context.Context, ids []uint, accountID uint) ([]models.User, error) {
+	args := m.Called(ctx, ids, accountID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
