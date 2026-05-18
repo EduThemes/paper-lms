@@ -340,7 +340,10 @@ func (h *GamificationHandler) resolveViewerRoleInCourse(c *fiber.Ctx, viewerID, 
 		return "", true, responses.InternalError(c, "failed to resolve enrollment")
 	}
 	if viewerEnrollment == nil || viewerEnrollment.WorkflowState != "active" {
-		return "", true, responses.Error(c, fiber.StatusForbidden, "not enrolled in this course")
+		// 13.1.E: existence leak — return 404 not 403. A 403 confirms
+		// the course exists (in this or another tenant) to a non-
+		// enrolled viewer; 404 keeps that signal silent.
+		return "", true, responses.NotFound(c, "course")
 	}
 	if viewerEnrollment.Type == "TeacherEnrollment" || viewerEnrollment.Type == "TaEnrollment" {
 		return gamification.ViewerTeacher, false, nil

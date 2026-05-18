@@ -60,11 +60,17 @@ func (h *GamificationHandler) GetPseudonymPools(c *fiber.Ctx) error {
 		return responses.InternalError(c, "failed to resolve enrollment")
 	}
 	if enrollment == nil || enrollment.WorkflowState != "active" {
-		return responses.Error(c, fiber.StatusForbidden, "not enrolled in this course")
+		// 13.1.E: existence leak — return 404 not 403. A 403 reveals
+		// the course exists (potentially in another tenant) to a non-
+		// enrolled viewer.
+		return responses.NotFound(c, "course")
 	}
 
 	policy := h.policyForViewerInCourse(c, enrollment)
 	if !policy.LearnerCanSwitch {
+		// True authorization failure: viewer IS enrolled in the course
+		// but the tenant-mode render policy disables pseudonym
+		// switching. 403 is correct here — no existence leak.
 		return responses.Error(c, fiber.StatusForbidden, "pseudonym switching is not allowed in this course")
 	}
 
@@ -126,11 +132,16 @@ func (h *GamificationHandler) UpdatePseudonymForSelf(c *fiber.Ctx) error {
 		return responses.InternalError(c, "failed to resolve enrollment")
 	}
 	if enrollment == nil || enrollment.WorkflowState != "active" {
-		return responses.Error(c, fiber.StatusForbidden, "not enrolled in this course")
+		// 13.1.E: existence leak — return 404 not 403. Same rationale
+		// as GetPseudonymPools above: don't confirm course existence
+		// to a non-enrolled viewer (potentially cross-tenant).
+		return responses.NotFound(c, "course")
 	}
 
 	policy := h.policyForViewerInCourse(c, enrollment)
 	if !policy.LearnerCanSwitch {
+		// True authorization failure: viewer IS enrolled but the
+		// tenant-mode policy gates pseudonym switching. 403 is correct.
 		return responses.Error(c, fiber.StatusForbidden, "pseudonym switching is not allowed in this course")
 	}
 

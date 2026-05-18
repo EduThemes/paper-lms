@@ -731,7 +731,11 @@ func TestUpdateCurrency_TogglesVisibleInTopbar(t *testing.T) {
 	currencyRepo.AssertExpectations(t)
 }
 
-func TestUpdateCurrency_ScopeMismatch_403(t *testing.T) {
+// TestUpdateCurrency_ScopeMismatch_404 locks the 13.1.E existence-leak
+// contract: scope-mismatched PATCHes must return 404, not 403. A 403
+// would confirm the currency exists somewhere (possibly another scope
+// or tenant); 404 keeps that signal silent.
+func TestUpdateCurrency_ScopeMismatch_404(t *testing.T) {
 	// A site-scoped XP currency cannot be PATCHed via the course-scoped
 	// route. Prevents a course instructor on course A from touching a
 	// site-scoped currency they don't own.
@@ -741,7 +745,7 @@ func TestUpdateCurrency_ScopeMismatch_403(t *testing.T) {
 
 	resp := patchJSON(app, "/api/v1/courses/99/gamification/currencies/11",
 		`{"display_label":"Hijack"}`)
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	currencyRepo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
 }
 
@@ -776,7 +780,9 @@ func TestDeleteCurrency_CustomRow_204(t *testing.T) {
 	currencyRepo.AssertExpectations(t)
 }
 
-func TestDeleteCurrency_ScopeMismatch_403(t *testing.T) {
+// TestDeleteCurrency_ScopeMismatch_404 — 13.1.E existence-leak fix.
+// See TestUpdateCurrency_ScopeMismatch_404 for the rationale.
+func TestDeleteCurrency_ScopeMismatch_404(t *testing.T) {
 	app, _, currencyRepo, _, _, _ := setupGamificationHandler(7, false)
 	custom := models.GamificationCurrencyType{
 		ID: 50, TenantID: 1, ScopeType: models.ScopeCourse, ScopeID: 99,
@@ -785,7 +791,7 @@ func TestDeleteCurrency_ScopeMismatch_403(t *testing.T) {
 	currencyRepo.On("FindByID", mock.Anything, uint(50)).Return(&custom, nil)
 
 	resp := deleteReq(app, "/api/v1/courses/77/gamification/currencies/50")
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	currencyRepo.AssertNotCalled(t, "Delete", mock.Anything, mock.Anything)
 }
 
@@ -976,7 +982,9 @@ func TestUpdateBadge_HappyPath(t *testing.T) {
 	badgeRepo.AssertExpectations(t)
 }
 
-func TestUpdateBadge_ScopeMismatch_403(t *testing.T) {
+// TestUpdateBadge_ScopeMismatch_404 — 13.1.E existence-leak fix.
+// See TestUpdateCurrency_ScopeMismatch_404 for rationale.
+func TestUpdateBadge_ScopeMismatch_404(t *testing.T) {
 	// A site-scoped badge can't be PATCHed via the course-scoped route.
 	app, _, _, _, badgeRepo, _ := setupGamificationHandler(7, false)
 	row := fixtureBadge() // site
@@ -984,7 +992,7 @@ func TestUpdateBadge_ScopeMismatch_403(t *testing.T) {
 
 	resp := patchJSON(app, "/api/v1/courses/99/gamification/badges/50",
 		`{"name":"Hijack"}`)
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	badgeRepo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
 }
 
@@ -1072,14 +1080,17 @@ func TestAwardBadgeToUser_RejectsBadInput(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
-func TestAwardBadgeToUser_TenantMismatch_403(t *testing.T) {
+// TestAwardBadgeToUser_TenantMismatch_404 — 13.1.E existence-leak fix.
+// Awarding a badge that belongs to a different tenant must return 404,
+// not 403; 403 would confirm the badge ID exists somewhere.
+func TestAwardBadgeToUser_TenantMismatch_404(t *testing.T) {
 	app, _, _, _, badgeRepo, _ := setupGamificationHandler(7, true)
 	row := fixtureBadge()
 	row.TenantID = 99 // someone else's tenant
 	badgeRepo.On("FindByID", mock.Anything, uint(50)).Return(&row, nil)
 
 	resp := postJSON(app, "/api/v1/users/42/badges", `{"badge_id":50}`)
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
 func TestRevokeBadgeFromUser_NoContent(t *testing.T) {
