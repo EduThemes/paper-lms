@@ -14,13 +14,20 @@ type AccommodationHandler struct {
 	accommodationService *service.AccommodationService
 	assignmentService    *service.AssignmentService
 	authz                *ResourceAuthorizer
+	// Wave 5.2: 13.5 LogPIIAccess sweep. Accommodation rows reveal
+	// disability / 504 / IEP plan information about a student — the
+	// most sensitive FERPA-protected data the LMS holds. Every read
+	// where the caller is not the affected student fires a PII access
+	// log row. Nil is safe (no-op) so legacy tests don't break.
+	auditService *service.AuditService
 }
 
-func NewAccommodationHandler(accommodationService *service.AccommodationService, assignmentService *service.AssignmentService, authz *ResourceAuthorizer) *AccommodationHandler {
+func NewAccommodationHandler(accommodationService *service.AccommodationService, assignmentService *service.AssignmentService, authz *ResourceAuthorizer, auditService *service.AuditService) *AccommodationHandler {
 	return &AccommodationHandler{
 		accommodationService: accommodationService,
 		assignmentService:    assignmentService,
 		authz:                authz,
+		auditService:         auditService,
 	}
 }
 
@@ -66,6 +73,15 @@ func (h *AccommodationHandler) ListUserAccommodations(c *fiber.Ctx) error {
 	items := make([]fiber.Map, len(result.Items))
 	for i, a := range result.Items {
 		items[i] = accommodationToJSON(&a)
+	}
+
+	// Wave 5.2 FERPA audit: reading another user's accommodation list
+	// exposes disability/504/IEP plan PII. Self-reads (a student
+	// reading their own accommodations) are not logged — only
+	// staff/admin/observer-style accesses where the caller is not
+	// the affected student.
+	if callerID, _ := getUserID(c); callerID != 0 && uint(userID) != callerID && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, uint(userID), "read", "accommodations_list", "student_accommodations", uint(userID), c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(items)
@@ -140,6 +156,13 @@ func (h *AccommodationHandler) GetAccommodation(c *fiber.Ctx) error {
 	// Authorization: only the accommodation's user or an admin can view it
 	if err := h.authz.RequireOwnerOrAdmin(c, accommodation.UserID); err != nil {
 		return err
+	}
+
+	// Wave 5.2 FERPA audit: an admin/staff member reading a student's
+	// individual accommodation (disability / 504 / IEP) is the most
+	// sensitive read in the LMS — log it.
+	if callerID, _ := getUserID(c); callerID != 0 && accommodation.UserID != callerID && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, accommodation.UserID, "read", "accommodation_detail", "student_accommodations", accommodation.ID, c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(accommodationToJSON(accommodation))
@@ -263,6 +286,13 @@ func (h *AccommodationHandler) ListCourseAccommodations(c *fiber.Ctx) error {
 		}
 	}
 
+	// Wave 5.2 FERPA audit: bulk read of every student's accommodations
+	// in a course. studentID=0 follows the bulk-read convention
+	// (single row per request rather than N).
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_accommodations_read", "courses", uint(courseID), c.IP(), c.Get("User-Agent"))
+	}
+
 	return c.JSON(filtered)
 }
 
@@ -309,6 +339,14 @@ func (h *AccommodationHandler) ApplyAccommodationsToAssignment(c *fiber.Ctx) err
 				"extra_days":       adjustment.ExtraDays,
 			})
 		}
+	}
+
+	// Wave 5.2 FERPA audit: preview reveals per-student accommodation
+	// adjustments (extra days, time multipliers). studentID=0 because
+	// this is a multi-user preview keyed by an explicit user_ids list;
+	// the bulk convention applies.
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_accommodation_preview", "assignments", uint(assignmentID), c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(fiber.Map{

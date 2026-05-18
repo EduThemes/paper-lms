@@ -12,10 +12,15 @@ import (
 type LearningOutcomeHandler struct {
 	outcomeService *service.LearningOutcomeService
 	alignmentRepo  repository.OutcomeAlignmentRepository
+	// Wave 5.2: 13.5 LogPIIAccess sweep. Outcome groups/outcomes/
+	// alignments are rubric metadata (not PII). The student-keyed
+	// reads are ListResults (per-user outcome attainment) and
+	// GetMasteryGradebook (per-student mastery rollups).
+	auditService *service.AuditService
 }
 
-func NewLearningOutcomeHandler(outcomeService *service.LearningOutcomeService, alignmentRepo repository.OutcomeAlignmentRepository) *LearningOutcomeHandler {
-	return &LearningOutcomeHandler{outcomeService: outcomeService, alignmentRepo: alignmentRepo}
+func NewLearningOutcomeHandler(outcomeService *service.LearningOutcomeService, alignmentRepo repository.OutcomeAlignmentRepository, auditService *service.AuditService) *LearningOutcomeHandler {
+	return &LearningOutcomeHandler{outcomeService: outcomeService, alignmentRepo: alignmentRepo, auditService: auditService}
 }
 
 func outcomeGroupToJSON(g *models.LearningOutcomeGroup) fiber.Map {
@@ -372,6 +377,12 @@ func (h *LearningOutcomeHandler) ListResults(c *fiber.Ctx) error {
 			items[i] = outcomeResultToJSON(&r)
 		}
 
+		// Wave 5.2 FERPA audit: reading another student's outcome
+		// mastery results is a per-student academic-record read.
+		if callerID, _ := getUserID(c); callerID != 0 && uint(userID) != callerID && h.auditService != nil {
+			_ = h.auditService.LogPIIAccess(c.Context(), callerID, uint(userID), "read", "outcome_results", "courses", uint(courseID), c.IP(), c.Get("User-Agent"))
+		}
+
 		return c.JSON(fiber.Map{
 			"outcome_results": items,
 		})
@@ -395,6 +406,13 @@ func (h *LearningOutcomeHandler) ListResults(c *fiber.Ctx) error {
 		for _, r := range results.Items {
 			allResults = append(allResults, outcomeResultToJSON(&r))
 		}
+	}
+
+	// Wave 5.2 FERPA audit: bulk read across every student's outcome
+	// results in this course (instructor view). studentID=0 follows
+	// the bulk-read convention.
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_outcome_results", "courses", uint(courseID), c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(fiber.Map{
@@ -483,6 +501,13 @@ func (h *LearningOutcomeHandler) GetMasteryGradebook(c *fiber.Ctx) error {
 			},
 			"scores": scores,
 		}
+	}
+
+	// Wave 5.2 FERPA audit: mastery gradebook returns per-student
+	// rollups across every outcome — bulk read of academic-record
+	// data. studentID=0 per the bulk convention.
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "mastery_gradebook", "courses", uint(courseID), c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(fiber.Map{
