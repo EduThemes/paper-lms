@@ -171,7 +171,11 @@ func (r *Resolver) resolveAssignment(ctx context.Context, args map[string]interf
 }
 
 func (r *Resolver) resolveSelf(ctx context.Context, userID uint, subFields []Field) (interface{}, error) {
-	user, err := r.userService.GetByID(ctx, userID)
+	// Self lookup via GraphQL: userID is the JWT subject. Pass the
+	// tenant from the GraphQL context (Sprint 2.4 wired
+	// AccountIDFromContext); accountID=0 falls back to "no scope" if
+	// the context is unwired (defensive).
+	user, err := r.userService.GetByID(ctx, userID, AccountIDFromContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("current user not found: %w", err)
 	}
@@ -185,7 +189,7 @@ func (r *Resolver) resolveUser(ctx context.Context, args map[string]interface{},
 		return nil, fmt.Errorf("user requires 'id' argument: %w", err)
 	}
 
-	user, err := r.userService.GetByID(ctx, id)
+	user, err := r.userService.GetByID(ctx, id, AccountIDFromContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("user not found: %w", err)
 	}

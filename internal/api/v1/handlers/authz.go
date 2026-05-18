@@ -28,7 +28,9 @@ func (a *ResourceAuthorizer) isAdmin(c *fiber.Ctx) bool {
 	if !ok || userID == 0 {
 		return false
 	}
-	user, err := a.userRepo.FindByID(c.Context(), userID)
+	// AUTH-INTERNAL: cached role check. userID is the JWT subject;
+	// role is tenant-independent. accountID=0 is correct.
+	user, err := a.userRepo.FindByID(c.Context(), userID, 0)
 	return err == nil && user.Role == "admin"
 }
 

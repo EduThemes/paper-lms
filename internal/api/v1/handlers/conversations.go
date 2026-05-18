@@ -135,7 +135,7 @@ func (h *ConversationHandler) resolveParticipants(c *fiber.Ctx, conversationID u
 	result := make([]fiber.Map, 0, len(participants))
 	for _, p := range participants {
 		name := ""
-		if user, err := h.userService.GetByID(c.Context(), p.UserID); err == nil {
+		if user, err := h.userService.GetByID(c.Context(), p.UserID, callerAccountID(c)); err == nil {
 			name = user.Name
 		}
 		result = append(result, fiber.Map{
@@ -304,7 +304,7 @@ func (h *ConversationHandler) ListMessages(c *fiber.Ctx) error {
 	messages := make([]fiber.Map, len(result.Items))
 	for i, m := range result.Items {
 		j := conversationMessageToJSON(&m)
-		if user, err := h.userService.GetByID(c.Context(), m.UserID); err == nil {
+		if user, err := h.userService.GetByID(c.Context(), m.UserID, callerAccountID(c)); err == nil {
 			j["user_name"] = user.Name
 		}
 		messages[i] = j
@@ -351,7 +351,7 @@ func (h *ConversationHandler) CreateMessage(c *fiber.Ctx) error {
 	}
 
 	j := conversationMessageToJSON(msg)
-	if user, err := h.userService.GetByID(c.Context(), userID); err == nil {
+	if user, err := h.userService.GetByID(c.Context(), userID, callerAccountID(c)); err == nil {
 		j["user_name"] = user.Name
 	}
 	return c.Status(fiber.StatusCreated).JSON(j)

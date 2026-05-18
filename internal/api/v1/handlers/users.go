@@ -297,7 +297,7 @@ func (h *UserHandler) GetUser(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid user ID")
 	}
 
-	user, err := h.userService.GetByID(c.Context(), uint(id))
+	user, err := h.userService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "user")
 	}
@@ -322,7 +322,7 @@ func (h *UserHandler) GetUserProfile(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid user ID")
 	}
 
-	user, err := h.userService.GetByID(c.Context(), uint(id))
+	user, err := h.userService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "user")
 	}
@@ -354,7 +354,7 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 		return responses.Error(c, fiber.StatusForbidden, "You can only update your own profile")
 	}
 
-	user, err := h.userService.GetByID(c.Context(), uint(id))
+	user, err := h.userService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "user")
 	}
@@ -442,7 +442,7 @@ func (h *UserHandler) UpdateUserRole(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "role must be one of: admin, teacher, observer, user")
 	}
 
-	user, err := h.userService.GetByID(c.Context(), uint(id))
+	user, err := h.userService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "user")
 	}
@@ -458,7 +458,10 @@ func (h *UserHandler) GetSelf(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	user, err := h.userService.GetByID(c.Context(), userID)
+	// Self lookup: the user-id IS the caller. accountID=0 is safe
+	// because we're not crossing tenants — the JWT already attested
+	// to this user's identity.
+	user, err := h.userService.GetByID(c.Context(), userID, 0)
 	if err != nil {
 		return responses.NotFound(c, "user")
 	}
@@ -480,8 +483,11 @@ func (h *UserHandler) GetSelf(c *fiber.Ctx) error {
 	if masqueradeByID, ok := c.Locals("masquerade_by").(uint); ok && masqueradeByID > 0 {
 		result["masquerading_as"] = user.Name
 		result["real_user_id"] = masqueradeByID
-		// Look up the real admin user to return their name for display
-		adminUser, adminErr := h.userService.GetByID(c.Context(), masqueradeByID)
+		// Look up the real admin user to return their name for display.
+		// admin_account_id Locals carries the impersonator's home
+		// tenant (see auth middleware 13.1.B + GenerateMasqueradeToken).
+		adminAcctID, _ := c.Locals("admin_account_id").(uint)
+		adminUser, adminErr := h.userService.GetByID(c.Context(), masqueradeByID, adminAcctID)
 		if adminErr == nil {
 			result["real_user_name"] = adminUser.Name
 		}
@@ -513,8 +519,10 @@ func (h *UserHandler) StartMasquerade(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Cannot start a masquerade while already masquerading. End the current masquerade first.")
 	}
 
-	// Look up the target user
-	targetUser, err := h.userService.GetByID(c.Context(), uint(targetUserID))
+	// Look up the target user, scoped to the masquerading admin's
+	// tenant. An admin cannot masquerade across tenant boundaries —
+	// cross-tenant attempts surface as 404 (existence-leak contract).
+	targetUser, err := h.userService.GetByID(c.Context(), uint(targetUserID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "user")
 	}
@@ -574,8 +582,12 @@ func (h *UserHandler) EndMasquerade(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Not currently masquerading")
 	}
 
-	// Look up the original admin user
-	adminUser, err := h.userService.GetByID(c.Context(), masqueradeByID)
+	// Look up the original admin user. admin_account_id Locals
+	// carries the impersonator's home tenant — that's the right
+	// scope for this lookup (the masquerade session's account_id
+	// Locals belongs to the target, not the admin).
+	adminAcctID, _ := c.Locals("admin_account_id").(uint)
+	adminUser, err := h.userService.GetByID(c.Context(), masqueradeByID, adminAcctID)
 	if err != nil {
 		return responses.InternalError(c, "Could not find the original admin user")
 	}
@@ -674,7 +686,9 @@ func (h *UserHandler) ListUsers(c *fiber.Ctx) error {
 		// email substring.
 		result, err = h.userService.Search(c.Context(), searchTerm, callerAccountID(c), params)
 	} else {
-		result, err = h.userService.List(c.Context(), params)
+		// Wave 2 widening: List scopes to the caller's tenant for
+		// the same reason Search does.
+		result, err = h.userService.List(c.Context(), params, callerAccountID(c))
 	}
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch users")

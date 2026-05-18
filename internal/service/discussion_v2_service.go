@@ -366,7 +366,11 @@ func ParseMentions(message string) []string {
 func (s *DiscussionV2Service) ResolveUserInfo(ctx context.Context, userIDs []uint) map[uint]UserInfo {
 	result := make(map[uint]UserInfo, len(userIDs))
 	for _, uid := range userIDs {
-		user, err := s.userRepo.FindByID(ctx, uid)
+		// Wave 2 widening: this service doesn't yet thread accountID
+		// from its handler. accountID=0 preserves the pre-widening
+		// semantics. Sprint 2.3 leftover: thread tenant context
+		// through DiscussionV2Service from the handler.
+		user, err := s.userRepo.FindByID(ctx, uid, 0)
 		if err != nil {
 			result[uid] = UserInfo{ID: uid, Name: "Unknown User", AvatarURL: ""}
 			continue

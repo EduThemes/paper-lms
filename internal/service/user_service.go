@@ -94,16 +94,23 @@ func (s *UserService) Authenticate(ctx context.Context, loginID, password string
 	return user, nil
 }
 
-func (s *UserService) GetByID(ctx context.Context, id uint) (*models.User, error) {
-	return s.repo.FindByID(ctx, id)
+// GetByID resolves a user by id, scoped to the caller's tenant.
+// accountID == 0 means "no tenant scope" (internal/background callers
+// that have already validated tenant ownership upstream — auth
+// middleware resolving the JWT subject before Locals is set, the
+// login pipeline, etc.). Handler callers MUST pass callerAccountID(c).
+func (s *UserService) GetByID(ctx context.Context, id, accountID uint) (*models.User, error) {
+	return s.repo.FindByID(ctx, id, accountID)
 }
 
 func (s *UserService) Update(ctx context.Context, user *models.User) error {
 	return s.repo.Update(ctx, user)
 }
 
-func (s *UserService) List(ctx context.Context, params repository.PaginationParams) (*repository.PaginatedResult[models.User], error) {
-	return s.repo.List(ctx, params)
+// List threads accountID through to the repo. accountID == 0 reserved
+// for super-admin/background callers (see UserRepository docs).
+func (s *UserService) List(ctx context.Context, params repository.PaginationParams, accountID uint) (*repository.PaginatedResult[models.User], error) {
+	return s.repo.List(ctx, params, accountID)
 }
 
 // Search threads accountID from the handler (`callerAccountID(c)`)
@@ -172,7 +179,12 @@ func (s *UserService) ChangePassword(ctx context.Context, userID uint, currentPa
 		return errors.New("password must be at least 8 characters")
 	}
 
-	user, err := s.repo.FindByID(ctx, userID)
+	// accountID==0 is acceptable here: the caller (ChangePassword
+	// handler) already authenticated as this exact userID via the
+	// session JWT; we're loading their own row to verify the current
+	// password. The user row carries account_id; no cross-tenant
+	// pivot is possible because userID is the JWT subject.
+	user, err := s.repo.FindByID(ctx, userID, 0)
 	if err != nil {
 		return errors.New("user not found")
 	}

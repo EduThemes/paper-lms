@@ -268,7 +268,10 @@ func (h *OAuth2Handler) handleAuthorizationCodeGrant(c *fiber.Ctx, code, clientI
 	// Look up user info
 	userInfo := fiber.Map{"id": token.UserID}
 	if h.userService != nil {
-		user, userErr := h.userService.GetByID(c.Context(), token.UserID)
+		// AUTH-INTERNAL: OAuth2 token-grant response. The token row IS
+		// the identity binding; the OAuth2 endpoint runs without a
+		// session cookie / account_id Locals. accountID=0 is correct.
+		user, userErr := h.userService.GetByID(c.Context(), token.UserID, 0)
 		if userErr == nil {
 			userInfo["id"] = user.ID
 			userInfo["name"] = user.Name
@@ -325,7 +328,10 @@ func (h *OAuth2Handler) handleRefreshTokenGrant(c *fiber.Ctx, refreshToken, clie
 	// Look up user info
 	userInfo := fiber.Map{"id": token.UserID}
 	if h.userService != nil {
-		user, userErr := h.userService.GetByID(c.Context(), token.UserID)
+		// AUTH-INTERNAL: OAuth2 token-grant response. The token row IS
+		// the identity binding; the OAuth2 endpoint runs without a
+		// session cookie / account_id Locals. accountID=0 is correct.
+		user, userErr := h.userService.GetByID(c.Context(), token.UserID, 0)
 		if userErr == nil {
 			userInfo["id"] = user.ID
 			userInfo["name"] = user.Name

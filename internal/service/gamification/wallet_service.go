@@ -66,8 +66,9 @@ func (s *WalletService) ListTransactions(ctx context.Context, userID, currencyTy
 }
 
 // GetPreferences loads the leaderboard_opt_out flag for the user.
+// Self lookup: userID is the JWT subject. accountID=0 is safe.
 func (s *WalletService) GetPreferences(ctx context.Context, userID uint) (bool, error) {
-	user, err := s.userRepo.FindByID(ctx, userID)
+	user, err := s.userRepo.FindByID(ctx, userID, 0)
 	if err != nil {
 		return false, err
 	}
@@ -79,8 +80,9 @@ func (s *WalletService) GetPreferences(ctx context.Context, userID uint) (bool, 
 
 // UpdatePreferences applies a partial update to the user's gamification
 // preferences. optOut is a pointer so omitted=no-op.
+// Self lookup: userID is the JWT subject. accountID=0 is safe.
 func (s *WalletService) UpdatePreferences(ctx context.Context, userID uint, optOut *bool) (bool, error) {
-	user, err := s.userRepo.FindByID(ctx, userID)
+	user, err := s.userRepo.FindByID(ctx, userID, 0)
 	if err != nil {
 		return false, err
 	}

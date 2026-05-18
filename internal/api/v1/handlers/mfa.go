@@ -80,7 +80,10 @@ func (h *MFAHandler) EnrollMFA(c *fiber.Ctx) error {
 	if userID == 0 {
 		return responses.Unauthorized(c)
 	}
-	user, err := h.users.FindByID(c.Context(), userID)
+	// Self lookup: userID is the JWT subject (or pending-MFA token
+	// subject). accountID=0 is correct — the user-id IS the caller,
+	// no cross-tenant pivot is possible.
+	user, err := h.users.FindByID(c.Context(), userID, 0)
 	if err != nil || user == nil {
 		return responses.Error(c, fiber.StatusNotFound, "user not found")
 	}
@@ -143,7 +146,10 @@ func (h *MFAHandler) VerifyEnrollment(c *fiber.Ctx) error {
 	if userID == 0 {
 		return responses.Unauthorized(c)
 	}
-	user, err := h.users.FindByID(c.Context(), userID)
+	// Self lookup: userID is the JWT subject (or pending-MFA token
+	// subject). accountID=0 is correct — the user-id IS the caller,
+	// no cross-tenant pivot is possible.
+	user, err := h.users.FindByID(c.Context(), userID, 0)
 	if err != nil || user == nil {
 		return responses.Error(c, fiber.StatusNotFound, "user not found")
 	}
@@ -183,7 +189,10 @@ func (h *MFAHandler) DisableMFA(c *fiber.Ctx) error {
 	if userID == 0 {
 		return responses.Unauthorized(c)
 	}
-	user, err := h.users.FindByID(c.Context(), userID)
+	// Self lookup: userID is the JWT subject (or pending-MFA token
+	// subject). accountID=0 is correct — the user-id IS the caller,
+	// no cross-tenant pivot is possible.
+	user, err := h.users.FindByID(c.Context(), userID, 0)
 	if err != nil || user == nil {
 		return responses.Error(c, fiber.StatusNotFound, "user not found")
 	}
@@ -252,7 +261,10 @@ func (h *MFAHandler) VerifyAtLogin(c *fiber.Ctx) error {
 			return responses.Error(c, fiber.StatusTooManyRequests, "too many attempts; log in again")
 		}
 	}
-	user, err := h.users.FindByID(c.Context(), userID)
+	// Self lookup: userID is the JWT subject (or pending-MFA token
+	// subject). accountID=0 is correct — the user-id IS the caller,
+	// no cross-tenant pivot is possible.
+	user, err := h.users.FindByID(c.Context(), userID, 0)
 	if err != nil || user == nil {
 		return responses.Error(c, fiber.StatusNotFound, "user not found")
 	}
@@ -328,7 +340,10 @@ func (h *MFAHandler) UseRecoveryCode(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.Error(c, fiber.StatusUnauthorized, "pending token invalid or expired")
 	}
-	user, err := h.users.FindByID(c.Context(), userID)
+	// Self lookup: userID is the JWT subject (or pending-MFA token
+	// subject). accountID=0 is correct — the user-id IS the caller,
+	// no cross-tenant pivot is possible.
+	user, err := h.users.FindByID(c.Context(), userID, 0)
 	if err != nil || user == nil {
 		return responses.Error(c, fiber.StatusNotFound, "user not found")
 	}

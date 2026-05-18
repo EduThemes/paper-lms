@@ -243,7 +243,9 @@ func (h *FeatureFlagHandler) isAdmin(c *fiber.Ctx) bool {
 	if !ok || uid == 0 {
 		return false
 	}
-	user, err := h.userRepo.FindByID(c.Context(), uid)
+	// AUTH-INTERNAL: cached-role lookup. uid is the JWT subject;
+	// role is tenant-independent. accountID=0 is correct.
+	user, err := h.userRepo.FindByID(c.Context(), uid, 0)
 	if err != nil {
 		return false
 	}
