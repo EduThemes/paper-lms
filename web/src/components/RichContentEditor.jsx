@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import katex from 'katex';
 import { api } from '../services/api';
+import { useClickOutside } from '../hooks/useClickOutside';
 
 /* --- Helpers ------------------------------------------------------------ */
 
@@ -55,25 +56,10 @@ function Separator() {
 function Popover({ open, onClose, children, className }) {
   const ref = useRef(null);
 
-  useEffect(() => {
-    if (!open) return;
-    // Defer registration so the opening mousedown doesn't immediately close the popover
-    const timer = setTimeout(() => {
-      function handleClick(e) {
-        if (ref.current && !ref.current.contains(e.target)) onClose();
-      }
-      document.addEventListener('mousedown', handleClick);
-      // Store cleanup reference
-      ref.current?.__cleanup?.();
-      if (ref.current) {
-        ref.current.__cleanup = () => document.removeEventListener('mousedown', handleClick);
-      }
-    }, 0);
-    return () => {
-      clearTimeout(timer);
-      ref.current?.__cleanup?.();
-    };
-  }, [open, onClose]);
+  // Popover is only mounted when `open=true` (see early-return below), so the
+  // hook's listener registers AFTER the click that opened the popover has
+  // already propagated — no need for the previous setTimeout-defer guard.
+  useClickOutside(ref, onClose);
 
   if (!open) return null;
 
