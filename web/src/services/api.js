@@ -25,62 +25,99 @@ function parseLinkHeader(header) {
   return links;
 }
 
-async function request(path, options = {}) {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    credentials: 'include',
-    headers: { ...getHeaders(), ...options.headers },
-  });
+/**
+ * Typed error thrown by every helper in this module. Extends `Error`
+ * so the bulk of callers that only read `err.message` keep working,
+ * while callers that need to branch on status (e.g. "is this a 404
+ * because the resource doesn't exist yet?") can read `err.status`,
+ * `err.code`, `err.errors`, or `err.body` directly.
+ *
+ * Backend error envelope: `{errors: [{code, message, ...}, ...]}`.
+ */
+export class ApiError extends Error {
+  constructor({ status, body, message }) {
+    super(message || body?.errors?.[0]?.message || `Request failed: ${status}`);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body || null;
+    this.errors = body?.errors || [];
+    this.code = body?.errors?.[0]?.code;
+  }
+}
+
+/**
+ * Unified fetch helper. `parse` controls request body shape and response
+ * parsing:
+ *
+ *   - 'json'      (default) — JSON request (caller is responsible for
+ *                  JSON.stringify on options.body), returns
+ *                  `{ data, pagination }` from a JSON response.
+ *   - 'raw'       — JSON request headers, returns the raw `Response`
+ *                  (caller decides whether to call .blob(), .text(),
+ *                  or treat as a 204).
+ *   - 'multipart' — `FormData` request (no Content-Type header so the
+ *                  browser sets the multipart boundary), returns the
+ *                  parsed JSON body directly (no pagination wrapper).
+ *
+ * All three paths share CSRF cookie/header handling, 401 →
+ * `auth:session-expired` event dispatch, and `ApiError` extraction
+ * from `{errors: [{code, message}]}` bodies.
+ */
+async function fetchApi(path, { parse = 'json', ...options } = {}) {
+  let fetchOptions;
+  if (parse === 'multipart') {
+    // FormData mode: do NOT set Content-Type — the browser inserts the
+    // multipart boundary itself. Still send the CSRF header.
+    fetchOptions = {
+      method: 'POST',
+      ...options,
+      credentials: 'include',
+      headers: { 'X-CSRF-Token': getCSRFToken(), ...options.headers },
+    };
+  } else {
+    fetchOptions = {
+      ...options,
+      credentials: 'include',
+      headers: { ...getHeaders(), ...options.headers },
+    };
+  }
+
+  const response = await fetch(`${API_URL}${path}`, fetchOptions);
 
   if (!response.ok) {
     if (response.status === 401) {
       window.dispatchEvent(new Event('auth:session-expired'));
     }
     const body = await response.json().catch(() => ({}));
-    const message = body.errors?.[0]?.message || `Request failed: ${response.status}`;
-    throw new Error(message);
+    throw new ApiError({ status: response.status, body });
   }
 
+  if (parse === 'raw') {
+    return response;
+  }
+  if (parse === 'multipart') {
+    return response.json();
+  }
+  // 'json' path: parse JSON + extract pagination from Link header so
+  // callers don't have to.
   const data = await response.json();
   const linkHeader = response.headers.get('Link');
   const pagination = parseLinkHeader(linkHeader);
-
   return { data, pagination };
 }
 
-async function requestRaw(path, options = {}) {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    credentials: 'include',
-    headers: { ...getHeaders(), ...options.headers },
-  });
-  if (!response.ok) {
-    if (response.status === 401) {
-      window.dispatchEvent(new Event('auth:session-expired'));
-    }
-    const body = await response.json().catch(() => ({}));
-    const message = body.errors?.[0]?.message || `Request failed: ${response.status}`;
-    throw new Error(message);
-  }
-  return response;
+// Thin shims that preserve the existing call sites' shapes. Each is a
+// one-liner that forwards to `fetchApi` with the right `parse` mode.
+function request(path, options = {}) {
+  return fetchApi(path, { ...options, parse: 'json' });
 }
 
-async function uploadFile(path, formData) {
-  const response = await fetch(`${API_URL}${path}`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'X-CSRF-Token': getCSRFToken() },
-    body: formData,
-  });
-  if (!response.ok) {
-    if (response.status === 401) {
-      window.dispatchEvent(new Event('auth:session-expired'));
-    }
-    const body = await response.json().catch(() => ({}));
-    const message = body.errors?.[0]?.message || `Request failed: ${response.status}`;
-    throw new Error(message);
-  }
-  return response.json();
+function requestRaw(path, options = {}) {
+  return fetchApi(path, { ...options, parse: 'raw' });
+}
+
+function uploadFile(path, formData) {
+  return fetchApi(path, { parse: 'multipart', body: formData });
 }
 
 export const api = {
