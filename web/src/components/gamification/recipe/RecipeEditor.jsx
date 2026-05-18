@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
-import * as DialogPrimitive from '@radix-ui/react-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogClose,
+} from '@/components/ui/dialog';
 import { useGamificationVocabulary } from '../../../hooks/useGamificationVocabulary';
 import TriggerPicker from './TriggerPicker';
 import ConditionNode from './ConditionNode';
@@ -120,23 +124,15 @@ export default function RecipeEditor({
   const windowKinds = vocab?.windows || ['day', 'week', 'lifetime'];
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 motion-reduce:transition-none" />
-        <DialogPrimitive.Content
-          className="fixed left-1/2 top-1/2 z-50 w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-lg bg-surface-0 shadow-xl border border-surface-raised data-[state=open]:animate-in data-[state=closed]:animate-out motion-reduce:duration-0"
-          aria-describedby={undefined}
-        >
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="max-w-2xl rounded-lg bg-surface-0 border border-surface-raised p-0"
+        aria-describedby={undefined}
+      >
           <header className="flex items-center justify-between px-5 py-3 border-b border-surface-raised">
-            <DialogPrimitive.Title className="text-base font-semibold text-text-primary">
+            <DialogTitle className="text-base font-semibold text-text-primary">
               {isEdit ? 'Edit recipe' : 'New recipe'}
-            </DialogPrimitive.Title>
-            <DialogPrimitive.Close
-              className="p-1.5 rounded-md text-text-secondary hover:bg-surface-2 hover:text-text-primary"
-              aria-label="Close"
-            >
-              <X className="w-4 h-4" />
-            </DialogPrimitive.Close>
+            </DialogTitle>
           </header>
 
           <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4 max-h-[80vh] overflow-y-auto">
@@ -286,12 +282,14 @@ export default function RecipeEditor({
             )}
 
             <footer className="flex justify-end gap-2 pt-2 border-t border-surface-raised">
-              <DialogPrimitive.Close
-                type="button"
-                className="px-3 py-1.5 rounded-md text-sm text-text-secondary hover:bg-surface-2"
-              >
-                Cancel
-              </DialogPrimitive.Close>
+              <DialogClose asChild>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-md text-sm text-text-secondary hover:bg-surface-2"
+                >
+                  Cancel
+                </button>
+              </DialogClose>
               <button
                 type="submit"
                 disabled={!formValid || saving}
@@ -301,9 +299,8 @@ export default function RecipeEditor({
               </button>
             </footer>
           </form>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+      </DialogContent>
+    </Dialog>
   );
 }
 

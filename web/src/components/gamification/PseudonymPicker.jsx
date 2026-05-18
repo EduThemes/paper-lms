@@ -1,5 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { X, RefreshCcw, User, AlertTriangle, Check } from 'lucide-react';
+import { RefreshCcw, User, AlertTriangle, Check } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { api } from '../../services/api';
 
 // PseudonymPicker is the modal a learner uses to switch their per-
@@ -45,8 +50,6 @@ export default function PseudonymPicker({ courseId, open, onClose, onSaved }) {
   useEffect(() => {
     if (open) load();
   }, [open, load]);
-
-  if (!open) return null;
 
   const handlePick = async (poolCode, name) => {
     setSaving(true);
@@ -97,29 +100,15 @@ export default function PseudonymPicker({ courseId, open, onClose, onSaved }) {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="pseudonym-picker-title"
-      onClick={(e) => {
-        // close on backdrop click; ignore clicks on the inner card.
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-lg bg-surface-0 shadow-xl border border-surface-raised">
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent
+        className="max-w-2xl max-h-[85vh] overflow-y-auto rounded-lg bg-surface-0 shadow-xl border border-surface-raised p-0"
+        aria-describedby={undefined}
+      >
         <header className="flex items-center justify-between px-5 py-4 border-b border-surface-raised sticky top-0 bg-surface-0 z-10">
-          <h2 id="pseudonym-picker-title" className="text-base font-semibold text-text-primary">
+          <DialogTitle id="pseudonym-picker-title" className="text-base font-semibold text-text-primary">
             Pick your leaderboard name
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-text-secondary hover:bg-surface-1 hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-brand-400/60"
-            aria-label="Close"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          </DialogTitle>
         </header>
 
         <div className="px-5 py-4 space-y-4 text-sm text-text-primary">
@@ -216,7 +205,7 @@ export default function PseudonymPicker({ courseId, open, onClose, onSaved }) {
             </>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

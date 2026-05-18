@@ -3,7 +3,7 @@ package models
 import "time"
 
 type CalendarEvent struct {
-	ID              uint       `json:"id" gorm:"primaryKey"`
+	ID              uint       `json:"id" gorm:"column:id;primaryKey"`
 	ContextType     string     `json:"context_type" gorm:"not null;index:idx_cal_event_context"`
 	ContextID       uint       `json:"context_id" gorm:"not null;index:idx_cal_event_context"`
 	Title           string     `json:"title" gorm:"not null"`

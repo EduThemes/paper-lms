@@ -46,7 +46,7 @@ func TestCreate_NewSubmission(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, 1, sub.Attempt)
-	assert.Equal(t, "submitted", sub.WorkflowState)
+	assert.Equal(t, models.SubmissionSubmitted, sub.WorkflowState)
 	assert.NotNil(t, sub.SubmittedAt)
 	submissionRepo.AssertCalled(t, "Create", mock.Anything, mock.AnythingOfType("*models.Submission"))
 }
@@ -242,7 +242,7 @@ func TestCreate_ResubmissionIncrementsAttempt(t *testing.T) {
 	assert.NoError(t, err)
 	submissionRepo.AssertCalled(t, "Update", mock.Anything, mock.AnythingOfType("*models.Submission"))
 	assert.Equal(t, 2, sub.Attempt, "expected attempt to be incremented to 2")
-	assert.Equal(t, "submitted", sub.WorkflowState)
+	assert.Equal(t, models.SubmissionSubmitted, sub.WorkflowState)
 	assert.Equal(t, uint(5), sub.ID, "expected submission to retain the original ID")
 }
 
@@ -339,7 +339,7 @@ func TestGrade_Success(t *testing.T) {
 	assert.Equal(t, 95.0, *result.Score)
 	assert.NotNil(t, result.Grade)
 	assert.Equal(t, "95", *result.Grade)
-	assert.Equal(t, "graded", result.WorkflowState)
+	assert.Equal(t, models.SubmissionGraded, result.WorkflowState)
 	assert.NotNil(t, result.GradedAt)
 	assert.NotNil(t, result.GraderID)
 	assert.Equal(t, uint(99), *result.GraderID)
@@ -395,7 +395,7 @@ func TestGrade_NotFound_CreatesSubmission(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.Equal(t, "graded", result.WorkflowState)
+	assert.Equal(t, models.SubmissionGraded, result.WorkflowState)
 	assert.NotNil(t, result.Score)
 	assert.Equal(t, 95.0, *result.Score)
 }

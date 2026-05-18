@@ -62,8 +62,20 @@ func Connect(databaseURL string) (*gorm.DB, error) {
 	return db, nil
 }
 
-func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
+// allAutoMigrateModels returns the slice handed to AutoMigrate. Order
+// matters because GORM creates tables and FKs in this order. The
+// schemagen parity test runs AutoMigrate against this exact set.
+//
+// NOTE: this list is intentionally distinct from models.AllModels() in
+// internal/domain/models/registry.go. The models.AllModels() superset
+// includes a handful of structs that are migration-only (FederatedIdentity,
+// UserRecoveryCode, UserWebauthnCredential, PlannerNote, PlannerOverride)
+// — they are not in the AutoMigrate list because their schema lives in
+// the SQL migration chain only. The enums_test.go reflect walker uses
+// models.AllModels() so those structs are still subject to the
+// "GORM acronym fields need explicit gorm:column:... tag" rule.
+func allAutoMigrateModels() []interface{} {
+	return []interface{}{
 		&models.User{},
 		&models.Account{},
 		&models.Course{},
@@ -240,7 +252,11 @@ func AutoMigrate(db *gorm.DB) error {
 		// store backing the settings service in internal/service/settings/;
 		// catalog declares the typed vocabulary that maps to these rows.
 		&models.Setting{},
-	)
+	}
+}
+
+func AutoMigrate(db *gorm.DB) error {
+	return db.AutoMigrate(allAutoMigrateModels()...)
 }
 
 func SeedDefaultAccount(db *gorm.DB) error {
@@ -249,7 +265,7 @@ func SeedDefaultAccount(db *gorm.DB) error {
 	if count == 0 {
 		account := models.Account{
 			Name:          "Paper LMS",
-			WorkflowState: "active",
+			WorkflowState: models.AccountActive,
 		}
 		if err := db.Create(&account).Error; err != nil {
 			return fmt.Errorf("failed to seed default account: %w", err)

@@ -19,6 +19,7 @@ import TextAlign from '@tiptap/extension-text-align';
 import Highlight from '@tiptap/extension-highlight';
 import { sanitizeHTML } from '../RichContentViewer';
 import { getCSRFToken } from '../../services/api';
+import { useClickOutside } from '../../hooks/useClickOutside';
 import RCEToolbar from './RCEToolbar';
 import RestoreAutosaveModal from './RestoreAutosaveModal';
 
@@ -181,17 +182,12 @@ export default function RichContentEditorV2({
   }, [autoSaveKey]);
 
   // ----- AI Assist ---------------------------------------------------------
-  // Close the AI dropdown when clicking outside.
-  useEffect(() => {
-    if (!aiMenuOpen) return;
-    const onDocClick = (e) => {
-      if (aiMenuRef.current && !aiMenuRef.current.contains(e.target)) {
-        setAiMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
+  // Close the AI dropdown on outside click / Escape. The hook attaches
+  // unconditionally; the close fn is a no-op when the menu is already closed.
+  const closeAiMenu = useCallback(() => {
+    if (aiMenuOpen) setAiMenuOpen(false);
   }, [aiMenuOpen]);
+  useClickOutside(aiMenuRef, closeAiMenu);
 
   /**
    * Run an AI Assist action against the current selection (or whole doc).

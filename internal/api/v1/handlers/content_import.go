@@ -82,7 +82,7 @@ func (h *ContentImportHandler) ImportPackage(c *fiber.Ctx) error {
 		CourseID:      uint(courseID),
 		UserID:        userID,
 		MigrationType: migrationType,
-		WorkflowState: "running",
+		WorkflowState: models.ContentMigrationRunning,
 		Progress:      0,
 		Attachment:    zipPath,
 		StartedAt:     &now,
@@ -108,7 +108,7 @@ func (h *ContentImportHandler) ImportPackage(c *fiber.Ctx) error {
 			h.imsccParser.CleanupFailedImport(c.Context(), uint(courseID), importResult.CreatedEntities)
 		}
 
-		migration.WorkflowState = "failed"
+		migration.WorkflowState = models.ContentMigrationFailed
 		migration.ErrorMessage = parseErr.Error()
 		migration.Progress = 0
 		h.contentMigrationService.UpdateMigration(c.Context(), migration)
@@ -127,11 +127,11 @@ func (h *ContentImportHandler) ImportPackage(c *fiber.Ctx) error {
 		importResult.QuizzesCreated == 0 && importResult.DiscussionsCreated == 0 {
 		// Whole import failed — roll back the partial writes too.
 		h.imsccParser.CleanupFailedImport(c.Context(), uint(courseID), importResult.CreatedEntities)
-		migration.WorkflowState = "failed"
+		migration.WorkflowState = models.ContentMigrationFailed
 		migration.ErrorMessage = fmt.Sprintf("All imports failed. First error: %s", importResult.Errors[0])
 		migration.Progress = 0
 	} else {
-		migration.WorkflowState = "completed"
+		migration.WorkflowState = models.ContentMigrationCompleted
 		migration.Progress = 100
 	}
 

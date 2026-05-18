@@ -11,10 +11,15 @@ import (
 type GroupHandler struct {
 	groupService *service.GroupService
 	authz        *ResourceAuthorizer
+	// Wave 5.2: 13.5 LogPIIAccess sweep. ListGroupMemberships surfaces
+	// names, emails, and login_ids of every member — that's the only
+	// student-keyed read here. Group/category metadata reads are not
+	// student PII.
+	auditService *service.AuditService
 }
 
-func NewGroupHandler(groupService *service.GroupService, authz *ResourceAuthorizer) *GroupHandler {
-	return &GroupHandler{groupService: groupService, authz: authz}
+func NewGroupHandler(groupService *service.GroupService, authz *ResourceAuthorizer, auditService *service.AuditService) *GroupHandler {
+	return &GroupHandler{groupService: groupService, authz: authz, auditService: auditService}
 }
 
 // getCourseIDFromCategory fetches a group category and returns its CourseID.
@@ -485,6 +490,13 @@ func (h *GroupHandler) ListGroupMemberships(c *fiber.Ctx) error {
 	memberships := make([]fiber.Map, len(result.Items))
 	for i, m := range result.Items {
 		memberships[i] = groupMembershipToJSON(&m)
+	}
+
+	// Wave 5.2 FERPA audit: membership list embeds user.email +
+	// user.login_id for every group member — directory-level PII.
+	// Bulk read (studentID=0) keyed on the group resource.
+	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_group_memberships", "groups", uint(groupID), c.IP(), c.Get("User-Agent"))
 	}
 
 	return c.JSON(memberships)

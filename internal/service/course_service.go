@@ -51,7 +51,7 @@ func (s *CourseService) Create(ctx context.Context, course *models.Course, creat
 		CourseSectionID: &section.ID,
 		Type:            "TeacherEnrollment",
 		Role:            "TeacherEnrollment",
-		WorkflowState:   "active",
+		WorkflowState:   models.EnrollmentActive,
 	}
 	return s.enrollmentRepo.Create(ctx, enrollment)
 }

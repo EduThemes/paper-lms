@@ -30,7 +30,7 @@ func TestAssignmentCreate_Success(t *testing.T) {
 	err := svc.Create(ctx, assignment)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "unpublished", assignment.WorkflowState)
+	assert.Equal(t, models.AssignmentUnpublished, assignment.WorkflowState)
 	mockRepo.AssertExpectations(t)
 }
 
@@ -66,7 +66,7 @@ func TestAssignmentCreate_PreservesState(t *testing.T) {
 	err := svc.Create(ctx, assignment)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "published", assignment.WorkflowState)
+	assert.Equal(t, models.AssignmentPublished, assignment.WorkflowState)
 	mockRepo.AssertExpectations(t)
 }
 
@@ -86,7 +86,7 @@ func TestAssignmentCreate_DefaultsUnpublished(t *testing.T) {
 	err := svc.Create(ctx, assignment)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "unpublished", assignment.WorkflowState)
+	assert.Equal(t, models.AssignmentUnpublished, assignment.WorkflowState)
 	mockRepo.AssertExpectations(t)
 }
 

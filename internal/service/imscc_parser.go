@@ -574,14 +574,14 @@ func (p *IMSCCParser) processOrganization(
 					ContentType:     "ContextModuleSubHeader",
 					Title:           subItem.Title,
 					Position:        itemPos + 1,
-					WorkflowState:   "active",
+					WorkflowState:   models.ContentTagActive,
 				}
 				// module_meta keys items by IdentifierRef preferred, then Identifier.
 				if is, ok := result.itemMeta[subItem.Identifier]; ok {
 					tag.Indent = is.Indent
 					tag.NewTab = is.NewTab
 					if is.WorkflowState == "unpublished" {
-						tag.WorkflowState = "unpublished"
+						tag.WorkflowState = models.ContentTagUnpublished
 					}
 				}
 				if err := p.moduleItemRepo.Create(ctx, tag); err != nil {
@@ -850,13 +850,13 @@ func (p *IMSCCParser) importDiscussion(
 		Title:          title,
 		Message:        message,
 		DiscussionType: "side_comment",
-		WorkflowState:  "active",
+		WorkflowState:  models.DiscussionTopicActive,
 	}
 	if topic.DiscussionType != "" && topic.DiscussionType != "announcement" {
 		disc.DiscussionType = topic.DiscussionType
 	}
 	if topic.WorkflowState == "unpublished" || topic.WorkflowState == "deleted" {
-		disc.WorkflowState = topic.WorkflowState
+		disc.WorkflowState = models.DiscussionTopicWorkflow(topic.WorkflowState)
 	}
 
 	if err := p.discussionTopicRepo.Create(ctx, disc); err != nil {
@@ -994,13 +994,13 @@ func (p *IMSCCParser) importAssignment(
 		PointsPossible:  pointsPossible,
 		GradingType:     gradingType,
 		SubmissionTypes: submissionTypes,
-		WorkflowState:   "unpublished",
+		WorkflowState:   models.AssignmentUnpublished,
 		DueAt:           parseCanvasTime(ca.DueAt),
 		UnlockAt:        parseCanvasTime(ca.UnlockAt),
 		LockAt:          parseCanvasTime(ca.LockAt),
 	}
 	if ca.WorkflowState == "published" {
-		assignment.WorkflowState = "published"
+		assignment.WorkflowState = models.AssignmentPublished
 		assignment.Published = true
 	}
 	if ca.Position != "" {
@@ -1176,14 +1176,14 @@ func (p *IMSCCParser) importWebLink(
 		Title:           title,
 		Position:        position,
 		URL:             linkURL,
-		WorkflowState:   "active",
+		WorkflowState:   models.ContentTagActive,
 	}
 	if res.Identifier != "" {
 		if is, ok := result.itemMeta[res.Identifier]; ok {
 			tag.Indent = is.Indent
 			tag.NewTab = is.NewTab
 			if is.WorkflowState == "unpublished" {
-				tag.WorkflowState = "unpublished"
+				tag.WorkflowState = models.ContentTagUnpublished
 			}
 		}
 	}
@@ -1216,14 +1216,14 @@ func (p *IMSCCParser) createModuleItem(
 		ContentID:       contentID,
 		Title:           title,
 		Position:        position,
-		WorkflowState:   "active",
+		WorkflowState:   models.ContentTagActive,
 	}
 	if migrationID != "" {
 		if is, ok := result.itemMeta[migrationID]; ok {
 			tag.Indent = is.Indent
 			tag.NewTab = is.NewTab
 			if is.WorkflowState == "unpublished" {
-				tag.WorkflowState = "unpublished"
+				tag.WorkflowState = models.ContentTagUnpublished
 			}
 		}
 	}

@@ -21,15 +21,15 @@ import (
 // still vanishes from peer views. The snapshot row is not editable; the
 // re-filter is the correctness mechanism.
 type GamificationLeaderboardSnapshot struct {
-	ID             uint           `json:"id" gorm:"primaryKey"`
+	ID             uint                  `json:"id" gorm:"column:id;primaryKey"`
 	ScopeType      GamificationScopeType `json:"scope_type" gorm:"not null;type:text"`
-	ScopeID        uint           `json:"scope_id" gorm:"not null"`
-	CurrencyTypeID uint           `json:"currency_type_id" gorm:"not null"`
-	WindowKind     string         `json:"window_kind" gorm:"not null"`
-	WindowStart    time.Time      `json:"window_start" gorm:"not null"`
-	WindowEnd      time.Time      `json:"window_end" gorm:"not null"`
-	ComputedAt     time.Time      `json:"computed_at" gorm:"not null;default:now()"`
-	Payload        datatypes.JSON `json:"payload" gorm:"type:jsonb;not null"`
+	ScopeID        uint                  `json:"scope_id" gorm:"not null"`
+	CurrencyTypeID uint                  `json:"currency_type_id" gorm:"not null"`
+	WindowKind     string                `json:"window_kind" gorm:"not null"`
+	WindowStart    time.Time             `json:"window_start" gorm:"not null"`
+	WindowEnd      time.Time             `json:"window_end" gorm:"not null"`
+	ComputedAt     time.Time             `json:"computed_at" gorm:"not null;default:now()"`
+	Payload        datatypes.JSON        `json:"payload" gorm:"type:jsonb;not null"`
 }
 
 func (GamificationLeaderboardSnapshot) TableName() string {

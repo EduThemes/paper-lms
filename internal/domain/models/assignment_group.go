@@ -3,7 +3,7 @@ package models
 import "time"
 
 type AssignmentGroup struct {
-	ID            uint      `json:"id" gorm:"primaryKey"`
+	ID            uint      `json:"id" gorm:"column:id;primaryKey"`
 	CourseID      uint      `json:"course_id" gorm:"not null"`
 	Name          string    `json:"name" gorm:"not null"`
 	Position      int       `json:"position"`

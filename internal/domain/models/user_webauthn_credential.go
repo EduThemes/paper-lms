@@ -17,7 +17,7 @@ import (
 // {"usb","nfc"}). pq.StringArray gives us the GORM-friendly
 // adapter without an extra serializer.
 type UserWebauthnCredential struct {
-	ID             uint           `json:"id" gorm:"primaryKey"`
+	ID             uint           `json:"id" gorm:"column:id;primaryKey"`
 	UserID         uint           `json:"user_id" gorm:"not null;index"`
 	CredentialID   []byte         `json:"-" gorm:"not null;uniqueIndex"`
 	PublicKeyCOSE  []byte         `json:"-" gorm:"column:public_key_cose;not null"`
