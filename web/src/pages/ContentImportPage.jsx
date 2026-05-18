@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, Navigate } from 'react-router-dom';
 import { Upload, CheckCircle, AlertCircle, Clock, FileArchive } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import useIsTeacher from '../hooks/useIsTeacher';
@@ -22,6 +23,7 @@ const STATUS_COLORS = {
 };
 
 const ContentImportPage = () => {
+  const { t } = useTranslation();
   const { courseId } = useParams();
   const { user } = useAuth();
   const isTeacher = useIsTeacher(courseId);
@@ -72,7 +74,7 @@ const ContentImportPage = () => {
     const validTypes = ['.imscc', '.zip', '.xml'];
     const ext = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
     if (!validTypes.includes(ext)) {
-      setError('Please select an .imscc, .zip, or .xml file');
+      setError(t('contentImport.invalidFileType'));
       return;
     }
 
@@ -82,11 +84,11 @@ const ContentImportPage = () => {
 
     try {
       await api.importContentPackage(courseId, file);
-      setSuccess(`"${file.name}" uploaded successfully. Import is processing...`);
+      setSuccess(t('contentImport.uploadSuccess', { name: file.name }));
       // Refresh migration list
       setTimeout(fetchMigrations, 1000);
     } catch (err) {
-      setError(err.message || 'Upload failed');
+      setError(err.message || t('contentImport.uploadFailed'));
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -102,20 +104,21 @@ const ContentImportPage = () => {
   };
 
   const formatType = (type) => {
-    const labels = {
-      common_cartridge_importer: 'Common Cartridge',
-      canvas_cartridge_importer: 'Canvas Export',
-      qti_converter: 'QTI Quiz',
-      moodle_converter: 'Moodle Backup',
-      course_copy_importer: 'Course Copy',
+    const labelKeys = {
+      common_cartridge_importer: 'contentImport.typeCommonCartridge',
+      canvas_cartridge_importer: 'contentImport.typeCanvasExport',
+      qti_converter: 'contentImport.typeQtiQuiz',
+      moodle_converter: 'contentImport.typeMoodleBackup',
+      course_copy_importer: 'contentImport.typeCourseCopy',
     };
-    return labels[type] || type || 'Import';
+    if (labelKeys[type]) return t(labelKeys[type]);
+    return type || t('contentImport.typeFallback');
   };
 
   if (isTeacher === false) return <Navigate to={`/courses/${courseId}`} replace />;
   if (isTeacher === null) return <Layout><div className="flex items-center justify-center py-12 gap-2 text-text-tertiary">
   <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-  Loading...
+  {t('common.loading')}
 </div></Layout>;
 
   return (
@@ -123,11 +126,11 @@ const ContentImportPage = () => {
       <CourseNav />
       <div className="mb-6">
         <Link to={`/courses/${courseId}`} className="text-brand-600 hover:underline text-sm">
-          &larr; Back to Course
+          {t('contentImport.backToCourse')}
         </Link>
-        <h2 className="text-2xl font-bold text-text-primary mt-2">Import Content</h2>
+        <h2 className="text-2xl font-bold text-text-primary mt-2">{t('contentImport.title')}</h2>
         <p className="text-text-tertiary text-sm mt-1">
-          Import course content from Canvas exports (.imscc), Common Cartridge packages, or QTI quiz files.
+          {t('contentImport.description')}
         </p>
       </div>
 
@@ -140,10 +143,10 @@ const ContentImportPage = () => {
         >
           <FileArchive className="w-12 h-12 text-text-disabled mx-auto mb-3" />
           <p className="text-text-secondary font-medium mb-1">
-            {uploading ? 'Uploading...' : 'Upload a course package'}
+            {uploading ? t('contentImport.uploading') : t('contentImport.uploadAPackage')}
           </p>
           <p className="text-text-tertiary text-sm mb-4">
-            Supported formats: .imscc (Canvas export), .zip (Common Cartridge), .xml (QTI)
+            {t('contentImport.supportedFormats')}
           </p>
           <label className={`inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors ${
             uploading
@@ -151,7 +154,7 @@ const ContentImportPage = () => {
               : 'bg-brand-600 text-white hover:bg-brand-700'
           }`}>
             <Upload className="w-4 h-4" />
-            {uploading ? 'Uploading...' : 'Choose File'}
+            {uploading ? t('contentImport.uploading') : t('contentImport.chooseFile')}
             <input
               ref={fileRef}
               type="file"
@@ -180,12 +183,12 @@ const ContentImportPage = () => {
       {/* Migration History */}
       <div className="bg-surface-0 rounded-lg shadow">
         <div className="p-4 border-b">
-          <h3 className="font-semibold text-text-primary">Import History</h3>
+          <h3 className="font-semibold text-text-primary">{t('contentImport.history')}</h3>
         </div>
         {loading ? (
-          <div className="p-6 text-center text-text-tertiary">Loading...</div>
+          <div className="p-6 text-center text-text-tertiary">{t('common.loading')}</div>
         ) : migrations.length === 0 ? (
-          <div className="p-6 text-center text-text-tertiary">No imports yet.</div>
+          <div className="p-6 text-center text-text-tertiary">{t('contentImport.noImportsYet')}</div>
         ) : (
           <div className="divide-y">
             {migrations.map((m) => {
@@ -209,10 +212,10 @@ const ContentImportPage = () => {
                   </div>
                   <div className="text-right">
                     <span className={`text-xs font-medium px-2 py-1 rounded-full ${statusColor}`}>
-                      {m.workflow_state === 'running' ? 'Processing...' :
-                       m.workflow_state === 'created' ? 'Queued' :
-                       m.workflow_state === 'completed' ? 'Completed' :
-                       m.workflow_state === 'failed' ? 'Failed' :
+                      {m.workflow_state === 'running' ? t('contentImport.statusProcessing') :
+                       m.workflow_state === 'created' ? t('contentImport.statusQueued') :
+                       m.workflow_state === 'completed' ? t('contentImport.statusCompleted') :
+                       m.workflow_state === 'failed' ? t('contentImport.statusFailed') :
                        m.workflow_state}
                     </span>
                     {m.workflow_state === 'running' && m.progress_url && (
