@@ -834,8 +834,11 @@ func main() {
 	// Wave 1 handlers
 	discussionCheckpointHandler := handlers.NewDiscussionCheckpointHandler(discussionCheckpointService)
 	// TODO: implement reindex source adapter wiring (announcement /
-	// assignment / page / discussion topic listers). Until then Search works,
-	// Reindex returns 501.
+	// assignment / page / discussion topic listers). Until then Search
+	// works; the Reindex route is GATED OFF in routes_p3_features.go
+	// because the handler can only respond 501 without sources. Once
+	// adapters land, pass them as the second arg and the route mounts
+	// automatically.
 	smartSearchHandler := handlers.NewSmartSearchHandler(smartSearchService, nil)
 	commonsHandler := handlers.NewCommonsHandler(commonsService, courseRepo)
 	aiAssistHandler := handlers.NewAIAssistHandler(aiAssistService, accountRepo)

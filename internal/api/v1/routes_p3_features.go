@@ -76,9 +76,8 @@ func (r *Router) registerP3FeatureRoutes(protected fiber.Router, admin, enrolled
 	protected.Put("/courses/:course_id/discussion_topics/:topic_id/checkpoints/:id", instructor, r.DiscussionCheckpointHandler.UpdateCheckpoint)
 	protected.Delete("/courses/:course_id/discussion_topics/:topic_id/checkpoints/:id", instructor, r.DiscussionCheckpointHandler.DeleteCheckpoint)
 
-	// Smart Search (pgvector cosine similarity)
-	protected.Get("/courses/:course_id/smart_search", enrolled, r.SmartSearchHandler.Search)
-	protected.Post("/courses/:course_id/smart_search/reindex", instructor, r.SmartSearchHandler.Reindex)
+	// Smart Search (pgvector cosine similarity).
+	r.mountSmartSearchRoutes(protected, enrolled, instructor)
 
 	// Commons content library (district-scoped sharing).
 	// IMPORTANT: register /commons/favorites BEFORE /commons/:id so the literal
@@ -94,4 +93,32 @@ func (r *Router) registerP3FeatureRoutes(protected fiber.Router, admin, enrolled
 	// Per-user rate limit (30 / 5 min) is the cost gate — any authenticated user
 	// can call it, but no single account can drain the API budget.
 	protected.Post("/ai_assist/:action", middleware.AIAssistRateLimit(), r.AIAssistHandler.Dispatch)
+}
+
+// mountSmartSearchRoutes wires the smart-search surface onto `protected`.
+//
+// The Search endpoint is always available — it reads from the existing
+// content_embeddings table and works the moment any row is indexed (by
+// Reindex, future webhooks, or background workers).
+//
+// The Reindex endpoint is GATED on the handler having a non-nil
+// ReindexSourceLister wired in main.go. Without sources the handler
+// can only ever respond 501 Not Implemented (see
+// `internal/api/v1/handlers/smart_search.go` Reindex), so we'd be
+// advertising an unimplemented endpoint and inviting client code that
+// retries on 501. Mirror the same shape as `if r.GamificationHandler
+// == nil { return }` in `routes_gamification.go`: when the dependency
+// isn't wired, the route simply does not exist (404), not 501.
+//
+// To enable Reindex: pass a non-nil ReindexSourceLister to
+// `handlers.NewSmartSearchHandler` in `cmd/server/main.go`.
+//
+// This is a separate method (rather than inline) so the gating
+// decision is unit-testable in `routes_smart_search_test.go` without
+// having to stand up the rest of the P3 feature handlers.
+func (r *Router) mountSmartSearchRoutes(protected fiber.Router, enrolled, instructor fiber.Handler) {
+	protected.Get("/courses/:course_id/smart_search", enrolled, r.SmartSearchHandler.Search)
+	if r.SmartSearchHandler.Sources != nil {
+		protected.Post("/courses/:course_id/smart_search/reindex", instructor, r.SmartSearchHandler.Reindex)
+	}
 }
