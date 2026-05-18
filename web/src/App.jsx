@@ -65,6 +65,7 @@ const FERPAPage = React.lazy(() => import('./pages/FERPAPage'));
 const GamificationCurrenciesPage = React.lazy(() => import('./pages/GamificationCurrenciesPage'));
 const GamificationBadgesPage = React.lazy(() => import('./pages/GamificationBadgesPage'));
 const GamificationRecipesPage = React.lazy(() => import('./pages/GamificationRecipesPage'));
+const AdminGamificationSettingsPage = React.lazy(() => import('./pages/AdminGamificationSettingsPage'));
 const MyBadgesPage = React.lazy(() => import('./pages/MyBadgesPage'));
 const ObserverDashboardPage = React.lazy(() => import('./pages/ObserverDashboardPage'));
 const AdminHomePage = React.lazy(() => import('./pages/AdminHomePage'));
@@ -447,6 +448,14 @@ const App = () => {
           element={
             <ProtectedRoute>
               <GamificationRecipesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/gamification/settings"
+          element={
+            <ProtectedRoute>
+              <AdminGamificationSettingsPage />
             </ProtectedRoute>
           }
         />
