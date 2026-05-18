@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Award } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../services/api';
@@ -18,6 +19,7 @@ function formatAwarded(iso) {
 // state explains how badges are earned so a fresh learner isn't
 // staring at an empty page.
 export default function MyBadgesPage() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -34,11 +36,11 @@ export default function MyBadgesPage() {
       setItems(result.badges || []);
     } catch (err) {
       console.error('MyBadgesPage: load failed', err);
-      setError(err.message || 'Could not load your badges.');
+      setError(err.message || t('myBadgesPage.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, t]);
 
   useEffect(() => {
     load();
@@ -49,10 +51,10 @@ export default function MyBadgesPage() {
       <div className="max-w-4xl mx-auto py-6 space-y-6">
         <header>
           <h1 className="text-xl font-semibold text-text-primary flex items-center gap-2">
-            <Award className="w-5 h-5" /> My badges
+            <Award className="w-5 h-5" /> {t('myBadgesPage.title')}
           </h1>
           <p className="text-sm text-text-secondary mt-1">
-            Badges your teachers have awarded you, or that you earned automatically.
+            {t('myBadgesPage.subtitle')}
           </p>
         </header>
 
@@ -63,13 +65,13 @@ export default function MyBadgesPage() {
         )}
 
         {loading ? (
-          <div className="text-sm text-text-tertiary">Loading…</div>
+          <div className="text-sm text-text-tertiary">{t('common.loading')}</div>
         ) : items.length === 0 ? (
           <div className="border border-dashed border-surface-raised rounded-lg bg-surface-0 px-6 py-12 text-center">
             <Award className="w-10 h-10 mx-auto text-text-tertiary mb-3" />
-            <div className="text-sm text-text-primary font-medium">No badges yet</div>
+            <div className="text-sm text-text-primary font-medium">{t('myBadgesPage.emptyTitle')}</div>
             <p className="text-xs text-text-tertiary mt-1">
-              Keep going! Badges get awarded for completed work, sustained streaks, or by your teacher.
+              {t('myBadgesPage.emptyDescription')}
             </p>
           </div>
         ) : (
@@ -82,13 +84,13 @@ export default function MyBadgesPage() {
                 <BadgeIcon badge={it} size="lg" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-text-primary truncate">
-                    {it.name || it.code || 'Badge'}
+                    {it.name || it.code || t('myBadgesPage.fallbackBadgeLabel')}
                   </div>
                   {it.description && (
                     <div className="text-xs text-text-secondary mt-1 line-clamp-3">{it.description}</div>
                   )}
                   <div className="text-[11px] text-text-tertiary mt-2">
-                    Earned {formatAwarded(it.awarded_at)}
+                    {t('myBadgesPage.earnedAt', { date: formatAwarded(it.awarded_at) })}
                   </div>
                 </div>
               </li>

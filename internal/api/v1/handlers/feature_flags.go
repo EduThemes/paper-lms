@@ -260,7 +260,7 @@ func (h *FeatureFlagHandler) isTeacher(c *fiber.Ctx, courseID uint) bool {
 	if !ok || uid == 0 {
 		return false
 	}
-	enr, err := h.enrollmentRepo.FindByUserAndCourse(c.Context(), uid, courseID)
+	enr, err := h.enrollmentRepo.FindByUserAndCourse(c.Context(), uid, courseID, callerAccountID(c))
 	if err != nil {
 		return false
 	}

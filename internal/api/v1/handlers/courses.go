@@ -93,7 +93,7 @@ func (h *CourseHandler) ListCourses(c *fiber.Ctx) error {
 	for i, course := range items {
 		courseIDs[i] = course.ID
 	}
-	studentCounts, _ := h.enrollmentService.CountStudentsByCourseIDs(c.Context(), courseIDs)
+	studentCounts, _ := h.enrollmentService.CountStudentsByCourseIDs(c.Context(), courseIDs, callerAccountID(c))
 	if studentCounts == nil {
 		studentCounts = map[uint]int64{}
 	}

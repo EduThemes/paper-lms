@@ -85,7 +85,7 @@ func TestGetCourseLeaderboard_AdminSeesRealNamesAndTopN(t *testing.T) {
 		Return(xpCurrency(), nil)
 	accountRepo.On("FindByID", mock.Anything, uint(1)).
 		Return(&models.Account{ID: 1, TenantMode: "k5"}, nil)
-	enrollmentRepo.On("ListActiveStudentEnrollmentsByCourse", mock.Anything, uint(1)).
+	enrollmentRepo.On("ListActiveStudentEnrollmentsByCourse", mock.Anything, uint(1), mock.AnythingOfType("uint")).
 		Return(course1ActiveEnrollments(), nil)
 	// Admin doesn't have a row in the candidate set; userRepo lookup is
 	// still required (no admin middleware on this route).
@@ -135,10 +135,10 @@ func TestGetCourseLeaderboard_K5StudentSeesPseudonymsAndRelativeWindow(t *testin
 		Return(xpCurrency(), nil)
 	accountRepo.On("FindByID", mock.Anything, uint(1)).
 		Return(&models.Account{ID: 1, TenantMode: "k5"}, nil)
-	enrollmentRepo.On("ListActiveStudentEnrollmentsByCourse", mock.Anything, uint(1)).
+	enrollmentRepo.On("ListActiveStudentEnrollmentsByCourse", mock.Anything, uint(1), mock.AnythingOfType("uint")).
 		Return(course1ActiveEnrollments(), nil)
 	// Viewer's own enrollment lookup (role resolution).
-	enrollmentRepo.On("FindByUserAndCourse", mock.Anything, uint(viewerID), uint(1)).
+	enrollmentRepo.On("FindByUserAndCourse", mock.Anything, uint(viewerID), uint(1), mock.AnythingOfType("uint")).
 		Return(&models.Enrollment{
 			ID: 205, UserID: viewerID, CourseID: 1,
 			Type: "StudentEnrollment", WorkflowState: "active",
@@ -213,9 +213,9 @@ func TestGetCourseLeaderboard_OptedOutStudentDroppedFromRanking(t *testing.T) {
 		Return(xpCurrency(), nil)
 	accountRepo.On("FindByID", mock.Anything, uint(1)).
 		Return(&models.Account{ID: 1, TenantMode: "higher_ed"}, nil)
-	enrollmentRepo.On("ListActiveStudentEnrollmentsByCourse", mock.Anything, uint(1)).
+	enrollmentRepo.On("ListActiveStudentEnrollmentsByCourse", mock.Anything, uint(1), mock.AnythingOfType("uint")).
 		Return(course1ActiveEnrollments(), nil)
-	enrollmentRepo.On("FindByUserAndCourse", mock.Anything, uint(viewerID), uint(1)).
+	enrollmentRepo.On("FindByUserAndCourse", mock.Anything, uint(viewerID), uint(1), mock.AnythingOfType("uint")).
 		Return(&models.Enrollment{
 			ID: 200, UserID: viewerID, CourseID: 1,
 			Type: "StudentEnrollment", WorkflowState: "active",
@@ -267,7 +267,7 @@ func TestGetCourseLeaderboard_UnknownCurrencyReturns400(t *testing.T) {
 		Return((*models.GamificationCurrencyType)(nil), nil)
 	accountRepo.On("FindByID", mock.Anything, uint(1)).
 		Return(&models.Account{ID: 1, TenantMode: "k5"}, nil).Maybe()
-	enrollmentRepo.On("FindByUserAndCourse", mock.Anything, uint(100), uint(1)).
+	enrollmentRepo.On("FindByUserAndCourse", mock.Anything, uint(100), uint(1), mock.AnythingOfType("uint")).
 		Return(&models.Enrollment{
 			ID: 200, UserID: 100, CourseID: 1,
 			Type: "StudentEnrollment", WorkflowState: "active",
@@ -334,7 +334,7 @@ func TestGetCourseLeaderboard_SnapshotReadAppliesOptOutAtReadTime(t *testing.T) 
 	userRepo.On("FilterPublicLeaderboardCandidates", mock.Anything, allIDs).
 		Return(filtered, nil)
 
-	enrollmentRepo.On("ListActiveStudentEnrollmentsByCourse", mock.Anything, uint(1)).
+	enrollmentRepo.On("ListActiveStudentEnrollmentsByCourse", mock.Anything, uint(1), mock.AnythingOfType("uint")).
 		Return(course1ActiveEnrollments(), nil)
 	userRepo.On("FindByIDs", mock.Anything, mock.Anything).
 		Return([]models.User{
@@ -369,7 +369,7 @@ func TestGetCourseLeaderboard_NotEnrolledReturns404(t *testing.T) {
 	const viewerID = 999
 	app, _, userRepo, enrollmentRepo, _, _, _ := setupLeaderboardHandler(viewerID, false)
 
-	enrollmentRepo.On("FindByUserAndCourse", mock.Anything, uint(viewerID), uint(1)).
+	enrollmentRepo.On("FindByUserAndCourse", mock.Anything, uint(viewerID), uint(1), mock.AnythingOfType("uint")).
 		Return((*models.Enrollment)(nil), nil)
 	userRepo.On("FindByID", mock.Anything, uint(viewerID)).
 		Return(&models.User{ID: viewerID, Name: "Stranger", Role: "user"}, nil).Maybe()
