@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -52,6 +53,21 @@ func (r *GamificationWalletRepo) ListBalancesForUser(ctx context.Context, userID
 // pair, which is the right granularity: two users earning XP at the same
 // moment don't contend, but two simultaneous awards to the same user
 // linearize.
+//
+// Idempotency on (triggering_event_id, triggering_rule_id) — closes the
+// TOCTOU race between CheckCooldown and the effects pass in the
+// gamification dispatcher. When both fields are set, the INSERT uses
+// `ON CONFLICT (triggering_event_id, triggering_rule_id) WHERE
+// triggering_event_id IS NOT NULL DO NOTHING RETURNING id` against the
+// partial unique index uniq_wallet_tx_event_rule (migration 000059). If
+// a concurrent worker already wrote a row for the same (event, rule)
+// pair, the RETURNING yields no row; we translate that into the typed
+// sentinel repository.ErrDuplicateWalletTransaction and skip the balance
+// update so the duplicate emit is a clean no-op. The row-level lock on
+// the balance serializes the inference so we never double-count.
+//
+// Same pattern as gamification_currency_type Create — atomic
+// duplicate detection without a TOCTOU pre-check window.
 func (r *GamificationWalletRepo) ApplyTransaction(ctx context.Context, tx *models.GamificationWalletTransaction) error {
 	if tx.Delta == 0 {
 		return errors.New("wallet transaction delta must be non-zero")
@@ -72,7 +88,10 @@ func (r *GamificationWalletRepo) ApplyTransaction(ctx context.Context, tx *model
 			}
 		}
 
-		// Lock the balance row (or treat absence as zero).
+		// Lock the balance row (or treat absence as zero). The lock both
+		// serializes concurrent (user, currency) writers AND serializes
+		// the idempotency inference below — without it two workers could
+		// race past the duplicate check before either INSERT lands.
 		var balance models.GamificationWalletBalance
 		err := g.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("user_id = ? AND currency_type_id = ?", tx.UserID, tx.CurrencyTypeID).
@@ -87,8 +106,50 @@ func (r *GamificationWalletRepo) ApplyTransaction(ctx context.Context, tx *model
 			return fmt.Errorf("insufficient balance: have %d, delta %d", balance.Balance, tx.Delta)
 		}
 
-		// Append the immutable transaction row.
-		if err := g.Create(tx).Error; err != nil {
+		// Append the immutable transaction row. Use a raw INSERT so the
+		// ON CONFLICT inference targets the partial unique index
+		// uniq_wallet_tx_event_rule (migration 000059). When
+		// triggering_event_id IS NULL the partial index predicate
+		// excludes the row, so the INSERT always succeeds — manual
+		// grants / seeds / spends bypass idempotency by design (their
+		// natural keys live elsewhere).
+		//
+		// COALESCE(policy_flags, '{}') mirrors the column DEFAULT —
+		// a nil pq.StringArray binds as NULL, which would trip the
+		// NOT NULL constraint. The pre-fix Create path went through
+		// GORM which applied the default; raw SQL needs to be explicit.
+		const insertSQL = `
+			INSERT INTO gamification_wallet_transactions
+				(user_id, currency_type_id, delta, reason,
+				 triggering_event_id, triggering_rule_id,
+				 policy_flags, occurred_at)
+			VALUES
+				(?, ?, ?, ?, ?, ?, COALESCE(?, '{}'::text[]), COALESCE(?, NOW()))
+			ON CONFLICT (triggering_event_id, triggering_rule_id)
+			    WHERE triggering_event_id IS NOT NULL
+			    DO NOTHING
+			RETURNING id, occurred_at`
+		var occurredArg interface{}
+		if !tx.OccurredAt.IsZero() {
+			occurredArg = tx.OccurredAt
+		}
+		var policyFlagsArg interface{}
+		if tx.PolicyFlags != nil {
+			policyFlagsArg = tx.PolicyFlags
+		}
+		row := g.Raw(insertSQL,
+			tx.UserID, tx.CurrencyTypeID, tx.Delta, tx.Reason,
+			tx.TriggeringEventID, tx.TriggeringRuleID,
+			policyFlagsArg, occurredArg,
+		).Row()
+		if err := row.Scan(&tx.ID, &tx.OccurredAt); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				// Idempotency hit: a concurrent worker already wrote a
+				// row for this (event, rule) pair. Bail without
+				// touching the balance — the existing row's delta is
+				// already reflected.
+				return repository.ErrDuplicateWalletTransaction
+			}
 			return err
 		}
 

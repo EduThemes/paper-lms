@@ -2,10 +2,12 @@ package effects
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 )
 
 // AwardCurrency is the effect side of the economy: ledger a positive delta
@@ -63,6 +65,26 @@ func (a AwardCurrency) Apply(ctx context.Context, deps EffectDeps, trig Triggeri
 		PolicyFlags:       policyFlags,
 	}
 	if err := deps.Wallet.ApplyTransaction(ctx, tx); err != nil {
+		// Idempotent retry: a concurrent emit for the same (event, rule)
+		// pair already ledgered this award. Surface as a successful
+		// no-op so the dispatcher records the rule_evaluation cleanly
+		// rather than treating a race-loser as an effect failure. The
+		// underlying constraint (migration 000059) is the correctness
+		// fix; the cooldown gate stays an optimization.
+		if errors.Is(err, repository.ErrDuplicateWalletTransaction) {
+			detail := map[string]any{
+				"code":             a.Code,
+				"currency_type_id": currency.ID,
+				"amount":           a.Amount,
+				"final_delta":      final,
+				"idempotent":       true,
+			}
+			return EffectResult{
+				Kind:    a.Kind(),
+				Summary: fmt.Sprintf("no-op (idempotent): %s to user %d already awarded for this event", a.Code, trig.ActorID),
+				Detail:  detail,
+			}, nil
+		}
 		return EffectResult{}, fmt.Errorf("apply transaction: %w", err)
 	}
 

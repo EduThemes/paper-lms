@@ -21,6 +21,18 @@ var ErrCurrencyDuplicate = errors.New("currency with this code already exists in
 // pattern, same handler→409 translation.
 var ErrBadgeDuplicate = errors.New("badge with this code already exists in this scope")
 
+// ErrDuplicateWalletTransaction is returned by
+// GamificationWalletRepository.ApplyTransaction when the
+// (triggering_event_id, triggering_rule_id) pair already has a wallet
+// transaction row. This is the dispatcher-TOCTOU defense: two concurrent
+// emits for the same (user, rule) past the CheckCooldown gate both
+// attempt to INSERT a wallet row; the partial UNIQUE index
+// uniq_wallet_tx_event_rule (migration 000059) lets exactly one win and
+// the loser surfaces this sentinel. Callers (effects.AwardCurrency,
+// dispatcher) MUST treat the sentinel as a clean idempotent no-op —
+// neither a failure nor a re-emit.
+var ErrDuplicateWalletTransaction = errors.New("wallet transaction for (event, rule) already exists")
+
 // Phase 6 Wave 1: gamification foundations.
 // See docs/research/gamification-2026-05/PHASE6-WAVE1-PLAN.md.
 
