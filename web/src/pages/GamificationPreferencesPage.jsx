@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Trophy, Check, AlertTriangle } from 'lucide-react';
+import { Trans, useTranslation } from 'react-i18next';
 import Layout from '../components/Layout';
 import { api } from '../services/api';
 
@@ -14,6 +15,7 @@ import { api } from '../services/api';
 // the page copy makes this contract loud so a learner can opt out
 // without fearing they'll lose progress.
 export default function GamificationPreferencesPage() {
+  const { t } = useTranslation();
   const [optOut, setOptOut] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -28,11 +30,11 @@ export default function GamificationPreferencesPage() {
       setOptOut(!!prefs.leaderboard_opt_out);
     } catch (err) {
       console.error('GamificationPreferencesPage: failed to load', err);
-      setError(err.message || 'Could not load your preferences.');
+      setError(err.message || t('gamificationPreferencesPage.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     load();
@@ -51,7 +53,7 @@ export default function GamificationPreferencesPage() {
       // Revert the optimistic toggle on failure so the UI doesn't
       // diverge from the server.
       setOptOut(!next);
-      setError(err.message || 'Could not save preference.');
+      setError(err.message || t('gamificationPreferencesPage.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -62,22 +64,20 @@ export default function GamificationPreferencesPage() {
       <div className="max-w-2xl mx-auto py-6 space-y-6">
         <header>
           <h1 className="text-xl font-semibold text-text-primary flex items-center gap-2">
-            <Trophy className="w-5 h-5" /> Gamification preferences
+            <Trophy className="w-5 h-5" /> {t('gamificationPreferencesPage.title')}
           </h1>
           <p className="text-sm text-text-secondary mt-1">
-            Control how your progress is visible to peers. These settings only
-            affect what others see — they don&rsquo;t change your wallet, awards,
-            or mastery.
+            {t('gamificationPreferencesPage.subtitle')}
           </p>
         </header>
 
         {loading ? (
-          <div className="text-sm text-text-tertiary">Loading…</div>
+          <div className="text-sm text-text-tertiary">{t('common.loading')}</div>
         ) : (
           <section className="border border-surface-raised rounded-lg bg-surface-0">
             <div className="px-5 py-4 border-b border-surface-raised">
               <h2 className="text-sm font-semibold text-text-primary uppercase tracking-wider">
-                Privacy
+                {t('gamificationPreferencesPage.privacy')}
               </h2>
             </div>
             <div className="px-5 py-4">
@@ -91,14 +91,13 @@ export default function GamificationPreferencesPage() {
                 />
                 <div className="flex-1">
                   <div className="text-sm font-medium text-text-primary">
-                    Hide me from public leaderboards
+                    {t('gamificationPreferencesPage.hideFromLeaderboards')}
                   </div>
                   <p className="text-xs text-text-tertiary mt-1">
-                    When this is on, you&rsquo;ll be excluded from leaderboards
-                    your classmates can see. <strong>Your XP, gems, mastery
-                    points, and badges are not affected</strong> — you keep
-                    everything you&rsquo;ve earned, and rules still award you
-                    progress as usual. You can turn this back off any time.
+                    <Trans
+                      i18nKey="gamificationPreferencesPage.hideDescription"
+                      components={{ strong: <strong /> }}
+                    />
                   </p>
                 </div>
               </label>
@@ -112,7 +111,7 @@ export default function GamificationPreferencesPage() {
               {!error && savedAt && (
                 <div className="mt-3 flex items-center gap-1.5 text-xs text-accent-success">
                   <Check className="w-3.5 h-3.5" />
-                  <span>Saved.</span>
+                  <span>{t('gamificationPreferencesPage.saved')}</span>
                 </div>
               )}
             </div>
