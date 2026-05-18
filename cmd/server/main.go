@@ -774,10 +774,10 @@ func main() {
 	notificationHandler := handlers.NewNotificationHandler(notificationService)
 	// handlers
 	contentMigrationHandler := handlers.NewContentMigrationHandler(contentMigrationService)
-	learningOutcomeHandler := handlers.NewLearningOutcomeHandler(learningOutcomeService, outcomeAlignmentRepo)
+	learningOutcomeHandler := handlers.NewLearningOutcomeHandler(learningOutcomeService, outcomeAlignmentRepo, auditService)
 	speedGraderHandler := handlers.NewSpeedGraderHandler(speedGraderService, auditService)
 	// handlers
-	groupHandler := handlers.NewGroupHandler(groupService, authz)
+	groupHandler := handlers.NewGroupHandler(groupService, authz, auditService)
 	blueprintHandler := handlers.NewBlueprintHandler(blueprintService)
 	coursePaceHandler := handlers.NewCoursePaceHandler(coursePaceService)
 	// handlers
@@ -790,7 +790,7 @@ func main() {
 	graphqlHandler := handlers.NewGraphQLHandler(graphqlResolver)
 	authProviderHandler := handlers.NewAuthProviderHandler(authProviderService)
 	// handlers
-	announcementHandler := handlers.NewAnnouncementHandler(announcementService, authz)
+	announcementHandler := handlers.NewAnnouncementHandler(announcementService, authz, auditService)
 	enrollmentTermHandler := handlers.NewEnrollmentTermHandler(enrollmentTermService)
 	syllabusHandler := handlers.NewSyllabusHandler(courseService, assignmentService, assignmentGroupService, calendarService, gradingService, enrollmentService, submissionService)
 	// handlers
@@ -807,7 +807,7 @@ func main() {
 	// handlers
 	coppaHandler := handlers.NewCOPPAHandler(coppaService)
 	ferpaHandler := handlers.NewFERPAHandler(ferpaService)
-	accommodationHandler := handlers.NewAccommodationHandler(accommodationService, assignmentService, authz)
+	accommodationHandler := handlers.NewAccommodationHandler(accommodationService, assignmentService, authz, auditService)
 	attendanceHandler := handlers.NewAttendanceHandler(attendanceService, auditService)
 	portfolioHandler := handlers.NewPortfolioHandler(portfolioService, authz)
 	courseHomeHandler := handlers.NewCourseHomeHandler(courseHomeService)
@@ -828,7 +828,7 @@ func main() {
 	featureFlagHandler := handlers.NewFeatureFlagHandler(featureFlagService, enrollmentRepo, userRepo)
 	customGradebookColumnHandler := handlers.NewCustomGradebookColumnHandler(customGradebookColumnService, auditService)
 	masteryPathHandler := handlers.NewMasteryPathHandler(masteryPathService)
-	appointmentGroupHandler := handlers.NewAppointmentGroupHandler(appointmentGroupService, authz)
+	appointmentGroupHandler := handlers.NewAppointmentGroupHandler(appointmentGroupService, authz, auditService)
 	outcomeProficiencyHandler := handlers.NewOutcomeProficiencyHandler(outcomeProficiencyService, masteryGradebookService)
 	pairingCodeHandler := handlers.NewPairingCodeHandler(pairingCodeService)
 	// Wave 1 handlers
