@@ -1,30 +1,45 @@
 import React from 'react';
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+  DialogClose,
+} from '@/components/ui/dialog';
 
+// Warning dialog shown when authored content references another course
+// the audience may not be able to reach. Open-state is driven by the
+// callers passing a truthy `issues` array; closing the dialog (Esc,
+// outside click, X button, or Go Back) all route to `onGoBack`.
 export default function CrossCourseWarningDialog({ issues, onGoBack, onSaveAnyway }) {
-  if (!issues || issues.length === 0) return null;
+  const open = Array.isArray(issues) && issues.length > 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-surface-0 rounded-lg shadow-xl max-w-lg w-full mx-4">
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onGoBack();
+      }}
+    >
+      <DialogContent className="max-w-lg p-0 bg-surface-0 rounded-lg border border-border-default">
         <div className="flex items-center gap-3 px-6 py-4 border-b border-border-default">
           <div className="flex items-center justify-center w-10 h-10 bg-accent-warning/20 rounded-full shrink-0">
             <AlertTriangle size={20} className="text-accent-warning" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-text-primary">Cross-Course References Detected</h2>
-            <p className="text-sm text-text-tertiary mt-0.5">
+            <DialogTitle className="text-lg font-semibold text-text-primary">
+              Cross-Course References Detected
+            </DialogTitle>
+            <DialogDescription className="text-sm text-text-tertiary mt-0.5">
               This content contains links or images that reference other courses. Students enrolled only in this course may not be able to access them.
-            </p>
+            </DialogDescription>
           </div>
-          <button type="button" onClick={onGoBack} className="ml-auto text-text-disabled hover:text-text-secondary shrink-0">
-            <X size={20} />
-          </button>
         </div>
 
         <div className="px-6 py-4 max-h-60 overflow-y-auto">
           <ul className="space-y-2">
-            {issues.map((issue, i) => (
+            {(issues || []).map((issue, i) => (
               <li key={i} className="flex items-start gap-2 text-sm">
                 <span className="inline-block mt-0.5 w-2 h-2 bg-amber-400 rounded-full shrink-0" />
                 <div>
@@ -43,13 +58,15 @@ export default function CrossCourseWarningDialog({ issues, onGoBack, onSaveAnywa
         </div>
 
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-border-default bg-surface-1 rounded-b-lg">
-          <button
-            type="button"
-            onClick={onGoBack}
-            className="px-4 py-2 text-sm font-medium text-text-secondary bg-surface-0 border border-border-strong rounded-md hover:bg-surface-1"
-          >
-            Go Back
-          </button>
+          <DialogClose asChild>
+            <button
+              type="button"
+              onClick={onGoBack}
+              className="px-4 py-2 text-sm font-medium text-text-secondary bg-surface-0 border border-border-strong rounded-md hover:bg-surface-1"
+            >
+              Go Back
+            </button>
+          </DialogClose>
           <button
             type="button"
             onClick={onSaveAnyway}
@@ -58,7 +75,7 @@ export default function CrossCourseWarningDialog({ issues, onGoBack, onSaveAnywa
             Save Anyway
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
