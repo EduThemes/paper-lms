@@ -15,7 +15,6 @@ import AdminNav from './AdminNav';
 import NotificationBell from './NotificationBell';
 import MobileBottomNav from './MobileBottomNav';
 import ThemeToggle from './ThemeToggle';
-import LanguageSwitcher from './LanguageSwitcher';
 import CurrencyPills from './gamification/CurrencyPills';
 import BrandLogo from './brand/BrandLogo';
 import UserMenu from './UserMenu';
@@ -308,7 +307,6 @@ const Layout = ({ children }) => {
       <div className="border-t border-white/10 py-2 space-y-1 flex flex-col items-center w-full">
         <NotificationBell />
         <ThemeToggle />
-        <LanguageSwitcher />
         <UserMenu
           user={user}
           onLogout={() => { setMobileMenuOpen(false); handleLogout(); }}

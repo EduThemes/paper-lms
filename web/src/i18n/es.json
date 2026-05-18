@@ -815,6 +815,28 @@
         "mismatch": "Las contraseñas no coinciden.",
         "noPending": "No se encontró un restablecimiento de contraseña pendiente. Inicia sesión nuevamente."
       }
+    },
+    "accountSettings": {
+      "language": {
+        "title": "Idioma",
+        "description": "Elige el idioma de la interfaz."
+      }
+    },
+    "languagePreferences": {
+      "title": "Idioma",
+      "subtitle": "Elige el idioma que se usa en toda la aplicación.",
+      "english": "Inglés",
+      "spanish": "Español",
+      "currentLabel": "Idioma actual",
+      "savedToast": "Idioma actualizado"
     }
+  },
+  "languagePreferencesPage": {
+    "title": "Idioma",
+    "subtitle": "Elige el idioma que se usa en toda la aplicación.",
+    "english": "Inglés",
+    "spanish": "Español",
+    "currentLabel": "Idioma actual",
+    "savedToast": "Idioma actualizado"
   }
 }

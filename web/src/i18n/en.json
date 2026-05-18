@@ -815,6 +815,28 @@
         "mismatch": "Passwords do not match.",
         "noPending": "No pending password-reset found. Please log in again."
       }
+    },
+    "accountSettings": {
+      "language": {
+        "title": "Language",
+        "description": "Choose the language for the interface."
+      }
+    },
+    "languagePreferences": {
+      "title": "Language",
+      "subtitle": "Choose the language used throughout the app.",
+      "english": "English",
+      "spanish": "Spanish",
+      "currentLabel": "Current language",
+      "savedToast": "Language updated"
     }
+  },
+  "languagePreferencesPage": {
+    "title": "Language",
+    "subtitle": "Choose the language used throughout the app.",
+    "english": "English",
+    "spanish": "Spanish",
+    "currentLabel": "Current language",
+    "savedToast": "Language updated"
   }
 }
