@@ -73,10 +73,10 @@ type ActivityItem struct {
 // compile-time safety without modifying shared interface files.
 type ObserverEnrollmentRepository interface {
 	Create(ctx context.Context, enrollment *models.Enrollment) error
-	FindByID(ctx context.Context, id uint) (*models.Enrollment, error)
-	ListByCourseID(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Enrollment], error)
-	ListByUserID(ctx context.Context, userID uint) ([]models.Enrollment, error)
-	FindByUserAndCourse(ctx context.Context, userID, courseID uint) (*models.Enrollment, error)
+	FindByID(ctx context.Context, id, accountID uint) (*models.Enrollment, error)
+	ListByCourseID(ctx context.Context, courseID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Enrollment], error)
+	ListByUserID(ctx context.Context, userID, accountID uint) ([]models.Enrollment, error)
+	FindByUserAndCourse(ctx context.Context, userID, courseID, accountID uint) (*models.Enrollment, error)
 	Update(ctx context.Context, enrollment *models.Enrollment) error
 }
 
@@ -151,7 +151,7 @@ func (s *ObserverService) LinkObserverToStudent(ctx context.Context, observerUse
 	}
 
 	// Get all active enrollments for the student.
-	studentEnrollments, err := s.enrollmentRepo.ListByUserID(ctx, studentUserID)
+	studentEnrollments, err := s.enrollmentRepo.ListByUserID(ctx, studentUserID, 0)
 	if err != nil {
 		return errors.New("could not fetch student enrollments")
 	}
@@ -187,7 +187,7 @@ func (s *ObserverService) LinkObserverToStudent(ctx context.Context, observerUse
 // UnlinkObserver removes observer enrollments for the given student by setting
 // the workflow_state to "deleted" on each matching ObserverEnrollment.
 func (s *ObserverService) UnlinkObserver(ctx context.Context, observerUserID, studentUserID uint) error {
-	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID)
+	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
 	if err != nil {
 		return errors.New("could not fetch observer enrollments")
 	}
@@ -219,7 +219,7 @@ func (s *ObserverService) UnlinkObserver(ctx context.Context, observerUserID, st
 // linked to, derived from active ObserverEnrollment records where
 // associated_user_id is not null.
 func (s *ObserverService) ListObservedStudents(ctx context.Context, observerUserID uint) ([]uint, error) {
-	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID)
+	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
 	if err != nil {
 		return nil, errors.New("could not fetch observer enrollments")
 	}
@@ -249,7 +249,7 @@ func (s *ObserverService) ListObservedStudents(ctx context.Context, observerUser
 // IsObserverOf checks whether the observer has an active ObserverEnrollment
 // linked to the given student.
 func (s *ObserverService) IsObserverOf(ctx context.Context, observerUserID, studentUserID uint) (bool, error) {
-	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID)
+	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
 	if err != nil {
 		return false, errors.New("could not fetch observer enrollments")
 	}
@@ -285,7 +285,7 @@ func (s *ObserverService) GetObserveeCourses(ctx context.Context, observerUserID
 	}
 
 	// Get the student's active enrollments to find their courses
-	studentEnrollments, err := s.enrollmentRepo.ListByUserID(ctx, studentUserID)
+	studentEnrollments, err := s.enrollmentRepo.ListByUserID(ctx, studentUserID, 0)
 	if err != nil {
 		return nil, errors.New("could not fetch student enrollments")
 	}
@@ -329,7 +329,7 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 		return nil, errors.New("observer is not linked to this student")
 	}
 
-	studentEnrollments, err := s.enrollmentRepo.ListByUserID(ctx, childID)
+	studentEnrollments, err := s.enrollmentRepo.ListByUserID(ctx, childID, 0)
 	if err != nil {
 		return nil, errors.New("could not fetch student enrollments")
 	}
@@ -514,7 +514,7 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 // GetObserverDashboard returns the courses where the observer has an active
 // ObserverEnrollment.
 func (s *ObserverService) GetObserverDashboard(ctx context.Context, observerUserID uint) ([]models.Course, error) {
-	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID)
+	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
 	if err != nil {
 		return nil, errors.New("could not fetch observer enrollments")
 	}

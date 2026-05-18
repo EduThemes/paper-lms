@@ -52,7 +52,7 @@ func (h *EnrollmentHandler) ListEnrollments(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.enrollmentService.ListByCourse(c.Context(), uint(courseID), params)
+	result, err := h.enrollmentService.ListByCourse(c.Context(), uint(courseID), callerAccountID(c), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch enrollments")
 	}
@@ -100,7 +100,7 @@ func (h *EnrollmentHandler) CreateEnrollment(c *fiber.Ctx) error {
 		WorkflowState:   models.EnrollmentActive,
 	}
 
-	if err := h.enrollmentService.Create(c.Context(), enrollment); err != nil {
+	if err := h.enrollmentService.Create(c.Context(), enrollment, callerAccountID(c)); err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 

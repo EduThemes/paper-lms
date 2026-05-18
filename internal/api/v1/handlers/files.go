@@ -158,7 +158,7 @@ func (h *FileHandler) DownloadFile(c *fiber.Ctx) error {
 	// Authorization: verify user is enrolled in the course that owns this file
 	if attachment.ContextType == "Course" {
 		userID, _ := c.Locals("user_id").(uint)
-		enrollment, _ := h.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, attachment.ContextID)
+		enrollment, _ := h.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, attachment.ContextID, callerAccountID(c))
 		if enrollment == nil || enrollment.WorkflowState != "active" {
 			// 13.1.E: existence leak — return 404 not 403. The file
 			// exists (the tenant filter on GetAttachment passed), but

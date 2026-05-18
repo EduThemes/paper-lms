@@ -38,7 +38,10 @@ func EnrolledCourseEmitCallback(
 	courseRepo repository.CourseRepository,
 ) service.EnrollmentCreatedCallback {
 	return func(ctx context.Context, enrollmentID uint) {
-		enrollment, err := enrollmentRepo.FindByID(ctx, enrollmentID)
+		// accountID=0: internal callback fired in a detached goroutine,
+		// no caller request context. The enrollmentID came from the
+		// originating service that already validated tenant ownership.
+		enrollment, err := enrollmentRepo.FindByID(ctx, enrollmentID, 0)
 		if err != nil {
 			slog.Error("enrolled course emit: load enrollment",
 				"enrollment_id", enrollmentID, "error", err)

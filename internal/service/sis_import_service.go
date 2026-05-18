@@ -532,7 +532,7 @@ func (s *SISImportService) processEnrollmentsCSV(ctx context.Context, batchID ui
 		}
 
 		// Check for existing enrollment (deduplication on re-import)
-		existingEnrollment, _ := s.enrollmentRepo.FindByUserAndCourse(ctx, user.ID, course.ID)
+		existingEnrollment, _ := s.enrollmentRepo.FindByUserAndCourse(ctx, user.ID, course.ID, 0)
 		if existingEnrollment != nil && existingEnrollment.Type == enrollmentType {
 			// Update existing enrollment instead of creating a duplicate
 			existingEnrollment.WorkflowState = workflowState

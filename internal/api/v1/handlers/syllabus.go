@@ -98,7 +98,7 @@ func (h *SyllabusHandler) GetSyllabus(c *fiber.Ctx) error {
 	// 2. Determine the user's role in this course
 	userRole := ""
 	if userID > 0 {
-		role, roleErr := h.enrollmentService.GetUserRole(c.Context(), userID, uint(courseID))
+		role, roleErr := h.enrollmentService.GetUserRole(c.Context(), userID, uint(courseID), callerAccountID(c))
 		if roleErr == nil {
 			userRole = role
 		}

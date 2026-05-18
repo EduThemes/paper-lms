@@ -67,7 +67,7 @@ func NewPlannerService(
 // chronological list within the given date range.
 func (s *PlannerService) GetPlannerItems(ctx context.Context, userID uint, startDate, endDate time.Time) ([]PlannerItem, error) {
 	// 1. Fetch the user's active enrollments to discover their courses.
-	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, userID)
+	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, userID, 0)
 	if err != nil {
 		return nil, err
 	}

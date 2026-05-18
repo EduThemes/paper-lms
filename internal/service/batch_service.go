@@ -506,7 +506,7 @@ func (s *BatchService) BulkSendMessage(
 
 	// Get all enrollments for the course
 	allParams := repository.PaginationParams{Page: 1, PerPage: 1000}
-	enrollments, err := s.enrollmentRepo.ListByCourseID(ctx, recipientCourseID, allParams)
+	enrollments, err := s.enrollmentRepo.ListByCourseID(ctx, recipientCourseID, 0, allParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list enrollments: %w", err)
 	}
@@ -631,7 +631,7 @@ func (s *BatchService) BulkEnrollUsers(
 		}
 
 		// Check for existing enrollment
-		existing, _ := s.enrollmentRepo.FindByUserAndCourse(ctx, req.UserID, courseID)
+		existing, _ := s.enrollmentRepo.FindByUserAndCourse(ctx, req.UserID, courseID, 0)
 		if existing != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("enrollment[%d]: user %d is already enrolled in this course", i, req.UserID))
 			continue
