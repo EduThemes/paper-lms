@@ -10,10 +10,11 @@ import (
 
 type SectionHandler struct {
 	sectionRepo repository.SectionRepository
+	authz       *ResourceAuthorizer
 }
 
-func NewSectionHandler(sectionRepo repository.SectionRepository) *SectionHandler {
-	return &SectionHandler{sectionRepo: sectionRepo}
+func NewSectionHandler(sectionRepo repository.SectionRepository, authz *ResourceAuthorizer) *SectionHandler {
+	return &SectionHandler{sectionRepo: sectionRepo, authz: authz}
 }
 
 func sectionToJSON(s *models.CourseSection) fiber.Map {
@@ -94,6 +95,13 @@ func (h *SectionHandler) GetSection(c *fiber.Ctx) error {
 	section, err := h.sectionRepo.FindByID(c.Context(), uint(id))
 	if err != nil {
 		return responses.NotFound(c, "section")
+	}
+
+	// Section authz lives on the owning course: only enrolled callers
+	// see it. Pre-2026-05-22 this endpoint was open to any authenticated
+	// user, including cross-tenant — a course enumeration vector.
+	if err := h.authz.RequireCourseEnrolled(c, section.CourseID); err != nil {
+		return err
 	}
 
 	return c.JSON(sectionToJSON(section))

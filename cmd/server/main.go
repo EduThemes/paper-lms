@@ -731,7 +731,10 @@ func main() {
 		WithCOPPADeps(accountRepo, ageVerificationRepo, parentalConsentRepo, authAudit)
 	accountHandler := handlers.NewAccountHandler(accountRepo)
 	courseHandler := handlers.NewCourseHandler(courseService, enrollmentService)
-	sectionHandler := handlers.NewSectionHandler(sectionRepo)
+	// sectionHandler is constructed below, after `authz` is available.
+	// See the NewResourceAuthorizer line further down in this same
+	// init block. Section authz piggy-backs on RequireCourseEnrolled.
+	var sectionHandler *handlers.SectionHandler
 	enrollmentHandler := handlers.NewEnrollmentHandler(enrollmentService)
 	moduleHandler := handlers.NewModuleHandler(moduleService)
 	moduleItemHandler := handlers.NewModuleItemHandler(moduleService, pageService)
@@ -758,6 +761,7 @@ func main() {
 	fileHandler := handlers.NewFileHandler(fileService, enrollmentRepo, auditService)
 	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo)
 	folderHandler := handlers.NewFolderHandler(fileService, authz)
+	sectionHandler = handlers.NewSectionHandler(sectionRepo, authz)
 	sisImportHandler := handlers.NewSISImportHandler(sisImportService)
 	// handlers
 	quizHandler := handlers.NewQuizHandler(quizRepo)
