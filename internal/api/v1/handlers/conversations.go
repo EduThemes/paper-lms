@@ -257,10 +257,14 @@ func (h *ConversationHandler) UpdateConversation(c *fiber.Ctx) error {
 		return responses.NotFound(c, "conversation")
 	}
 
+	// WorkflowState is intentionally NOT in this DTO. A conversation's
+	// workflow_state is shared across all participants — letting any one
+	// participant write it would clobber visibility for everyone else.
+	// Read/archive state lives on the per-participant message endpoints
+	// (MarkAsRead) instead. See 2026-05-22 audit finding #3.
 	var input struct {
 		Conversation struct {
-			WorkflowState *string `json:"workflow_state"`
-			Subject       *string `json:"subject"`
+			Subject *string `json:"subject"`
 		} `json:"conversation"`
 	}
 
@@ -268,9 +272,6 @@ func (h *ConversationHandler) UpdateConversation(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 
-	if input.Conversation.WorkflowState != nil {
-		conv.WorkflowState = *input.Conversation.WorkflowState
-	}
 	if input.Conversation.Subject != nil {
 		conv.Subject = *input.Conversation.Subject
 	}
