@@ -218,6 +218,14 @@ func AuthRateLimit() fiber.Handler {
 	return RateLimitMiddleware(10, 1*time.Minute)
 }
 
+// SetupRateLimit returns a rate-limiting handler preconfigured for
+// the one-shot setup wizard: 3 requests per 5 minutes per IP. Even
+// with SETUP_BOOTSTRAP_TOKEN gating the endpoint, a tight limit makes
+// online brute-force against the token prohibitive.
+func SetupRateLimit() fiber.Handler {
+	return RateLimitMiddleware(3, 5*time.Minute)
+}
+
 // UploadRateLimit returns a rate-limiting handler preconfigured for
 // file upload and import endpoints: 10 requests per 5 minutes per IP address.
 func UploadRateLimit() fiber.Handler {

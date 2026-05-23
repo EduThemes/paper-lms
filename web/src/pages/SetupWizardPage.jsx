@@ -60,6 +60,10 @@ const SetupWizardPage = ({ onSetupComplete }) => {
     admin_password: '',
     confirm_password: '',
     instance_name: 'Paper LMS',
+    // Optional bootstrap token. Required only when the instance was
+    // deployed with SETUP_BOOTSTRAP_TOKEN set — the operator pastes the
+    // token they generated. Empty means the legacy open-wizard mode.
+    setup_token: '',
   });
   const [createdUser, setCreatedUser] = useState(null);
 
@@ -87,12 +91,15 @@ const SetupWizardPage = ({ onSetupComplete }) => {
 
     setLoading(true);
     try {
-      const { data } = await api.completeSetup({
-        admin_name: formData.admin_name.trim(),
-        admin_email: formData.admin_email.trim(),
-        admin_password: formData.admin_password,
-        instance_name: formData.instance_name.trim(),
-      });
+      const { data } = await api.completeSetup(
+        {
+          admin_name: formData.admin_name.trim(),
+          admin_email: formData.admin_email.trim(),
+          admin_password: formData.admin_password,
+          instance_name: formData.instance_name.trim(),
+        },
+        { setupToken: formData.setup_token.trim() || undefined }
+      );
       setCreatedUser(data.user);
       setStep(3);
     } catch (err) {
@@ -209,6 +216,23 @@ const SetupWizardPage = ({ onSetupComplete }) => {
                     placeholder="Paper LMS"
                   />
                   <p className="text-xs text-text-disabled mt-1">The name displayed across your LMS instance.</p>
+                </div>
+
+                <div>
+                  <label htmlFor="setup_token" className="block text-sm font-medium text-text-secondary mb-1">
+                    Setup Token <span className="text-text-disabled">(optional)</span>
+                  </label>
+                  <input
+                    id="setup_token"
+                    name="setup_token"
+                    type="password"
+                    autoComplete="off"
+                    value={formData.setup_token}
+                    onChange={handleChange}
+                    className="w-full px-3 py-2 border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                    placeholder=""
+                  />
+                  <p className="text-xs text-text-disabled mt-1">Required only when your deploy operator set SETUP_BOOTSTRAP_TOKEN. Leave blank otherwise.</p>
                 </div>
 
                 <div className="flex space-x-3 pt-2">
