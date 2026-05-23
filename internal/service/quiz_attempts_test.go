@@ -71,6 +71,10 @@ func TestStartSubmission_Resume(t *testing.T) {
 		WorkflowState: "untaken",
 	}
 
+	// F-048: StartSubmission now loads the quiz BEFORE the submission
+	// lookup so it can enforce unlock_at / lock_at windows. Tests need
+	// to stub that lookup.
+	quizRepo.On("FindByID", ctx, uint(1), uint(0)).Return(&models.Quiz{ID: 1, AllowedAttempts: -1}, nil)
 	submissionRepo.On("FindByQuizAndUser", ctx, uint(1), uint(10)).Return(existingSub, nil)
 
 	result, err := svc.StartSubmission(ctx, 1, 10, nil)
@@ -81,6 +85,57 @@ func TestStartSubmission_Resume(t *testing.T) {
 	assert.Equal(t, 1, result.Attempt)
 	assert.Equal(t, "untaken", result.WorkflowState)
 	// Create should NOT have been called since we're resuming
+	submissionRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+}
+
+// TestStartSubmission_LockAtRejects — F-048: a quiz past its lock_at
+// MUST refuse new submissions. Pre-fix path silently created one.
+func TestStartSubmission_LockAtRejects(t *testing.T) {
+	questionRepo := new(mocks.MockQuizQuestionRepository)
+	submissionRepo := new(mocks.MockQuizSubmissionRepository)
+	answerRepo := new(mocks.MockQuizSubmissionAnswerRepository)
+	quizRepo := new(mocks.MockQuizRepository)
+	svc := service.NewQuizService(quizRepo, questionRepo, submissionRepo, answerRepo)
+
+	ctx := context.Background()
+	past := time.Now().Add(-1 * time.Hour)
+	quizRepo.On("FindByID", ctx, uint(1), uint(0)).Return(&models.Quiz{
+		ID:              1,
+		AllowedAttempts: -1,
+		LockAt:          &past,
+	}, nil)
+
+	result, err := svc.StartSubmission(ctx, 1, 10, nil)
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "locked")
+	// The submission table MUST NOT be touched on a locked quiz.
+	submissionRepo.AssertNotCalled(t, "FindByQuizAndUser", mock.Anything, mock.Anything, mock.Anything)
+	submissionRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+}
+
+// TestStartSubmission_UnlockAtRejects — F-048: a quiz before its
+// unlock_at MUST refuse the start so students cannot preview questions.
+func TestStartSubmission_UnlockAtRejects(t *testing.T) {
+	questionRepo := new(mocks.MockQuizQuestionRepository)
+	submissionRepo := new(mocks.MockQuizSubmissionRepository)
+	answerRepo := new(mocks.MockQuizSubmissionAnswerRepository)
+	quizRepo := new(mocks.MockQuizRepository)
+	svc := service.NewQuizService(quizRepo, questionRepo, submissionRepo, answerRepo)
+
+	ctx := context.Background()
+	future := time.Now().Add(1 * time.Hour)
+	quizRepo.On("FindByID", ctx, uint(1), uint(0)).Return(&models.Quiz{
+		ID:              1,
+		AllowedAttempts: -1,
+		UnlockAt:        &future,
+	}, nil)
+
+	result, err := svc.StartSubmission(ctx, 1, 10, nil)
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "not yet available")
+	submissionRepo.AssertNotCalled(t, "FindByQuizAndUser", mock.Anything, mock.Anything, mock.Anything)
 	submissionRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
 	submissionRepo.AssertExpectations(t)
 }

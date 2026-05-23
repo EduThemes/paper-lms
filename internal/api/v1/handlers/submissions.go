@@ -251,6 +251,13 @@ func (h *SubmissionHandler) CreateSubmission(c *fiber.Ctx) error {
 	}
 
 	if err := h.submissionService.Create(c.Context(), submission); err != nil {
+		// F-047: distinct status codes for the lock/unlock windows so
+		// the client UI can show the right "not yet" vs "too late"
+		// message. 409 Conflict matches the state-machine semantics.
+		switch err {
+		case service.ErrSubmissionLocked, service.ErrSubmissionNotYetUnlocked:
+			return responses.Error(c, fiber.StatusConflict, err.Error())
+		}
 		return responses.BadRequest(c, err.Error())
 	}
 
