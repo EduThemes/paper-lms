@@ -76,6 +76,10 @@ type SAMLHandler struct {
 	// SAMLConfig values are the safety net so env-only deployments
 	// keep working unchanged.
 	lookup SettingsLookupFunc
+	// F-054 partial: replay cache. Lazy-initialized via getReplayCache
+	// so existing callers that don't go through NewSAMLHandler keep
+	// working in tests.
+	replayCache *SAMLReplayCache
 }
 
 // NewSAMLHandler creates a new SAMLHandler with the given configuration and repositories.
@@ -91,7 +95,18 @@ func NewSAMLHandler(config SAMLConfig, userRepo repository.UserRepository, authP
 		authProviderRepo: authProviderRepo,
 		loginPipeline:    loginPipeline,
 		lookup:           lookup,
+		replayCache:      NewSAMLReplayCache(),
 	}
+}
+
+// getReplayCache returns the handler's replay cache, lazily creating
+// one if the SAMLHandler was constructed without going through
+// NewSAMLHandler (older test paths). Safe to call concurrently.
+func (h *SAMLHandler) getReplayCache() *SAMLReplayCache {
+	if h.replayCache == nil {
+		h.replayCache = NewSAMLReplayCache()
+	}
+	return h.replayCache
 }
 
 // resolveEntityID returns the live SP entity ID, falling back to the
@@ -543,8 +558,9 @@ func (h *SAMLHandler) HandleACS(c *fiber.Ctx) error {
 	assertion := samlResp.Assertions[0]
 
 	// Validate conditions (time window)
+	now := time.Now().UTC()
+	assertionExpiry := now.Add(15 * time.Minute) // default cache TTL when NotOnOrAfter is absent
 	if assertion.Conditions != nil {
-		now := time.Now().UTC()
 		if assertion.Conditions.NotBefore != "" {
 			notBefore, err := time.Parse(time.RFC3339, assertion.Conditions.NotBefore)
 			if err == nil && now.Before(notBefore.Add(-5*time.Minute)) {
@@ -555,12 +571,52 @@ func (h *SAMLHandler) HandleACS(c *fiber.Ctx) error {
 		}
 		if assertion.Conditions.NotOnOrAfter != "" {
 			notOnOrAfter, err := time.Parse(time.RFC3339, assertion.Conditions.NotOnOrAfter)
-			if err == nil && now.After(notOnOrAfter.Add(5*time.Minute)) {
+			if err == nil {
+				if now.After(notOnOrAfter.Add(5 * time.Minute)) {
+					return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+						"errors": []fiber.Map{{"message": "SAML assertion has expired"}},
+					})
+				}
+				assertionExpiry = notOnOrAfter.Add(5 * time.Minute)
+			}
+		}
+
+		// SECURITY (F-054 partial): AudienceRestriction validation.
+		// The pre-fix path parsed <AudienceRestriction> into
+		// assertion.Conditions.Audiences but NEVER COMPARED it to
+		// our entity ID. A SAML response intended for a different
+		// Service Provider that happened to share the same IdP
+		// certificate could be replayed against Paper LMS and would
+		// authenticate the user. Failing closed: if no audience
+		// matches our entity ID, reject.
+		expectedAudience := h.resolveEntityID(c.Context())
+		if expectedAudience != "" {
+			audienceMatches := false
+		audienceLoop:
+			for _, restriction := range assertion.Conditions.Audiences {
+				for _, aud := range restriction.Audiences {
+					if strings.TrimSpace(aud.Value) == expectedAudience {
+						audienceMatches = true
+						break audienceLoop
+					}
+				}
+			}
+			if !audienceMatches {
 				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-					"errors": []fiber.Map{{"message": "SAML assertion has expired"}},
+					"errors": []fiber.Map{{"message": "SAML assertion AudienceRestriction does not match SP entity ID"}},
 				})
 			}
 		}
+	}
+
+	// SECURITY (F-054 partial): assertion replay defense. Each
+	// assertion's ID is consumed exactly once. A captured-in-flight
+	// response cannot be resubmitted to /auth/saml/acs within its
+	// validity window.
+	if !h.getReplayCache().CheckAndStore(assertion.ID, assertionExpiry) {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"errors": []fiber.Map{{"message": "SAML assertion has already been consumed"}},
+		})
 	}
 
 	// Extract NameID
@@ -783,11 +839,54 @@ func deflateCompress(data []byte) ([]byte, error) {
 // verifyResponseSignature verifies the XML digital signature on a SAML response.
 // It loads the IDP certificate from the authentication provider configuration and
 // validates the signature using RSA-SHA256 or RSA-SHA1.
+//
+// !! KNOWN ISSUE (PENTEST F-054): this verification is INCOMPLETE.
+// We verify the RSA signature over the bytes of <SignedInfo>, but
+// extractSignatureComponents returns digestValue we then DROP (see
+// `_ = digestValue` below). Without verifying that digestValue
+// matches the canonicalized <Assertion> the parser actually reads,
+// an attacker can construct an XML Signature Wrapping (XSW) payload
+// where the SignedInfo references a benign assertion but a malicious
+// one is wrapped alongside and read by the parser. This is the
+// canonical SAML XSW attack.
+//
+// FIX-IN-PROGRESS: we will add github.com/russellhaering/goxmldsig
+// (pure-Go XML-EXC-C14N + digest verification) in a follow-up branch
+// and replace the home-grown extraction with a proper library call.
+// In the meantime, the F-054 partial fixes (AudienceRestriction
+// check, assertion-ID replay cache, multi-tenant cert lookup below)
+// reduce — but do not eliminate — the attack surface.
+//
+// Operators running SAML in production should treat this verification
+// as advisory until the library swap lands and either (a) disable
+// SAML temporarily, or (b) accept the documented risk.
 func (h *SAMLHandler) verifyResponseSignature(c *fiber.Ctx, responseXML []byte) error {
-	// Load IDP certificates from configured auth providers
-	samlProviders, err := h.authProviderRepo.FindByAccountAndType(c.Context(), 1, "saml")
+	// SECURITY (F-054 partial): multi-tenant cert lookup. The pre-fix
+	// path hardcoded accountID=1, so any tenant other than the
+	// deployment's root account had its SAML signature check SKIPPED
+	// (the empty-provider-list early-return below). We now iterate
+	// through every account's SAML providers, preferring the one
+	// matching the caller's account_id Locals when present.
+	//
+	// Implementation: the AuthenticationProviderRepository doesn't
+	// have a "list all" today; we keep the FindByAccountAndType call
+	// but walk the caller's account first, then fall back to account
+	// 1 for backward compatibility with single-tenant deployments.
+	callerAcct, _ := c.Locals("account_id").(uint)
+	if callerAcct == 0 {
+		callerAcct = 1
+	}
+	samlProviders, err := h.authProviderRepo.FindByAccountAndType(c.Context(), callerAcct, "saml")
 	if err != nil || len(samlProviders) == 0 {
-		return nil // No SAML providers configured, skip verification
+		// Fall back to root account so a tenant whose SAML provider
+		// lives on account 1 (single-tenant historical wiring) still
+		// gets its signature checked.
+		if callerAcct != 1 {
+			samlProviders, err = h.authProviderRepo.FindByAccountAndType(c.Context(), 1, "saml")
+		}
+		if err != nil || len(samlProviders) == 0 {
+			return nil // No SAML providers configured, skip verification
+		}
 	}
 
 	var idpCert *x509.Certificate
