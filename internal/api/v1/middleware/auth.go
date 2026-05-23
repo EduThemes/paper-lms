@@ -3,6 +3,7 @@ package middleware
 import (
 	"strings"
 
+	"github.com/EduThemes/paper-lms/internal/auth"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
 	"github.com/gofiber/fiber/v2"
@@ -49,13 +50,17 @@ func (m *AuthMiddleware) Protected() fiber.Handler {
 			})
 		}
 
-		// Try JWT first (session tokens from login)
+		// Try JWT first (session tokens from login). aud/iss validation
+		// added 2026-05-22 (audit finding #5): the parser rejects any
+		// token without iss=paper-lms AND aud=paper-lms-api, so a JWT
+		// minted for an unrelated service that happens to share
+		// JWT_SECRET cannot be replayed as a Paper LMS session.
 		jwtToken, jwtErr := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, jwt.ErrSignatureInvalid
 			}
 			return []byte(m.jwtSecret), nil
-		})
+		}, jwt.WithIssuer(auth.JWTIssuer), jwt.WithAudience(auth.JWTAudienceAPI))
 
 		if jwtErr == nil && jwtToken.Valid {
 			// Check if token was revoked via logout

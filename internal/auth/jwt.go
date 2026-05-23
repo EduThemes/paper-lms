@@ -7,7 +7,18 @@ import (
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 )
 
+// JWT issuer and audience values asserted on every Paper LMS session
+// token. Validating both prevents a token minted for another service
+// (or a different Paper LMS subsystem) from being accepted as a
+// session token if JWT_SECRET is ever shared across services.
+// Documented as audit finding #5, 2026-05-22.
+const (
+	JWTIssuer       = "paper-lms"
+	JWTAudienceAPI  = "paper-lms-api"
+)
+
 func GenerateToken(user *models.User, secret string) (string, error) {
+	now := time.Now()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"id":    user.ID,
 		"email": user.Email,
@@ -24,7 +35,10 @@ func GenerateToken(user *models.User, secret string) (string, error) {
 		// don't carry the claim and fall back to a userRepo lookup +
 		// 401 if the DB column is also null.
 		"account_id": user.AccountID,
-		"exp":        time.Now().Add(time.Hour * 24).Unix(),
+		"iss":        JWTIssuer,
+		"aud":        JWTAudienceAPI,
+		"iat":        now.Unix(),
+		"exp":        now.Add(time.Hour * 24).Unix(),
 	})
 
 	return token.SignedString([]byte(secret))
@@ -44,6 +58,7 @@ func GenerateToken(user *models.User, secret string) (string, error) {
 // `admin_account_id` carries the masquerader's home tenant so audit
 // logging can attribute the action back to the real admin.
 func GenerateMasqueradeToken(targetUser *models.User, adminUserID, adminAccountID uint, secret string) (string, error) {
+	now := time.Now()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"id":               targetUser.ID,
 		"email":            targetUser.Email,
@@ -52,7 +67,10 @@ func GenerateMasqueradeToken(targetUser *models.User, adminUserID, adminAccountI
 		"masquerade_by":    adminUserID,
 		"account_id":       targetUser.AccountID,
 		"admin_account_id": adminAccountID,
-		"exp":              time.Now().Add(time.Hour * 24).Unix(),
+		"iss":              JWTIssuer,
+		"aud":              JWTAudienceAPI,
+		"iat":              now.Unix(),
+		"exp":              now.Add(time.Hour * 24).Unix(),
 	})
 
 	return token.SignedString([]byte(secret))

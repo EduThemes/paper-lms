@@ -127,6 +127,71 @@ func TestProtected_InvalidJWT(t *testing.T) {
 	assert.Contains(t, errMap["message"], "Invalid or expired token")
 }
 
+// TestProtected_WrongAudience confirms a structurally valid token
+// signed with the right secret but minted for a different audience
+// is rejected. This is the cross-service replay defense added by
+// audit finding #5 (2026-05-22).
+func TestProtected_WrongAudience(t *testing.T) {
+	app := setupProtectedApp(nil, nil)
+
+	claims := jwt.MapClaims{
+		"id":    float64(42),
+		"email": "alice@example.com",
+		"name":  "Alice Wonderland",
+		"iss":   auth.JWTIssuer,
+		"aud":   "some-other-service",
+		"exp":   time.Now().Add(time.Hour).Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenStr, err := token.SignedString([]byte(testJWTSecret))
+	assert.NoError(t, err)
+
+	resp := testutil.MakeAuthenticatedRequest(app, http.MethodGet, "/protected", tokenStr, nil)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+// TestProtected_WrongIssuer mirrors WrongAudience for the iss claim.
+// Both must match — a token with the right aud but wrong iss is
+// equally rejected.
+func TestProtected_WrongIssuer(t *testing.T) {
+	app := setupProtectedApp(nil, nil)
+
+	claims := jwt.MapClaims{
+		"id":    float64(42),
+		"email": "alice@example.com",
+		"iss":   "not-paper-lms",
+		"aud":   auth.JWTAudienceAPI,
+		"exp":   time.Now().Add(time.Hour).Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenStr, err := token.SignedString([]byte(testJWTSecret))
+	assert.NoError(t, err)
+
+	resp := testutil.MakeAuthenticatedRequest(app, http.MethodGet, "/protected", tokenStr, nil)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+// TestProtected_LegacyJWTWithoutAudience confirms tokens minted before
+// the iss/aud enforcement (no iss, no aud) are also rejected. This is
+// the user-impact note in the PR: existing sessions get logged out on
+// deploy and must re-authenticate. Tradeoff is acceptable given the
+// 24h TTL and that the alternative is a downgrade attack surface.
+func TestProtected_LegacyJWTWithoutAudience(t *testing.T) {
+	app := setupProtectedApp(nil, nil)
+
+	claims := jwt.MapClaims{
+		"id":    float64(42),
+		"email": "alice@example.com",
+		"exp":   time.Now().Add(time.Hour).Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenStr, err := token.SignedString([]byte(testJWTSecret))
+	assert.NoError(t, err)
+
+	resp := testutil.MakeAuthenticatedRequest(app, http.MethodGet, "/protected", tokenStr, nil)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
 func TestProtected_ExpiredJWT(t *testing.T) {
 	app := setupProtectedApp(nil, nil)
 
