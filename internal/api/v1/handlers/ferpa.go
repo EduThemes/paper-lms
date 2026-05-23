@@ -310,7 +310,7 @@ func (h *FERPAHandler) CreateRetentionPolicy(c *fiber.Ctx) error {
 		RetentionPeriod: input.RetentionPeriod,
 		RetentionAction: input.RetentionAction,
 		AutoApply:       input.AutoApply,
-		Description:     input.Description,
+		Description:     service.SanitizeHTML(input.Description),
 	}
 
 	if err := h.ferpaService.CreateRetentionPolicy(c.Context(), policy); err != nil {
@@ -372,7 +372,7 @@ func (h *FERPAHandler) UpdateRetentionPolicy(c *fiber.Ctx) error {
 		policy.AutoApply = *input.AutoApply
 	}
 	if input.Description != nil {
-		policy.Description = *input.Description
+		policy.Description = service.SanitizeHTML(*input.Description)
 	}
 
 	if err := h.ferpaService.UpdateRetentionPolicy(c.Context(), policy); err != nil {

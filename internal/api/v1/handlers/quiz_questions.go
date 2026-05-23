@@ -103,7 +103,7 @@ func (h *QuizQuestionHandler) CreateQuestion(c *fiber.Ctx) error {
 		QuizQuestionGroupID: input.Question.QuizQuestionGroupID,
 		Position:            input.Question.Position,
 		QuestionType:        input.Question.QuestionType,
-		QuestionText:        input.Question.QuestionText,
+		QuestionText:        service.SanitizeHTML(input.Question.QuestionText),
 		PointsPossible:      input.Question.PointsPossible,
 		Answers:             input.Question.Answers,
 		CorrectComments:     input.Question.CorrectComments,
@@ -154,7 +154,7 @@ func (h *QuizQuestionHandler) UpdateQuestion(c *fiber.Ctx) error {
 		question.QuestionType = *input.Question.QuestionType
 	}
 	if input.Question.QuestionText != nil {
-		question.QuestionText = *input.Question.QuestionText
+		question.QuestionText = service.SanitizeHTML(*input.Question.QuestionText)
 	}
 	if input.Question.PointsPossible != nil {
 		question.PointsPossible = input.Question.PointsPossible

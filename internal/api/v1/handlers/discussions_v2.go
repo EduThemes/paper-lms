@@ -207,7 +207,7 @@ func (h *DiscussionV2Handler) UpdateEntryV2(c *fiber.Ctx) error {
 
 	userID, _ := c.Locals("user_id").(uint)
 
-	if err := h.discussionV2Service.UpdateEntryWithHistory(c.Context(), uint(entryID), userID, input.Message); err != nil {
+	if err := h.discussionV2Service.UpdateEntryWithHistory(c.Context(), uint(entryID), userID, service.SanitizeHTML(input.Message)); err != nil {
 		return responses.InternalError(c, "Could not update entry")
 	}
 

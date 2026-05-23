@@ -125,7 +125,7 @@ func (h *ExternalToolHandler) CreateExternalTool(c *fiber.Ctx) error {
 		ContextID:      uint(courseID),
 		DeveloperKeyID: input.ExternalTool.DeveloperKeyID,
 		Name:           input.ExternalTool.Name,
-		Description:    input.ExternalTool.Description,
+		Description:    service.SanitizeHTML(input.ExternalTool.Description),
 		URL:            input.ExternalTool.URL,
 		Domain:         input.ExternalTool.Domain,
 		ConsumerKey:    input.ExternalTool.ConsumerKey,
@@ -181,7 +181,7 @@ func (h *ExternalToolHandler) UpdateExternalTool(c *fiber.Ctx) error {
 		tool.Domain = *input.ExternalTool.Domain
 	}
 	if input.ExternalTool.Description != nil {
-		tool.Description = *input.ExternalTool.Description
+		tool.Description = service.SanitizeHTML(*input.ExternalTool.Description)
 	}
 	if input.ExternalTool.ConsumerKey != nil {
 		tool.ConsumerKey = *input.ExternalTool.ConsumerKey
