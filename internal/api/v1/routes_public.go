@@ -38,9 +38,16 @@ func (r *Router) registerPublicRoutes(api fiber.Router, authLimit fiber.Handler)
 	api.Post("/login/oauth2/token", r.OAuth2Handler.Token)
 
 	// Public LTI endpoints (no auth required)
+	//
+	// SECURITY (F-055): JWKS stays public — clients fetch it to verify
+	// signed launch tokens. /lti/oidc/login and /lti/launch are NOT
+	// public anymore: they mint a signed id_token impersonating the
+	// caller. Previously the platform trusted login_hint from the form
+	// body to identify the user, letting any unauthenticated request
+	// forge an arbitrary user identity. The session JWT (cookie or
+	// Bearer) is now the source of truth; see ltiAuthenticated mounted
+	// in router.go.
 	api.Get("/lti/jwks", r.LTIHandler.JWKS)
-	api.Post("/lti/oidc/login", r.LTIHandler.OIDCLogin)
-	api.Post("/lti/launch", r.LTIHandler.LaunchDirect)
 
 	// Public SSO endpoints (no auth required). 13.6.B — every public
 	// auth route now goes through AuthRateLimit so SAML ACS, OIDC
