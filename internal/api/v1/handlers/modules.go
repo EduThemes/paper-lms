@@ -244,9 +244,23 @@ func (h *ModuleHandler) ReorderModules(c *fiber.Ctx) error {
 }
 
 func (h *ModuleHandler) DeleteModule(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid module ID")
+	}
+
+	// F-011 / F-013: load under the caller's tenant + verify the
+	// module belongs to the URL's :course_id before the destructive op.
+	module, err := h.moduleService.GetByID(c.Context(), uint(id), callerAccountID(c))
+	if err != nil {
+		return responses.NotFound(c, "module")
+	}
+	if module.CourseID != uint(courseID) {
+		return responses.NotFound(c, "module")
 	}
 
 	if err := h.moduleService.Delete(c.Context(), uint(id)); err != nil {

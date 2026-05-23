@@ -270,6 +270,13 @@ func (h *PageHandler) DeletePage(c *fiber.Ctx) error {
 		}
 	}
 
+	// F-013: parent-course tie. The numeric :url_or_id form can name a
+	// page in another course in the SAME tenant; the GetByURL form
+	// already scopes to courseID. Either way, assert before delete.
+	if page.CourseID != uint(courseID) {
+		return responses.NotFound(c, "page")
+	}
+
 	if err := h.pageService.Delete(c.Context(), page.ID); err != nil {
 		return responses.InternalError(c, "Could not delete page")
 	}
