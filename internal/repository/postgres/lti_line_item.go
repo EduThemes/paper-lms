@@ -32,8 +32,18 @@ func (r *ltiLineItemRepo) Update(ctx context.Context, item *models.LTILineItem) 
 	return r.db.WithContext(ctx).Save(item).Error
 }
 
-func (r *ltiLineItemRepo) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Delete(&models.LTILineItem{}, id).Error
+// Delete — F-012 widening: tenant-scoped via courses.account_id.
+// LTILineItem has a course_id FK; the course carries account_id.
+// accountID==0 skips the scope filter (auth-internal callers only);
+// handler callers MUST pass callerAccountID(c).
+func (r *ltiLineItemRepo) Delete(ctx context.Context, id, accountID uint) error {
+	q := r.db.WithContext(ctx).Model(&models.LTILineItem{}).Where("id = ?", id)
+	if accountID != 0 {
+		q = q.Where(`course_id IN (
+			SELECT id FROM courses WHERE account_id = ?
+		)`, accountID)
+	}
+	return q.Delete(&models.LTILineItem{}).Error
 }
 
 func (r *ltiLineItemRepo) ListByCourse(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LTILineItem], error) {

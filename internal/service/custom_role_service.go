@@ -74,9 +74,12 @@ func (s *CustomRoleService) UpdateRole(ctx context.Context, role *models.CustomR
 	return s.roleRepo.Update(ctx, role)
 }
 
-// DeleteRole soft-deletes a custom role by setting workflow_state to "deleted".
-func (s *CustomRoleService) DeleteRole(ctx context.Context, id uint) error {
-	return s.roleRepo.Delete(ctx, id)
+// DeleteRole soft-deletes a custom role by setting workflow_state to
+// "deleted". accountID scopes the write to a single tenant (F-012);
+// handler callers MUST pass callerAccountID(c). Pass 0 only from
+// privileged internal callers.
+func (s *CustomRoleService) DeleteRole(ctx context.Context, id, accountID uint) error {
+	return s.roleRepo.Delete(ctx, id, accountID)
 }
 
 // ListRoles returns paginated roles for an account.

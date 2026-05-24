@@ -43,8 +43,17 @@ func (r *notificationRepo) Update(ctx context.Context, notification *models.Noti
 	return r.db.WithContext(ctx).Save(notification).Error
 }
 
-func (r *notificationRepo) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Delete(&models.Notification{}, id).Error
+// Delete — F-012: tenant-scope via the owning user's account_id (same
+// chain as FindByID). A cross-tenant id silently affects zero rows;
+// callers that pre-load via FindByID will already 404 before this
+// fires, preserving the 13.1.E existence-leak contract. accountID==0
+// disables (no auth-internal callers exist today; convention).
+func (r *notificationRepo) Delete(ctx context.Context, id, accountID uint) error {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		q = q.Where(notificationTenantFilter, accountID)
+	}
+	return q.Delete(&models.Notification{}, id).Error
 }
 
 func (r *notificationRepo) ListByUserID(ctx context.Context, userID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Notification], error) {

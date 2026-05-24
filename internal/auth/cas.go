@@ -12,6 +12,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/security"
 )
 
 // CASAuthenticator implements CAS 2.0 protocol authentication.
@@ -102,6 +103,12 @@ func (a *CASAuthenticator) ValidateTicketOutcome(ctx context.Context, provider *
 	parsedURL, err := url.Parse(validateURL)
 	if err != nil {
 		return SSOOutcome{}, fmt.Errorf("invalid CAS validate URL: %w", err)
+	}
+
+	// SECURITY (F-024): SSRF defense on the validation URL. Admin-
+	// controlled in the AuthenticationProvider row.
+	if err := security.ValidateExternalURL(ctx, parsedURL.String()); err != nil {
+		return SSOOutcome{}, fmt.Errorf("CAS validate URL rejected by SSRF guard: %w", err)
 	}
 
 	q := parsedURL.Query()

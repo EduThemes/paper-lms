@@ -78,3 +78,22 @@ func TestCSRFProtection_BearerAuthNoCSRFHeader_200(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
+
+// TestCSRFProtection_TokenMismatch_403 — locks F-030 (constant-time
+// compare). Different cookie and header values must always 403, with
+// or without the timing-attack defense, but having the test in place
+// guards against an accidental regression to a fast-fail string
+// compare (which would also short-circuit the comparison early).
+func TestCSRFProtection_TokenMismatch_403(t *testing.T) {
+	app := setupCSRFApp()
+
+	req := httptest.NewRequest(http.MethodPost, "/echo", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", "header-value-different-length-than-cookie")
+	req.AddCookie(&http.Cookie{Name: "paper_csrf", Value: "cookie-value"})
+	req.AddCookie(&http.Cookie{Name: "paper_session", Value: "stub-session-token"})
+
+	resp, err := app.Test(req, -1)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
