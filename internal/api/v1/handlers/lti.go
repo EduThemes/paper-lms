@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"html/template"
 	"strconv"
 	"time"
 
@@ -13,6 +14,68 @@ import (
 	"github.com/EduThemes/paper-lms/internal/repository/postgres"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
+
+// ltiLaunchTemplate renders the form_post response. html/template's
+// contextual auto-escape blocks HTML injection in the action= attribute
+// and the id_token value. Compiled once at package init; Execute is
+// goroutine-safe.
+var ltiLaunchTemplate = template.Must(template.New("lti_launch").Parse(`<!DOCTYPE html>
+<html>
+<head><title>LTI Launch</title></head>
+<body>
+<form id="lti_launch_form" action="{{.RedirectURI}}" method="POST">
+    <input type="hidden" name="id_token" value="{{.IDToken}}" />
+    <input type="hidden" name="state" value="" />
+    <noscript><input type="submit" value="Continue" /></noscript>
+</form>
+<script>document.getElementById('lti_launch_form').submit();</script>
+</body>
+</html>`))
+
+// RenderLTILaunchForTest exposes the launch-HTML template render so
+// tests in this package's external _test package can assert on the
+// escape contract (F-056). NOT for production callers.
+func RenderLTILaunchForTest(w interface{ Write([]byte) (int, error) }, redirectURI, idToken string) error {
+	return ltiLaunchTemplate.Execute(w, struct {
+		RedirectURI string
+		IDToken     string
+	}{RedirectURI: redirectURI, IDToken: idToken})
+}
+
+// requireSessionUserMatches verifies the authenticated caller IS the user
+// the LTI launch is being minted for. login_hint is attacker-controlled
+// in a pre-authentication context; without this check, anyone hitting
+// the launch endpoint can mint a signed id_token impersonating any user.
+//
+// Returns the resolved user ID (always equal to the session user) and
+// true on success. On failure, writes the appropriate 401/403 response
+// and returns false — caller short-circuits.
+//
+// loginHint may be empty (use session) or a decimal user ID (must match
+// session). Anything else 400s.
+func (h *LTIHandler) requireSessionUserMatches(c *fiber.Ctx, loginHint string) (uint, bool) {
+	sessionUserID, _ := c.Locals("user_id").(uint)
+	if sessionUserID == 0 {
+		_ = responses.Unauthorized(c)
+		return 0, false
+	}
+	if loginHint == "" {
+		return sessionUserID, true
+	}
+	hinted, err := strconv.ParseUint(loginHint, 10, 64)
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid login_hint")
+		return 0, false
+	}
+	if uint(hinted) != sessionUserID {
+		// 401, not 403 — declaring the mismatch would leak that other
+		// user IDs exist. The browser cookie session establishes who
+		// the caller IS; login_hint is informational.
+		_ = responses.Unauthorized(c)
+		return 0, false
+	}
+	return sessionUserID, true
+}
 
 type LTIHandler struct {
 	ltiService  *service.LTIService
@@ -149,20 +212,26 @@ func (h *LTIHandler) OIDCLogin(c *fiber.Ctx) error {
 	if clientID == "" {
 		return responses.BadRequest(c, "client_id is required")
 	}
-	if loginHint == "" {
-		return responses.BadRequest(c, "login_hint is required")
-	}
 	if targetLinkURI == "" {
 		return responses.BadRequest(c, "target_link_uri is required")
 	}
 
+	// SECURITY (F-055): the caller MUST be the user being launched.
+	// login_hint is otherwise attacker-controlled in this anonymous-
+	// reachable endpoint and would let any actor mint a signed id_token
+	// impersonating any user. Verify the session JWT matches the hint
+	// (or fill the hint from the session when omitted).
+	userID, ok := h.requireSessionUserMatches(c, loginHint)
+	if !ok {
+		return nil
+	}
+	loginHint = strconv.FormatUint(uint64(userID), 10)
+
 	// 13.4 (Wave C.2) — COPPA gate on the initiation step too. Refusing
 	// at /oidc/login avoids round-tripping the user's identity to the
 	// tool's OIDC endpoint before we decide to refuse.
-	if userID, parseErr := strconv.ParseUint(loginHint, 10, 64); parseErr == nil {
-		if h.gateLTILaunchForCOPPA(c, uint(userID)) {
-			return nil
-		}
+	if h.gateLTILaunchForCOPPA(c, userID) {
+		return nil
 	}
 
 	redirectURL, err := h.ltiService.InitiateLogin(
@@ -183,179 +252,8 @@ func (h *LTIHandler) OIDCLogin(c *fiber.Ctx) error {
 // LTI Launch
 // --------------------------------------------------------------------------
 
-// Launch handles the LTI 1.3 resource link launch.
-// POST /api/v1/lti/launch (PUBLIC)
-//
-// After the OIDC flow completes, the tool redirects back to this endpoint.
-// The platform generates and returns a signed LTI launch JWT via an HTML
-// auto-submit form (form_post response mode).
-func (h *LTIHandler) Launch(c *fiber.Ctx) error {
-	// The launch typically receives the user context from the OIDC flow.
-	// The login_hint contains the user ID, and the lti_message_hint contains
-	// the resource link context.
-	loginHint := c.FormValue("login_hint")
-	clientID := c.FormValue("client_id")
-	ltiMessageHint := c.FormValue("lti_message_hint")
-	redirectURI := c.FormValue("redirect_uri")
-
-	// Fall back to JSON
-	if loginHint == "" {
-		var body struct {
-			LoginHint      string `json:"login_hint"`
-			ClientID       string `json:"client_id"`
-			LTIMessageHint string `json:"lti_message_hint"`
-			RedirectURI    string `json:"redirect_uri"`
-		}
-		if err := c.BodyParser(&body); err == nil {
-			loginHint = body.LoginHint
-			clientID = body.ClientID
-			ltiMessageHint = body.LTIMessageHint
-			redirectURI = body.RedirectURI
-		}
-	}
-
-	if loginHint == "" {
-		return responses.BadRequest(c, "login_hint is required")
-	}
-	if clientID == "" {
-		return responses.BadRequest(c, "client_id is required")
-	}
-
-	// Parse the user ID from the login hint
-	userID, err := strconv.ParseUint(loginHint, 10, 64)
-	if err != nil {
-		return responses.BadRequest(c, "Invalid login_hint")
-	}
-
-	// 13.4 (Wave C.2) — COPPA gate. K-12 tenant + no granted
-	// third_party_sharing parental consent = refused.
-	if h.gateLTILaunchForCOPPA(c, uint(userID)) {
-		return nil
-	}
-
-	// Parse the LTI message hint to extract course ID and resource link ID.
-	// The message hint format is: "courseID:resourceLinkID"
-	courseID, resourceLinkID, err := parseLTIMessageHint(ltiMessageHint)
-	if err != nil {
-		return responses.BadRequest(c, "Invalid lti_message_hint")
-	}
-
-	// Look up the LTI tool configuration by client_id
-	toolConfig, err := h.findToolConfigByClientID(c, clientID)
-	if err != nil {
-		return responses.BadRequest(c, err.Error())
-	}
-
-	// Build the signed LTI launch token
-	idToken, err := h.ltiService.BuildLaunchToken(
-		c.Context(),
-		uint(userID),
-		courseID,
-		resourceLinkID,
-		toolConfig,
-	)
-	if err != nil {
-		return responses.InternalError(c, "Could not build launch token")
-	}
-
-	// Determine the redirect URI (use the tool's target_link_uri if not
-	// provided in the request)
-	if redirectURI == "" {
-		redirectURI = toolConfig.TargetLinkURI
-	}
-
-	// Return an HTML auto-submit form (form_post response mode)
-	html := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head><title>LTI Launch</title></head>
-<body>
-<form id="lti_launch_form" action="%s" method="POST">
-    <input type="hidden" name="id_token" value="%s" />
-    <input type="hidden" name="state" value="" />
-    <noscript><input type="submit" value="Continue" /></noscript>
-</form>
-<script>document.getElementById('lti_launch_form').submit();</script>
-</body>
-</html>`, redirectURI, idToken)
-
-	c.Set("Content-Type", "text/html; charset=utf-8")
-	return c.SendString(html)
-}
-
-// findToolConfigByClientID looks up the LTI tool configuration associated
-// with the given client_id through the developer key.
-func (h *LTIHandler) findToolConfigByClientID(c *fiber.Ctx, clientID string) (*models.LTIToolConfiguration, error) {
-	// We need to find the developer key by its client_id, then look up the
-	// LTI tool configuration by developer key ID. Since we don't have a
-	// direct service dependency on DeveloperKeyService here, we use the
-	// configRepo which can find by developer key ID. First, we need to
-	// find the developer key ID.
-	//
-	// The LTI service already validates the client_id internally, but we
-	// need the tool config to build the launch token. We'll iterate through
-	// the approach of using the lti_message_hint or looking up by client_id.
-	//
-	// For simplicity, use the LTI service's internal repos via the configRepo.
-	// The handler has access to configRepo.
-	//
-	// We need a way to go from clientID -> devKey -> toolConfig.
-	// Since we only have configRepo.FindByDeveloperKeyID, we need the devKeyID.
-	// The LTI handler doesn't directly have the devKeyRepo, so we pass
-	// through the ltiService which does. For this handler, we add the lookup
-	// indirectly.
-	//
-	// Actually, let's just use the fact that InitiateLogin validates the
-	// client_id and finds the tool config. For the launch endpoint, we can
-	// store the necessary info in the message_hint or look it up.
-	//
-	// The cleanest approach: search all tool configs. In practice this would
-	// be a direct lookup. For now, since the configRepo does not have a
-	// FindByClientID method, we return an error and let the caller handle it.
-
-	// This is handled through the LTI service internally. The handler
-	// should not need to do this lookup directly. Instead, we can extend
-	// the approach to pass the tool config through the message hint.
-	return nil, fmt.Errorf("tool configuration lookup by client_id requires LTI service")
-}
-
-// parseLTIMessageHint parses a message hint string in the format
-// "courseID:resourceLinkID" and returns the individual components.
-func parseLTIMessageHint(hint string) (courseID uint, resourceLinkID string, err error) {
-	if hint == "" {
-		return 0, "", fmt.Errorf("empty message hint")
-	}
-
-	// Find the colon separator
-	colonIdx := -1
-	for i, ch := range hint {
-		if ch == ':' {
-			colonIdx = i
-			break
-		}
-	}
-
-	if colonIdx < 0 {
-		// Try parsing the entire hint as a course ID with a generated resource link
-		id, parseErr := strconv.ParseUint(hint, 10, 64)
-		if parseErr != nil {
-			return 0, "", fmt.Errorf("invalid message hint format")
-		}
-		return uint(id), "", nil
-	}
-
-	courseIDStr := hint[:colonIdx]
-	resourceLinkID = hint[colonIdx+1:]
-
-	id, parseErr := strconv.ParseUint(courseIDStr, 10, 64)
-	if parseErr != nil {
-		return 0, "", fmt.Errorf("invalid course ID in message hint")
-	}
-
-	return uint(id), resourceLinkID, nil
-}
-
 // --------------------------------------------------------------------------
-// LTI Launch (Improved - Direct Token Build)
+// LTI Launch
 // --------------------------------------------------------------------------
 
 // LaunchDirect handles the LTI 1.3 resource link launch with direct config lookup.
@@ -368,33 +266,27 @@ func parseLTIMessageHint(hint string) (courseID uint, resourceLinkID string, err
 func (h *LTIHandler) LaunchDirect(c *fiber.Ctx) error {
 	loginHint := c.FormValue("login_hint")
 	ltiMessageHint := c.FormValue("lti_message_hint")
-	redirectURI := c.FormValue("redirect_uri")
 
 	if loginHint == "" {
 		var body struct {
 			LoginHint      string `json:"login_hint"`
 			LTIMessageHint string `json:"lti_message_hint"`
-			RedirectURI    string `json:"redirect_uri"`
 		}
 		if err := c.BodyParser(&body); err == nil {
 			loginHint = body.LoginHint
 			ltiMessageHint = body.LTIMessageHint
-			redirectURI = body.RedirectURI
 		}
 	}
 
-	if loginHint == "" {
-		return responses.BadRequest(c, "login_hint is required")
-	}
-
-	// Parse user ID from login hint
-	userID, err := strconv.ParseUint(loginHint, 10, 64)
-	if err != nil {
-		return responses.BadRequest(c, "Invalid login_hint")
+	// SECURITY (F-055): the session JWT is the source of identity, not
+	// the login_hint form value. See OIDCLogin and Launch above.
+	userID, ok := h.requireSessionUserMatches(c, loginHint)
+	if !ok {
+		return nil
 	}
 
 	// 13.4 (Wave C.2) — COPPA gate.
-	if h.gateLTILaunchForCOPPA(c, uint(userID)) {
+	if h.gateLTILaunchForCOPPA(c, userID) {
 		return nil
 	}
 
@@ -413,7 +305,7 @@ func (h *LTIHandler) LaunchDirect(c *fiber.Ctx) error {
 	// Build the signed LTI launch token
 	idToken, err := h.ltiService.BuildLaunchToken(
 		c.Context(),
-		uint(userID),
+		userID,
 		courseID,
 		resourceLinkID,
 		toolConfig,
@@ -422,25 +314,15 @@ func (h *LTIHandler) LaunchDirect(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not build launch token")
 	}
 
-	if redirectURI == "" {
-		redirectURI = toolConfig.TargetLinkURI
-	}
-
-	html := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head><title>LTI Launch</title></head>
-<body>
-<form id="lti_launch_form" action="%s" method="POST">
-    <input type="hidden" name="id_token" value="%s" />
-    <input type="hidden" name="state" value="" />
-    <noscript><input type="submit" value="Continue" /></noscript>
-</form>
-<script>document.getElementById('lti_launch_form').submit();</script>
-</body>
-</html>`, redirectURI, idToken)
-
+	// SECURITY (F-056): redirect_uri is always the tool config's
+	// registered TargetLinkURI. The pre-fix path read it from the request
+	// body and HTML-injected it into the action= attribute via Sprintf,
+	// letting an attacker craft `"><script>...</script>` payloads.
 	c.Set("Content-Type", "text/html; charset=utf-8")
-	return c.SendString(html)
+	return ltiLaunchTemplate.Execute(c.Response().BodyWriter(), struct {
+		RedirectURI string
+		IDToken     string
+	}{RedirectURI: toolConfig.TargetLinkURI, IDToken: idToken})
 }
 
 // parseExtendedMessageHint parses a message hint string in the format

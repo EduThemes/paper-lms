@@ -199,6 +199,23 @@ func (r *Router) Register(app *fiber.App) {
 	// route declarations on this group.
 	protected.Use(middleware.AuditWrites(r.AuditService, "http.write"))
 
+	// SECURITY (F-055): LTI 1.3 OIDC initiation and Launch endpoints
+	// must verify the caller IS the user being launched. The browser
+	// session cookie established at /login is the trust anchor; the
+	// form's login_hint is only informational.
+	//
+	// CSRF is intentionally NOT applied here — LTI launches arrive via
+	// cross-site top-level POSTs from external tool platforms, which
+	// cannot read the CSRF cookie. The handler's session-user-match
+	// check (requireSessionUserMatches) is what makes the endpoint safe:
+	// even a CSRF attacker tricking Alice into POSTing
+	// login_hint=Bob would fail the check because Alice's cookie ≠ Bob.
+	// Mounted on its own auth-only group so the Bearer/cookie session
+	// is validated and Locals("user_id") is set without the CSRF gate.
+	ltiAuthenticated := api.Group("", r.AuthMiddleware.Protected())
+	ltiAuthenticated.Post("/lti/oidc/login", authLimit, r.LTIHandler.OIDCLogin)
+	ltiAuthenticated.Post("/lti/launch", authLimit, r.LTIHandler.LaunchDirect)
+
 	// Users (self access or admin)
 	protected.Get("/users/self", r.UserHandler.GetSelf)
 	protected.Post("/users/self/change_password", r.UserHandler.ChangePassword)
