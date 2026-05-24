@@ -281,6 +281,17 @@ func (s *QuizService) StartSubmission(ctx context.Context, quizID, userID uint, 
 	}
 
 	if err := s.submissionRepo.Create(ctx, submission); err != nil {
+		// F-049 race recovery: migration 000062 adds a partial UNIQUE
+		// on (quiz_id, user_id) WHERE workflow_state='untaken'. When
+		// two requests race to start the same quiz, the loser's
+		// Create fails with the UNIQUE violation. Re-run the
+		// existing-untaken find so the loser sees the winner's row
+		// instead of bubbling a raw GORM error to the handler (which
+		// pre-fix surfaced as 400).
+		if winner, findErr := s.submissionRepo.FindByQuizAndUser(ctx, quizID, userID); findErr == nil &&
+			winner != nil && winner.WorkflowState == "untaken" {
+			return winner, nil
+		}
 		return nil, err
 	}
 

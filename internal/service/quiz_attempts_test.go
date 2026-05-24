@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
 	"github.com/EduThemes/paper-lms/internal/testutil/mocks"
 	"github.com/stretchr/testify/assert"
@@ -327,4 +328,54 @@ func TestCompleteSubmission_WrongUser(t *testing.T) {
 	assert.Nil(t, result)
 	assert.EqualError(t, err, "unauthorized: submission does not belong to this user")
 	submissionRepo.AssertExpectations(t)
+}
+
+// TestStartSubmission_RaceRecovery — F-049 follow-up. When two
+// concurrent requests start the same quiz, migration 000062's
+// partial UNIQUE fires on the loser's Create. Pre-fix the loser
+// bubbled the raw GORM error to the handler → 400 with no winning
+// row. Now the service catches the create-error path, re-runs the
+// existing-untaken find, and returns the winner's row to both
+// callers. This test simulates that by having the find return
+// nil-then-winner (winner wasn't visible when StartSubmission read
+// initially), the create fail with a unique-violation, and the
+// post-create find return the winner.
+func TestStartSubmission_RaceRecovery(t *testing.T) {
+	questionRepo := new(mocks.MockQuizQuestionRepository)
+	submissionRepo := new(mocks.MockQuizSubmissionRepository)
+	answerRepo := new(mocks.MockQuizSubmissionAnswerRepository)
+	quizRepo := new(mocks.MockQuizRepository)
+	svc := service.NewQuizService(quizRepo, questionRepo, submissionRepo, answerRepo)
+
+	ctx := context.Background()
+
+	now := time.Now()
+	quiz := &models.Quiz{
+		ID:              1,
+		CourseID:        10,
+		AllowedAttempts: -1,
+	}
+	winner := &models.QuizSubmission{
+		ID:            42,
+		QuizID:        1,
+		UserID:        7,
+		Attempt:       1,
+		WorkflowState: "untaken",
+		StartedAt:     &now,
+	}
+
+	// Initial existence check: no in-progress row yet.
+	submissionRepo.On("FindByQuizAndUser", ctx, uint(1), uint(7)).Return(nil, nil).Once()
+	quizRepo.On("FindByID", ctx, uint(1), uint(0)).Return(quiz, nil).Once()
+	questionRepo.On("ListByQuizID", ctx, uint(1), mock.Anything).Return(&repository.PaginatedResult[models.QuizQuestion]{Items: []models.QuizQuestion{}}, nil).Once()
+	// Race: another goroutine got there first; UNIQUE violation.
+	submissionRepo.On("Create", ctx, mock.AnythingOfType("*models.QuizSubmission")).Return(errors.New("ERROR: duplicate key value violates unique constraint")).Once()
+	// Recovery: re-find returns the winner's row.
+	submissionRepo.On("FindByQuizAndUser", ctx, uint(1), uint(7)).Return(winner, nil).Once()
+
+	result, err := svc.StartSubmission(ctx, 1, 7, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, uint(42), result.ID, "race loser should receive winner's row, not 400")
+	assert.Equal(t, "untaken", string(result.WorkflowState))
 }
