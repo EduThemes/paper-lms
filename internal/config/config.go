@@ -29,6 +29,12 @@ type Config struct {
 	SAMLEntityID string
 	SAMLCertFile string
 	SAMLKeyFile  string
+	// SetupBootstrapToken gates POST /setup/complete. When set, the
+	// request must echo it in the X-Setup-Token header. Empty means the
+	// wizard is open (development default). In production with no admin
+	// yet, leaving this empty triggers a SECURITY warning at boot — see
+	// Validate().
+	SetupBootstrapToken string
 }
 
 func Load() *Config {
@@ -50,6 +56,7 @@ func Load() *Config {
 		S3Endpoint:      getEnv("S3_ENDPOINT", ""),
 		S3AccessKey:     getEnv("S3_ACCESS_KEY", ""),
 		S3SecretKey:     getEnv("S3_SECRET_KEY", ""),
+		SetupBootstrapToken: getEnv("SETUP_BOOTSTRAP_TOKEN", ""),
 	}
 }
 
@@ -81,6 +88,13 @@ func (c *Config) Validate() {
 		}
 		if c.AutoMigrate {
 			fmt.Println("WARNING: AUTO_MIGRATE=true in production. Set AUTO_MIGRATE=false to use versioned SQL migrations instead of GORM AutoMigrate.")
+		}
+		if c.SetupBootstrapToken == "" {
+			// Boot-time warning only. The handler still works because
+			// the hasAdmin recheck closes the wizard once a real admin
+			// exists; the risk is the window between deploy and
+			// finish-wizard, which token gating eliminates.
+			fmt.Println("WARNING: SETUP_BOOTSTRAP_TOKEN is unset in production. The /setup/complete wizard is open until the first admin is created — set this env var to require an X-Setup-Token header for protection against attackers racing your operator on a fresh deploy.")
 		}
 	}
 }

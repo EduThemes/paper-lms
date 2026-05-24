@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"crypto/subtle"
+	"log"
 	"strings"
 	"sync"
 
@@ -21,12 +23,13 @@ import (
 const bootstrapAdvisoryLockKey int64 = 0x504150_5242_4F_4F_54 // "PAPRBOOT"
 
 type SetupHandler struct {
-	userService *service.UserService
-	accountRepo repository.AccountRepository
-	userRepo    repository.UserRepository
-	db          *gorm.DB
-	jwtSecret   string
-	environment string
+	userService    *service.UserService
+	accountRepo    repository.AccountRepository
+	userRepo       repository.UserRepository
+	db             *gorm.DB
+	jwtSecret      string
+	environment    string
+	bootstrapToken string
 
 	// setupMu serializes CompleteSetup within ONE pod. The
 	// Postgres advisory lock below covers cross-pod races; the
@@ -40,14 +43,22 @@ type SetupHandler struct {
 // bootstrap advisory lock during CompleteSetup. Tests that exercise
 // the handler in isolation may pass a nil db; the handler degrades
 // to the in-process mutex only and logs a warning at the call site.
-func NewSetupHandler(userService *service.UserService, accountRepo repository.AccountRepository, userRepo repository.UserRepository, db *gorm.DB, jwtSecret string, environment string) *SetupHandler {
+//
+// `bootstrapToken`, if non-empty, gates CompleteSetup behind an
+// X-Setup-Token header match (constant-time compare). Empty disables
+// the gate, matching legacy behavior — the in-process mutex + advisory
+// lock + hasAdmin recheck still prevent double-bootstrap, but cannot
+// stop a single attacker from racing a legitimate operator to a fresh
+// deploy. SETUP_BOOTSTRAP_TOKEN closes that window.
+func NewSetupHandler(userService *service.UserService, accountRepo repository.AccountRepository, userRepo repository.UserRepository, db *gorm.DB, jwtSecret string, environment string, bootstrapToken string) *SetupHandler {
 	return &SetupHandler{
-		userService: userService,
-		accountRepo: accountRepo,
-		userRepo:    userRepo,
-		db:          db,
-		jwtSecret:   jwtSecret,
-		environment: environment,
+		userService:    userService,
+		accountRepo:    accountRepo,
+		userRepo:       userRepo,
+		db:             db,
+		jwtSecret:      jwtSecret,
+		environment:    environment,
+		bootstrapToken: bootstrapToken,
 	}
 }
 
@@ -163,6 +174,17 @@ type setupRequest struct {
 // Layer #1 is defense-in-depth (faster than the DB round-trip) but
 // not load-bearing; #2 + #3 are the actual correctness guarantee.
 func (h *SetupHandler) CompleteSetup(c *fiber.Ctx) error {
+	// Bootstrap-token gate runs OUTSIDE the lock so a flood of
+	// wrong-token attempts doesn't queue on the advisory lock. When
+	// SETUP_BOOTSTRAP_TOKEN is unset (dev), the gate is a no-op.
+	if h.bootstrapToken != "" {
+		provided := c.Get("X-Setup-Token")
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(h.bootstrapToken)) != 1 {
+			log.Printf("setup: rejected /setup/complete attempt — bad/missing X-Setup-Token (ip=%s ua=%q)", c.IP(), c.Get("User-Agent"))
+			return responses.Error(c, fiber.StatusUnauthorized, "Setup token required")
+		}
+	}
+
 	h.setupMu.Lock()
 	defer h.setupMu.Unlock()
 
@@ -172,25 +194,31 @@ func (h *SetupHandler) CompleteSetup(c *fiber.Ctx) error {
 		Email string
 		Role  string
 	}
-	var responseErr error
+	// `wrote` short-circuits the post-lock response builder. We can't
+	// rely on the return value of responses.Error here because c.JSON
+	// returns nil after a successful write, so `if responseErr != nil`
+	// would silently fall through and double-write a 200. The
+	// (result, wrote, err) pattern is documented as load-bearing in
+	// CLAUDE.md for exactly this case.
+	var wrote bool
 
 	lockErr := h.withBootstrapLock(c.Context(), func() error {
 		// Re-check INSIDE the lock — a racing caller waited for us
 		// to commit and now sees the admin we just created.
 		adminExists, err := h.hasAdmin(c)
 		if err != nil {
-			responseErr = responses.InternalError(c, "Could not check setup status")
-			return nil
+			wrote = true
+			return responses.InternalError(c, "Could not check setup status")
 		}
 		if adminExists {
-			responseErr = responses.Error(c, fiber.StatusForbidden, "Setup already completed")
-			return nil
+			wrote = true
+			return responses.Error(c, fiber.StatusForbidden, "Setup already completed")
 		}
 
 		var input setupRequest
 		if err := c.BodyParser(&input); err != nil {
-			responseErr = responses.BadRequest(c, "Invalid input")
-			return nil
+			wrote = true
+			return responses.BadRequest(c, "Invalid input")
 		}
 
 		input.AdminName = strings.TrimSpace(input.AdminName)
@@ -198,22 +226,22 @@ func (h *SetupHandler) CompleteSetup(c *fiber.Ctx) error {
 		input.InstanceName = strings.TrimSpace(input.InstanceName)
 
 		if input.AdminName == "" {
-			responseErr = responses.BadRequest(c, "Admin name is required")
-			return nil
+			wrote = true
+			return responses.BadRequest(c, "Admin name is required")
 		}
 		if input.AdminEmail == "" || !strings.Contains(input.AdminEmail, "@") {
-			responseErr = responses.BadRequest(c, "A valid email is required")
-			return nil
+			wrote = true
+			return responses.BadRequest(c, "A valid email is required")
 		}
 		if len(input.AdminPassword) < 8 {
-			responseErr = responses.BadRequest(c, "Password must be at least 8 characters")
-			return nil
+			wrote = true
+			return responses.BadRequest(c, "Password must be at least 8 characters")
 		}
 
 		user, err := h.userService.Register(c.Context(), input.AdminName, input.AdminEmail, input.AdminPassword)
 		if err != nil {
-			responseErr = responses.BadRequest(c, err.Error())
-			return nil
+			wrote = true
+			return responses.BadRequest(c, err.Error())
 		}
 
 		// Promote to super_admin. The first user on a fresh
@@ -224,21 +252,21 @@ func (h *SetupHandler) CompleteSetup(c *fiber.Ctx) error {
 		// Wave 2/4 admin UI.
 		user.Role = "super_admin"
 		if err := h.userRepo.Update(c.Context(), user); err != nil {
-			responseErr = responses.InternalError(c, "Could not set super-admin role")
-			return nil
+			wrote = true
+			return responses.InternalError(c, "Could not set super-admin role")
 		}
 
 		if input.InstanceName != "" {
 			account, err := h.accountRepo.FindByID(c.Context(), 1)
 			if err != nil && err != gorm.ErrRecordNotFound {
-				responseErr = responses.InternalError(c, "Could not update instance name")
-				return nil
+				wrote = true
+				return responses.InternalError(c, "Could not update instance name")
 			}
 			if account != nil {
 				account.Name = input.InstanceName
 				if err := h.accountRepo.Update(c.Context(), account); err != nil {
-					responseErr = responses.InternalError(c, "Could not update instance name")
-					return nil
+					wrote = true
+					return responses.InternalError(c, "Could not update instance name")
 				}
 			}
 		}
@@ -254,9 +282,11 @@ func (h *SetupHandler) CompleteSetup(c *fiber.Ctx) error {
 	if lockErr != nil {
 		return responses.InternalError(c, "Could not acquire setup lock")
 	}
-	if responseErr != nil {
-		return responseErr
+	if wrote {
+		return nil
 	}
+
+	log.Printf("setup: super_admin created (user_id=%d email=%s ip=%s)", resultUser.ID, resultUser.Email, c.IP())
 
 	return c.JSON(fiber.Map{
 		"message": "Setup complete",
