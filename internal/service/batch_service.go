@@ -103,26 +103,39 @@ func NewBatchService(
 
 // CloneCourse deep-clones a course with selected content types. All cloned content
 // is set to "unpublished" workflow state. Returns the newly created course.
+// CloneCourse copies a source course (its outline, optionally its
+// assignments / pages / quizzes / discussions) into a new course row.
+//
+// SECURITY (F-015):
+//   - sourceAccountID gates the source lookup. Caller-tenant by default;
+//     super_admin passes the platform-wide account-id they're cloning
+//     from.
+//   - destAccountID names where the new course lands. Same default.
+//
+// The pre-fix path passed accountID=0 to FindByID (no tenant scope)
+// and let the body name the destination tenant, which let an admin
+// in tenant 5 lift any tenant's course content into any other tenant.
 func (s *BatchService) CloneCourse(
 	ctx context.Context,
 	sourceCourseID uint,
 	destName string,
-	accountID uint,
+	sourceAccountID uint,
+	destAccountID uint,
 	includeModules bool,
 	includeAssignments bool,
 	includePages bool,
 	includeQuizzes bool,
 	includeDiscussions bool,
 ) (*models.Course, error) {
-	// Fetch the source course
-	sourceCourse, err := s.courseRepo.FindByID(ctx, sourceCourseID, 0)
+	// Fetch the source course — tenant-scoped.
+	sourceCourse, err := s.courseRepo.FindByID(ctx, sourceCourseID, sourceAccountID)
 	if err != nil {
 		return nil, fmt.Errorf("source course not found: %w", err)
 	}
 
 	// Create the new course
 	newCourse := &models.Course{
-		AccountID:     accountID,
+		AccountID:     destAccountID,
 		Name:          destName,
 		CourseCode:    sourceCourse.CourseCode + "-copy",
 		WorkflowState: models.CourseUnpublished,
