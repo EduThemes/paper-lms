@@ -163,6 +163,10 @@ func (h *ModuleHandler) CreateModule(c *fiber.Ctx) error {
 }
 
 func (h *ModuleHandler) UpdateModule(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid module ID")
@@ -170,6 +174,14 @@ func (h *ModuleHandler) UpdateModule(c *fiber.Ctx) error {
 
 	module, err := h.moduleService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
+		return responses.NotFound(c, "module")
+	}
+
+	// F-013 parent-tie: same shape as DeleteModule. A module loaded
+	// under the caller's tenant must still belong to the URL's
+	// :course_id, otherwise a teacher in course A could PUT a module
+	// from course B in the same tenant.
+	if module.CourseID != uint(courseID) {
 		return responses.NotFound(c, "module")
 	}
 
