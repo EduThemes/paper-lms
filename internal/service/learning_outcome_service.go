@@ -80,8 +80,11 @@ func (s *LearningOutcomeService) UpdateGroup(ctx context.Context, group *models.
 	return s.groupRepo.Update(ctx, group)
 }
 
-func (s *LearningOutcomeService) DeleteGroup(ctx context.Context, id uint) error {
-	return s.groupRepo.Delete(ctx, id)
+// DeleteGroup soft-deletes the outcome group. F-012 — accountID is
+// the caller's tenant; when 0 the underlying repo skips the tenant
+// filter (auth-internal contract per internal/repository/postgres/user.go).
+func (s *LearningOutcomeService) DeleteGroup(ctx context.Context, id, accountID uint) error {
+	return s.groupRepo.Delete(ctx, id, accountID)
 }
 
 func (s *LearningOutcomeService) ListGroups(ctx context.Context, contextType string, contextID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcomeGroup], error) {
@@ -124,8 +127,11 @@ func (s *LearningOutcomeService) UpdateOutcome(ctx context.Context, outcome *mod
 	return s.outcomeRepo.Update(ctx, outcome)
 }
 
-func (s *LearningOutcomeService) DeleteOutcome(ctx context.Context, id uint) error {
-	return s.outcomeRepo.Delete(ctx, id)
+// DeleteOutcome soft-deletes the outcome. F-012 — accountID is the
+// caller's tenant; when 0 the underlying repo skips the tenant filter
+// (auth-internal contract per internal/repository/postgres/user.go).
+func (s *LearningOutcomeService) DeleteOutcome(ctx context.Context, id, accountID uint) error {
+	return s.outcomeRepo.Delete(ctx, id, accountID)
 }
 
 func (s *LearningOutcomeService) ListOutcomes(ctx context.Context, groupID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcome], error) {

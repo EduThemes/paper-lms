@@ -188,12 +188,30 @@ func (h *LearningOutcomeHandler) UpdateGroup(c *fiber.Ctx) error {
 }
 
 func (h *LearningOutcomeHandler) DeleteGroup(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	groupID, err := c.ParamsInt("group_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid group ID")
 	}
 
-	if err := h.outcomeService.DeleteGroup(c.Context(), uint(groupID)); err != nil {
+	// SECURITY (F-011 / F-012): load the group under the caller's
+	// tenant AND verify it belongs to the URL's course. Pre-fix path
+	// called DeleteGroup(id) with no scope, so a teacher in course 10
+	// could DELETE /courses/10/outcome_groups/<id from any other
+	// course/tenant>. Account-context groups intentionally cannot be
+	// deleted through a course-scoped route.
+	group, err := h.outcomeService.GetGroup(c.Context(), uint(groupID), callerAccountID(c))
+	if err != nil {
+		return responses.NotFound(c, "outcome group")
+	}
+	if group.ContextType != "Course" || group.ContextID != uint(courseID) {
+		return responses.NotFound(c, "outcome group")
+	}
+
+	if err := h.outcomeService.DeleteGroup(c.Context(), uint(groupID), callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not delete outcome group")
 	}
 
@@ -345,12 +363,30 @@ func (h *LearningOutcomeHandler) UpdateOutcome(c *fiber.Ctx) error {
 }
 
 func (h *LearningOutcomeHandler) DeleteOutcome(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	outcomeID, err := c.ParamsInt("outcome_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid outcome ID")
 	}
 
-	if err := h.outcomeService.DeleteOutcome(c.Context(), uint(outcomeID)); err != nil {
+	// SECURITY (F-011 / F-012): load the outcome under the caller's
+	// tenant AND verify it belongs to the URL's course. Pre-fix path
+	// called DeleteOutcome(id) with no scope, so a teacher in course
+	// 10 could DELETE /courses/10/outcomes/<id from any other course/
+	// tenant>. Account-context outcomes intentionally cannot be deleted
+	// through a course-scoped route.
+	outcome, err := h.outcomeService.GetOutcome(c.Context(), uint(outcomeID), callerAccountID(c))
+	if err != nil {
+		return responses.NotFound(c, "outcome")
+	}
+	if outcome.ContextType != "Course" || outcome.ContextID != uint(courseID) {
+		return responses.NotFound(c, "outcome")
+	}
+
+	if err := h.outcomeService.DeleteOutcome(c.Context(), uint(outcomeID), callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not delete outcome")
 	}
 

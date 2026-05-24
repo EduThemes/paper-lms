@@ -42,8 +42,20 @@ func (r *learningOutcomeRepo) Update(ctx context.Context, outcome *models.Learni
 	return r.db.WithContext(ctx).Save(outcome).Error
 }
 
-func (r *learningOutcomeRepo) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Model(&models.LearningOutcome{}).Where("id = ?", id).Update("workflow_state", "deleted").Error
+// Delete soft-deletes the outcome by setting workflow_state='deleted'.
+// F-012 widening — accountID, when non-zero, restricts the soft-delete
+// to outcomes belonging to caller's tenant (Account context → direct
+// match, Course context → JOIN through courses.account_id). accountID==0
+// is the auth-internal contract documented on internal/repository/postgres/user.go.
+func (r *learningOutcomeRepo) Delete(ctx context.Context, id, accountID uint) error {
+	q := r.db.WithContext(ctx).Model(&models.LearningOutcome{}).Where("id = ?", id)
+	if accountID != 0 {
+		q = q.Where(`
+			(context_type = 'Account' AND context_id = ?)
+			OR (context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))
+		`, accountID, accountID)
+	}
+	return q.Update("workflow_state", "deleted").Error
 }
 
 func (r *learningOutcomeRepo) ListByGroupID(ctx context.Context, groupID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcome], error) {

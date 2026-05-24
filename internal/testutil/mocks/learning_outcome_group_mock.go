@@ -29,8 +29,8 @@ func (m *MockLearningOutcomeGroupRepository) Update(ctx context.Context, group *
 	return m.Called(ctx, group).Error(0)
 }
 
-func (m *MockLearningOutcomeGroupRepository) Delete(ctx context.Context, id uint) error {
-	return m.Called(ctx, id).Error(0)
+func (m *MockLearningOutcomeGroupRepository) Delete(ctx context.Context, id, accountID uint) error {
+	return m.Called(ctx, id, accountID).Error(0)
 }
 
 func (m *MockLearningOutcomeGroupRepository) ListByContext(ctx context.Context, contextType string, contextID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcomeGroup], error) {
