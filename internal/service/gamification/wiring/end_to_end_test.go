@@ -126,7 +126,7 @@ func TestGradeSubmission_TriggersRuleViaCallback(t *testing.T) {
 	))
 
 	// Grade the submission to 95.
-	gradedSub, err := submissionService.Grade(ctx, assignment.ID, learnerID, 0, "95")
+	gradedSub, err := submissionService.Grade(ctx, assignment.ID, learnerID, 0, 0, "95")
 	if err != nil {
 		t.Fatalf("grade: %v", err)
 	}

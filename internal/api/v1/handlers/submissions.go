@@ -251,6 +251,13 @@ func (h *SubmissionHandler) CreateSubmission(c *fiber.Ctx) error {
 	}
 
 	if err := h.submissionService.Create(c.Context(), submission); err != nil {
+		// F-047: distinct status codes for the lock/unlock windows so
+		// the client UI can show the right "not yet" vs "too late"
+		// message. 409 Conflict matches the state-machine semantics.
+		switch err {
+		case service.ErrSubmissionLocked, service.ErrSubmissionNotYetUnlocked:
+			return responses.Error(c, fiber.StatusConflict, err.Error())
+		}
 		return responses.BadRequest(c, err.Error())
 	}
 
@@ -285,8 +292,13 @@ func (h *SubmissionHandler) UpdateSubmission(c *fiber.Ctx) error {
 	}
 
 	if input.Submission.PostedGrade != "" {
-		submission, err := h.submissionService.Grade(c.Context(), uint(assignmentID), uint(userID), graderID, input.Submission.PostedGrade)
+		// F-016: pass caller's tenant so cross-tenant grading attempts
+		// (teacher in tenant A → assignment in tenant B) return 404.
+		submission, err := h.submissionService.Grade(c.Context(), uint(assignmentID), uint(userID), graderID, callerAccountID(c), input.Submission.PostedGrade)
 		if err != nil {
+			if err == service.ErrGradeCrossTenant {
+				return responses.NotFound(c, "assignment")
+			}
 			return responses.BadRequest(c, err.Error())
 		}
 
@@ -489,13 +501,19 @@ func (h *SubmissionHandler) BulkGrade(c *fiber.Ctx) error {
 	results := make([]gradeResult, 0, len(input.GradeData))
 	_ = courseID // validated above
 
+	callerAcct := callerAccountID(c)
 	for _, entry := range input.GradeData {
-		sub, err := h.submissionService.Grade(c.Context(), entry.AssignmentID, entry.UserID, graderID, entry.PostedGrade)
+		// F-016: each entry's assignment must be in the caller's tenant.
+		sub, err := h.submissionService.Grade(c.Context(), entry.AssignmentID, entry.UserID, graderID, callerAcct, entry.PostedGrade)
 		if err != nil {
+			errMsg := err.Error()
+			if err == service.ErrGradeCrossTenant {
+				errMsg = "assignment not found"
+			}
 			results = append(results, gradeResult{
 				AssignmentID: entry.AssignmentID,
 				UserID:       entry.UserID,
-				Error:        err.Error(),
+				Error:        errMsg,
 			})
 		} else {
 			results = append(results, gradeResult{

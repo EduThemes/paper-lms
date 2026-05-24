@@ -17,13 +17,54 @@ import (
 )
 
 type FileHandler struct {
-	fileService    *service.FileService
-	enrollmentRepo repository.EnrollmentRepository
-	auditService   *service.AuditService
+	fileService         *service.FileService
+	enrollmentRepo      repository.EnrollmentRepository
+	groupMembershipRepo repository.GroupMembershipRepository
+	auditService        *service.AuditService
 }
 
-func NewFileHandler(fileService *service.FileService, enrollmentRepo repository.EnrollmentRepository, auditService *service.AuditService) *FileHandler {
-	return &FileHandler{fileService: fileService, enrollmentRepo: enrollmentRepo, auditService: auditService}
+// NewFileHandler wires the file-handler dependencies. groupMembershipRepo
+// was added in the F-041 fix to authz Group-context downloads.
+func NewFileHandler(fileService *service.FileService, enrollmentRepo repository.EnrollmentRepository, groupMembershipRepo repository.GroupMembershipRepository, auditService *service.AuditService) *FileHandler {
+	return &FileHandler{
+		fileService:         fileService,
+		enrollmentRepo:      enrollmentRepo,
+		groupMembershipRepo: groupMembershipRepo,
+		auditService:        auditService,
+	}
+}
+
+// inlineSafeMIMEPrefixes is the allow-list of MIME prefixes that may be
+// served with Content-Disposition: inline (rendered in the browser
+// rather than downloaded). Anything not on the list defaults to
+// Disposition: attachment so a malicious upload can't execute as
+// script in the LMS origin.
+//
+// SECURITY (F-040): SVG is the canonical XSS vehicle (<script> inside
+// <svg> runs same-origin), so image/svg+xml is intentionally NOT
+// inline-safe. text/html, application/xhtml+xml, application/xml are
+// likewise risky. PDF can embed scripts in some viewers — we err on
+// the side of attachment.
+var inlineSafeMIMEPrefixes = []string{
+	"image/png",
+	"image/jpeg",
+	"image/gif",
+	"image/webp",
+	"image/avif",
+	"image/heic",
+}
+
+// isInlineSafeMIME returns true when the given MIME type matches one
+// of the inline-safe prefixes. Exact-match style — a stored MIME of
+// `image/svg+xml` does NOT match the `image/png` allow-listed prefix.
+func isInlineSafeMIME(contentType string) bool {
+	lower := strings.ToLower(strings.TrimSpace(contentType))
+	for _, p := range inlineSafeMIMEPrefixes {
+		if lower == p || strings.HasPrefix(lower, p+";") {
+			return true
+		}
+	}
+	return false
 }
 
 func attachmentToJSON(a *models.Attachment) fiber.Map {
@@ -172,17 +213,56 @@ func (h *FileHandler) DownloadFile(c *fiber.Ctx) error {
 		return responses.NotFound(c, "file")
 	}
 
-	// Authorization: verify user is enrolled in the course that owns this file
-	if attachment.ContextType == "Course" {
-		userID, _ := c.Locals("user_id").(uint)
+	// SECURITY (F-041): authz default-denies for any context type the
+	// switch doesn't recognize. The pre-fix path only checked enrollment
+	// for ContextType=="Course"; every other context (User, Group,
+	// Account, etc.) fell through to "allow." User-context attachments
+	// (personal files, draft uploads) and Group-context attachments
+	// (often private to members) were readable by anyone with a JWT.
+	userID, _ := c.Locals("user_id").(uint)
+	switch attachment.ContextType {
+	case "Course":
 		enrollment, _ := h.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, attachment.ContextID, callerAccountID(c))
 		if enrollment == nil || enrollment.WorkflowState != "active" {
-			// 13.1.E: existence leak — return 404 not 403. The file
-			// exists (the tenant filter on GetAttachment passed), but
-			// the caller has no enrollment in the course that owns it;
-			// 403 would confirm the file exists to an unenrolled user.
 			return responses.NotFound(c, "file")
 		}
+	case "User":
+		// Personal files: only the owner can download. Admins of the
+		// same tenant retain access via the GetAttachment tenant gate
+		// + is_admin Locals; that combination is intentionally
+		// permissive for FERPA / data-export workflows.
+		isAdmin, _ := c.Locals("is_admin").(bool)
+		if !isAdmin && attachment.ContextID != userID {
+			return responses.NotFound(c, "file")
+		}
+	case "Group":
+		// Group files: visible only to members of the group + admins.
+		isMember := false
+		if h.groupMembershipRepo != nil {
+			memberships, _ := h.groupMembershipRepo.ListByGroupID(c.Context(), attachment.ContextID, repository.PaginationParams{Page: 1, PerPage: 10000})
+			if memberships != nil {
+				for _, m := range memberships.Items {
+					if m.UserID == userID && m.WorkflowState == "accepted" {
+						isMember = true
+						break
+					}
+				}
+			}
+		}
+		isAdmin, _ := c.Locals("is_admin").(bool)
+		if !isMember && !isAdmin {
+			return responses.NotFound(c, "file")
+		}
+	case "Account":
+		// Account-context attachments are admin-only by convention.
+		isAdmin, _ := c.Locals("is_admin").(bool)
+		if !isAdmin {
+			return responses.NotFound(c, "file")
+		}
+	default:
+		// Unknown context type — fail closed. Adding a new context
+		// type now requires explicit authz wiring here.
+		return responses.NotFound(c, "file")
 	}
 
 	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil && attachment.UserID != 0 && attachment.UserID != callerID {
@@ -194,8 +274,18 @@ func (h *FileHandler) DownloadFile(c *fiber.Ctx) error {
 	safeName = strings.ReplaceAll(safeName, "\"", "")
 	safeName = strings.ReplaceAll(safeName, "\r", "")
 	safeName = strings.ReplaceAll(safeName, "\n", "")
+
+	// SECURITY (F-040): serve inline ONLY for an explicit allow-list of
+	// MIME prefixes that are NOT executable in a browser. The pre-fix
+	// path served any `image/*` inline — and the upload-time
+	// `Content-Type` header is attacker-controlled, so an attacker
+	// could upload `payload.bogus` with header `Content-Type:
+	// image/svg+xml` (unknown extension skips MIME validation) and
+	// trigger script execution in the LMS origin on download. SVG is
+	// the canonical XSS vehicle here; PDFs can also embed scripts in
+	// some viewers, so neither is allow-listed for inline.
 	disposition := "attachment"
-	if strings.HasPrefix(attachment.ContentType, "image/") {
+	if isInlineSafeMIME(attachment.ContentType) {
 		disposition = "inline"
 	}
 	c.Set("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"; filename*=UTF-8''%s", disposition, safeName, url.PathEscape(safeName)))

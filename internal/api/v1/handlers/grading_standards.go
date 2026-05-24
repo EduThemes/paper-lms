@@ -94,7 +94,7 @@ func (h *GradingStandardHandler) CreateGradingStandard(c *fiber.Ctx) error {
 }
 
 func (h *GradingStandardHandler) UpdateGradingStandard(c *fiber.Ctx) error {
-	_, err := c.ParamsInt("course_id")
+	courseID, err := c.ParamsInt("course_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid course ID")
 	}
@@ -109,10 +109,19 @@ func (h *GradingStandardHandler) UpdateGradingStandard(c *fiber.Ctx) error {
 		return responses.NotFound(c, "grading standard")
 	}
 
+	// SECURITY (F-002): assert the standard belongs to the URL's
+	// course_id. The pre-fix path discarded :course_id (`_, err :=`)
+	// and let a teacher of course A edit standards owned by course B
+	// in any tenant — RequireInstructor guarded course-A enrollment,
+	// not the standard's parent. 404 leaks no existence info.
+	if standard.ContextType != "Course" || standard.ContextID != uint(courseID) {
+		return responses.NotFound(c, "grading standard")
+	}
+
 	var input struct {
 		GradingStandard struct {
-			Title *string          `json:"title"`
-			Data  json.RawMessage  `json:"data"`
+			Title *string         `json:"title"`
+			Data  json.RawMessage `json:"data"`
 		} `json:"grading_standard"`
 	}
 
@@ -135,7 +144,7 @@ func (h *GradingStandardHandler) UpdateGradingStandard(c *fiber.Ctx) error {
 }
 
 func (h *GradingStandardHandler) DeleteGradingStandard(c *fiber.Ctx) error {
-	_, err := c.ParamsInt("course_id")
+	courseID, err := c.ParamsInt("course_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid course ID")
 	}
@@ -143,6 +152,16 @@ func (h *GradingStandardHandler) DeleteGradingStandard(c *fiber.Ctx) error {
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid grading standard ID")
+	}
+
+	// SECURITY (F-002): load first so we can assert parent course
+	// ownership before the destructive op. See UpdateGradingStandard.
+	standard, err := h.repo.FindByID(c.Context(), uint(id))
+	if err != nil {
+		return responses.NotFound(c, "grading standard")
+	}
+	if standard.ContextType != "Course" || standard.ContextID != uint(courseID) {
+		return responses.NotFound(c, "grading standard")
 	}
 
 	if err := h.repo.Delete(c.Context(), uint(id)); err != nil {
