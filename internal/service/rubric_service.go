@@ -86,8 +86,11 @@ func (s *RubricService) UpdateRubric(ctx context.Context, rubric *models.Rubric)
 	return s.rubricRepo.Update(ctx, rubric)
 }
 
-func (s *RubricService) DeleteRubric(ctx context.Context, id uint) error {
-	return s.rubricRepo.Delete(ctx, id)
+// DeleteRubric soft-deletes the rubric. F-012 — accountID is the
+// caller's tenant; when 0 the underlying repo skips the tenant filter
+// (auth-internal contract per internal/repository/postgres/user.go).
+func (s *RubricService) DeleteRubric(ctx context.Context, id, accountID uint) error {
+	return s.rubricRepo.Delete(ctx, id, accountID)
 }
 
 func (s *RubricService) ListRubricsByContext(ctx context.Context, contextType string, contextID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Rubric], error) {

@@ -500,7 +500,7 @@ func (f *fakeLearningOutcomeRepo) FindByID(ctx context.Context, id, accountID ui
 func (f *fakeLearningOutcomeRepo) Update(ctx context.Context, o *models.LearningOutcome) error {
 	return nil
 }
-func (f *fakeLearningOutcomeRepo) Delete(ctx context.Context, id uint) error {
+func (f *fakeLearningOutcomeRepo) Delete(ctx context.Context, id, accountID uint) error {
 	return nil
 }
 func (f *fakeLearningOutcomeRepo) ListByGroupID(ctx context.Context, groupID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcome], error) {
@@ -529,7 +529,7 @@ func (f *fakeLearningOutcomeGroupRepo) FindByID(ctx context.Context, id, account
 func (f *fakeLearningOutcomeGroupRepo) Update(ctx context.Context, g *models.LearningOutcomeGroup) error {
 	return nil
 }
-func (f *fakeLearningOutcomeGroupRepo) Delete(ctx context.Context, id uint) error {
+func (f *fakeLearningOutcomeGroupRepo) Delete(ctx context.Context, id, accountID uint) error {
 	return nil
 }
 func (f *fakeLearningOutcomeGroupRepo) ListByContext(ctx context.Context, contextType string, contextID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcomeGroup], error) {

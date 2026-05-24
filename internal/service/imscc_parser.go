@@ -1727,7 +1727,10 @@ func (p *IMSCCParser) CleanupFailedImport(ctx context.Context, courseID uint, re
 				}
 			case "Rubric":
 				if p.rubricRepo != nil {
-					_ = p.rubricRepo.Delete(ctx, e.ID)
+					// auth-internal: import rollback runs without
+					// caller-tenant context; accountID=0 skips the
+					// scope filter per the documented user.go contract.
+					_ = p.rubricRepo.Delete(ctx, e.ID, 0)
 				}
 			case "RubricAssociation":
 				if p.rubricAssocRepo != nil {
@@ -1735,11 +1738,13 @@ func (p *IMSCCParser) CleanupFailedImport(ctx context.Context, courseID uint, re
 				}
 			case "LearningOutcomeGroup":
 				if p.outcomeGroupRepo != nil {
-					_ = p.outcomeGroupRepo.Delete(ctx, e.ID)
+					// auth-internal: see Rubric case above.
+					_ = p.outcomeGroupRepo.Delete(ctx, e.ID, 0)
 				}
 			case "LearningOutcome":
 				if p.outcomeRepo != nil {
-					_ = p.outcomeRepo.Delete(ctx, e.ID)
+					// auth-internal: see Rubric case above.
+					_ = p.outcomeRepo.Delete(ctx, e.ID, 0)
 				}
 			case "CalendarEvent":
 				if p.calendarEventRepo != nil {
