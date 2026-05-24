@@ -95,6 +95,35 @@ func callerAccountID(c *fiber.Ctx) uint {
 	return v
 }
 
+// callerRoleForStateMachine maps the request's auth Locals onto a
+// role string the model state-machine helpers understand (see
+// internal/domain/models/state_transitions.go). is_admin takes
+// precedence — an admin in a course where they happen to also be
+// enrolled as a Student should still get admin privileges for
+// workflow_state changes. Empty string when no role can be inferred;
+// the state machine then rejects most non-self transitions.
+//
+// PENTEST F-018 supporting helper.
+func callerRoleForStateMachine(c *fiber.Ctx) string {
+	if isSuperAdmin, _ := c.Locals("is_super_admin").(bool); isSuperAdmin {
+		return models.RoleSuperUser
+	}
+	if isAdmin, _ := c.Locals("is_admin").(bool); isAdmin {
+		return models.RoleAdmin
+	}
+	switch enrollmentType, _ := c.Locals("enrollment_type").(string); enrollmentType {
+	case "TeacherEnrollment":
+		return models.RoleTeacher
+	case "TaEnrollment":
+		return models.RoleTA
+	case "StudentEnrollment":
+		return models.RoleStudent
+	case "ObserverEnrollment":
+		return models.RoleObserver
+	}
+	return ""
+}
+
 // Browse handles GET /api/v1/commons.
 // Query params: resource_type, subject, grade_level, q (search), author_user_id, page, per_page.
 func (h *CommonsHandler) Browse(c *fiber.Ctx) error {
