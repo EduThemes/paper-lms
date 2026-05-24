@@ -134,7 +134,7 @@ func (h *AssignmentHandler) CreateAssignment(c *fiber.Ctx) error {
 		CourseID:           uint(courseID),
 		AssignmentGroupID:  input.Assignment.AssignmentGroupID,
 		Name:               input.Assignment.Name,
-		Description:        input.Assignment.Description,
+		Description:        service.SanitizeHTML(input.Assignment.Description),
 		DueAt:              input.Assignment.DueAt,
 		UnlockAt:           input.Assignment.UnlockAt,
 		LockAt:             input.Assignment.LockAt,
@@ -205,7 +205,7 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 		assignment.Name = *input.Assignment.Name
 	}
 	if input.Assignment.Description != nil {
-		assignment.Description = *input.Assignment.Description
+		assignment.Description = service.SanitizeHTML(*input.Assignment.Description)
 	}
 	if input.Assignment.DueAt != nil {
 		assignment.DueAt = input.Assignment.DueAt

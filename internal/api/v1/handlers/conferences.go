@@ -112,7 +112,7 @@ func (h *ConferenceHandler) CreateConference(c *fiber.Ctx) error {
 		ContextID:      uint(courseID),
 		ConferenceType: input.Conference.ConferenceType,
 		Title:          input.Conference.Title,
-		Description:    input.Conference.Description,
+		Description:    service.SanitizeHTML(input.Conference.Description),
 		Duration:       input.Conference.Duration,
 		Settings:       input.Conference.Settings,
 		UserID:         userID,
@@ -190,7 +190,7 @@ func (h *ConferenceHandler) UpdateConference(c *fiber.Ctx) error {
 		conference.Title = *input.Conference.Title
 	}
 	if input.Conference.Description != nil {
-		conference.Description = *input.Conference.Description
+		conference.Description = service.SanitizeHTML(*input.Conference.Description)
 	}
 	if input.Conference.ConferenceType != nil {
 		conference.ConferenceType = *input.Conference.ConferenceType

@@ -116,7 +116,7 @@ func (h *AnnouncementHandler) CreateCourseAnnouncement(c *fiber.Ctx) error {
 		CourseID:       &cid,
 		UserID:         userID,
 		Title:          input.Title,
-		Message:        input.Message,
+		Message:        service.SanitizeHTML(input.Message),
 		Priority:       input.Priority,
 		RequireAck:     input.RequireAck,
 		TargetAudience: input.TargetAudience,
@@ -204,7 +204,7 @@ func (h *AnnouncementHandler) UpdateAnnouncement(c *fiber.Ctx) error {
 		announcement.Title = *input.Title
 	}
 	if input.Message != nil {
-		announcement.Message = *input.Message
+		announcement.Message = service.SanitizeHTML(*input.Message)
 	}
 	if input.Priority != nil {
 		announcement.Priority = *input.Priority
@@ -433,7 +433,7 @@ func (h *AnnouncementHandler) CreateAccountAnnouncement(c *fiber.Ctx) error {
 		AccountID:      &aid,
 		UserID:         userID,
 		Title:          input.Title,
-		Message:        input.Message,
+		Message:        service.SanitizeHTML(input.Message),
 		Priority:       input.Priority,
 		RequireAck:     input.RequireAck,
 		TargetAudience: input.TargetAudience,

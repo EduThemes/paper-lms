@@ -339,7 +339,7 @@ func (h *GroupHandler) CreateGroup(c *fiber.Ctx) error {
 	group := &models.Group{
 		GroupCategoryID: uint(categoryID),
 		Name:            input.Group.Name,
-		Description:     input.Group.Description,
+		Description:     service.SanitizeHTML(input.Group.Description),
 		MaxMembership:   input.Group.MaxMembership,
 		IsPublic:        input.Group.IsPublic,
 		JoinLevel:       input.Group.JoinLevel,
@@ -413,7 +413,7 @@ func (h *GroupHandler) UpdateGroup(c *fiber.Ctx) error {
 		group.Name = *input.Group.Name
 	}
 	if input.Group.Description != nil {
-		group.Description = *input.Group.Description
+		group.Description = service.SanitizeHTML(*input.Group.Description)
 	}
 	if input.Group.MaxMembership != nil {
 		group.MaxMembership = input.Group.MaxMembership
@@ -566,11 +566,18 @@ func (h *GroupHandler) UpdateGroupMembership(c *fiber.Ctx) error {
 		return responses.NotFound(c, "group membership")
 	}
 
-	// Authorization: require instructor for course-scoped groups
+	// Authorization: course-scoped groups require instructor; account-
+	// scoped (non-course) groups require admin. Before the 2026-05-22
+	// audit fix, the account-scope branch had NO authz gate, which let
+	// a pending member self-accept by writing workflow_state=accepted.
 	courseID, err := h.getCourseIDFromGroup(c, membership.GroupID)
 	if err == nil && courseID != 0 {
 		if err := h.authz.RequireCourseInstructor(c, courseID); err != nil {
 			return err
+		}
+	} else {
+		if isAdmin, _ := c.Locals("is_admin").(bool); !isAdmin {
+			return responses.Forbidden(c, "admin required to update account-scoped group memberships")
 		}
 	}
 
