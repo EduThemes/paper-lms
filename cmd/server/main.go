@@ -770,7 +770,7 @@ func main() {
 	rubricHandler := handlers.NewRubricHandler(rubricService)
 	rubricAssessmentHandler := handlers.NewRubricAssessmentHandler(rubricService)
 	gradingPeriodHandler := handlers.NewGradingPeriodHandler(gradingPeriodService)
-	assignmentOverrideHandler := handlers.NewAssignmentOverrideHandler(overrideService)
+	assignmentOverrideHandler := handlers.NewAssignmentOverrideHandler(overrideService, assignmentService)
 	latePolicyHandler := handlers.NewLatePolicyHandler(latePolicyService)
 	// handlers
 	calendarEventHandler := handlers.NewCalendarEventHandler(calendarService, authz)
