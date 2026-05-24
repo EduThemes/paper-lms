@@ -19,7 +19,9 @@ type BlueprintTemplateRepository interface {
 	FindByID(ctx context.Context, id uint) (*models.BlueprintTemplate, error)
 	FindByCourseID(ctx context.Context, courseID uint) (*models.BlueprintTemplate, error)
 	Update(ctx context.Context, template *models.BlueprintTemplate) error
-	Delete(ctx context.Context, id uint) error
+	// F-012 — accountID scopes the write to a single tenant via the
+	// parent course; pass 0 only from privileged internal callers.
+	Delete(ctx context.Context, id, accountID uint) error
 	ListByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.BlueprintTemplate], error)
 }
 
