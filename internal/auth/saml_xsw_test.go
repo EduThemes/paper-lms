@@ -109,7 +109,9 @@ func buildSignedSAMLResponse(t *testing.T, store dsig.X509KeyStore, assertionID 
 
 // validateBytes is a thin wrapper that wires up the cert store and
 // returns the validated element's ID + error, mirroring what
-// SAMLHandler.verifyResponseSignature does after cert lookup.
+// SAMLHandler.verifyResponseSignature does after cert lookup —
+// INCLUDING the Response-first, Assertion-fallback walk for IdPs
+// (Okta, ADFS) that sign just the Assertion.
 func validateBytes(t *testing.T, cert *x509.Certificate, xmlBytes []byte) (string, error) {
 	t.Helper()
 	doc := etree.NewDocument()
@@ -118,11 +120,73 @@ func validateBytes(t *testing.T, cert *x509.Certificate, xmlBytes []byte) (strin
 	}
 	store := &dsig.MemoryX509CertificateStore{Roots: []*x509.Certificate{cert}}
 	ctx := dsig.NewDefaultValidationContext(store)
-	validated, err := ctx.Validate(doc.Root())
-	if err != nil {
-		return "", err
+	root := doc.Root()
+	if validated, err := ctx.Validate(root); err == nil {
+		return validated.SelectAttrValue("ID", ""), nil
 	}
-	return validated.SelectAttrValue("ID", ""), nil
+	for _, child := range root.ChildElements() {
+		if !strings.HasSuffix(child.Tag, "Assertion") {
+			continue
+		}
+		if validated, err := ctx.Validate(child); err == nil {
+			return validated.SelectAttrValue("ID", ""), nil
+		}
+	}
+	return "", errSignatureNotFound
+}
+
+var errSignatureNotFound = newErr("no valid signature on Response or Assertion")
+
+func newErr(msg string) error { return &simpleErr{msg} }
+
+type simpleErr struct{ msg string }
+
+func (e *simpleErr) Error() string { return e.msg }
+
+// buildAssertionSignedSAMLResponse produces a SAML Response where only
+// the <Assertion> child is signed (signature inside the Assertion,
+// referencing the Assertion's ID). This is the Okta / ADFS default
+// shape — the original PR's test fixtures only covered the
+// Response-signed case and the production code only tried Validate(root),
+// which rejected real-world IdP traffic.
+func buildAssertionSignedSAMLResponse(t *testing.T, store dsig.X509KeyStore, assertionID string) []byte {
+	t.Helper()
+	signCtx := dsig.NewDefaultSigningContext(store)
+	signCtx.Canonicalizer = dsig.MakeC14N10ExclusiveCanonicalizerWithPrefixList("")
+
+	assertion := etree.NewElement("Assertion")
+	assertion.CreateAttr("xmlns", "urn:oasis:names:tc:SAML:2.0:assertion")
+	assertion.CreateAttr("ID", assertionID)
+	assertion.CreateAttr("Version", "2.0")
+	assertion.CreateAttr("IssueInstant", time.Now().UTC().Format(time.RFC3339))
+	issuer := assertion.CreateElement("Issuer")
+	issuer.SetText("https://idp.test")
+	subject := assertion.CreateElement("Subject")
+	nameID := subject.CreateElement("NameID")
+	nameID.SetText("alice@idp.test")
+
+	signedAssertion, err := signCtx.SignEnveloped(assertion)
+	if err != nil {
+		t.Fatalf("sign assertion: %v", err)
+	}
+
+	response := etree.NewElement("samlp:Response")
+	response.CreateAttr("xmlns:samlp", "urn:oasis:names:tc:SAML:2.0:protocol")
+	response.CreateAttr("ID", "_resp-"+assertionID)
+	response.CreateAttr("Version", "2.0")
+	response.CreateAttr("IssueInstant", time.Now().UTC().Format(time.RFC3339))
+	status := response.CreateElement("samlp:Status")
+	sc := status.CreateElement("samlp:StatusCode")
+	sc.CreateAttr("Value", "urn:oasis:names:tc:SAML:2.0:status:Success")
+	response.AddChild(signedAssertion)
+
+	doc := etree.NewDocument()
+	doc.SetRoot(response)
+	xmlBytes, err := doc.WriteToBytes()
+	if err != nil {
+		t.Fatalf("serialize response: %v", err)
+	}
+	return xmlBytes
 }
 
 // TestValidSignedAssertion_Accepts is the happy-path lock. A response
@@ -139,6 +203,27 @@ func TestValidSignedAssertion_Accepts(t *testing.T) {
 	// Signed element is the Response; its ID is "_resp-<assertionID>".
 	if signedID != "_resp-_assertion-happy" {
 		t.Errorf("expected signedID=_resp-_assertion-happy, got %q", signedID)
+	}
+}
+
+// TestAssertionSignedResponse_Accepts locks the real-world Okta/ADFS
+// path — the IdP signs ONLY the <Assertion>, not the <Response>.
+// Pre-fix verifyResponseSignature called goxmldsig.Validate(root)
+// which only matches signatures whose Reference URI equals the
+// Response's ID; this case returned "Missing reference" → 401.
+// Now: Response-level validate fails, but the Assertion-level walk
+// succeeds and the signed Assertion's ID is returned for downstream
+// pinning.
+func TestAssertionSignedResponse_Accepts(t *testing.T) {
+	cert, _, store := makeSelfSignedCertAndKey(t)
+	xmlBytes := buildAssertionSignedSAMLResponse(t, store, "_assertion-okta-style")
+
+	signedID, err := validateBytes(t, cert, xmlBytes)
+	if err != nil {
+		t.Fatalf("expected Assertion-signed response to validate, got error: %v", err)
+	}
+	if signedID != "_assertion-okta-style" {
+		t.Errorf("expected signedID=_assertion-okta-style (the Assertion's ID), got %q", signedID)
 	}
 }
 

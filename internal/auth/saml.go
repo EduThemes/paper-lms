@@ -920,16 +920,36 @@ func (h *SAMLHandler) verifyResponseSignature(c *fiber.Ctx, responseXML []byte) 
 	validationCtx := dsig.NewDefaultValidationContext(certStore)
 	validationCtx.IdAttribute = "ID"
 
-	validated, err := validationCtx.Validate(root)
-	if err != nil {
-		return "", fmt.Errorf("SAML signature verification failed: %w", err)
+	// Try Response-level signature first (typical for Azure AD,
+	// Shibboleth-configured-to-sign-response). If that fails, fall
+	// back to Assertion-level (Okta default, ADFS default, many
+	// other real-world IdPs). goxmldsig.Validate(el) only validates
+	// signatures whose Reference URI references el's ID — it does
+	// NOT walk children. So we walk the candidate elements
+	// ourselves.
+	if validated, vErr := validationCtx.Validate(root); vErr == nil {
+		signedID := validated.SelectAttrValue("ID", "")
+		if signedID == "" {
+			return "", fmt.Errorf("signed SAML element has no ID attribute")
+		}
+		return signedID, nil
 	}
 
-	signedID := validated.SelectAttrValue("ID", "")
-	if signedID == "" {
-		return "", fmt.Errorf("signed SAML element has no ID attribute")
+	// Look for an <Assertion> child (handles namespaced + bare).
+	for _, child := range root.ChildElements() {
+		if !strings.HasSuffix(child.Tag, "Assertion") {
+			continue
+		}
+		if validated, vErr := validationCtx.Validate(child); vErr == nil {
+			signedID := validated.SelectAttrValue("ID", "")
+			if signedID == "" {
+				return "", fmt.Errorf("signed SAML element has no ID attribute")
+			}
+			return signedID, nil
+		}
 	}
-	return signedID, nil
+
+	return "", fmt.Errorf("SAML signature verification failed: no valid Reference at Response or Assertion level")
 }
 
 
