@@ -331,7 +331,11 @@ func TestGrade_Success(t *testing.T) {
 	gradingPeriodGroupRepo := new(mocks.MockGradingPeriodGroupRepository)
 	gradingPeriodRepo := new(mocks.MockGradingPeriodRepository)
 	svc := service.NewSubmissionService(submissionRepo, assignmentRepo, enrollmentRepo, latePolicyRepo, courseRepo, gradingPeriodGroupRepo, gradingPeriodRepo, nil)
-	result, err := svc.Grade(context.Background(), 10, 20, 99, "95")
+	// callerAccountID=0 mirrors the legacy auth-internal path; mocks
+	// expect 0 in their `On("FindBy...", ..., uint(0))` setup, so the
+	// success path verifies the tenant gate is wired without changing
+	// existing mock expectations.
+	result, err := svc.Grade(context.Background(), 10, 20, 99, 0, "95")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -365,7 +369,7 @@ func TestGrade_InvalidGrade(t *testing.T) {
 	gradingPeriodGroupRepo := new(mocks.MockGradingPeriodGroupRepository)
 	gradingPeriodRepo := new(mocks.MockGradingPeriodRepository)
 	svc := service.NewSubmissionService(submissionRepo, assignmentRepo, enrollmentRepo, latePolicyRepo, courseRepo, gradingPeriodGroupRepo, gradingPeriodRepo, nil)
-	result, err := svc.Grade(context.Background(), 10, 20, 99, "abc")
+	result, err := svc.Grade(context.Background(), 10, 20, 99, 0, "abc")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -391,7 +395,7 @@ func TestGrade_NotFound_CreatesSubmission(t *testing.T) {
 	gradingPeriodGroupRepo := new(mocks.MockGradingPeriodGroupRepository)
 	gradingPeriodRepo := new(mocks.MockGradingPeriodRepository)
 	svc := service.NewSubmissionService(submissionRepo, assignmentRepo, enrollmentRepo, latePolicyRepo, courseRepo, gradingPeriodGroupRepo, gradingPeriodRepo, nil)
-	result, err := svc.Grade(context.Background(), 10, 20, 99, "95")
+	result, err := svc.Grade(context.Background(), 10, 20, 99, 0, "95")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)

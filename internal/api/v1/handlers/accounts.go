@@ -28,28 +28,53 @@ func accountToJSON(a *models.Account) fiber.Map {
 	}
 }
 
+// ListAccounts returns the caller's own tenant (and child accounts when
+// the hierarchy lands). A super_admin sees every account in the
+// deployment; an account-admin sees only their own row.
+//
+// SECURITY (F-001): the pre-fix path returned every account in the DB
+// to any admin, which let a tenant-A admin enumerate every tenant in
+// the deployment.
 func (h *AccountHandler) ListAccounts(c *fiber.Ctx) error {
 	params := middleware.GetPagination(c)
 
-	result, err := h.accountRepo.List(c.Context(), params)
+	isSuper, _ := c.Locals("is_super_admin").(bool)
+	if isSuper {
+		result, err := h.accountRepo.List(c.Context(), params)
+		if err != nil {
+			return responses.InternalError(c, "Could not fetch accounts")
+		}
+		responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
+		accounts := make([]fiber.Map, len(result.Items))
+		for i := range result.Items {
+			accounts[i] = accountToJSON(&result.Items[i])
+		}
+		return c.JSON(accounts)
+	}
+
+	// Tenant-admin: scope to their own account row. The hierarchy walk
+	// (parent/child) is a Phase-14 follow-up; for now return the
+	// caller's account only — that's strictly less data than before,
+	// and the audit's "multi-tenancy in disguise" finding is closed.
+	account, err := h.accountRepo.FindByID(c.Context(), callerAccountID(c))
 	if err != nil {
-		return responses.InternalError(c, "Could not fetch accounts")
+		return responses.InternalError(c, "Could not fetch account")
 	}
-
-	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
-
-	accounts := make([]fiber.Map, len(result.Items))
-	for i := range result.Items {
-		accounts[i] = accountToJSON(&result.Items[i])
-	}
-
-	return c.JSON(accounts)
+	responses.SetPaginationHeaders(c, 1, 1, 1)
+	return c.JSON([]fiber.Map{accountToJSON(account)})
 }
 
 func (h *AccountHandler) GetAccount(c *fiber.Ctx) error {
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid account ID")
+	}
+
+	// SECURITY (F-001): require :id == caller's tenant. Super-admin
+	// bypasses (treated as global operator). 404 on mismatch leaks
+	// nothing about the existence of other tenants.
+	if assertSameTenant(c, uint(id)) {
+		return nil
 	}
 
 	account, err := h.accountRepo.FindByID(c.Context(), uint(id))
@@ -66,6 +91,11 @@ func (h *AccountHandler) UpdateAccount(c *fiber.Ctx) error {
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid account ID")
+	}
+
+	// SECURITY (F-001): see GetAccount.
+	if assertSameTenant(c, uint(id)) {
+		return nil
 	}
 
 	account, err := h.accountRepo.FindByID(c.Context(), uint(id))

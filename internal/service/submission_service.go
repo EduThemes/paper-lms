@@ -86,6 +86,18 @@ func NewSubmissionService(
 	}
 }
 
+// ErrSubmissionLocked is returned when a student attempts to submit
+// (or resubmit) after the assignment's lock_at window has closed.
+// Handlers map this to 409 Conflict so the UI can show "this assignment
+// is locked" instead of a generic 400.
+var ErrSubmissionLocked = errors.New("assignment is locked")
+
+// ErrSubmissionNotYetUnlocked is returned when a student attempts to
+// submit before the assignment's unlock_at window has opened. Handlers
+// map this to 409 Conflict — same shape as ErrSubmissionLocked, distinct
+// failure mode so the UI can distinguish "not yet" from "too late".
+var ErrSubmissionNotYetUnlocked = errors.New("assignment is not yet available")
+
 func (s *SubmissionService) Create(ctx context.Context, submission *models.Submission) error {
 	// Validate assignment exists
 	assignment, err := s.assignmentRepo.FindByID(ctx, submission.AssignmentID, 0)
@@ -98,6 +110,18 @@ func (s *SubmissionService) Create(ctx context.Context, submission *models.Submi
 	}
 
 	now := time.Now()
+
+	// F-047: unlock_at / lock_at windows. The pre-fix path flagged
+	// submissions past due_at as Late=true but accepted them; it never
+	// looked at lock_at, so students could submit indefinitely after
+	// the assignment closed. Now: reject before any DB write.
+	if assignment.UnlockAt != nil && now.Before(*assignment.UnlockAt) {
+		return ErrSubmissionNotYetUnlocked
+	}
+	if assignment.LockAt != nil && now.After(*assignment.LockAt) {
+		return ErrSubmissionLocked
+	}
+
 	submission.SubmittedAt = &now
 	submission.Attempt = 1
 	submission.WorkflowState = "submitted"
@@ -174,26 +198,48 @@ func (s *SubmissionService) PostGradesByAssignment(ctx context.Context, assignme
 	return s.submissionRepo.PostGradesByAssignment(ctx, assignmentID, postedAt)
 }
 
-func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, graderID uint, postedGrade string) (*models.Submission, error) {
+// ErrGradeCrossTenant is returned when a Grade call attempts to score
+// a submission whose assignment lives outside the grader's tenant.
+// Handlers map this to 404 (existence-leak contract).
+var ErrGradeCrossTenant = errors.New("assignment not in grader's tenant")
+
+// Grade scores an existing submission (or creates a graded submission
+// for a student who hadn't submitted yet, the "teacher grades a missing
+// student" path).
+//
+// SECURITY (F-016): callerAccountID gates both the assignment and the
+// existing-submission lookups. The pre-fix path passed accountID=0
+// through every repo call, which let a teacher in course A submit:
+//   PUT /courses/A/assignments/<id from tenant B>/submissions/<user>
+// and rewrite (or CREATE) a graded submission for any student in any
+// tenant. The fix loads the assignment under the caller's tenant; an
+// assignment in a different tenant returns ErrGradeCrossTenant.
+func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, graderID, callerAccountID uint, postedGrade string) (*models.Submission, error) {
 	score, err := strconv.ParseFloat(postedGrade, 64)
 	if err != nil {
 		return nil, fmt.Errorf("invalid grade value: %s", postedGrade)
 	}
 
+	// Tenant gate — assignment lookup MUST scope to the caller's
+	// tenant. A miss = cross-tenant grading attempt = refuse.
+	assignment, aErr := s.assignmentRepo.FindByID(ctx, assignmentID, callerAccountID)
+	if aErr != nil {
+		return nil, ErrGradeCrossTenant
+	}
+
 	// Check if grading period is closed for this assignment
-	if closed, periodTitle := s.isGradingPeriodClosed(ctx, assignmentID); closed {
+	if closed, periodTitle := s.isGradingPeriodClosed(ctx, assignment); closed {
 		return nil, fmt.Errorf("grading period %q is closed — grades cannot be modified", periodTitle)
 	}
 
 	now := time.Now()
 
 	// Apply late policy deductions if applicable
-	score = s.applyLateDeduction(ctx, assignmentID, userID, score)
+	score = s.applyLateDeduction(ctx, assignmentID, userID, callerAccountID, score)
 
 	gradeStr := strconv.FormatFloat(score, 'f', -1, 64)
 
-	// accountID=0: tenant verification already done upstream by the grading handler.
-	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, 0)
+	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, callerAccountID)
 	if err != nil {
 		// No existing submission — create one (teacher grading without student submission)
 		submission = &models.Submission{
@@ -220,9 +266,9 @@ func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, gra
 		}
 	}
 
-	// For group assignments, apply the same grade to all other group members
-	assignment, aErr := s.assignmentRepo.FindByID(ctx, assignmentID, 0)
-	if aErr == nil && assignment.GroupCategoryID != nil && *assignment.GroupCategoryID > 0 {
+	// For group assignments, apply the same grade to all other group members.
+	// Tenant is already enforced via the assignment load above.
+	if assignment.GroupCategoryID != nil && *assignment.GroupCategoryID > 0 {
 		s.gradeGroupMembers(ctx, assignment, userID, graderID, score, gradeStr, &now)
 	}
 
@@ -296,15 +342,24 @@ func (s *SubmissionService) createGroupSubmissions(ctx context.Context, assignme
 }
 
 // gradeGroupMembers applies the same grade to all other group members
-// when grading a group assignment submission.
+// when grading a group assignment submission. The caller has already
+// loaded the assignment under its tenant scope, so the assignment
+// itself is safe to use directly; the per-member lookups use
+// assignment.AccountID as the tenant.
 func (s *SubmissionService) gradeGroupMembers(ctx context.Context, assignment *models.Assignment, gradedUserID, graderID uint, score float64, gradeStr string, gradedAt *time.Time) {
 	memberIDs := s.getGroupMemberIDs(ctx, gradedUserID, *assignment.GroupCategoryID)
+	// Resolve the assignment's tenant scope from its course (assignment
+	// rows don't carry account_id directly).
+	tenantScope := uint(0)
+	if course, cErr := s.courseRepo.FindByID(ctx, assignment.CourseID, 0); cErr == nil {
+		tenantScope = course.AccountID
+	}
 	for _, memberID := range memberIDs {
 		// Apply per-member late deduction (each member's lateness may differ if overrides exist)
-		memberScore := s.applyLateDeduction(ctx, assignment.ID, memberID, score)
+		memberScore := s.applyLateDeduction(ctx, assignment.ID, memberID, tenantScope, score)
 		memberGradeStr := strconv.FormatFloat(memberScore, 'f', -1, 64)
 
-		existing, _ := s.submissionRepo.FindByAssignmentAndUser(ctx, assignment.ID, memberID, 0)
+		existing, _ := s.submissionRepo.FindByAssignmentAndUser(ctx, assignment.ID, memberID, tenantScope)
 		if existing != nil {
 			existing.Score = &memberScore
 			existing.Grade = &memberGradeStr
@@ -329,15 +384,21 @@ func (s *SubmissionService) gradeGroupMembers(ctx context.Context, assignment *m
 
 // applyLateDeduction applies late submission deduction based on the course's late policy.
 // Returns the adjusted score (or original score if no deduction applies).
-func (s *SubmissionService) applyLateDeduction(ctx context.Context, assignmentID, userID uint, score float64) float64 {
+//
+// SECURITY (F-016): tenant-scope is threaded through. The pre-fix
+// path used accountID=0 here, which was harmless on its own (this
+// helper is only called from Grade, which now refuses cross-tenant
+// at the outer FindByID gate) but inconsistent — the mocks would
+// see two different accountID values for the same Grade call.
+func (s *SubmissionService) applyLateDeduction(ctx context.Context, assignmentID, userID, callerAccountID uint, score float64) float64 {
 	// Get the submission to check if it's late
-	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, 0)
+	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, callerAccountID)
 	if err != nil || !submission.Late {
 		return score
 	}
 
 	// Get the assignment to determine course and due date
-	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, 0)
+	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, callerAccountID)
 	if err != nil || assignment.DueAt == nil {
 		return score
 	}
@@ -391,11 +452,12 @@ func (s *SubmissionService) applyLateDeduction(ctx context.Context, assignmentID
 	return adjustedScore
 }
 
-// isGradingPeriodClosed checks whether the assignment falls within a closed grading period.
-// Returns (true, periodTitle) if closed, (false, "") if open or no grading periods configured.
-func (s *SubmissionService) isGradingPeriodClosed(ctx context.Context, assignmentID uint) (bool, string) {
-	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, 0)
-	if err != nil {
+// isGradingPeriodClosed checks whether the given assignment falls
+// within a closed grading period. Takes the already-loaded assignment
+// so the caller's tenant scope (verified at the original FindByID
+// site) is preserved without an extra unscoped lookup.
+func (s *SubmissionService) isGradingPeriodClosed(ctx context.Context, assignment *models.Assignment) (bool, string) {
+	if assignment == nil {
 		return false, ""
 	}
 

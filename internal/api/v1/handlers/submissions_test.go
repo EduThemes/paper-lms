@@ -229,10 +229,12 @@ func TestUpdateSubmission_Grade(t *testing.T) {
 		WorkflowState:  "submitted",
 	}
 
-	// Grade calls isGradingPeriodClosed → assignmentRepo.FindByID (returns no DueAt, so period check skips)
-	assignmentRepo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(&models.Assignment{ID: 1, CourseID: 1, Name: "Essay 1"}, nil)
-	// Grade calls FindByAssignmentAndUser, then Update.
-	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2), uint(0)).Return(submission, nil)
+	// Grade calls assignmentRepo.FindByID with the caller's tenant
+	// (F-016 — the assignment must be in the grader's tenant). The
+	// test's authStub sets account_id=1, so callerAccountID is 1.
+	assignmentRepo.On("FindByID", mock.Anything, uint(1), uint(1)).Return(&models.Assignment{ID: 1, CourseID: 1, Name: "Essay 1"}, nil)
+	// Grade calls FindByAssignmentAndUser with the same tenant scope, then Update.
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2), uint(1)).Return(submission, nil)
 	submissionRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.Submission")).Return(nil)
 
 	body := testutil.JSONBody(map[string]interface{}{
