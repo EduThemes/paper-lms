@@ -124,7 +124,7 @@ func (h *LearningOutcomeHandler) CreateGroup(c *fiber.Ctx) error {
 		ContextType:   "Course",
 		ContextID:     uint(courseID),
 		Title:         input.Title,
-		Description:   input.Description,
+		Description:   service.SanitizeHTML(input.Description),
 		ParentGroupID: input.ParentGroupID,
 	}
 
@@ -174,7 +174,7 @@ func (h *LearningOutcomeHandler) UpdateGroup(c *fiber.Ctx) error {
 		group.Title = *input.Title
 	}
 	if input.Description != nil {
-		group.Description = *input.Description
+		group.Description = service.SanitizeHTML(*input.Description)
 	}
 	if input.ParentGroupID != nil {
 		group.ParentGroupID = input.ParentGroupID
@@ -257,7 +257,7 @@ func (h *LearningOutcomeHandler) CreateOutcome(c *fiber.Ctx) error {
 		OutcomeGroupID:    uint(groupID),
 		Title:             input.Title,
 		DisplayName:       input.DisplayName,
-		Description:       input.Description,
+		Description:       service.SanitizeHTML(input.Description),
 		CalculationMethod: input.CalculationMethod,
 		CalculationInt:    input.CalculationInt,
 		MasteryPoints:     input.MasteryPoints,
@@ -319,7 +319,7 @@ func (h *LearningOutcomeHandler) UpdateOutcome(c *fiber.Ctx) error {
 		outcome.DisplayName = *input.DisplayName
 	}
 	if input.Description != nil {
-		outcome.Description = *input.Description
+		outcome.Description = service.SanitizeHTML(*input.Description)
 	}
 	if input.CalculationMethod != nil {
 		outcome.CalculationMethod = *input.CalculationMethod

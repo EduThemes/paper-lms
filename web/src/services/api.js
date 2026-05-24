@@ -126,9 +126,13 @@ export const api = {
 
   // Setup
   getSetupStatus: () => request('/setup/status'),
-  completeSetup: (data) => request('/setup/complete', {
+  completeSetup: (data, { setupToken } = {}) => request('/setup/complete', {
     method: 'POST',
     body: JSON.stringify(data),
+    // SETUP_BOOTSTRAP_TOKEN gating: backend requires X-Setup-Token to
+    // match the env value when set. Empty token = no header, which is
+    // the legacy dev behavior.
+    headers: setupToken ? { 'X-Setup-Token': setupToken } : undefined,
   }),
 
   // Auth

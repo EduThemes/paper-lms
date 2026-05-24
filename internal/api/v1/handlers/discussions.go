@@ -118,7 +118,7 @@ func (h *DiscussionHandler) CreateTopic(c *fiber.Ctx) error {
 		CourseID:           uint(courseID),
 		UserID:             userID,
 		Title:              input.DiscussionTopic.Title,
-		Message:            input.DiscussionTopic.Message,
+		Message:            service.SanitizeHTML(input.DiscussionTopic.Message),
 		DiscussionType:     input.DiscussionTopic.DiscussionType,
 		PostedAt:           input.DiscussionTopic.PostedAt,
 		DelayedPostAt:      input.DiscussionTopic.DelayedPostAt,
@@ -176,7 +176,7 @@ func (h *DiscussionHandler) UpdateTopic(c *fiber.Ctx) error {
 		topic.Title = *input.DiscussionTopic.Title
 	}
 	if input.DiscussionTopic.Message != nil {
-		topic.Message = *input.DiscussionTopic.Message
+		topic.Message = service.SanitizeHTML(*input.DiscussionTopic.Message)
 	}
 	if input.DiscussionTopic.DiscussionType != nil {
 		topic.DiscussionType = *input.DiscussionTopic.DiscussionType

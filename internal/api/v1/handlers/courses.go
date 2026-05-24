@@ -160,7 +160,7 @@ func (h *CourseHandler) CreateCourse(c *fiber.Ctx) error {
 		StartAt:          input.Course.StartAt,
 		EndAt:            input.Course.EndAt,
 		DefaultView:      input.Course.DefaultView,
-		SyllabusBody:     input.Course.SyllabusBody,
+		SyllabusBody:     service.SanitizeHTML(input.Course.SyllabusBody),
 		License:          input.Course.License,
 		IsPublic:          input.Course.IsPublic,
 		UIMode:            input.Course.UIMode,
@@ -233,7 +233,7 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 		course.DefaultView = *input.Course.DefaultView
 	}
 	if input.Course.SyllabusBody != nil {
-		course.SyllabusBody = *input.Course.SyllabusBody
+		course.SyllabusBody = service.SanitizeHTML(*input.Course.SyllabusBody)
 	}
 	if input.Course.License != nil {
 		course.License = *input.Course.License

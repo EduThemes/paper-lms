@@ -8,6 +8,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
+	"github.com/EduThemes/paper-lms/internal/service"
 )
 
 type QuizHandler struct {
@@ -110,7 +111,7 @@ func (h *QuizHandler) CreateQuiz(c *fiber.Ctx) error {
 	quiz := &models.Quiz{
 		CourseID:        uint(courseID),
 		Title:           input.Quiz.Title,
-		Description:     input.Quiz.Description,
+		Description:     service.SanitizeHTML(input.Quiz.Description),
 		QuizType:        input.Quiz.QuizType,
 		TimeLimit:       input.Quiz.TimeLimit,
 		AllowedAttempts: input.Quiz.AllowedAttempts,
@@ -170,7 +171,7 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 		quiz.Title = *input.Quiz.Title
 	}
 	if input.Quiz.Description != nil {
-		quiz.Description = *input.Quiz.Description
+		quiz.Description = service.SanitizeHTML(*input.Quiz.Description)
 	}
 	if input.Quiz.QuizType != nil {
 		quiz.QuizType = *input.Quiz.QuizType
