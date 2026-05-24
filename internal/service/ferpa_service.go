@@ -100,11 +100,44 @@ func (s *FERPAService) CreateDeletionRequest(ctx context.Context, requestedByID,
 	return request, nil
 }
 
-// ApproveDeletionRequest approves a data deletion request and marks it for processing.
-func (s *FERPAService) ApproveDeletionRequest(ctx context.Context, requestID uint, reviewerID uint) error {
+// ErrFERPACrossTenant is returned by the deletion / export approval
+// paths when the reviewer's tenant does not own the subject user.
+// Handlers translate this to a 404 (existence-leak contract) so an
+// attacker cannot discover whether a deletion request exists in another
+// tenant.
+var ErrFERPACrossTenant = errors.New("deletion request not in caller's tenant")
+
+// resolveSubjectAccount loads the subject user for a deletion request
+// and returns their account_id. accountID=0 is correct here — this is
+// auth-internal (the FERPA workflow has its own tenant gate).
+func (s *FERPAService) resolveSubjectAccount(ctx context.Context, subjectUserID uint) (uint, error) {
+	if s.userRepo == nil {
+		return 0, errors.New("ferpa: userRepo dependency not configured")
+	}
+	user, err := s.userRepo.FindByID(ctx, subjectUserID, 0)
+	if err != nil {
+		return 0, err
+	}
+	return user.AccountID, nil
+}
+
+// ApproveDeletionRequest approves a data deletion request and marks it
+// for processing.
+//
+// SECURITY (F-005): reviewerAccountID + isSuperAdmin gate cross-tenant
+// approvals. The pre-fix path let any admin approve any tenant's
+// deletion request — which then anonymized that tenant's user record.
+func (s *FERPAService) ApproveDeletionRequest(ctx context.Context, requestID uint, reviewerID, reviewerAccountID uint, isSuperAdmin bool) error {
 	request, err := s.deletionRepo.FindByID(ctx, requestID)
 	if err != nil {
 		return errors.New("deletion request not found")
+	}
+
+	if !isSuperAdmin {
+		acct, err := s.resolveSubjectAccount(ctx, request.UserID)
+		if err != nil || acct != reviewerAccountID {
+			return ErrFERPACrossTenant
+		}
 	}
 
 	if request.Status != "pending" {
@@ -119,11 +152,20 @@ func (s *FERPAService) ApproveDeletionRequest(ctx context.Context, requestID uin
 	return s.deletionRepo.Update(ctx, request)
 }
 
-// DenyDeletionRequest denies a data deletion request.
-func (s *FERPAService) DenyDeletionRequest(ctx context.Context, requestID uint, reviewerID uint) error {
+// DenyDeletionRequest denies a data deletion request. Same tenant gate
+// as ApproveDeletionRequest — denial is also a state change visible to
+// the subject user.
+func (s *FERPAService) DenyDeletionRequest(ctx context.Context, requestID uint, reviewerID, reviewerAccountID uint, isSuperAdmin bool) error {
 	request, err := s.deletionRepo.FindByID(ctx, requestID)
 	if err != nil {
 		return errors.New("deletion request not found")
+	}
+
+	if !isSuperAdmin {
+		acct, err := s.resolveSubjectAccount(ctx, request.UserID)
+		if err != nil || acct != reviewerAccountID {
+			return ErrFERPACrossTenant
+		}
 	}
 
 	if request.Status != "pending" {
@@ -249,9 +291,11 @@ func (s *FERPAService) GetDeletionRequest(ctx context.Context, id uint) (*models
 	return request, nil
 }
 
-// ListPendingDeletionRequests returns a paginated list of pending deletion requests.
-func (s *FERPAService) ListPendingDeletionRequests(ctx context.Context, params repository.PaginationParams) (*repository.PaginatedResult[models.DataDeletionRequest], error) {
-	return s.deletionRepo.ListPending(ctx, params)
+// ListPendingDeletionRequests returns a paginated list of pending deletion
+// requests scoped to the caller's tenant. accountID=0 (only legitimate
+// for super_admin) returns every tenant's pending requests.
+func (s *FERPAService) ListPendingDeletionRequests(ctx context.Context, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DataDeletionRequest], error) {
+	return s.deletionRepo.ListPending(ctx, accountID, params)
 }
 
 // ListDeletionRequestsByUser returns all deletion requests for a specific user.
@@ -359,7 +403,7 @@ var (
 // System-generated audit_log rows are intentionally excluded — those
 // belong to the institution, not the user, and disclosing them is a
 // separate FERPA carve-out.
-func (s *FERPAService) BuildExportZip(ctx context.Context, requestID, callerID uint, callerIsAdmin bool) ([]byte, error) {
+func (s *FERPAService) BuildExportZip(ctx context.Context, requestID, callerID, callerAccountID uint, callerIsAdmin, callerIsSuperAdmin bool) ([]byte, error) {
 	if requestID == 0 {
 		return nil, errors.New("request id is required")
 	}
@@ -373,6 +417,17 @@ func (s *FERPAService) BuildExportZip(ctx context.Context, requestID, callerID u
 	request, err := s.exportRepo.FindByID(ctx, requestID)
 	if err != nil {
 		return nil, errors.New("export request not found")
+	}
+
+	// SECURITY (F-006): the pre-fix path allowed ANY admin (incl. one
+	// from a different tenant) to download the export. An admin is
+	// only authoritative inside their own tenant; super_admin crosses
+	// tenants by design.
+	if callerIsAdmin && !callerIsSuperAdmin {
+		acct, err := s.resolveSubjectAccount(ctx, request.UserID)
+		if err != nil || acct != callerAccountID {
+			return nil, ErrExportForbidden
+		}
 	}
 
 	if !callerIsAdmin && callerID != request.RequestedByID && callerID != request.UserID {

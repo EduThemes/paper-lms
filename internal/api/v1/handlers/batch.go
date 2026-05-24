@@ -17,12 +17,20 @@ func NewBatchHandler(batchService *service.BatchService, authz *ResourceAuthoriz
 	return &BatchHandler{batchService: batchService, authz: authz}
 }
 
-// CloneCourse handles POST /api/v1/courses/clone
+// CloneCourse handles POST /api/v1/courses/clone.
+//
+// SECURITY (F-015): the pre-fix path took both `source_course_id` and
+// `account_id` from the request body, then read the source via
+// FindByID(.., 0) (no tenant scope) and wrote the destination into
+// whichever tenant the body named. An admin in tenant 5 could clone
+// any tenant's course content into any other tenant.
+//
+// Both source and destination are now pinned to the caller's tenant.
+// A super_admin can clone across tenants by passing `?target_account_id=N`.
 func (h *BatchHandler) CloneCourse(c *fiber.Ctx) error {
 	var input struct {
 		SourceCourseID uint   `json:"source_course_id"`
 		Name           string `json:"name"`
-		AccountID      uint   `json:"account_id"`
 		Include        struct {
 			Modules     bool `json:"modules"`
 			Assignments bool `json:"assignments"`
@@ -42,15 +50,21 @@ func (h *BatchHandler) CloneCourse(c *fiber.Ctx) error {
 	if input.Name == "" {
 		return responses.BadRequest(c, "name is required")
 	}
-	if input.AccountID == 0 {
-		input.AccountID = 1 // default account
+
+	callerAcct := callerAccountID(c)
+	targetAccountID := callerAcct
+	if isSuper, _ := c.Locals("is_super_admin").(bool); isSuper {
+		if q := c.QueryInt("target_account_id"); q > 0 {
+			targetAccountID = uint(q)
+		}
 	}
 
 	course, err := h.batchService.CloneCourse(
 		c.Context(),
 		input.SourceCourseID,
 		input.Name,
-		input.AccountID,
+		callerAcct,
+		targetAccountID,
 		input.Include.Modules,
 		input.Include.Assignments,
 		input.Include.Pages,
