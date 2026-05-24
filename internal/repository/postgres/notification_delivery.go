@@ -9,12 +9,26 @@ import (
 	"gorm.io/gorm"
 )
 
+// notificationDeliveryTenantFilter scopes a notification_deliveries
+// query to a tenant via the owning user's account_id. The table
+// carries no direct account_id column; user_id → users.account_id is
+// the join. Same shape as notificationTenantFilter on the parent
+// notifications table. accountID==0 disables — notification_delivery
+// has many auth-internal callers (scheduler digest jobs, the SMTP
+// dispatcher) that legitimately operate without a tenant scope; only
+// the Delete path is widened here, and only Delete callers MUST pass
+// a non-zero accountID when the caller is a handler.
+const notificationDeliveryTenantFilter = `user_id IN (SELECT id FROM users WHERE account_id = ?)`
+
 // NotificationDeliveryRepository defines the data access methods for notification deliveries.
 type NotificationDeliveryRepository interface {
 	Create(ctx context.Context, delivery *models.NotificationDelivery) error
 	FindByID(ctx context.Context, id uint) (*models.NotificationDelivery, error)
 	Update(ctx context.Context, delivery *models.NotificationDelivery) error
-	Delete(ctx context.Context, id uint) error
+	// Delete — F-012: tenant-scope via the owning user's account_id.
+	// accountID==0 disables (background scheduler / digest job calls).
+	// Handler-routed callers MUST pass callerAccountID(c).
+	Delete(ctx context.Context, id, accountID uint) error
 	ListByUserID(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.NotificationDelivery], error)
 	ListPending(ctx context.Context, now time.Time) ([]models.NotificationDelivery, error)
 	ListPendingByDigestType(ctx context.Context, digestType string, now time.Time) ([]models.NotificationDelivery, error)
@@ -51,8 +65,12 @@ func (r *notificationDeliveryRepo) Update(ctx context.Context, delivery *models.
 	return r.db.WithContext(ctx).Save(delivery).Error
 }
 
-func (r *notificationDeliveryRepo) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Delete(&models.NotificationDelivery{}, id).Error
+func (r *notificationDeliveryRepo) Delete(ctx context.Context, id, accountID uint) error {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		q = q.Where(notificationDeliveryTenantFilter, accountID)
+	}
+	return q.Delete(&models.NotificationDelivery{}, id).Error
 }
 
 func (r *notificationDeliveryRepo) ListByUserID(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.NotificationDelivery], error) {
