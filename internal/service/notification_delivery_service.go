@@ -14,6 +14,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/repository/postgres"
+	"github.com/EduThemes/paper-lms/internal/security"
 	"github.com/EduThemes/paper-lms/internal/settingsctx"
 )
 
@@ -549,7 +550,18 @@ func (s *NotificationDeliveryService) calculateScheduledFor(digestType string) t
 }
 
 // sendWebhook sends a notification payload via HTTP POST to the webhook URL.
+//
+// SECURITY (F-021): user-controlled communication-channel addresses
+// were a viable SSRF primitive — an attacker registered a webhook
+// channel pointing at internal admin panels (or the cloud-metadata
+// service) and every notification fired POSTs from the server's
+// outbound IP, exfiltrating the notification body and probing the
+// internal network. ValidateExternalURL refuses RFC1918 / link-local
+// / loopback / port mismatches before the request is built.
 func (s *NotificationDeliveryService) sendWebhook(url, subject, body string) error {
+	if err := security.ValidateExternalURL(context.Background(), url); err != nil {
+		return fmt.Errorf("webhook URL rejected by SSRF guard: %w", err)
+	}
 	payload := fmt.Sprintf(`{"subject":%q,"body":%q,"timestamp":%q}`, subject, body, time.Now().Format(time.RFC3339))
 	req, err := http.NewRequest("POST", url, strings.NewReader(payload))
 	if err != nil {

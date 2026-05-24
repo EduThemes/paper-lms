@@ -184,14 +184,42 @@ func (h *CustomRoleHandler) UpdateRole(c *fiber.Ctx) error {
 	return c.JSON(customRoleToJSON(existing))
 }
 
-// DeleteRole handles DELETE /accounts/:account_id/roles/:id
+// DeleteRole handles DELETE /accounts/:account_id/roles/:id.
+//
+// SECURITY (F-012): the destructive write is scoped by the caller's
+// JWT tenant via callerAccountID(c). The URL's :account_id is also
+// asserted against the role's actual account_id (parent-tie) so an
+// admin in tenant A cannot DELETE /accounts/B/roles/<id from tenant A>
+// — both checks are required because either alone would leak.
+//
+// Pre-fix, the service.DeleteRole(id) call had NO tenant scope at all
+// and the handler did not assert :account_id at all.
 func (h *CustomRoleHandler) DeleteRole(c *fiber.Ctx) error {
+	accountIDParam, err := c.ParamsInt("account_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid account ID")
+	}
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid role ID")
 	}
 
-	if err := h.customRoleService.DeleteRole(c.Context(), uint(id)); err != nil {
+	// Load under the caller's tenant first. assertSameTenant via
+	// FindByID(id, callerAccountID) ensures we 404 (not 403) when the
+	// role belongs to a different tenant — see 13.1.E existence-leak
+	// contract.
+	role, err := h.customRoleService.GetRole(c.Context(), uint(id), callerAccountID(c))
+	if err != nil {
+		return responses.NotFound(c, "role")
+	}
+	// Parent-tie: the URL's :account_id must match the role's actual
+	// account_id, otherwise the URL is lying about which tenant we
+	// are deleting from.
+	if role.AccountID != uint(accountIDParam) {
+		return responses.NotFound(c, "role")
+	}
+
+	if err := h.customRoleService.DeleteRole(c.Context(), uint(id), callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not delete role")
 	}
 

@@ -181,8 +181,8 @@ func (m *MockLearningOutcomeRepository) Update(ctx context.Context, outcome *mod
 	return m.Called(ctx, outcome).Error(0)
 }
 
-func (m *MockLearningOutcomeRepository) Delete(ctx context.Context, id uint) error {
-	return m.Called(ctx, id).Error(0)
+func (m *MockLearningOutcomeRepository) Delete(ctx context.Context, id, accountID uint) error {
+	return m.Called(ctx, id, accountID).Error(0)
 }
 
 func (m *MockLearningOutcomeRepository) ListByGroupID(ctx context.Context, groupID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LearningOutcome], error) {

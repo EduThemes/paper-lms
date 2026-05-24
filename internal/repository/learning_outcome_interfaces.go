@@ -12,7 +12,9 @@ type LearningOutcomeGroupRepository interface {
 	// Course via parent courses.account_id).
 	FindByID(ctx context.Context, id, accountID uint) (*models.LearningOutcomeGroup, error)
 	Update(ctx context.Context, group *models.LearningOutcomeGroup) error
-	Delete(ctx context.Context, id uint) error
+	// F-012 — accountID, when non-zero, scopes the soft-delete to
+	// caller's tenant. See FindByID for the polymorphic-context pattern.
+	Delete(ctx context.Context, id, accountID uint) error
 	ListByContext(ctx context.Context, contextType string, contextID, accountID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcomeGroup], error)
 	FindRootGroup(ctx context.Context, contextType string, contextID, accountID uint) (*models.LearningOutcomeGroup, error)
 }
@@ -24,7 +26,9 @@ type LearningOutcomeRepository interface {
 	// enforces "Account → direct match, Course → JOIN through courses".
 	FindByID(ctx context.Context, id, accountID uint) (*models.LearningOutcome, error)
 	Update(ctx context.Context, outcome *models.LearningOutcome) error
-	Delete(ctx context.Context, id uint) error
+	// F-012 — accountID, when non-zero, scopes the soft-delete to
+	// caller's tenant. See FindByID for the polymorphic-context pattern.
+	Delete(ctx context.Context, id, accountID uint) error
 	ListByGroupID(ctx context.Context, groupID, accountID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcome], error)
 	ListByContext(ctx context.Context, contextType string, contextID, accountID uint, params PaginationParams) (*PaginatedResult[models.LearningOutcome], error)
 }

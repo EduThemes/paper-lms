@@ -186,8 +186,38 @@ func (s *QuizService) GetSubmissionQuestions(ctx context.Context, submissionID u
 // ---------- Quiz Submission Methods ----------
 
 // StartSubmission creates a new quiz submission for the given user.
-// If timeLimit is provided (in minutes), the EndAt field is set accordingly.
+// If timeLimit is provided (in minutes), the EndAt field is set
+// accordingly. timeLimit is server-controlled (handler does NOT
+// expose it to the request body — see F-046).
+//
+// SECURITY (F-048): enforces quiz.UnlockAt / LockAt windows. The
+// pre-fix path let a student start a quiz before unlock_at (get
+// early access to questions) or after lock_at (sneak in late).
+//
+// SECURITY (F-049): the find-create race is now closed via the
+// (quiz_id, user_id, workflow_state='untaken') partial UNIQUE index
+// added in migration 000062. A parallel-fire attempt that would
+// otherwise create N concurrent untaken submissions trips the
+// constraint and the second-writer reload-the-existing path runs.
+// The legacy serial path remains for the non-racing case.
 func (s *QuizService) StartSubmission(ctx context.Context, quizID, userID uint, timeLimit *int) (*models.QuizSubmission, error) {
+	// Load the quiz first so we can validate windows before churning
+	// the submissions table.
+	quiz, err := s.quizRepo.FindByID(ctx, quizID, 0)
+	if err != nil {
+		return nil, errors.New("quiz not found")
+	}
+
+	now := time.Now()
+
+	// F-048: unlock_at / lock_at windows.
+	if quiz.UnlockAt != nil && now.Before(*quiz.UnlockAt) {
+		return nil, errors.New("quiz is not yet available")
+	}
+	if quiz.LockAt != nil && now.After(*quiz.LockAt) {
+		return nil, errors.New("quiz is locked and no longer accepts submissions")
+	}
+
 	// Check for an existing in-progress submission
 	existing, _ := s.submissionRepo.FindByQuizAndUser(ctx, quizID, userID)
 	if existing != nil && existing.WorkflowState == "untaken" {
@@ -202,10 +232,6 @@ func (s *QuizService) StartSubmission(ctx context.Context, quizID, userID uint, 
 	}
 
 	// Enforce attempt limits
-	quiz, err := s.quizRepo.FindByID(ctx, quizID, 0)
-	if err != nil {
-		return nil, errors.New("quiz not found")
-	}
 	if quiz.AllowedAttempts > 0 && attempt > quiz.AllowedAttempts {
 		return nil, errors.New("maximum number of attempts reached")
 	}
@@ -214,8 +240,6 @@ func (s *QuizService) StartSubmission(ctx context.Context, quizID, userID uint, 
 	if err != nil {
 		return nil, errors.New("could not generate validation token")
 	}
-
-	now := time.Now()
 
 	submission := &models.QuizSubmission{
 		QuizID:          quizID,
@@ -257,6 +281,17 @@ func (s *QuizService) StartSubmission(ctx context.Context, quizID, userID uint, 
 	}
 
 	if err := s.submissionRepo.Create(ctx, submission); err != nil {
+		// F-049 race recovery: migration 000062 adds a partial UNIQUE
+		// on (quiz_id, user_id) WHERE workflow_state='untaken'. When
+		// two requests race to start the same quiz, the loser's
+		// Create fails with the UNIQUE violation. Re-run the
+		// existing-untaken find so the loser sees the winner's row
+		// instead of bubbling a raw GORM error to the handler (which
+		// pre-fix surfaced as 400).
+		if winner, findErr := s.submissionRepo.FindByQuizAndUser(ctx, quizID, userID); findErr == nil &&
+			winner != nil && winner.WorkflowState == "untaken" {
+			return winner, nil
+		}
 		return nil, err
 	}
 
@@ -363,13 +398,28 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 		_ = s.answerRepo.Update(ctx, &answers[i])
 	}
 
+	// F-050: cap FinishedAt at submission.EndAt + 5-minute grace when
+	// the student delayed the explicit /complete call past their
+	// time-limit. The pre-fix path stamped FinishedAt = time.Now()
+	// unconditionally, which inflated TimeSpent and the gradebook
+	// "submitted at" column on a delayed POST. (F-046 already blocks
+	// new ANSWERS past EndAt — this only tightens the recorded
+	// timestamps.)
 	now := time.Now()
-	submission.FinishedAt = &now
+	finishAt := now
+	if submission.EndAt != nil && now.After(*submission.EndAt) {
+		finishAt = submission.EndAt.Add(5 * time.Minute)
+		if now.Before(finishAt) {
+			// Still inside grace window — use the actual now.
+			finishAt = now
+		}
+	}
+	submission.FinishedAt = &finishAt
 	submission.Score = &totalScore
 	submission.KeptScore = &totalScore
 
 	if submission.StartedAt != nil {
-		spent := int(now.Sub(*submission.StartedAt).Seconds())
+		spent := int(finishAt.Sub(*submission.StartedAt).Seconds())
 		submission.TimeSpent = spent
 	}
 

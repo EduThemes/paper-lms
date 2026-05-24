@@ -187,12 +187,31 @@ func (h *RubricHandler) UpdateRubric(c *fiber.Ctx) error {
 }
 
 func (h *RubricHandler) DeleteRubric(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	rubricID, err := c.ParamsInt("rubric_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid rubric ID")
 	}
 
-	if err := h.rubricService.DeleteRubric(c.Context(), uint(rubricID)); err != nil {
+	// SECURITY (F-011 / F-012): load the rubric under the caller's
+	// tenant AND verify it belongs to the URL's course. Pre-fix path
+	// called DeleteRubric(id) with no scope, so a teacher in course 10
+	// could DELETE /courses/10/rubrics/<id from any other course/tenant>.
+	// Account-context rubrics intentionally cannot be deleted through a
+	// course-scoped route — that's a separate /accounts/:account_id/rubrics
+	// surface (not yet implemented).
+	rubric, err := h.rubricService.GetRubric(c.Context(), uint(rubricID), callerAccountID(c))
+	if err != nil {
+		return responses.NotFound(c, "rubric")
+	}
+	if rubric.ContextType != "Course" || rubric.ContextID != uint(courseID) {
+		return responses.NotFound(c, "rubric")
+	}
+
+	if err := h.rubricService.DeleteRubric(c.Context(), uint(rubricID), callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not delete rubric")
 	}
 

@@ -13,7 +13,9 @@ type CustomRoleRepository interface {
 	// 13.1.D — direct account_id column.
 	FindByID(ctx context.Context, id, accountID uint) (*models.CustomRole, error)
 	Update(ctx context.Context, role *models.CustomRole) error
-	Delete(ctx context.Context, id uint) error
+	// F-012 — accountID scopes the write to a single tenant; pass 0 only
+	// from privileged internal callers.
+	Delete(ctx context.Context, id, accountID uint) error
 	ListByAccountID(ctx context.Context, accountID uint, params PaginationParams) (*PaginatedResult[models.CustomRole], error)
 	FindByAccountAndName(ctx context.Context, accountID uint, name string) (*models.CustomRole, error)
 	ListByBaseRoleType(ctx context.Context, accountID uint, baseRoleType string) ([]models.CustomRole, error)

@@ -15,7 +15,10 @@ type RubricRepository interface {
 	// in tenant A but never from tenant B.
 	FindByID(ctx context.Context, id, accountID uint) (*models.Rubric, error)
 	Update(ctx context.Context, rubric *models.Rubric) error
-	Delete(ctx context.Context, id uint) error
+	// F-012 — accountID, when non-zero, scopes the soft-delete to
+	// caller's tenant. See FindByID for the polymorphic-context
+	// pattern.
+	Delete(ctx context.Context, id, accountID uint) error
 	ListByContext(ctx context.Context, contextType string, contextID, accountID uint, params PaginationParams) (*PaginatedResult[models.Rubric], error)
 }
 
@@ -31,7 +34,10 @@ type RubricAssessmentRepository interface {
 	Create(ctx context.Context, assessment *models.RubricAssessment) error
 	FindByID(ctx context.Context, id uint) (*models.RubricAssessment, error)
 	Update(ctx context.Context, assessment *models.RubricAssessment) error
-	Delete(ctx context.Context, id uint) error
+	// F-012 — accountID, when non-zero, scopes the delete to assessments
+	// whose rubric belongs to caller's tenant. JOIN through rubrics →
+	// (Account direct, Course through courses).
+	Delete(ctx context.Context, id, accountID uint) error
 	FindByUserAndAssociation(ctx context.Context, userID, assessorID, rubricAssocID uint) (*models.RubricAssessment, error)
 	ListByAssociationID(ctx context.Context, rubricAssocID uint, params PaginationParams) (*PaginatedResult[models.RubricAssessment], error)
 }

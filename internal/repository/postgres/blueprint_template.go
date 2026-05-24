@@ -40,8 +40,17 @@ func (r *blueprintTemplateRepo) Update(ctx context.Context, template *models.Blu
 	return r.db.WithContext(ctx).Save(template).Error
 }
 
-func (r *blueprintTemplateRepo) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Model(&models.BlueprintTemplate{}).Where("id = ?", id).Update("workflow_state", "deleted").Error
+// Delete soft-deletes a blueprint template by setting workflow_state to
+// "deleted". F-012 — accountID scopes the write to a single tenant via
+// the parent course (blueprint_templates has no direct account_id column,
+// so we join through courses.account_id). Pass 0 only from privileged
+// internal callers. Handler callers MUST pass callerAccountID(c).
+func (r *blueprintTemplateRepo) Delete(ctx context.Context, id, accountID uint) error {
+	q := r.db.WithContext(ctx).Model(&models.BlueprintTemplate{}).Where("id = ?", id)
+	if accountID != 0 {
+		q = q.Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID)
+	}
+	return q.Update("workflow_state", "deleted").Error
 }
 
 func (r *blueprintTemplateRepo) ListByCourseID(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.BlueprintTemplate], error) {

@@ -43,7 +43,10 @@ type LTIToolConfigurationRepository interface {
 	FindByID(ctx context.Context, id uint) (*models.LTIToolConfiguration, error)
 	FindByDeveloperKeyID(ctx context.Context, devKeyID uint) (*models.LTIToolConfiguration, error)
 	Update(ctx context.Context, config *models.LTIToolConfiguration) error
-	Delete(ctx context.Context, id uint) error
+	// Delete — F-012: tenant-scoped via JOIN through developer_keys.account_id.
+	// accountID==0 skips the scope filter (auth-internal callers only); all
+	// handler-routed callers MUST pass callerAccountID(c).
+	Delete(ctx context.Context, id, accountID uint) error
 }
 
 type ContextExternalToolRepository interface {
@@ -60,14 +63,20 @@ type LTIResourceLinkRepository interface {
 	Create(ctx context.Context, link *models.LTIResourceLink) error
 	FindByID(ctx context.Context, id uint) (*models.LTIResourceLink, error)
 	FindByResourceLinkID(ctx context.Context, resourceLinkID string) (*models.LTIResourceLink, error)
-	Delete(ctx context.Context, id uint) error
+	// Delete — F-012: tenant-scoped via the context_external_tool →
+	// developer_keys.account_id chain (for Course/Account context types).
+	// accountID==0 skips the scope filter (auth-internal callers only).
+	Delete(ctx context.Context, id, accountID uint) error
 }
 
 type LTILineItemRepository interface {
 	Create(ctx context.Context, item *models.LTILineItem) error
 	FindByID(ctx context.Context, id uint) (*models.LTILineItem, error)
 	Update(ctx context.Context, item *models.LTILineItem) error
-	Delete(ctx context.Context, id uint) error
+	// Delete — F-012: tenant-scoped via courses.account_id (LTILineItem has
+	// a course_id FK). accountID==0 skips the scope filter (auth-internal
+	// callers only); all handler-routed callers MUST pass callerAccountID(c).
+	Delete(ctx context.Context, id, accountID uint) error
 	ListByCourse(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.LTILineItem], error)
 	FindByAssignmentID(ctx context.Context, assignmentID uint) (*models.LTILineItem, error)
 }

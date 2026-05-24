@@ -3,25 +3,21 @@ package auth
 import (
 	"compress/flate"
 	"context"
-	"crypto"
 	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha1"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
 	"encoding/xml"
 	"fmt"
-	"hash"
 	"net/url"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/beevik/etree"
 	"github.com/gofiber/fiber/v2"
+	dsig "github.com/russellhaering/goxmldsig"
 
 	"github.com/EduThemes/paper-lms/internal/repository"
 )
@@ -76,6 +72,10 @@ type SAMLHandler struct {
 	// SAMLConfig values are the safety net so env-only deployments
 	// keep working unchanged.
 	lookup SettingsLookupFunc
+	// F-054 partial: replay cache. Lazy-initialized via getReplayCache
+	// so existing callers that don't go through NewSAMLHandler keep
+	// working in tests.
+	replayCache *SAMLReplayCache
 }
 
 // NewSAMLHandler creates a new SAMLHandler with the given configuration and repositories.
@@ -91,7 +91,18 @@ func NewSAMLHandler(config SAMLConfig, userRepo repository.UserRepository, authP
 		authProviderRepo: authProviderRepo,
 		loginPipeline:    loginPipeline,
 		lookup:           lookup,
+		replayCache:      NewSAMLReplayCache(),
 	}
+}
+
+// getReplayCache returns the handler's replay cache, lazily creating
+// one if the SAMLHandler was constructed without going through
+// NewSAMLHandler (older test paths). Safe to call concurrently.
+func (h *SAMLHandler) getReplayCache() *SAMLReplayCache {
+	if h.replayCache == nil {
+		h.replayCache = NewSAMLReplayCache()
+	}
+	return h.replayCache
 }
 
 // resolveEntityID returns the live SP entity ID, falling back to the
@@ -519,11 +530,35 @@ func (h *SAMLHandler) HandleACS(c *fiber.Ctx) error {
 		})
 	}
 
-	// Verify XML signature if IDP certificate is available
-	if err := h.verifyResponseSignature(c, responseXML); err != nil {
+	// Verify XML signature and obtain the signed element's ID. The
+	// returned signedID is the canonical XSW defense: the parsed
+	// Assertion or Response MUST carry this ID, otherwise an attacker
+	// who wrapped a malicious assertion alongside a legitimately-signed
+	// one would slip through (the parser reads the first Assertion;
+	// the signature validates the wrapped one; the IDs differ).
+	signedID, err := h.verifyResponseSignature(c, responseXML)
+	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"errors": []fiber.Map{{"message": "SAML signature verification failed: " + err.Error()}},
 		})
+	}
+
+	// XSW pinning: only enforced when verifyResponseSignature returned
+	// a non-empty signedID (i.e., a SAML provider was configured and a
+	// signature was actually validated). The no-provider dev/test path
+	// returns "" and skips this check, matching the legacy permissive
+	// behavior.
+	if signedID != "" {
+		if len(samlResp.Assertions) != 1 {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"errors": []fiber.Map{{"message": "SAML response must contain exactly one Assertion"}},
+			})
+		}
+		if samlResp.ID != signedID && samlResp.Assertions[0].ID != signedID {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"errors": []fiber.Map{{"message": "SAML signature does not cover the parsed Assertion (possible XSW attack)"}},
+			})
+		}
 	}
 
 	// Verify status
@@ -543,8 +578,9 @@ func (h *SAMLHandler) HandleACS(c *fiber.Ctx) error {
 	assertion := samlResp.Assertions[0]
 
 	// Validate conditions (time window)
+	now := time.Now().UTC()
+	assertionExpiry := now.Add(15 * time.Minute) // default cache TTL when NotOnOrAfter is absent
 	if assertion.Conditions != nil {
-		now := time.Now().UTC()
 		if assertion.Conditions.NotBefore != "" {
 			notBefore, err := time.Parse(time.RFC3339, assertion.Conditions.NotBefore)
 			if err == nil && now.Before(notBefore.Add(-5*time.Minute)) {
@@ -555,12 +591,52 @@ func (h *SAMLHandler) HandleACS(c *fiber.Ctx) error {
 		}
 		if assertion.Conditions.NotOnOrAfter != "" {
 			notOnOrAfter, err := time.Parse(time.RFC3339, assertion.Conditions.NotOnOrAfter)
-			if err == nil && now.After(notOnOrAfter.Add(5*time.Minute)) {
+			if err == nil {
+				if now.After(notOnOrAfter.Add(5 * time.Minute)) {
+					return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+						"errors": []fiber.Map{{"message": "SAML assertion has expired"}},
+					})
+				}
+				assertionExpiry = notOnOrAfter.Add(5 * time.Minute)
+			}
+		}
+
+		// SECURITY (F-054 partial): AudienceRestriction validation.
+		// The pre-fix path parsed <AudienceRestriction> into
+		// assertion.Conditions.Audiences but NEVER COMPARED it to
+		// our entity ID. A SAML response intended for a different
+		// Service Provider that happened to share the same IdP
+		// certificate could be replayed against Paper LMS and would
+		// authenticate the user. Failing closed: if no audience
+		// matches our entity ID, reject.
+		expectedAudience := h.resolveEntityID(c.Context())
+		if expectedAudience != "" {
+			audienceMatches := false
+		audienceLoop:
+			for _, restriction := range assertion.Conditions.Audiences {
+				for _, aud := range restriction.Audiences {
+					if strings.TrimSpace(aud.Value) == expectedAudience {
+						audienceMatches = true
+						break audienceLoop
+					}
+				}
+			}
+			if !audienceMatches {
 				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-					"errors": []fiber.Map{{"message": "SAML assertion has expired"}},
+					"errors": []fiber.Map{{"message": "SAML assertion AudienceRestriction does not match SP entity ID"}},
 				})
 			}
 		}
+	}
+
+	// SECURITY (F-054 partial): assertion replay defense. Each
+	// assertion's ID is consumed exactly once. A captured-in-flight
+	// response cannot be resubmitted to /auth/saml/acs within its
+	// validity window.
+	if !h.getReplayCache().CheckAndStore(assertion.ID, assertionExpiry) {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"errors": []fiber.Map{{"message": "SAML assertion has already been consumed"}},
+		})
 	}
 
 	// Extract NameID
@@ -780,14 +856,35 @@ func deflateCompress(data []byte) ([]byte, error) {
 	return []byte(buf.String()), nil
 }
 
-// verifyResponseSignature verifies the XML digital signature on a SAML response.
-// It loads the IDP certificate from the authentication provider configuration and
-// validates the signature using RSA-SHA256 or RSA-SHA1.
-func (h *SAMLHandler) verifyResponseSignature(c *fiber.Ctx, responseXML []byte) error {
-	// Load IDP certificates from configured auth providers
+// verifyResponseSignature verifies the XML digital signature on a SAML
+// response and returns the ID of the signed element (Response or
+// Assertion). The caller MUST compare this ID to the parsed
+// samlResp.ID / samlResp.Assertions[0].ID to defeat XSW (XML Signature
+// Wrapping) — see HandleACS for the pinning logic.
+//
+// Implementation: signature validation is delegated to
+// github.com/russellhaering/goxmldsig, which walks every <Reference>,
+// canonicalizes the referenced element via EXC-C14N, recomputes its
+// digest, and rejects on mismatch. The home-grown extraction +
+// RSA-verify-SignedInfo block this replaced was incomplete: it
+// verified the SignatureValue over the SignedInfo bytes but DISCARDED
+// the DigestValue, so an attacker could swap the referenced assertion
+// for a malicious one (classic XSW) and the signature would still
+// "verify."
+//
+// Cert lookup is single-tenant: the ACS endpoint is mounted on the
+// PUBLIC route group, so c.Locals("account_id") is always 0 at
+// signature-verify time. We read account_id=1's IdP provider row.
+// Multi-tenant SAML routing (path-based ACS like /auth/saml/acs/:id,
+// RelayState parsing, or SP entity ID lookup) is tracked as a
+// follow-up. Returns "" (empty signedID) when no SAML provider is
+// configured at all — the no-provider early-skip is preserved for
+// dev/test ergonomics; the caller's pinning check is gated on
+// signedID != "".
+func (h *SAMLHandler) verifyResponseSignature(c *fiber.Ctx, responseXML []byte) (string, error) {
 	samlProviders, err := h.authProviderRepo.FindByAccountAndType(c.Context(), 1, "saml")
 	if err != nil || len(samlProviders) == 0 {
-		return nil // No SAML providers configured, skip verification
+		return "", nil
 	}
 
 	var idpCert *x509.Certificate
@@ -802,56 +899,59 @@ func (h *SAMLHandler) verifyResponseSignature(c *fiber.Ctx, responseXML []byte) 
 	}
 
 	if idpCert == nil {
-		// No IDP certificate configured — skip only if SAML not configured at all
 		if h.resolveEntityID(c.Context()) == "" {
-			return nil // SAML not fully configured, skip
+			return "", nil
 		}
-		return fmt.Errorf("no IDP certificate configured — cannot verify SAML signature")
+		return "", fmt.Errorf("no IDP certificate configured — cannot verify SAML signature")
 	}
 
-	// Extract the Signature element from the XML
-	sigValue, digestValue, signedInfo, algorithm, err := extractSignatureComponents(responseXML)
-	if err != nil {
-		return fmt.Errorf("could not extract signature: %w", err)
+	doc := etree.NewDocument()
+	if err := doc.ReadFromBytes(responseXML); err != nil {
+		return "", fmt.Errorf("could not parse SAML XML: %w", err)
+	}
+	root := doc.Root()
+	if root == nil {
+		return "", fmt.Errorf("SAML response has no root element")
 	}
 
-	if len(sigValue) == 0 {
-		return fmt.Errorf("no signature found in SAML response")
+	certStore := &dsig.MemoryX509CertificateStore{
+		Roots: []*x509.Certificate{idpCert},
+	}
+	validationCtx := dsig.NewDefaultValidationContext(certStore)
+	validationCtx.IdAttribute = "ID"
+
+	// Try Response-level signature first (typical for Azure AD,
+	// Shibboleth-configured-to-sign-response). If that fails, fall
+	// back to Assertion-level (Okta default, ADFS default, many
+	// other real-world IdPs). goxmldsig.Validate(el) only validates
+	// signatures whose Reference URI references el's ID — it does
+	// NOT walk children. So we walk the candidate elements
+	// ourselves.
+	if validated, vErr := validationCtx.Validate(root); vErr == nil {
+		signedID := validated.SelectAttrValue("ID", "")
+		if signedID == "" {
+			return "", fmt.Errorf("signed SAML element has no ID attribute")
+		}
+		return signedID, nil
 	}
 
-	// Verify the signature
-	var hashFunc crypto.Hash
-	var newHash func() hash.Hash
-	switch {
-	case strings.Contains(algorithm, "rsa-sha256"):
-		hashFunc = crypto.SHA256
-		newHash = sha256.New
-	case strings.Contains(algorithm, "rsa-sha1"):
-		hashFunc = crypto.SHA1
-		newHash = sha1.New
-	default:
-		hashFunc = crypto.SHA256
-		newHash = sha256.New
+	// Look for an <Assertion> child (handles namespaced + bare).
+	for _, child := range root.ChildElements() {
+		if !strings.HasSuffix(child.Tag, "Assertion") {
+			continue
+		}
+		if validated, vErr := validationCtx.Validate(child); vErr == nil {
+			signedID := validated.SelectAttrValue("ID", "")
+			if signedID == "" {
+				return "", fmt.Errorf("signed SAML element has no ID attribute")
+			}
+			return signedID, nil
+		}
 	}
 
-	_ = digestValue // Digest verification would require canonicalization
-
-	// Verify RSA signature over the SignedInfo
-	h2 := newHash()
-	h2.Write(signedInfo)
-	hashed := h2.Sum(nil)
-
-	rsaKey, ok := idpCert.PublicKey.(*rsa.PublicKey)
-	if !ok {
-		return fmt.Errorf("IDP certificate does not contain an RSA public key")
-	}
-
-	if err := rsa.VerifyPKCS1v15(rsaKey, hashFunc, hashed, sigValue); err != nil {
-		return fmt.Errorf("signature verification failed: %w", err)
-	}
-
-	return nil
+	return "", fmt.Errorf("SAML signature verification failed: no valid Reference at Response or Assertion level")
 }
+
 
 // parseIDPCertificate parses an IDP certificate from PEM or raw base64 format.
 func parseIDPCertificate(certData string) (*x509.Certificate, error) {
@@ -877,46 +977,3 @@ func parseIDPCertificate(certData string) (*x509.Certificate, error) {
 	return x509.ParseCertificate(certBytes)
 }
 
-// extractSignatureComponents extracts signature values from SAML XML using simple parsing.
-// Returns: signatureValue, digestValue, signedInfoBytes, algorithm, error
-func extractSignatureComponents(xmlData []byte) ([]byte, []byte, []byte, string, error) {
-	xmlStr := string(xmlData)
-
-	// Extract SignatureMethod Algorithm
-	algorithm := "rsa-sha256"
-	algRe := regexp.MustCompile(`<[^>]*SignatureMethod[^>]*Algorithm="([^"]+)"`)
-	if m := algRe.FindStringSubmatch(xmlStr); len(m) > 1 {
-		algorithm = strings.ToLower(m[1])
-	}
-
-	// Extract SignatureValue
-	sigRe := regexp.MustCompile(`<[^>]*SignatureValue[^>]*>([^<]+)</`)
-	sigMatch := sigRe.FindStringSubmatch(xmlStr)
-	if len(sigMatch) < 2 {
-		return nil, nil, nil, "", fmt.Errorf("SignatureValue not found")
-	}
-	sigB64 := strings.ReplaceAll(strings.TrimSpace(sigMatch[1]), "\n", "")
-	sigB64 = strings.ReplaceAll(sigB64, " ", "")
-	sigValue, err := base64.StdEncoding.DecodeString(sigB64)
-	if err != nil {
-		return nil, nil, nil, "", fmt.Errorf("could not decode SignatureValue: %w", err)
-	}
-
-	// Extract DigestValue
-	var digestValue []byte
-	digRe := regexp.MustCompile(`<[^>]*DigestValue[^>]*>([^<]+)</`)
-	if m := digRe.FindStringSubmatch(xmlStr); len(m) > 1 {
-		digB64 := strings.TrimSpace(m[1])
-		digestValue, _ = base64.StdEncoding.DecodeString(digB64)
-	}
-
-	// Extract SignedInfo element (for signature verification)
-	siRe := regexp.MustCompile(`(?s)(<[^>]*SignedInfo[^>]*>.*?</[^>]*SignedInfo>)`)
-	siMatch := siRe.FindStringSubmatch(xmlStr)
-	var signedInfo []byte
-	if len(siMatch) > 1 {
-		signedInfo = []byte(siMatch[1])
-	}
-
-	return sigValue, digestValue, signedInfo, algorithm, nil
-}

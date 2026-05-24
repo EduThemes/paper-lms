@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"strings"
 	"time"
@@ -47,7 +48,11 @@ func CSRFProtection() fiber.Handler {
 		cookieToken := c.Cookies(csrfCookieName)
 		headerToken := c.Get(csrfHeaderName)
 
-		if cookieToken == "" || headerToken == "" || cookieToken != headerToken {
+		// F-030: constant-time comparison. The CSRF token is a 256-bit
+		// random value, so timing-attack practicality is near zero, but
+		// the canonical defense-in-depth fix is one line.
+		if cookieToken == "" || headerToken == "" ||
+			subtle.ConstantTimeCompare([]byte(cookieToken), []byte(headerToken)) != 1 {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 				"errors": []fiber.Map{{"message": "CSRF token missing or invalid"}},
 			})
