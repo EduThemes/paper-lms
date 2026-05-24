@@ -776,7 +776,7 @@ func main() {
 	// handlers
 	discussionHandler := handlers.NewDiscussionHandler(discussionService)
 	discussionEntryHandler := handlers.NewDiscussionEntryHandler(discussionService)
-	fileHandler := handlers.NewFileHandler(fileService, enrollmentRepo, auditService)
+	fileHandler := handlers.NewFileHandler(fileService, enrollmentRepo, groupMembershipRepo, auditService)
 	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo)
 	folderHandler := handlers.NewFolderHandler(fileService, authz)
 	sectionHandler = handlers.NewSectionHandler(sectionRepo, authz)
