@@ -56,7 +56,14 @@ func (s *CommentBankService) Update(ctx context.Context, userID uint, id uint, c
 	return item, nil
 }
 
-func (s *CommentBankService) Delete(ctx context.Context, userID uint, id uint) error {
+// Delete — F-012: accountID threads from handler through to the
+// repo's tenant-scoped WHERE. The user_id == userID check still
+// stands as the primary "your row" guard; accountID is defense-in-
+// depth so a cross-tenant id whose owning user_id happens to collide
+// with the caller's id (extremely unlikely but) still fails the
+// underlying DELETE's WHERE clause. accountID==0 disables the repo
+// scope (kept for any future internal/background caller).
+func (s *CommentBankService) Delete(ctx context.Context, userID, id, accountID uint) error {
 	item, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return errors.New("comment bank item not found")
@@ -64,7 +71,7 @@ func (s *CommentBankService) Delete(ctx context.Context, userID uint, id uint) e
 	if item.UserID != userID {
 		return errors.New("unauthorized")
 	}
-	return s.repo.Delete(ctx, id)
+	return s.repo.Delete(ctx, id, accountID)
 }
 
 func (s *CommentBankService) List(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.CommentBankItem], error) {

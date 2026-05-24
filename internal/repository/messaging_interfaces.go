@@ -62,7 +62,9 @@ type NotificationRepository interface {
 	// users.account_id. Cross-tenant returns gorm.ErrRecordNotFound.
 	FindByID(ctx context.Context, id, accountID uint) (*models.Notification, error)
 	Update(ctx context.Context, notification *models.Notification) error
-	Delete(ctx context.Context, id uint) error
+	// Delete — F-012: same tenant-scope as FindByID. 0 disables;
+	// handler-routed callers MUST pass callerAccountID(c).
+	Delete(ctx context.Context, id, accountID uint) error
 	ListByUserID(ctx context.Context, userID, accountID uint, params PaginationParams) (*PaginatedResult[models.Notification], error)
 	MarkAsRead(ctx context.Context, userID, notificationID, accountID uint) error
 	MarkAllAsRead(ctx context.Context, userID, accountID uint) error

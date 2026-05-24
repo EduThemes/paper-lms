@@ -10,11 +10,37 @@ import (
 )
 
 type AssignmentOverrideHandler struct {
-	overrideService *service.OverrideService
+	overrideService   *service.OverrideService
+	assignmentService *service.AssignmentService
 }
 
-func NewAssignmentOverrideHandler(overrideService *service.OverrideService) *AssignmentOverrideHandler {
-	return &AssignmentOverrideHandler{overrideService: overrideService}
+func NewAssignmentOverrideHandler(overrideService *service.OverrideService, assignmentService *service.AssignmentService) *AssignmentOverrideHandler {
+	return &AssignmentOverrideHandler{
+		overrideService:   overrideService,
+		assignmentService: assignmentService,
+	}
+}
+
+// overrideInCourse returns true if (a) the override's AssignmentID
+// matches the URL's :assignment_id and (b) that assignment's CourseID
+// matches the URL's :course_id (loaded under the caller's tenant).
+// Returns false on any mismatch — the caller MUST emit
+// responses.NotFound when this returns false. PENTEST F-013 closure
+// for the assignment-override surface.
+//
+// This is a value-returning helper (NOT a wrote-the-response helper)
+// to avoid the (result, wrote, err) pitfall: responses.NotFound
+// returns nil after writing, so a helper that called it would
+// silently let the caller fall through to the next step.
+func (h *AssignmentOverrideHandler) overrideInCourse(c *fiber.Ctx, override *models.AssignmentOverride, urlAssignmentID, urlCourseID uint) bool {
+	if override.AssignmentID != urlAssignmentID {
+		return false
+	}
+	assignment, err := h.assignmentService.GetByID(c.Context(), override.AssignmentID, callerAccountID(c))
+	if err != nil {
+		return false
+	}
+	return assignment.CourseID == urlCourseID
 }
 
 func assignmentOverrideToJSON(o *models.AssignmentOverride) fiber.Map {
@@ -113,6 +139,11 @@ func (h *AssignmentOverrideHandler) CreateOverride(c *fiber.Ctx) error {
 }
 
 func (h *AssignmentOverrideHandler) GetOverride(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
+
 	assignmentID, err := c.ParamsInt("assignment_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid assignment ID")
@@ -128,8 +159,7 @@ func (h *AssignmentOverrideHandler) GetOverride(c *fiber.Ctx) error {
 		return responses.NotFound(c, "assignment override")
 	}
 
-	// Verify the override belongs to the URL's assignment (prevents cross-course IDOR)
-	if override.AssignmentID != uint(assignmentID) {
+	if !h.overrideInCourse(c, override, uint(assignmentID), uint(courseID)) {
 		return responses.NotFound(c, "assignment override")
 	}
 
@@ -147,6 +177,11 @@ func (h *AssignmentOverrideHandler) GetOverride(c *fiber.Ctx) error {
 }
 
 func (h *AssignmentOverrideHandler) UpdateOverride(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
+
 	assignmentID, err := c.ParamsInt("assignment_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid assignment ID")
@@ -162,8 +197,7 @@ func (h *AssignmentOverrideHandler) UpdateOverride(c *fiber.Ctx) error {
 		return responses.NotFound(c, "assignment override")
 	}
 
-	// Verify the override belongs to the URL's assignment (prevents cross-course IDOR)
-	if override.AssignmentID != uint(assignmentID) {
+	if !h.overrideInCourse(c, override, uint(assignmentID), uint(courseID)) {
 		return responses.NotFound(c, "assignment override")
 	}
 
@@ -223,6 +257,11 @@ func (h *AssignmentOverrideHandler) UpdateOverride(c *fiber.Ctx) error {
 }
 
 func (h *AssignmentOverrideHandler) DeleteOverride(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
+
 	assignmentID, err := c.ParamsInt("assignment_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid assignment ID")
@@ -233,12 +272,12 @@ func (h *AssignmentOverrideHandler) DeleteOverride(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid override ID")
 	}
 
-	// Verify the override belongs to the URL's assignment before deleting
 	override, err := h.overrideService.GetOverride(c.Context(), uint(overrideID))
 	if err != nil {
 		return responses.NotFound(c, "assignment override")
 	}
-	if override.AssignmentID != uint(assignmentID) {
+
+	if !h.overrideInCourse(c, override, uint(assignmentID), uint(courseID)) {
 		return responses.NotFound(c, "assignment override")
 	}
 

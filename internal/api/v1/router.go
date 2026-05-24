@@ -729,6 +729,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Post("/users/:user_id/data_deletion", selfOrAdmin, r.FERPAHandler.CreateDeletionRequest)
 	protected.Get("/admin/data_deletion_requests", admin, r.FERPAHandler.ListPendingDeletionRequests)
 	protected.Post("/admin/data_deletion_requests/:id/approve", admin, r.FERPAHandler.ApproveDeletionRequest)
+	protected.Post("/admin/data_deletion_requests/:id/deny", admin, r.FERPAHandler.DenyDeletionRequest)
 	protected.Get("/users/:user_id/pii_access_log", admin, r.FERPAHandler.GetPIIAccessLog)
 	protected.Get("/admin/retention_policies", admin, r.FERPAHandler.ListRetentionPolicies)
 	protected.Post("/admin/retention_policies", admin, r.FERPAHandler.CreateRetentionPolicy)
