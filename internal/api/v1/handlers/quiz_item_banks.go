@@ -100,7 +100,7 @@ func (h *QuizItemBankHandler) CreateBank(c *fiber.Ctx) error {
 	bank := &models.QuizItemBank{
 		CourseID:        uint(courseID),
 		Title:           input.Bank.Title,
-		Description:     input.Bank.Description,
+		Description:     service.SanitizeHTML(input.Bank.Description),
 		CreatedByUserID: userID,
 	}
 	if err := h.svc.CreateBank(c.Context(), bank); err != nil {
@@ -135,7 +135,7 @@ func (h *QuizItemBankHandler) UpdateBank(c *fiber.Ctx) error {
 		existing.Title = *input.Bank.Title
 	}
 	if input.Bank.Description != nil {
-		existing.Description = *input.Bank.Description
+		existing.Description = service.SanitizeHTML(*input.Bank.Description)
 	}
 	if err := h.svc.UpdateBank(c.Context(), uint(courseID), existing); err != nil {
 		return responses.InternalError(c, "Could not update item bank")
@@ -200,7 +200,7 @@ func (h *QuizItemBankHandler) CreateBankItem(c *fiber.Ctx) error {
 		BankID:            uint(bankID),
 		Position:          input.Item.Position,
 		QuestionType:      input.Item.QuestionType,
-		QuestionText:      input.Item.QuestionText,
+		QuestionText:      service.SanitizeHTML(input.Item.QuestionText),
 		PointsPossible:    input.Item.PointsPossible,
 		Answers:           input.Item.Answers,
 		CorrectComments:   input.Item.CorrectComments,
@@ -256,7 +256,7 @@ func (h *QuizItemBankHandler) UpdateBankItem(c *fiber.Ctx) error {
 		item.QuestionType = *input.Item.QuestionType
 	}
 	if input.Item.QuestionText != nil {
-		item.QuestionText = *input.Item.QuestionText
+		item.QuestionText = service.SanitizeHTML(*input.Item.QuestionText)
 	}
 	if input.Item.PointsPossible != nil {
 		item.PointsPossible = input.Item.PointsPossible

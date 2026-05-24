@@ -73,7 +73,7 @@ func (h *DiscussionEntryHandler) CreateEntry(c *fiber.Ctx) error {
 	entry := &models.DiscussionEntry{
 		DiscussionTopicID: uint(topicID),
 		UserID:            userID,
-		Message:           input.Message,
+		Message:           service.SanitizeHTML(input.Message),
 	}
 
 	if err := h.discussionService.CreateEntry(c.Context(), entry); err != nil {
@@ -103,7 +103,7 @@ func (h *DiscussionEntryHandler) UpdateEntry(c *fiber.Ctx) error {
 	}
 
 	if input.Message != "" {
-		entry.Message = input.Message
+		entry.Message = service.SanitizeHTML(input.Message)
 	}
 
 	if err := h.discussionService.UpdateEntry(c.Context(), entry); err != nil {
@@ -175,7 +175,7 @@ func (h *DiscussionEntryHandler) CreateReply(c *fiber.Ctx) error {
 		DiscussionTopicID: uint(topicID),
 		UserID:            userID,
 		ParentID:          &parentID,
-		Message:           input.Message,
+		Message:           service.SanitizeHTML(input.Message),
 	}
 
 	if err := h.discussionService.CreateEntry(c.Context(), entry); err != nil {
