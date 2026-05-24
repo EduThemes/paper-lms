@@ -41,6 +41,7 @@ const FERPAPage = () => {
   const [deletionPage, setDeletionPage] = useState(1);
   const [deletionHasMore, setDeletionHasMore] = useState(false);
   const [approvingId, setApprovingId] = useState(null);
+  const [denyingId, setDenyingId] = useState(null);
 
   // ── Retention Policies State ──
   const [policies, setPolicies] = useState([]);
@@ -155,6 +156,24 @@ const FERPAPage = () => {
       setError(err.message);
     } finally {
       setApprovingId(null);
+    }
+  };
+
+  // ── Deny Deletion Request ──
+  const handleDenyDeletion = async (requestId) => {
+    if (!window.confirm('Deny this data deletion request? The user will be notified and the request will be marked denied.')) {
+      return;
+    }
+    setDenyingId(requestId);
+    setError(null);
+    try {
+      await api.denyDeletionRequest(requestId);
+      setSuccessMessage('Deletion request denied.');
+      fetchDeletionRequests(deletionPage);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDenyingId(null);
     }
   };
 
@@ -413,29 +432,55 @@ const FERPAPage = () => {
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-right">
                           {(req.status === 'pending' || !req.status) && (
-                            <button
-                              onClick={() => handleApproveDeletion(req.id)}
-                              disabled={approvingId === req.id}
-                              className="inline-flex items-center space-x-1 px-3 py-1.5 bg-accent-danger text-white text-sm rounded-md hover:bg-accent-danger/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-accent-danger focus:ring-offset-2"
-                              aria-label={`Approve deletion request #${req.id}`}
-                            >
-                              {approvingId === req.id ? (
-                                <>
-                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
-                                  <span>Approving...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                                  <span>Approve</span>
-                                </>
-                              )}
-                            </button>
+                            <div className="inline-flex items-center space-x-2">
+                              <button
+                                onClick={() => handleApproveDeletion(req.id)}
+                                disabled={approvingId === req.id || denyingId === req.id}
+                                className="inline-flex items-center space-x-1 px-3 py-1.5 bg-accent-danger text-white text-sm rounded-md hover:bg-accent-danger/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-accent-danger focus:ring-offset-2"
+                                aria-label={`Approve deletion request #${req.id}`}
+                              >
+                                {approvingId === req.id ? (
+                                  <>
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                                    <span>Approving...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                                    <span>Approve</span>
+                                  </>
+                                )}
+                              </button>
+                              <button
+                                onClick={() => handleDenyDeletion(req.id)}
+                                disabled={approvingId === req.id || denyingId === req.id}
+                                className="inline-flex items-center space-x-1 px-3 py-1.5 bg-surface-tertiary text-text-primary text-sm rounded-md hover:bg-surface-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-text-tertiary focus:ring-offset-2"
+                                aria-label={`Deny deletion request #${req.id}`}
+                              >
+                                {denyingId === req.id ? (
+                                  <>
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                                    <span>Denying...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <X className="w-3.5 h-3.5" aria-hidden="true" />
+                                    <span>Deny</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
                           )}
                           {req.status === 'approved' && (
                             <span className="text-sm text-brand-600 flex items-center justify-end space-x-1">
                               <Check className="w-3.5 h-3.5" aria-hidden="true" />
                               <span>Approved</span>
+                            </span>
+                          )}
+                          {req.status === 'denied' && (
+                            <span className="text-sm text-text-tertiary flex items-center justify-end space-x-1">
+                              <X className="w-3.5 h-3.5" aria-hidden="true" />
+                              <span>Denied</span>
                             </span>
                           )}
                           {req.status === 'completed' && (

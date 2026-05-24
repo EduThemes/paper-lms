@@ -2016,6 +2016,10 @@ export const api = {
     const { data } = await request(`/admin/data_deletion_requests/${id}/approve`, { method: 'POST' });
     return data;
   },
+  denyDeletionRequest: async (id) => {
+    const { data } = await request(`/admin/data_deletion_requests/${id}/deny`, { method: 'POST' });
+    return data;
+  },
   getRetentionPolicies: async (page = 1, perPage = 20) => {
     return request(`/admin/retention_policies?page=${page}&per_page=${perPage}`);
   },
