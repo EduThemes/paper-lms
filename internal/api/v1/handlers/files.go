@@ -173,9 +173,26 @@ func (h *FileHandler) GetFile(c *fiber.Ctx) error {
 }
 
 func (h *FileHandler) DeleteFile(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid file ID")
+	}
+
+	// F-043: load under the caller's tenant + verify the attachment is
+	// in the URL's :course_id BEFORE delete. Pre-fix:
+	//   DELETE /courses/10/files/<id from any course in any tenant>
+	// soft-deleted the cross-context attachment because the service
+	// hit a raw `WHERE id = ?` with no scope.
+	attachment, err := h.fileService.GetAttachment(c.Context(), uint(id), callerAccountID(c))
+	if err != nil {
+		return responses.NotFound(c, "file")
+	}
+	if attachment.ContextType != "Course" || attachment.ContextID != uint(courseID) {
+		return responses.NotFound(c, "file")
 	}
 
 	if err := h.fileService.DeleteAttachment(c.Context(), uint(id)); err != nil {
