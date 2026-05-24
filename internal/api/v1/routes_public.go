@@ -16,9 +16,11 @@ import (
 // rest of the auth surface — mounted at the route level so an
 // unauthenticated caller can't brute-force any single endpoint.
 func (r *Router) registerPublicRoutes(api fiber.Router, authLimit fiber.Handler) {
-	// Setup wizard (public, no auth required)
+	// Setup wizard (public, no auth required). SetupRateLimit is
+	// stricter than AuthRateLimit because the wizard is one-shot —
+	// nobody legitimate hits it more than a few times.
 	api.Get("/setup/status", r.SetupHandler.GetStatus)
-	api.Post("/setup/complete", middleware.AuthRateLimit(), r.SetupHandler.CompleteSetup)
+	api.Post("/setup/complete", middleware.SetupRateLimit(), r.SetupHandler.CompleteSetup)
 
 	// Public auth routes (rate-limited to prevent brute-force)
 	api.Post("/login", authLimit, r.UserHandler.Login)
