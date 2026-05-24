@@ -854,39 +854,34 @@ func deflateCompress(data []byte) ([]byte, error) {
 // (pure-Go XML-EXC-C14N + digest verification) in a follow-up branch
 // and replace the home-grown extraction with a proper library call.
 // In the meantime, the F-054 partial fixes (AudienceRestriction
-// check, assertion-ID replay cache, multi-tenant cert lookup below)
-// reduce — but do not eliminate — the attack surface.
+// check, assertion-ID replay cache) reduce — but do not eliminate
+// — the attack surface.
+//
+// !! KNOWN LIMITATION — single-tenant cert lookup. The ACS endpoint
+// is mounted on the PUBLIC route group (no Protected middleware),
+// so c.Locals("account_id") is ALWAYS 0 at signature-verify time.
+// An earlier draft of this PR pretended to do multi-tenant cert
+// lookup based on the JWT account_id Locals; that was code-review-
+// caught dead code (the JWT doesn't exist on the public ACS path).
+//
+// Until tenant resolution is plumbed (path-based ACS like
+// /auth/saml/acs/:account_id, or RelayState parsing, or SP entity
+// ID lookup), SAML signature verification looks up provider rows
+// from account_id=1 only — single-tenant deployments work; multi-
+// tenant deployments where a non-root account configures SAML will
+// have their signatures verified against account-1's IdP cert,
+// which will fail closed (the wrong-cert check rejects), which is
+// the safe direction. Real multi-tenant SAML is tracked as a
+// follow-up.
 //
 // Operators running SAML in production should treat this verification
 // as advisory until the library swap lands and either (a) disable
 // SAML temporarily, or (b) accept the documented risk.
 func (h *SAMLHandler) verifyResponseSignature(c *fiber.Ctx, responseXML []byte) error {
-	// SECURITY (F-054 partial): multi-tenant cert lookup. The pre-fix
-	// path hardcoded accountID=1, so any tenant other than the
-	// deployment's root account had its SAML signature check SKIPPED
-	// (the empty-provider-list early-return below). We now iterate
-	// through every account's SAML providers, preferring the one
-	// matching the caller's account_id Locals when present.
-	//
-	// Implementation: the AuthenticationProviderRepository doesn't
-	// have a "list all" today; we keep the FindByAccountAndType call
-	// but walk the caller's account first, then fall back to account
-	// 1 for backward compatibility with single-tenant deployments.
-	callerAcct, _ := c.Locals("account_id").(uint)
-	if callerAcct == 0 {
-		callerAcct = 1
-	}
-	samlProviders, err := h.authProviderRepo.FindByAccountAndType(c.Context(), callerAcct, "saml")
+	// Single-tenant cert lookup (see KNOWN LIMITATION above).
+	samlProviders, err := h.authProviderRepo.FindByAccountAndType(c.Context(), 1, "saml")
 	if err != nil || len(samlProviders) == 0 {
-		// Fall back to root account so a tenant whose SAML provider
-		// lives on account 1 (single-tenant historical wiring) still
-		// gets its signature checked.
-		if callerAcct != 1 {
-			samlProviders, err = h.authProviderRepo.FindByAccountAndType(c.Context(), 1, "saml")
-		}
-		if err != nil || len(samlProviders) == 0 {
-			return nil // No SAML providers configured, skip verification
-		}
+		return nil // No SAML providers configured, skip verification
 	}
 
 	var idpCert *x509.Certificate
