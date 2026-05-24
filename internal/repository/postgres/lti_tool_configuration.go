@@ -40,6 +40,16 @@ func (r *ltiToolConfigurationRepo) Update(ctx context.Context, config *models.LT
 	return r.db.WithContext(ctx).Save(config).Error
 }
 
-func (r *ltiToolConfigurationRepo) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Delete(&models.LTIToolConfiguration{}, id).Error
+// Delete — F-012 widening: tenant-scoped via developer_keys.account_id.
+// LTIToolConfiguration has a 1:1 developer_key_id FK; the developer key
+// carries account_id. accountID==0 skips the scope filter (auth-internal
+// callers only); handler callers MUST pass callerAccountID(c).
+func (r *ltiToolConfigurationRepo) Delete(ctx context.Context, id, accountID uint) error {
+	q := r.db.WithContext(ctx).Model(&models.LTIToolConfiguration{}).Where("id = ?", id)
+	if accountID != 0 {
+		q = q.Where(`developer_key_id IN (
+			SELECT id FROM developer_keys WHERE account_id = ?
+		)`, accountID)
+	}
+	return q.Delete(&models.LTIToolConfiguration{}).Error
 }
