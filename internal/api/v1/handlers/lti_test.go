@@ -49,15 +49,25 @@ func setupLTIHandlerForGate(sessionUserID uint) (
 	h := handlers.NewLTIHandler(nil, nil, nil, nil, nil, userRepo, accountRepo, consentRepo)
 
 	app := testutil.SetupTestApp()
-	app.Post("/lti/launch", fakeSessionMiddleware(sessionUserID), h.Launch)
+	// PENTEST F-055 review follow-up: production routes `/lti/launch` to
+	// LaunchDirect (router.go), not Launch. Tests now exercise the same
+	// handler production runs, so the gate coverage is genuinely
+	// production-equivalent. The two methods share `requireSessionUserMatches`
+	// and `gateLTILaunchForCOPPA`, so the gate semantics are identical.
+	app.Post("/lti/launch", fakeSessionMiddleware(sessionUserID), h.LaunchDirect)
 	return app, userRepo, accountRepo, consentRepo
 }
 
-// jsonLaunchBody returns a JSON body for a Launch call.
+// jsonLaunchBody returns a JSON body for a LaunchDirect call. The
+// message hint is deliberately invalid ("not-a-number:..."): the gate
+// (F-055 + COPPA) runs BEFORE parseExtendedMessageHint, so a parse
+// failure becomes 400 which gate tests treat as non-403/non-401 success.
+// Using a valid hint would reach the configRepo dependency (nil here),
+// turning gate-allow paths into nil-pointer panics.
 func jsonLaunchBody(loginHint string) interface{} {
 	return map[string]interface{}{
-		"client_id":  "abc",
-		"login_hint": loginHint,
+		"login_hint":       loginHint,
+		"lti_message_hint": "not-a-course-id:resource-link-1:1",
 	}
 }
 
