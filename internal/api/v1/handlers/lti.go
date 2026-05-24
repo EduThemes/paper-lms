@@ -547,13 +547,35 @@ func (h *LTIHandler) UpdateLineItem(c *fiber.Ctx) error {
 
 // DeleteLineItem deletes an LTI line item.
 // DELETE /api/v1/lti/courses/:course_id/line_items/:id
+//
+// F-012 / F-011 (parent-tie): the handler resolves the line item under
+// the caller's tenant first, then enforces line_item.course_id ==
+// URL :course_id. A teacher in course 10 attempting to DELETE
+// /lti/courses/10/line_items/<id from course 99> sees a 404, and the
+// repo write never fires.
 func (h *LTIHandler) DeleteLineItem(c *fiber.Ctx) error {
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid line item ID")
 	}
+	urlCourseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 
-	if err := h.agsService.DeleteLineItem(c.Context(), uint(id)); err != nil {
+	accountID := callerAccountID(c)
+
+	// Parent-tie load: verify the line item exists AND belongs to the
+	// course in the URL. Existence-leak contract: any mismatch → 404.
+	item, err := h.agsService.GetLineItem(c.Context(), uint(id))
+	if err != nil {
+		return responses.NotFound(c, "line item")
+	}
+	if item.CourseID != uint(urlCourseID) {
+		return responses.NotFound(c, "line item")
+	}
+
+	if err := h.agsService.DeleteLineItem(c.Context(), uint(id), accountID); err != nil {
 		return responses.NotFound(c, "line item")
 	}
 

@@ -215,8 +215,11 @@ func (h *NotificationDeliveryHandler) DeleteChannel(c *fiber.Ctx) error {
 		return responses.NotFound(c, "communication channel")
 	}
 
+	// F-010: 404, not 403, on cross-user channel access. Per the
+	// 13.1.E existence-leak contract, distinguishing "exists but
+	// wrong owner" from "doesn't exist" leaks IDs.
 	if channel.UserID != userID {
-		return responses.Error(c, fiber.StatusForbidden, "You can only delete your own communication channels")
+		return responses.NotFound(c, "communication channel")
 	}
 
 	if err := h.channelRepo.Delete(c.Context(), uint(channelID)); err != nil {

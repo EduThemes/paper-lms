@@ -32,8 +32,24 @@ func (r *rubricAssessmentRepo) Update(ctx context.Context, assessment *models.Ru
 	return r.db.WithContext(ctx).Save(assessment).Error
 }
 
-func (r *rubricAssessmentRepo) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Delete(&models.RubricAssessment{}, id).Error
+// Delete removes the rubric assessment row.
+// F-012 widening — accountID, when non-zero, restricts the delete to
+// assessments whose rubric belongs to caller's tenant (Account context
+// → direct match, Course context → JOIN through courses.account_id).
+// accountID==0 is the auth-internal contract documented on
+// internal/repository/postgres/user.go.
+func (r *rubricAssessmentRepo) Delete(ctx context.Context, id, accountID uint) error {
+	q := r.db.WithContext(ctx).Where("id = ?", id)
+	if accountID != 0 {
+		q = q.Where(`
+			rubric_id IN (
+				SELECT id FROM rubrics
+				WHERE (context_type = 'Account' AND context_id = ?)
+				   OR (context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))
+			)
+		`, accountID, accountID)
+	}
+	return q.Delete(&models.RubricAssessment{}).Error
 }
 
 func (r *rubricAssessmentRepo) FindByUserAndAssociation(ctx context.Context, userID, assessorID, rubricAssocID uint) (*models.RubricAssessment, error) {

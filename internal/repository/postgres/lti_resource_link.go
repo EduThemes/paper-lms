@@ -36,6 +36,22 @@ func (r *ltiResourceLinkRepo) FindByResourceLinkID(ctx context.Context, resource
 	return &link, nil
 }
 
-func (r *ltiResourceLinkRepo) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Delete(&models.LTIResourceLink{}, id).Error
+// Delete — F-012 widening: tenant-scoped via the context_external_tool →
+// developer_keys.account_id chain. Mirrors the polymorphic context_type
+// guard used in ContextExternalToolRepository.FindByID — accepted scope
+// is "the caller's tenant owns the parent ContextExternalTool, which
+// itself is scoped through Course→account_id or Account→account_id."
+// accountID==0 skips the scope filter (auth-internal callers only);
+// handler callers MUST pass callerAccountID(c).
+func (r *ltiResourceLinkRepo) Delete(ctx context.Context, id, accountID uint) error {
+	q := r.db.WithContext(ctx).Model(&models.LTIResourceLink{}).Where("id = ?", id)
+	if accountID != 0 {
+		q = q.Where(`context_external_tool_id IN (
+			SELECT cet.id FROM context_external_tools cet
+			WHERE (cet.context_type = 'Course'
+			       AND cet.context_id IN (SELECT id FROM courses WHERE account_id = ?))
+			   OR (cet.context_type = 'Account' AND cet.context_id = ?)
+		)`, accountID, accountID)
+	}
+	return q.Delete(&models.LTIResourceLink{}).Error
 }

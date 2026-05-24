@@ -35,8 +35,8 @@ func (m *MockNotificationRepository) Update(ctx context.Context, notification *m
 	return args.Error(0)
 }
 
-func (m *MockNotificationRepository) Delete(ctx context.Context, id uint) error {
-	args := m.Called(ctx, id)
+func (m *MockNotificationRepository) Delete(ctx context.Context, id, accountID uint) error {
+	args := m.Called(ctx, id, accountID)
 	return args.Error(0)
 }
 

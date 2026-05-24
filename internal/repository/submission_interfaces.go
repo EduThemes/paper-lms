@@ -72,7 +72,9 @@ type CommentBankItemRepository interface {
 	Create(ctx context.Context, item *models.CommentBankItem) error
 	FindByID(ctx context.Context, id uint) (*models.CommentBankItem, error)
 	Update(ctx context.Context, item *models.CommentBankItem) error
-	Delete(ctx context.Context, id uint) error
+	// Delete — F-012: tenant-scope via the owning user's account_id.
+	// 0 disables; handler-routed callers MUST pass callerAccountID(c).
+	Delete(ctx context.Context, id, accountID uint) error
 	ListByUserID(ctx context.Context, userID uint, params PaginationParams) (*PaginatedResult[models.CommentBankItem], error)
 	SearchByUser(ctx context.Context, userID uint, query string) ([]models.CommentBankItem, error)
 }

@@ -8,6 +8,15 @@ import (
 	"gorm.io/gorm"
 )
 
+// commentBankItemTenantFilter scopes a comment_bank_items query to a
+// tenant via the owning user's account_id. The table carries no direct
+// account_id column; user_id → users.account_id is the join. The
+// subquery shape matches the parent-table pattern used elsewhere
+// (e.g. notifications). accountID==0 disables the filter (no auth-
+// internal callers exist for the Delete path today, but the convention
+// matches the rest of the codebase).
+const commentBankItemTenantFilter = `user_id IN (SELECT id FROM users WHERE account_id = ?)`
+
 type commentBankItemRepo struct {
 	db *gorm.DB
 }
@@ -32,8 +41,18 @@ func (r *commentBankItemRepo) Update(ctx context.Context, item *models.CommentBa
 	return r.db.WithContext(ctx).Save(item).Error
 }
 
-func (r *commentBankItemRepo) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Delete(&models.CommentBankItem{}, id).Error
+// Delete — F-012: tenant-scope via the owning user's account_id. A
+// cross-tenant id is silently a no-op (zero rows match the WHERE),
+// and the calling service surfaces gorm.ErrRecordNotFound when its
+// pre-Delete FindByID returns nothing — handler maps to 404 per the
+// 13.1.E existence-leak contract. accountID==0 disables the filter
+// (no current auth-internal callers for this Delete; convention).
+func (r *commentBankItemRepo) Delete(ctx context.Context, id, accountID uint) error {
+	q := r.db.WithContext(ctx)
+	if accountID != 0 {
+		q = q.Where(commentBankItemTenantFilter, accountID)
+	}
+	return q.Delete(&models.CommentBankItem{}, id).Error
 }
 
 func (r *commentBankItemRepo) ListByUserID(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.CommentBankItem], error) {

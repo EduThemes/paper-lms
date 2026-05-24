@@ -658,8 +658,26 @@ func main() {
 	casAuth := auth.NewCASAuthenticator()
 	ssoHandler := auth.NewSSOHandler(samlHandler, ldapAuth, casAuth, userRepo, authProviderRepo, cfg, loginPipeline)
 
-	// Initialize token blacklist for session revocation on logout
-	tokenBlacklist := service.NewTokenBlacklist()
+	// Initialize token blacklist for session revocation on logout.
+	//
+	// F-028: when REDIS_URL is set, use the cluster-shared Redis
+	// backend so a logout on pod A is immediately visible to pods
+	// B…N. Without it, the legacy in-memory store kept revoked
+	// tokens working on every other pod for up to the JWT's TTL
+	// (24h by default).
+	var tokenBlacklist *service.TokenBlacklist
+	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
+		bs, err := service.NewRedisBlacklistStore(redisURL)
+		if err != nil {
+			log.Printf("warning: REDIS_URL set but Redis blacklist init failed: %v — falling back to in-memory", err)
+			tokenBlacklist = service.NewTokenBlacklist()
+		} else {
+			tokenBlacklist = service.NewTokenBlacklistWithStore(bs)
+			slog.Info("token blacklist backed by Redis", "url_host", parseHostFromRedisURL(redisURL))
+		}
+	} else {
+		tokenBlacklist = service.NewTokenBlacklist()
+	}
 	// Phase 9-A — OIDC client. The redirect base is resolved per
 	// request via the Settings Engine ("auth.oidc.redirect_base"),
 	// which carries the OIDC_REDIRECT_BASE env fallback in its
@@ -758,7 +776,7 @@ func main() {
 	// handlers
 	discussionHandler := handlers.NewDiscussionHandler(discussionService)
 	discussionEntryHandler := handlers.NewDiscussionEntryHandler(discussionService)
-	fileHandler := handlers.NewFileHandler(fileService, enrollmentRepo, auditService)
+	fileHandler := handlers.NewFileHandler(fileService, enrollmentRepo, groupMembershipRepo, auditService)
 	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo)
 	folderHandler := handlers.NewFolderHandler(fileService, authz)
 	sectionHandler = handlers.NewSectionHandler(sectionRepo, authz)
@@ -770,7 +788,7 @@ func main() {
 	rubricHandler := handlers.NewRubricHandler(rubricService)
 	rubricAssessmentHandler := handlers.NewRubricAssessmentHandler(rubricService)
 	gradingPeriodHandler := handlers.NewGradingPeriodHandler(gradingPeriodService)
-	assignmentOverrideHandler := handlers.NewAssignmentOverrideHandler(overrideService)
+	assignmentOverrideHandler := handlers.NewAssignmentOverrideHandler(overrideService, assignmentService)
 	latePolicyHandler := handlers.NewLatePolicyHandler(latePolicyService)
 	// handlers
 	calendarEventHandler := handlers.NewCalendarEventHandler(calendarService, authz)

@@ -245,7 +245,16 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 		course.UIMode = *input.Course.UIMode
 	}
 	if input.Course.WorkflowState != nil {
-		course.WorkflowState = models.CourseWorkflow(*input.Course.WorkflowState)
+		// F-018: workflow_state changes are gated by the model's
+		// state machine. An attempted invalid transition (e.g.,
+		// deleted→published) or one disallowed for the caller's role
+		// is rejected as 400; the requested value is NOT silently
+		// dropped — that would mask a misbehaving client.
+		newState := models.CourseWorkflow(*input.Course.WorkflowState)
+		if err := models.TransitionCourseWorkflowState(course.WorkflowState, newState, callerRoleForStateMachine(c)); err != nil {
+			return responses.BadRequest(c, err.Error())
+		}
+		course.WorkflowState = newState
 	}
 	if input.Course.ApplyGroupWeights != nil {
 		course.ApplyGroupWeights = *input.Course.ApplyGroupWeights
