@@ -37,8 +37,15 @@ func (r *customRoleRepo) Update(ctx context.Context, role *models.CustomRole) er
 	return r.db.WithContext(ctx).Save(role).Error
 }
 
-func (r *customRoleRepo) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Model(&models.CustomRole{}).Where("id = ?", id).Update("workflow_state", "deleted").Error
+// Delete soft-deletes a custom role by setting workflow_state to "deleted".
+// F-012 — accountID scopes the write to a single tenant; pass 0 only from
+// privileged internal callers. Handler callers MUST pass callerAccountID(c).
+func (r *customRoleRepo) Delete(ctx context.Context, id, accountID uint) error {
+	q := r.db.WithContext(ctx).Model(&models.CustomRole{}).Where("id = ?", id)
+	if accountID != 0 {
+		q = q.Where("account_id = ?", accountID)
+	}
+	return q.Update("workflow_state", "deleted").Error
 }
 
 func (r *customRoleRepo) ListByAccountID(ctx context.Context, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.CustomRole], error) {

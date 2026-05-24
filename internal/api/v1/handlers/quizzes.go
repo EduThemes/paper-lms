@@ -138,6 +138,10 @@ func (h *QuizHandler) CreateQuiz(c *fiber.Ctx) error {
 }
 
 func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
@@ -145,6 +149,10 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 
 	quiz, err := h.quizRepo.FindByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
+		return responses.NotFound(c, "quiz")
+	}
+	// F-013: parent-course tie.
+	if quiz.CourseID != uint(courseID) {
 		return responses.NotFound(c, "quiz")
 	}
 
@@ -211,9 +219,22 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 }
 
 func (h *QuizHandler) DeleteQuiz(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
+	}
+
+	// F-011 / F-013: tenant + parent-course tie before destructive op.
+	quiz, err := h.quizRepo.FindByID(c.Context(), uint(id), callerAccountID(c))
+	if err != nil {
+		return responses.NotFound(c, "quiz")
+	}
+	if quiz.CourseID != uint(courseID) {
+		return responses.NotFound(c, "quiz")
 	}
 
 	if err := h.quizRepo.Delete(c.Context(), uint(id)); err != nil {

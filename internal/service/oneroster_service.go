@@ -15,6 +15,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/auth/initialpassword"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
+	"github.com/EduThemes/paper-lms/internal/security"
 	"gorm.io/gorm"
 )
 
@@ -276,6 +277,15 @@ type onerosterEnrollment struct {
 }
 
 func (s *OneRosterService) fetchToken(conn *models.OneRosterConnection) (string, error) {
+	// SECURITY (F-023): SSRF defense on the OAuth token URL. Admin-
+	// controlled per OneRosterConnection row. Combined with cross-
+	// tenant admin escalation (F-001 pre-fix), an attacker could
+	// install a OneRoster connection pointing at internal services
+	// and the server would POST basic-auth credentials to it.
+	if err := security.ValidateExternalURL(context.Background(), conn.TokenURL); err != nil {
+		return "", fmt.Errorf("OneRoster token URL rejected by SSRF guard: %w", err)
+	}
+
 	data := url.Values{}
 	data.Set("grant_type", "client_credentials")
 	if conn.Scope != "" {
@@ -317,6 +327,14 @@ func (s *OneRosterService) fetchPaginated(baseURL, path, token, filter string) (
 		u, err := url.Parse(baseURL + path)
 		if err != nil {
 			return nil, fmt.Errorf("parsing URL: %w", err)
+		}
+
+		// SECURITY (F-023): same defense as fetchToken. Validate on
+		// each loop iteration is cheap (DNS lookup cached by the
+		// resolver) and pins the contract — the base URL stays public
+		// for every page.
+		if err := security.ValidateExternalURL(context.Background(), u.String()); err != nil {
+			return nil, fmt.Errorf("OneRoster base URL rejected by SSRF guard: %w", err)
 		}
 
 		q := u.Query()

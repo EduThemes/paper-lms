@@ -193,6 +193,14 @@ func (h *PageHandler) UpdatePage(c *fiber.Ctx) error {
 		if err != nil {
 			return responses.NotFound(c, "page")
 		}
+		// F-013 parent-tie: the numeric branch loads a page by id
+		// under the caller's tenant, which catches cross-tenant
+		// IDOR, but a teacher in course A could PUT a page id from
+		// course B in the SAME tenant. The slug branch is safe
+		// because GetByURL filters by courseID. 404 on mismatch.
+		if page.CourseID != uint(courseID) {
+			return responses.NotFound(c, "page")
+		}
 	} else {
 		page, err = h.pageService.GetByURL(c.Context(), uint(courseID), urlOrID)
 		if err != nil {
@@ -268,6 +276,13 @@ func (h *PageHandler) DeletePage(c *fiber.Ctx) error {
 		if err != nil {
 			return responses.NotFound(c, "page")
 		}
+	}
+
+	// F-013: parent-course tie. The numeric :url_or_id form can name a
+	// page in another course in the SAME tenant; the GetByURL form
+	// already scopes to courseID. Either way, assert before delete.
+	if page.CourseID != uint(courseID) {
+		return responses.NotFound(c, "page")
 	}
 
 	if err := h.pageService.Delete(c.Context(), page.ID); err != nil {
