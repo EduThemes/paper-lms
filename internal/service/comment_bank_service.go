@@ -63,7 +63,7 @@ func (s *CommentBankService) Update(ctx context.Context, userID uint, id uint, c
 // with the caller's id (extremely unlikely but) still fails the
 // underlying DELETE's WHERE clause. accountID==0 disables the repo
 // scope (kept for any future internal/background caller).
-func (s *CommentBankService) Delete(ctx context.Context, userID, accountID, id uint) error {
+func (s *CommentBankService) Delete(ctx context.Context, userID, id, accountID uint) error {
 	item, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return errors.New("comment bank item not found")

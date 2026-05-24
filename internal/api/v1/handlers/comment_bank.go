@@ -120,7 +120,7 @@ func (h *CommentBankHandler) DeleteItem(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid comment bank item ID")
 	}
 
-	if err := h.service.Delete(c.Context(), userID, callerAccountID(c), uint(id)); err != nil {
+	if err := h.service.Delete(c.Context(), userID, uint(id), callerAccountID(c)); err != nil {
 		if err.Error() == "unauthorized" {
 			// 13.1.E: existence leak — return 404 not 403. Same
 			// rationale as UpdateItem above.
