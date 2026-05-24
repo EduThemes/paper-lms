@@ -55,7 +55,15 @@ func quizSubmissionAnswerToJSON(a *models.QuizSubmissionAnswer) fiber.Map {
 	}
 }
 
-// StartSubmission handles POST /courses/:course_id/quizzes/:quiz_id/submissions
+// StartSubmission handles POST /courses/:course_id/quizzes/:quiz_id/submissions.
+//
+// SECURITY (F-046): the pre-fix path read an optional `time_limit`
+// from the request body and forwarded it directly to the service,
+// which used it as the authoritative time limit when non-nil. A
+// student could simply POST {"time_limit": 99999} (or 0 to disable)
+// and trivially blow past the quiz's actual TimeLimit. There is no
+// legitimate use of a student-controlled time-limit override. The
+// quiz's own TimeLimit (plus any accommodations) is the only signal.
 func (h *QuizSubmissionHandler) StartSubmission(c *fiber.Ctx) error {
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil {
@@ -67,13 +75,7 @@ func (h *QuizSubmissionHandler) StartSubmission(c *fiber.Ctx) error {
 		return err
 	}
 
-	var input struct {
-		TimeLimit *int `json:"time_limit"` // optional override in minutes
-	}
-	// Body is optional for starting a submission
-	_ = c.BodyParser(&input)
-
-	submission, err := h.quizService.StartSubmission(c.Context(), uint(quizID), userID, input.TimeLimit)
+	submission, err := h.quizService.StartSubmission(c.Context(), uint(quizID), userID, nil /* time_limit is server-derived, not body-controlled */)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}

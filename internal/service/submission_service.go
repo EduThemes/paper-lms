@@ -86,6 +86,18 @@ func NewSubmissionService(
 	}
 }
 
+// ErrSubmissionLocked is returned when a student attempts to submit
+// (or resubmit) after the assignment's lock_at window has closed.
+// Handlers map this to 409 Conflict so the UI can show "this assignment
+// is locked" instead of a generic 400.
+var ErrSubmissionLocked = errors.New("assignment is locked")
+
+// ErrSubmissionNotYetUnlocked is returned when a student attempts to
+// submit before the assignment's unlock_at window has opened. Handlers
+// map this to 409 Conflict — same shape as ErrSubmissionLocked, distinct
+// failure mode so the UI can distinguish "not yet" from "too late".
+var ErrSubmissionNotYetUnlocked = errors.New("assignment is not yet available")
+
 func (s *SubmissionService) Create(ctx context.Context, submission *models.Submission) error {
 	// Validate assignment exists
 	assignment, err := s.assignmentRepo.FindByID(ctx, submission.AssignmentID, 0)
@@ -98,6 +110,18 @@ func (s *SubmissionService) Create(ctx context.Context, submission *models.Submi
 	}
 
 	now := time.Now()
+
+	// F-047: unlock_at / lock_at windows. The pre-fix path flagged
+	// submissions past due_at as Late=true but accepted them; it never
+	// looked at lock_at, so students could submit indefinitely after
+	// the assignment closed. Now: reject before any DB write.
+	if assignment.UnlockAt != nil && now.Before(*assignment.UnlockAt) {
+		return ErrSubmissionNotYetUnlocked
+	}
+	if assignment.LockAt != nil && now.After(*assignment.LockAt) {
+		return ErrSubmissionLocked
+	}
+
 	submission.SubmittedAt = &now
 	submission.Attempt = 1
 	submission.WorkflowState = "submitted"
