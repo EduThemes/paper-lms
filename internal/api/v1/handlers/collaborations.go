@@ -90,7 +90,7 @@ func (h *CollaborationHandler) CreateCollaboration(c *fiber.Ctx) error {
 		ContextID:         uint(courseID),
 		CollaborationType: input.Collaboration.CollaborationType,
 		Title:             input.Collaboration.Title,
-		Description:       input.Collaboration.Description,
+		Description:       service.SanitizeHTML(input.Collaboration.Description),
 		URL:               input.Collaboration.URL,
 		DocumentID:        input.Collaboration.DocumentID,
 		UserID:            userID,
@@ -165,7 +165,7 @@ func (h *CollaborationHandler) UpdateCollaboration(c *fiber.Ctx) error {
 		collaboration.Title = *input.Collaboration.Title
 	}
 	if input.Collaboration.Description != nil {
-		collaboration.Description = *input.Collaboration.Description
+		collaboration.Description = service.SanitizeHTML(*input.Collaboration.Description)
 	}
 	if input.Collaboration.CollaborationType != nil {
 		collaboration.CollaborationType = *input.Collaboration.CollaborationType

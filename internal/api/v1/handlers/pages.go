@@ -160,7 +160,7 @@ func (h *PageHandler) CreatePage(c *fiber.Ctx) error {
 	page := &models.WikiPage{
 		CourseID:      uint(courseID),
 		Title:         input.WikiPage.Title,
-		Body:          input.WikiPage.Body,
+		Body:          service.SanitizeHTML(input.WikiPage.Body),
 		EditingRoles:  input.WikiPage.EditingRoles,
 		FrontPage:     input.WikiPage.FrontPage,
 		Public:        input.WikiPage.Public,
@@ -220,7 +220,7 @@ func (h *PageHandler) UpdatePage(c *fiber.Ctx) error {
 		page.Title = *input.WikiPage.Title
 	}
 	if input.WikiPage.Body != nil {
-		page.Body = *input.WikiPage.Body
+		page.Body = service.SanitizeHTML(*input.WikiPage.Body)
 	}
 	if input.WikiPage.EditingRoles != nil {
 		page.EditingRoles = *input.WikiPage.EditingRoles
