@@ -77,13 +77,17 @@ func (s *LTIAGSService) UpdateLineItem(ctx context.Context, item *models.LTILine
 	return s.lineItemRepo.Update(ctx, item)
 }
 
-// DeleteLineItem removes a line item by its ID.
-func (s *LTIAGSService) DeleteLineItem(ctx context.Context, id uint) error {
+// DeleteLineItem removes a line item by its ID. accountID is threaded to
+// the repo's tenant-scoped Delete (F-012) so a cross-tenant id soft-
+// fails as a no-op rather than destructive write. accountID==0 means
+// "no scope" — only auth-internal background callers should pass 0;
+// handler-routed callers MUST pass callerAccountID(c).
+func (s *LTIAGSService) DeleteLineItem(ctx context.Context, id, accountID uint) error {
 	_, err := s.lineItemRepo.FindByID(ctx, id)
 	if err != nil {
 		return errors.New("line item not found")
 	}
-	return s.lineItemRepo.Delete(ctx, id)
+	return s.lineItemRepo.Delete(ctx, id, accountID)
 }
 
 // ListLineItems returns a paginated list of line items for the specified course.
