@@ -168,7 +168,34 @@ func (h *AttendanceHandler) GetClassAttendance(c *fiber.Ctx) error {
 	return c.JSON(items)
 }
 
-// GetStudentAttendance handles GET /api/v1/courses/:course_id/users/:user_id/attendance
+// requireSelfOrInstructor returns true (writing 404) when the caller
+// is neither the subject user nor an instructor/TA/admin in the URL
+// course. Used by the per-student attendance reads (F-009).
+func (h *AttendanceHandler) requireSelfOrInstructor(c *fiber.Ctx, subjectUserID uint) bool {
+	callerID, _ := c.Locals("user_id").(uint)
+	if callerID == subjectUserID {
+		return false
+	}
+	isAdmin, _ := c.Locals("is_admin").(bool)
+	if isAdmin {
+		return false
+	}
+	enrollmentType, _ := c.Locals("enrollment_type").(string)
+	if enrollmentType == "TeacherEnrollment" || enrollmentType == "TaEnrollment" {
+		return false
+	}
+	_ = responses.NotFound(c, "attendance records")
+	return true
+}
+
+// GetStudentAttendance handles GET /api/v1/courses/:course_id/users/:user_id/attendance.
+//
+// SECURITY (F-009): the route was gated by `enrolled` (any role), so
+// a student in the course could GET another student's attendance via
+// path-param swap. The PII audit log captured the access but couldn't
+// prevent it. Now: caller MUST be the subject user OR an instructor/
+// TA/admin of the course. 404 on cross-student access per the
+// existence-leak contract.
 func (h *AttendanceHandler) GetStudentAttendance(c *fiber.Ctx) error {
 	courseID, err := c.ParamsInt("course_id")
 	if err != nil {
@@ -178,6 +205,10 @@ func (h *AttendanceHandler) GetStudentAttendance(c *fiber.Ctx) error {
 	userID, err := c.ParamsInt("user_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid user ID")
+	}
+
+	if h.requireSelfOrInstructor(c, uint(userID)) {
+		return nil
 	}
 
 	params := middleware.GetPagination(c)
@@ -203,7 +234,8 @@ func (h *AttendanceHandler) GetStudentAttendance(c *fiber.Ctx) error {
 	return c.JSON(items)
 }
 
-// GetStudentAttendanceSummary handles GET /api/v1/courses/:course_id/users/:user_id/attendance/summary
+// GetStudentAttendanceSummary handles GET /api/v1/courses/:course_id/users/:user_id/attendance/summary.
+// F-009: same self-or-instructor gate as GetStudentAttendance.
 func (h *AttendanceHandler) GetStudentAttendanceSummary(c *fiber.Ctx) error {
 	courseID, err := c.ParamsInt("course_id")
 	if err != nil {
@@ -213,6 +245,10 @@ func (h *AttendanceHandler) GetStudentAttendanceSummary(c *fiber.Ctx) error {
 	userID, err := c.ParamsInt("user_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid user ID")
+	}
+
+	if h.requireSelfOrInstructor(c, uint(userID)) {
+		return nil
 	}
 
 	summary, err := h.attendanceService.GetAttendanceSummary(c.Context(), uint(userID), uint(courseID))

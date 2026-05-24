@@ -71,7 +71,10 @@ type DataDeletionRequestRepository interface {
 	Create(ctx context.Context, request *models.DataDeletionRequest) error
 	FindByID(ctx context.Context, id uint) (*models.DataDeletionRequest, error)
 	Update(ctx context.Context, request *models.DataDeletionRequest) error
-	ListPending(ctx context.Context, params repository.PaginationParams) (*repository.PaginatedResult[models.DataDeletionRequest], error)
+	// ListPending returns pending deletion requests filtered to the given
+	// tenant via JOIN on users.account_id. accountID=0 means "no filter"
+	// (super_admin or background jobs only).
+	ListPending(ctx context.Context, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DataDeletionRequest], error)
 	ListByUserID(ctx context.Context, userID uint) ([]models.DataDeletionRequest, error)
 }
 
@@ -100,11 +103,17 @@ func (r *dataDeletionRequestRepo) Update(ctx context.Context, request *models.Da
 	return r.db.WithContext(ctx).Save(request).Error
 }
 
-func (r *dataDeletionRequestRepo) ListPending(ctx context.Context, params repository.PaginationParams) (*repository.PaginatedResult[models.DataDeletionRequest], error) {
+func (r *dataDeletionRequestRepo) ListPending(ctx context.Context, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DataDeletionRequest], error) {
 	var requests []models.DataDeletionRequest
 	var count int64
 
+	// F-005: scope to the caller's tenant via JOIN on users.account_id.
+	// accountID=0 disables the filter — only super_admin and background
+	// jobs pass 0; the handler enforces this contract.
 	query := r.db.WithContext(ctx).Model(&models.DataDeletionRequest{}).Where("status = ?", "pending")
+	if accountID != 0 {
+		query = query.Where("user_id IN (SELECT id FROM users WHERE account_id = ?)", accountID)
+	}
 	query.Count(&count)
 
 	offset := (params.Page - 1) * params.PerPage

@@ -130,7 +130,11 @@ func (h *FERPAHandler) DownloadDataExport(c *fiber.Ctx) error {
 	}
 	callerIsAdmin, _ := c.Locals("is_admin").(bool)
 
-	zipBytes, berr := h.ferpaService.BuildExportZip(c.Context(), uint(exportID), callerID, callerIsAdmin)
+	// F-006: pass tenant scope through so cross-tenant admin downloads
+	// are refused (super_admin bypasses).
+	callerAcct, _ := c.Locals("account_id").(uint)
+	callerIsSuper, _ := c.Locals("is_super_admin").(bool)
+	zipBytes, berr := h.ferpaService.BuildExportZip(c.Context(), uint(exportID), callerID, callerAcct, callerIsAdmin, callerIsSuper)
 	if berr != nil {
 		switch berr {
 		case service.ErrExportForbidden:
@@ -201,11 +205,21 @@ func (h *FERPAHandler) CreateDeletionRequest(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(dataDeletionRequestToJSON(request))
 }
 
-// ListPendingDeletionRequests handles GET /api/v1/admin/data_deletion_requests
+// ListPendingDeletionRequests handles GET /api/v1/admin/data_deletion_requests.
+//
+// F-005: tenant-scoped. The pre-fix path returned every tenant's
+// pending requests to any admin (a privacy disclosure that named the
+// subject user ID, reason, and request type). Super-admin retains the
+// global view.
 func (h *FERPAHandler) ListPendingDeletionRequests(c *fiber.Ctx) error {
 	params := middleware.GetPagination(c)
 
-	result, err := h.ferpaService.ListPendingDeletionRequests(c.Context(), params)
+	scope := uint(0)
+	if isSuper, _ := c.Locals("is_super_admin").(bool); !isSuper {
+		scope = callerAccountID(c)
+	}
+
+	result, err := h.ferpaService.ListPendingDeletionRequests(c.Context(), scope, params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch deletion requests")
 	}
@@ -228,8 +242,45 @@ func (h *FERPAHandler) ApproveDeletionRequest(c *fiber.Ctx) error {
 	}
 
 	reviewerID, _ := c.Locals("user_id").(uint)
+	reviewerAcct, _ := c.Locals("account_id").(uint)
+	isSuper, _ := c.Locals("is_super_admin").(bool)
 
-	if err := h.ferpaService.ApproveDeletionRequest(c.Context(), uint(requestID), reviewerID); err != nil {
+	// F-005: cross-tenant approval = 404 (existence-leak contract). The
+	// pre-fix path let any admin approve any tenant's deletion, which
+	// then anonymized the subject user.
+	if err := h.ferpaService.ApproveDeletionRequest(c.Context(), uint(requestID), reviewerID, reviewerAcct, isSuper); err != nil {
+		if err == service.ErrFERPACrossTenant {
+			return responses.NotFound(c, "deletion request")
+		}
+		return responses.BadRequest(c, err.Error())
+	}
+
+	request, err := h.ferpaService.GetDeletionRequest(c.Context(), uint(requestID))
+	if err != nil {
+		return responses.InternalError(c, "Could not fetch updated request")
+	}
+
+	return c.JSON(dataDeletionRequestToJSON(request))
+}
+
+// DenyDeletionRequest handles POST /api/v1/admin/data_deletion_requests/:id/deny.
+// Mirrors ApproveDeletionRequest's tenant gating: cross-tenant or
+// non-super-admin attempts to deny another tenant's deletion request
+// return 404 per the existence-leak contract.
+func (h *FERPAHandler) DenyDeletionRequest(c *fiber.Ctx) error {
+	requestID, err := c.ParamsInt("id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid request ID")
+	}
+
+	reviewerID, _ := c.Locals("user_id").(uint)
+	reviewerAcct, _ := c.Locals("account_id").(uint)
+	isSuper, _ := c.Locals("is_super_admin").(bool)
+
+	if err := h.ferpaService.DenyDeletionRequest(c.Context(), uint(requestID), reviewerID, reviewerAcct, isSuper); err != nil {
+		if err == service.ErrFERPACrossTenant {
+			return responses.NotFound(c, "deletion request")
+		}
 		return responses.BadRequest(c, err.Error())
 	}
 
@@ -265,10 +316,21 @@ func (h *FERPAHandler) GetPIIAccessLog(c *fiber.Ctx) error {
 	return c.JSON(logs)
 }
 
-// ListRetentionPolicies handles GET /api/v1/admin/retention_policies
+// ListRetentionPolicies handles GET /api/v1/admin/retention_policies.
+//
+// F-007: returns the CALLER's tenant's retention policies. The pre-fix
+// path hardcoded accountID=1, which (a) leaked tenant-1's policies to
+// every admin and (b) hid every other tenant's policies even from
+// their own admins. Super-admin sees account 0 — interpreted here as
+// "the root account = 1" for backward compat until the hierarchy walk
+// lands; super_admin can pass ?account_id= to see another tenant's.
 func (h *FERPAHandler) ListRetentionPolicies(c *fiber.Ctx) error {
-	// Default to account 1 (single-tenant admin route)
-	accountID := uint(1)
+	accountID := callerAccountID(c)
+	if isSuper, _ := c.Locals("is_super_admin").(bool); isSuper {
+		if q := c.QueryInt("account_id"); q > 0 {
+			accountID = uint(q)
+		}
+	}
 
 	params := middleware.GetPagination(c)
 
@@ -287,10 +349,13 @@ func (h *FERPAHandler) ListRetentionPolicies(c *fiber.Ctx) error {
 	return c.JSON(policies)
 }
 
-// CreateRetentionPolicy handles POST /api/v1/admin/retention_policies
+// CreateRetentionPolicy handles POST /api/v1/admin/retention_policies.
+//
+// F-007: creates the policy in the CALLER's tenant. The pre-fix path
+// hardcoded accountID=1, which let an admin in tenant 9 silently
+// inject policies into tenant 1.
 func (h *FERPAHandler) CreateRetentionPolicy(c *fiber.Ctx) error {
-	// Default to account 1 (single-tenant admin route)
-	accountID := uint(1)
+	accountID := callerAccountID(c)
 
 	var input struct {
 		DataCategory    string `json:"data_category"`
@@ -332,6 +397,11 @@ func (h *FERPAHandler) GetRetentionPolicy(c *fiber.Ctx) error {
 		return responses.NotFound(c, "retention policy")
 	}
 
+	// F-007: 404 on cross-tenant — existence-leak contract.
+	if assertSameTenant(c, policy.AccountID) {
+		return nil
+	}
+
 	return c.JSON(retentionPolicyToJSON(policy))
 }
 
@@ -345,6 +415,11 @@ func (h *FERPAHandler) UpdateRetentionPolicy(c *fiber.Ctx) error {
 	policy, err := h.ferpaService.GetRetentionPolicy(c.Context(), uint(policyID))
 	if err != nil {
 		return responses.NotFound(c, "retention policy")
+	}
+
+	// F-007: 404 on cross-tenant.
+	if assertSameTenant(c, policy.AccountID) {
+		return nil
 	}
 
 	var input struct {
@@ -387,6 +462,16 @@ func (h *FERPAHandler) DeleteRetentionPolicy(c *fiber.Ctx) error {
 	policyID, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid policy ID")
+	}
+
+	// F-007: load first to assert tenant. Delete without the assertion
+	// would let any admin in any tenant nuke any policy by guessing IDs.
+	policy, err := h.ferpaService.GetRetentionPolicy(c.Context(), uint(policyID))
+	if err != nil {
+		return responses.NotFound(c, "retention policy")
+	}
+	if assertSameTenant(c, policy.AccountID) {
+		return nil
 	}
 
 	if err := h.ferpaService.DeleteRetentionPolicy(c.Context(), uint(policyID)); err != nil {

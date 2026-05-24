@@ -166,6 +166,10 @@ func (h *AssignmentHandler) CreateAssignment(c *fiber.Ctx) error {
 }
 
 func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid assignment ID")
@@ -173,6 +177,13 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 
 	assignment, err := h.assignmentService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
+		return responses.NotFound(c, "assignment")
+	}
+	// F-013: assignment must belong to the URL's :course_id. Without
+	// this a teacher in course A could PUT
+	// /courses/A/assignments/<id from course B same tenant> and edit
+	// course B's assignment.
+	if assignment.CourseID != uint(courseID) {
 		return responses.NotFound(c, "assignment")
 	}
 
@@ -263,9 +274,26 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 }
 
 func (h *AssignmentHandler) DeleteAssignment(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid assignment ID")
+	}
+
+	// SECURITY (F-011): load the assignment under the caller's tenant
+	// AND verify it belongs to the URL's course. Pre-fix path called
+	// h.assignmentService.Delete(id) with no scope, so a teacher in
+	// course 10 could DELETE /courses/10/assignments/<id from any
+	// other course/tenant>.
+	assignment, err := h.assignmentService.GetByID(c.Context(), uint(id), callerAccountID(c))
+	if err != nil {
+		return responses.NotFound(c, "assignment")
+	}
+	if assignment.CourseID != uint(courseID) {
+		return responses.NotFound(c, "assignment")
 	}
 
 	if err := h.assignmentService.Delete(c.Context(), uint(id)); err != nil {
