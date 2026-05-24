@@ -5,6 +5,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
 
@@ -502,21 +503,31 @@ func (h *GroupHandler) ListGroupMemberships(c *fiber.Ctx) error {
 	return c.JSON(memberships)
 }
 
+// CreateGroupMembership adds a member to a group.
+//
+// SECURITY (F-017): the pre-fix path only enforced authz when the
+// group was course-scoped (RequireCourseInstructor). For non-course
+// groups (account-level / personal), ANY authenticated user could
+// add ANY other user with `moderator: true` and `workflow_state:
+// "accepted"`. Fix:
+//   - course-scoped groups: instructor of the course (preserved).
+//   - non-course groups: caller MUST be either an existing group
+//     moderator OR an admin, OR be adding themselves with
+//     moderator=false (self-signup path).
+//   - moderator=true on self-signup is silently downgraded; only an
+//     existing moderator / admin can promote.
+//   - workflow_state restricted to "accepted" / "requested" for
+//     self-signup; only mod/admin can flip to anything else.
 func (h *GroupHandler) CreateGroupMembership(c *fiber.Ctx) error {
 	groupID, err := c.ParamsInt("group_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid group ID")
 	}
 
-	// Authorization: require instructor for course-scoped groups
+	// Course-scoped groups: same instructor gate as before.
 	courseID, err := h.getCourseIDFromGroup(c, uint(groupID))
 	if err != nil {
 		return responses.NotFound(c, "group")
-	}
-	if courseID != 0 {
-		if err := h.authz.RequireCourseInstructor(c, courseID); err != nil {
-			return err
-		}
 	}
 
 	var input struct {
@@ -531,14 +542,41 @@ func (h *GroupHandler) CreateGroupMembership(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 
+	callerID, _ := c.Locals("user_id").(uint)
+	isAdmin, _ := c.Locals("is_admin").(bool)
+
 	// If user_id not provided, use the authenticated user (self-signup)
 	userID := input.Membership.UserID
 	if userID == 0 {
-		uid, _ := c.Locals("user_id").(uint)
-		userID = uid
+		userID = callerID
 	}
 	if userID == 0 {
 		return responses.BadRequest(c, "user_id is required")
+	}
+
+	if courseID != 0 {
+		if err := h.authz.RequireCourseInstructor(c, courseID); err != nil {
+			return err
+		}
+	} else {
+		// Non-course group. Self-signup is OK with constrained fields;
+		// adding others or setting moderator requires an existing
+		// moderator role OR admin.
+		isCallerMod := h.callerIsGroupModerator(c, uint(groupID), callerID)
+		if !isAdmin && !isCallerMod {
+			if userID != callerID {
+				return responses.Forbidden(c, "only group moderators or admins can add other members")
+			}
+			if input.Membership.Moderator {
+				return responses.Forbidden(c, "cannot self-grant moderator status")
+			}
+			switch input.Membership.WorkflowState {
+			case "", "accepted", "requested":
+				// allowed for self-signup
+			default:
+				return responses.Forbidden(c, "workflow_state restricted on self-signup")
+			}
+		}
 	}
 
 	membership := &models.GroupMembership{
@@ -555,6 +593,33 @@ func (h *GroupHandler) CreateGroupMembership(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(groupMembershipToJSON(membership))
 }
 
+// callerIsGroupModerator returns true if the caller has an accepted
+// moderator membership in the given group. Cheap helper used by the
+// non-course CreateGroupMembership path; on the (rare) miss we fall
+// back to admin-or-self rules.
+func (h *GroupHandler) callerIsGroupModerator(c *fiber.Ctx, groupID, callerID uint) bool {
+	if callerID == 0 {
+		return false
+	}
+	members, err := h.groupService.ListMembers(c.Context(), groupID, repository.PaginationParams{Page: 1, PerPage: 10000})
+	if err != nil || members == nil {
+		return false
+	}
+	for _, m := range members.Items {
+		if m.UserID == callerID && m.Moderator && m.WorkflowState == "accepted" {
+			return true
+		}
+	}
+	return false
+}
+
+// UpdateGroupMembership updates an existing membership (workflow_state /
+// moderator).
+//
+// SECURITY (F-017): non-course groups previously allowed ANY
+// authenticated user to flip workflow_state and moderator on any
+// membership. Now: course groups still gated by instructor; non-
+// course groups require admin OR an existing moderator in that group.
 func (h *GroupHandler) UpdateGroupMembership(c *fiber.Ctx) error {
 	membershipID, err := c.ParamsInt("membership_id")
 	if err != nil {
@@ -576,8 +641,10 @@ func (h *GroupHandler) UpdateGroupMembership(c *fiber.Ctx) error {
 			return err
 		}
 	} else {
-		if isAdmin, _ := c.Locals("is_admin").(bool); !isAdmin {
-			return responses.Forbidden(c, "admin required to update account-scoped group memberships")
+		callerID, _ := c.Locals("user_id").(uint)
+		isAdmin, _ := c.Locals("is_admin").(bool)
+		if !isAdmin && !h.callerIsGroupModerator(c, membership.GroupID, callerID) {
+			return responses.Forbidden(c, "only group moderators or admins can modify memberships")
 		}
 	}
 
@@ -606,6 +673,12 @@ func (h *GroupHandler) UpdateGroupMembership(c *fiber.Ctx) error {
 	return c.JSON(groupMembershipToJSON(membership))
 }
 
+// DeleteGroupMembership removes a member from a group.
+//
+// SECURITY (F-017): same authz shape as UpdateGroupMembership. A
+// member may always remove themselves; otherwise the caller must
+// be a group moderator or an admin (and for course groups, a course
+// instructor).
 func (h *GroupHandler) DeleteGroupMembership(c *fiber.Ctx) error {
 	membershipID, err := c.ParamsInt("membership_id")
 	if err != nil {
@@ -618,11 +691,19 @@ func (h *GroupHandler) DeleteGroupMembership(c *fiber.Ctx) error {
 		return responses.NotFound(c, "group membership")
 	}
 
-	// Authorization: require instructor for course-scoped groups
-	courseID, err := h.getCourseIDFromGroup(c, membership.GroupID)
-	if err == nil && courseID != 0 {
-		if err := h.authz.RequireCourseInstructor(c, courseID); err != nil {
-			return err
+	callerID, _ := c.Locals("user_id").(uint)
+	isAdmin, _ := c.Locals("is_admin").(bool)
+
+	// Self-removal is always allowed (leave-the-group UX).
+	if membership.UserID != callerID {
+		// Authorization: require instructor for course-scoped groups
+		courseID, err := h.getCourseIDFromGroup(c, membership.GroupID)
+		if err == nil && courseID != 0 {
+			if err := h.authz.RequireCourseInstructor(c, courseID); err != nil {
+				return err
+			}
+		} else if !isAdmin && !h.callerIsGroupModerator(c, membership.GroupID, callerID) {
+			return responses.Forbidden(c, "only group moderators or admins can remove other members")
 		}
 	}
 

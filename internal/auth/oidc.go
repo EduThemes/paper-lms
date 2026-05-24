@@ -40,6 +40,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/security"
 )
 
 // SettingsLookupFunc is the type OIDCHandler accepts for resolving
@@ -253,6 +254,17 @@ func (h *OIDCHandler) buildConfig(ctx context.Context, provider *models.Authenti
 			return nil, nil, fmt.Errorf("decrypt oidc_client_secret: %w", err)
 		}
 		clientSecret = string(pt)
+	}
+
+	// SECURITY (F-022): SSRF defense on the issuer URL. The pre-fix
+	// production discovery path called oidc.NewProvider directly with
+	// a DB-stored OIDC_ISSUER_URL — admin-controlled, which combined
+	// with the cross-tenant admin escalation (F-001, pre-fix) gave
+	// any admin in any tenant the ability to install an SSRF probe
+	// pointing at internal services. The super-admin TEST endpoint
+	// already validated; this is the prod path.
+	if err := security.ValidateExternalURL(ctx, provider.OIDCIssuerURL); err != nil {
+		return nil, nil, fmt.Errorf("oidc issuer URL rejected by SSRF guard: %w", err)
 	}
 
 	// Discovery — coreos/go-oidc reads .well-known/openid-configuration.
