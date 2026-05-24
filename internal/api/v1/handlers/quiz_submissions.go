@@ -55,6 +55,29 @@ func quizSubmissionAnswerToJSON(a *models.QuizSubmissionAnswer) fiber.Map {
 	}
 }
 
+// requireQuizInCourse verifies the URL's quiz_id is a real quiz inside
+// the URL's course_id AND inside the caller's tenant. Used by every
+// quiz-submission endpoint to close F-003 (cross-course teacher reads)
+// and F-004 (cross-tenant submission enumeration).
+//
+// Returns wrote=true if the response has already been written (404 on
+// quiz-not-in-course); caller short-circuits. Returns wrote=false on
+// success.
+func (h *QuizSubmissionHandler) requireQuizInCourse(c *fiber.Ctx, quizID, courseID uint) bool {
+	quiz, err := h.quizService.GetQuizScoped(c.Context(), quizID, callerAccountID(c))
+	if err != nil || quiz == nil {
+		_ = responses.NotFound(c, "quiz")
+		return true
+	}
+	if quiz.CourseID != courseID {
+		// Existence-leak contract: don't distinguish "wrong course" from
+		// "quiz doesn't exist."
+		_ = responses.NotFound(c, "quiz")
+		return true
+	}
+	return false
+}
+
 // StartSubmission handles POST /courses/:course_id/quizzes/:quiz_id/submissions.
 //
 // SECURITY (F-046): the pre-fix path read an optional `time_limit`
@@ -65,9 +88,16 @@ func quizSubmissionAnswerToJSON(a *models.QuizSubmissionAnswer) fiber.Map {
 // legitimate use of a student-controlled time-limit override. The
 // quiz's own TimeLimit (plus any accommodations) is the only signal.
 func (h *QuizSubmissionHandler) StartSubmission(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
+	}
+	if h.requireQuizInCourse(c, uint(quizID), uint(courseID)) {
+		return nil
 	}
 
 	userID, err := getUserID(c)
@@ -87,9 +117,16 @@ func (h *QuizSubmissionHandler) StartSubmission(c *fiber.Ctx) error {
 
 // GetSubmission handles GET /courses/:course_id/quizzes/:quiz_id/submissions/:submission_id
 func (h *QuizSubmissionHandler) GetSubmission(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
+	}
+	if h.requireQuizInCourse(c, uint(quizID), uint(courseID)) {
+		return nil
 	}
 
 	submissionID, err := c.ParamsInt("submission_id")
@@ -137,9 +174,16 @@ func (h *QuizSubmissionHandler) GetSubmission(c *fiber.Ctx) error {
 
 // AnswerQuestion handles PUT /courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/questions/:question_id
 func (h *QuizSubmissionHandler) AnswerQuestion(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
+	}
+	if h.requireQuizInCourse(c, uint(quizID), uint(courseID)) {
+		return nil
 	}
 
 	submissionID, err := c.ParamsInt("submission_id")
@@ -186,9 +230,16 @@ func (h *QuizSubmissionHandler) AnswerQuestion(c *fiber.Ctx) error {
 
 // CompleteSubmission handles POST /courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/complete
 func (h *QuizSubmissionHandler) CompleteSubmission(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
+	}
+	if h.requireQuizInCourse(c, uint(quizID), uint(courseID)) {
+		return nil
 	}
 
 	submissionID, err := c.ParamsInt("submission_id")
@@ -222,9 +273,16 @@ func (h *QuizSubmissionHandler) CompleteSubmission(c *fiber.Ctx) error {
 
 // GetSubmissionAnswers handles GET /courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/answers
 func (h *QuizSubmissionHandler) GetSubmissionAnswers(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
+	}
+	if h.requireQuizInCourse(c, uint(quizID), uint(courseID)) {
+		return nil
 	}
 
 	submissionID, err := c.ParamsInt("submission_id")
@@ -270,9 +328,16 @@ func (h *QuizSubmissionHandler) GetSubmissionAnswers(c *fiber.Ctx) error {
 // GetSubmissionQuestions handles GET /courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/questions
 // Returns the personalized set of questions for this submission (randomized from groups).
 func (h *QuizSubmissionHandler) GetSubmissionQuestions(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
+	}
+	if h.requireQuizInCourse(c, uint(quizID), uint(courseID)) {
+		return nil
 	}
 
 	submissionID, err := c.ParamsInt("submission_id")
@@ -318,11 +383,35 @@ func (h *QuizSubmissionHandler) GetSubmissionQuestions(c *fiber.Ctx) error {
 	return c.JSON(result)
 }
 
-// ListSubmissions handles GET /courses/:course_id/quizzes/:quiz_id/submissions
+// ListSubmissions handles GET /courses/:course_id/quizzes/:quiz_id/submissions.
+//
+// SECURITY (F-004): the pre-fix path returned every submission for the
+// supplied quiz_id with no parent-tie check, so any enrolled student
+// could enumerate any quiz's submissions across courses and tenants
+// just by changing the quiz_id path segment. The fix:
+//   1. The quiz_id MUST belong to the URL's course_id within the
+//      caller's tenant (requireQuizInCourse).
+//   2. The caller MUST be an instructor / TA / admin of the course —
+//      students see only their own attempts via GetSubmission.
 func (h *QuizSubmissionHandler) ListSubmissions(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
+	}
+	if h.requireQuizInCourse(c, uint(quizID), uint(courseID)) {
+		return nil
+	}
+
+	// Restrict to instructor / TA / admin. Students do not have a
+	// roster-wide read on the quiz's attempts.
+	enrollmentType, _ := c.Locals("enrollment_type").(string)
+	isAdmin, _ := c.Locals("is_admin").(bool)
+	if !isAdmin && enrollmentType != "TeacherEnrollment" && enrollmentType != "TaEnrollment" {
+		return responses.NotFound(c, "quiz")
 	}
 
 	params := middleware.GetPagination(c)

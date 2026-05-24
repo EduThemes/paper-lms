@@ -14,9 +14,18 @@ import (
 	"github.com/EduThemes/paper-lms/internal/repository"
 )
 
-// GetQuiz returns a quiz by ID.
+// GetQuiz returns a quiz by ID. accountID=0 (legacy) disables the
+// tenant filter; new handler callers should use GetQuizScoped below.
 func (s *QuizService) GetQuiz(ctx context.Context, quizID uint) (*models.Quiz, error) {
 	return s.quizRepo.FindByID(ctx, quizID, 0)
+}
+
+// GetQuizScoped returns a quiz scoped to the caller's tenant.
+// SECURITY (F-003 / F-004): used by quiz-submission handlers to verify
+// the URL's quiz_id is reachable within the caller's tenant before
+// trusting it as a parent of a submission.
+func (s *QuizService) GetQuizScoped(ctx context.Context, quizID, accountID uint) (*models.Quiz, error) {
+	return s.quizRepo.FindByID(ctx, quizID, accountID)
 }
 
 // ListAllQuestions returns all active questions for a quiz (no pagination).
