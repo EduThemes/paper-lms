@@ -398,13 +398,28 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 		_ = s.answerRepo.Update(ctx, &answers[i])
 	}
 
+	// F-050: cap FinishedAt at submission.EndAt + 5-minute grace when
+	// the student delayed the explicit /complete call past their
+	// time-limit. The pre-fix path stamped FinishedAt = time.Now()
+	// unconditionally, which inflated TimeSpent and the gradebook
+	// "submitted at" column on a delayed POST. (F-046 already blocks
+	// new ANSWERS past EndAt — this only tightens the recorded
+	// timestamps.)
 	now := time.Now()
-	submission.FinishedAt = &now
+	finishAt := now
+	if submission.EndAt != nil && now.After(*submission.EndAt) {
+		finishAt = submission.EndAt.Add(5 * time.Minute)
+		if now.Before(finishAt) {
+			// Still inside grace window — use the actual now.
+			finishAt = now
+		}
+	}
+	submission.FinishedAt = &finishAt
 	submission.Score = &totalScore
 	submission.KeptScore = &totalScore
 
 	if submission.StartedAt != nil {
-		spent := int(now.Sub(*submission.StartedAt).Seconds())
+		spent := int(finishAt.Sub(*submission.StartedAt).Seconds())
 		submission.TimeSpent = spent
 	}
 
