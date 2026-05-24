@@ -166,7 +166,7 @@ func (h *GroupHandler) CreateGroupCategory(c *fiber.Ctx) error {
 }
 
 func (h *GroupHandler) GetGroupCategory(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("category_id")
+	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid category ID")
 	}
@@ -187,7 +187,7 @@ func (h *GroupHandler) GetGroupCategory(c *fiber.Ctx) error {
 }
 
 func (h *GroupHandler) UpdateGroupCategory(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("category_id")
+	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid category ID")
 	}
@@ -242,7 +242,7 @@ func (h *GroupHandler) UpdateGroupCategory(c *fiber.Ctx) error {
 }
 
 func (h *GroupHandler) DeleteGroupCategory(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("category_id")
+	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid category ID")
 	}
@@ -270,7 +270,7 @@ func (h *GroupHandler) DeleteGroupCategory(c *fiber.Ctx) error {
 // ---- Group handlers ----
 
 func (h *GroupHandler) ListGroupsByCategory(c *fiber.Ctx) error {
-	categoryID, err := c.ParamsInt("category_id")
+	categoryID, err := c.ParamsInt("group_category_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid category ID")
 	}
@@ -304,7 +304,7 @@ func (h *GroupHandler) ListGroupsByCategory(c *fiber.Ctx) error {
 }
 
 func (h *GroupHandler) CreateGroup(c *fiber.Ctx) error {
-	categoryID, err := c.ParamsInt("category_id")
+	categoryID, err := c.ParamsInt("group_category_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid category ID")
 	}
@@ -355,7 +355,7 @@ func (h *GroupHandler) CreateGroup(c *fiber.Ctx) error {
 }
 
 func (h *GroupHandler) GetGroup(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("group_id")
+	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid group ID")
 	}
@@ -377,7 +377,7 @@ func (h *GroupHandler) GetGroup(c *fiber.Ctx) error {
 }
 
 func (h *GroupHandler) UpdateGroup(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("group_id")
+	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid group ID")
 	}
@@ -433,7 +433,7 @@ func (h *GroupHandler) UpdateGroup(c *fiber.Ctx) error {
 }
 
 func (h *GroupHandler) DeleteGroup(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("group_id")
+	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid group ID")
 	}
