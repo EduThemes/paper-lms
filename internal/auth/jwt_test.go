@@ -105,6 +105,85 @@ func TestGenerateToken_WrongSecret(t *testing.T) {
 	assert.False(t, token.Valid)
 }
 
+// TestGenerateToken_HasIssuerAndAudience asserts every session token
+// carries the iss + aud claims required for middleware validation. A
+// token minted for an unrelated service that happens to share
+// JWT_SECRET must not be accepted as a Paper LMS session — these
+// claims are the gate. Audit finding #5, 2026-05-22.
+func TestGenerateToken_HasIssuerAndAudience(t *testing.T) {
+	user := testUser()
+	secret := "test-secret-key"
+
+	tokenString, err := auth.GenerateToken(user, secret)
+	assert.NoError(t, err)
+
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return []byte(secret), nil
+	})
+	assert.NoError(t, err)
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	assert.True(t, ok)
+	assert.Equal(t, auth.JWTIssuer, claims["iss"])
+
+	// "aud" is encoded as []interface{} when there is exactly one
+	// audience; both shapes (string and slice) are valid per RFC 7519.
+	switch v := claims["aud"].(type) {
+	case string:
+		assert.Equal(t, auth.JWTAudienceAPI, v)
+	case []interface{}:
+		assert.Contains(t, v, auth.JWTAudienceAPI)
+	default:
+		t.Fatalf("aud claim has unexpected type %T", v)
+	}
+}
+
+// TestGenerateMasqueradeToken_HasIssuerAndAudience mirrors the above
+// for masquerade tokens — those follow the same validation path
+// through the auth middleware.
+func TestGenerateMasqueradeToken_HasIssuerAndAudience(t *testing.T) {
+	target := testUser()
+	secret := "test-secret-key"
+
+	tokenString, err := auth.GenerateMasqueradeToken(target, 1, 1, secret)
+	assert.NoError(t, err)
+
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return []byte(secret), nil
+	})
+	assert.NoError(t, err)
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	assert.True(t, ok)
+	assert.Equal(t, auth.JWTIssuer, claims["iss"])
+}
+
+// TestGenerateToken_RejectedByWrongAudience verifies the parser-side
+// rejection: a token minted with a different aud cannot pass through
+// a parser configured with the API audience expectation. This is the
+// downgrade attack surface the iss/aud claims close.
+func TestGenerateToken_RejectedByWrongAudience(t *testing.T) {
+	secret := "test-secret-key"
+
+	// Mint a token manually with a different audience.
+	now := time.Now()
+	mintedForOtherService := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"id":  42,
+		"iss": auth.JWTIssuer,
+		"aud": "some-other-service",
+		"iat": now.Unix(),
+		"exp": now.Add(time.Hour).Unix(),
+	})
+	tokenString, err := mintedForOtherService.SignedString([]byte(secret))
+	assert.NoError(t, err)
+
+	// Parse with the API audience requirement — must fail.
+	_, err = jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return []byte(secret), nil
+	}, jwt.WithIssuer(auth.JWTIssuer), jwt.WithAudience(auth.JWTAudienceAPI))
+	assert.Error(t, err)
+}
+
 func TestGenerateToken_HasSignature(t *testing.T) {
 	user := testUser()
 	secret := "test-secret-key"
