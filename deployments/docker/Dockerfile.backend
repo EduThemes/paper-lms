@@ -17,19 +17,18 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /migrate ./cmd/migrate
 # Run stage
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata \
- && addgroup -S app && adduser -S -G app app
+RUN apk add --no-cache ca-certificates tzdata
 
 WORKDIR /app
 
 COPY --from=builder /paper-lms .
 COPY --from=builder /migrate .
 
-# Run as a non-root user (defense in depth). The app binds :3000, which needs
-# no privileged port. If STORAGE_BACKEND=local, the mounted storage volume must
-# be writable by the 'app' user — chown it in the deploy/compose layer.
-USER app
-
+# NOTE (security follow-up): run as a non-root USER. Deferred until the
+# compose layer makes the file-storage volume (/data/files) writable by that
+# user — a named volume is root-owned by default, so a bare `USER app` would
+# silently break uploads. Do it together with `user:`/an init-chown in
+# docker-compose.prod.yml, then verify an upload end-to-end.
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
