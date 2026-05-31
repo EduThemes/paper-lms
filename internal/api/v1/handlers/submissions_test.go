@@ -49,6 +49,12 @@ func setupSubmissionTest() (
 	app.Use(func(c *fiber.Ctx) error {
 		c.Locals("user_id", uint(1))
 		c.Locals("account_id", uint(1))
+		// These handler tests exercise course-staff operations (grading,
+		// listing the whole class's submissions). Post-SEC-002/004 the read
+		// endpoints enforce object-level authz, so the caller acts as a
+		// teacher. The non-staff/student restriction is covered separately in
+		// submissions_authz_test.go.
+		c.Locals("enrollment_type", "TeacherEnrollment")
 		return c.Next()
 	})
 

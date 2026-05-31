@@ -241,7 +241,7 @@ func TestCourseList(t *testing.T) {
 
 	mockCourseRepo.On("List", ctx, uint(0), params).Return(expectedResult, nil)
 
-	result, err := svc.List(ctx, params)
+	result, err := svc.List(ctx, uint(0), params)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -249,6 +249,32 @@ func TestCourseList(t *testing.T) {
 	assert.Equal(t, int64(2), result.TotalCount)
 	assert.Equal(t, "Course A", result.Items[0].Name)
 	assert.Equal(t, "Course B", result.Items[1].Name)
+	mockCourseRepo.AssertExpectations(t)
+}
+
+// SEC-001: List must forward the caller's tenant to the repository unchanged.
+// Previously the service hardcoded accountID=0 (no filter), which leaked every
+// tenant's courses through GraphQL allCourses and REST ?scope=all.
+func TestCourseListScopesToCallerTenant(t *testing.T) {
+	mockCourseRepo := new(mocks.MockCourseRepository)
+	mockEnrollmentRepo := new(mocks.MockEnrollmentRepository)
+	mockSectionRepo := new(mocks.MockSectionRepository)
+	svc := service.NewCourseService(mockCourseRepo, mockEnrollmentRepo, mockSectionRepo)
+	ctx := context.Background()
+
+	params := repository.PaginationParams{Page: 1, PerPage: 10}
+	expected := &repository.PaginatedResult[models.Course]{
+		Items:      []models.Course{{ID: 1, Name: "Tenant-7 Course", AccountID: 7}},
+		TotalCount: 1, Page: 1, PerPage: 10,
+	}
+	// The repo must be called with accountID=7, never 0.
+	mockCourseRepo.On("List", ctx, uint(7), params).Return(expected, nil)
+
+	result, err := svc.List(ctx, uint(7), params)
+
+	assert.NoError(t, err)
+	assert.Len(t, result.Items, 1)
+	mockCourseRepo.AssertCalled(t, "List", ctx, uint(7), params)
 	mockCourseRepo.AssertExpectations(t)
 }
 

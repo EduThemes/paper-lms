@@ -45,6 +45,12 @@ func TestGetSubmission_FiresLogPIIAccess(t *testing.T) {
 	app.Use(func(c *fiber.Ctx) error {
 		c.Locals("user_id", uint(7))
 		c.Locals("account_id", uint(1))
+		// Caller 7 reads student 123's submission. Post-SEC-002, a
+		// cross-student read is only permitted for course staff / owner /
+		// observer, so the auditable scenario is a teacher reading a
+		// student's work — set the staff role so the read is authorized
+		// (200) and the PII access is logged.
+		c.Locals("enrollment_type", "TeacherEnrollment")
 		return c.Next()
 	})
 	app.Use(middleware.PaginationParams())

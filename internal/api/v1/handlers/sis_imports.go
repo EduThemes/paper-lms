@@ -139,12 +139,18 @@ func (h *SISImportHandler) GetSISImportErrors(c *fiber.Ctx) error {
 }
 
 func (h *SISImportHandler) ExportUsersCSV(c *fiber.Ctx) error {
-	_, err := c.ParamsInt("account_id")
+	accountID, err := c.ParamsInt("account_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid account ID")
 	}
+	// SEC-005: scope the export to the caller's tenant. assertSameTenant
+	// writes a 404 (existence-leak contract) when a non-super-admin requests
+	// another tenant's account_id, and we filter by it in the service.
+	if assertSameTenant(c, uint(accountID)) {
+		return nil
+	}
 
-	data, err := h.sisService.ExportUsersCSV(c.Context())
+	data, err := h.sisService.ExportUsersCSV(c.Context(), uint(accountID))
 	if err != nil {
 		return responses.InternalError(c, "Could not export users CSV")
 	}
@@ -155,12 +161,15 @@ func (h *SISImportHandler) ExportUsersCSV(c *fiber.Ctx) error {
 }
 
 func (h *SISImportHandler) ExportCoursesCSV(c *fiber.Ctx) error {
-	_, err := c.ParamsInt("account_id")
+	accountID, err := c.ParamsInt("account_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid account ID")
 	}
+	if assertSameTenant(c, uint(accountID)) {
+		return nil
+	}
 
-	data, err := h.sisService.ExportCoursesCSV(c.Context())
+	data, err := h.sisService.ExportCoursesCSV(c.Context(), uint(accountID))
 	if err != nil {
 		return responses.InternalError(c, "Could not export courses CSV")
 	}
@@ -171,12 +180,15 @@ func (h *SISImportHandler) ExportCoursesCSV(c *fiber.Ctx) error {
 }
 
 func (h *SISImportHandler) ExportSectionsCSV(c *fiber.Ctx) error {
-	_, err := c.ParamsInt("account_id")
+	accountID, err := c.ParamsInt("account_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid account ID")
 	}
+	if assertSameTenant(c, uint(accountID)) {
+		return nil
+	}
 
-	data, err := h.sisService.ExportSectionsCSV(c.Context())
+	data, err := h.sisService.ExportSectionsCSV(c.Context(), uint(accountID))
 	if err != nil {
 		return responses.InternalError(c, "Could not export sections CSV")
 	}
@@ -187,12 +199,15 @@ func (h *SISImportHandler) ExportSectionsCSV(c *fiber.Ctx) error {
 }
 
 func (h *SISImportHandler) ExportEnrollmentsCSV(c *fiber.Ctx) error {
-	_, err := c.ParamsInt("account_id")
+	accountID, err := c.ParamsInt("account_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid account ID")
 	}
+	if assertSameTenant(c, uint(accountID)) {
+		return nil
+	}
 
-	data, err := h.sisService.ExportEnrollmentsCSV(c.Context())
+	data, err := h.sisService.ExportEnrollmentsCSV(c.Context(), uint(accountID))
 	if err != nil {
 		return responses.InternalError(c, "Could not export enrollments CSV")
 	}

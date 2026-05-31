@@ -573,9 +573,9 @@ func (s *SISImportService) processEnrollmentsCSV(ctx context.Context, batchID ui
 
 // Export methods
 
-func (s *SISImportService) ExportUsersCSV(ctx context.Context) ([]byte, error) {
+func (s *SISImportService) ExportUsersCSV(ctx context.Context, accountID uint) ([]byte, error) {
 	var users []models.User
-	if err := s.db.WithContext(ctx).Find(&users).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("account_id = ?", accountID).Find(&users).Error; err != nil {
 		return nil, err
 	}
 
@@ -611,9 +611,9 @@ func (s *SISImportService) ExportUsersCSV(ctx context.Context) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (s *SISImportService) ExportCoursesCSV(ctx context.Context) ([]byte, error) {
+func (s *SISImportService) ExportCoursesCSV(ctx context.Context, accountID uint) ([]byte, error) {
 	var courses []models.Course
-	if err := s.db.WithContext(ctx).Find(&courses).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("account_id = ?", accountID).Find(&courses).Error; err != nil {
 		return nil, err
 	}
 
@@ -650,15 +650,17 @@ func (s *SISImportService) ExportCoursesCSV(ctx context.Context) ([]byte, error)
 	return buf.Bytes(), nil
 }
 
-func (s *SISImportService) ExportSectionsCSV(ctx context.Context) ([]byte, error) {
+func (s *SISImportService) ExportSectionsCSV(ctx context.Context, accountID uint) ([]byte, error) {
 	var sections []models.CourseSection
-	if err := s.db.WithContext(ctx).Find(&sections).Error; err != nil {
+	if err := s.db.WithContext(ctx).
+		Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID).
+		Find(&sections).Error; err != nil {
 		return nil, err
 	}
 
-	// Build a map of course ID to SIS course ID for lookups
+	// Build a map of course ID to SIS course ID for lookups (tenant-scoped)
 	var courses []models.Course
-	s.db.WithContext(ctx).Find(&courses)
+	s.db.WithContext(ctx).Where("account_id = ?", accountID).Find(&courses)
 	courseMap := make(map[uint]string)
 	for _, c := range courses {
 		if c.SISCourseID != nil {
@@ -700,15 +702,17 @@ func (s *SISImportService) ExportSectionsCSV(ctx context.Context) ([]byte, error
 	return buf.Bytes(), nil
 }
 
-func (s *SISImportService) ExportEnrollmentsCSV(ctx context.Context) ([]byte, error) {
+func (s *SISImportService) ExportEnrollmentsCSV(ctx context.Context, accountID uint) ([]byte, error) {
 	var enrollments []models.Enrollment
-	if err := s.db.WithContext(ctx).Find(&enrollments).Error; err != nil {
+	if err := s.db.WithContext(ctx).
+		Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID).
+		Find(&enrollments).Error; err != nil {
 		return nil, err
 	}
 
-	// Build lookup maps for SIS IDs
+	// Build lookup maps for SIS IDs (tenant-scoped)
 	var courses []models.Course
-	s.db.WithContext(ctx).Find(&courses)
+	s.db.WithContext(ctx).Where("account_id = ?", accountID).Find(&courses)
 	courseMap := make(map[uint]string)
 	for _, c := range courses {
 		if c.SISCourseID != nil {
@@ -717,7 +721,7 @@ func (s *SISImportService) ExportEnrollmentsCSV(ctx context.Context) ([]byte, er
 	}
 
 	var users []models.User
-	s.db.WithContext(ctx).Find(&users)
+	s.db.WithContext(ctx).Where("account_id = ?", accountID).Find(&users)
 	userMap := make(map[uint]string)
 	for _, u := range users {
 		if u.SISUserID != nil {
@@ -726,7 +730,9 @@ func (s *SISImportService) ExportEnrollmentsCSV(ctx context.Context) ([]byte, er
 	}
 
 	var sections []models.CourseSection
-	s.db.WithContext(ctx).Find(&sections)
+	s.db.WithContext(ctx).
+		Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID).
+		Find(&sections)
 	sectionMap := make(map[uint]string)
 	for _, sec := range sections {
 		if sec.SISSectionID != nil {

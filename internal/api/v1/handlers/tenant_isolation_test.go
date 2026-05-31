@@ -326,7 +326,16 @@ func TestTenantIsolation_GetSubmission(t *testing.T) {
 		h := handlers.NewSubmissionHandler(svc, commentRepo, attachmentRepo, userRepo, assignmentRepo, nil, nil, nil, nil, nil)
 
 		app := testutil.SetupTestApp()
-		app.Use(authStub(callerFor(callerAccount), callerAccount), middleware.PaginationParams())
+		// SEC-002: GetSubmission now also enforces object-level authz (owner /
+		// course staff / observer). This matrix isolates the *tenant* dimension,
+		// so authorize the caller as course staff — a teacher reading a
+		// same-tenant submission is the legitimate 200 path; a cross-tenant read
+		// still 404s because the repo returns not-found for the other tenant.
+		staffRole := func(c *fiber.Ctx) error {
+			c.Locals("enrollment_type", "TeacherEnrollment")
+			return c.Next()
+		}
+		app.Use(authStub(callerFor(callerAccount), callerAccount), staffRole, middleware.PaginationParams())
 		app.Get("/courses/:course_id/assignments/:assignment_id/submissions/:user_id", h.GetSubmission)
 
 		resp := testutil.MakeRequest(app, http.MethodGet, fmt.Sprintf("/courses/1/assignments/%d/submissions/%d", resourceID, userInA), nil)
