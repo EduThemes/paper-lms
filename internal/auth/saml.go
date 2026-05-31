@@ -580,6 +580,18 @@ func (h *SAMLHandler) HandleACS(c *fiber.Ctx) error {
 	// Validate conditions (time window)
 	now := time.Now().UTC()
 	assertionExpiry := now.Add(15 * time.Minute) // default cache TTL when NotOnOrAfter is absent
+
+	// SECURITY: a <Conditions>-less assertion would skip BOTH the
+	// NotBefore/NotOnOrAfter validity window AND the AudienceRestriction
+	// check below, letting a response minted for a different Service
+	// Provider (or with no validity window at all) authenticate here.
+	// Conforming IdPs always emit <Conditions> with an AudienceRestriction,
+	// so fail closed when it is absent rather than accepting the assertion.
+	if assertion.Conditions == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"errors": []fiber.Map{{"message": "SAML assertion missing Conditions"}},
+		})
+	}
 	if assertion.Conditions != nil {
 		if assertion.Conditions.NotBefore != "" {
 			notBefore, err := time.Parse(time.RFC3339, assertion.Conditions.NotBefore)
