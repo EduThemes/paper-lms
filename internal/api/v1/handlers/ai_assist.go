@@ -32,6 +32,12 @@ func NewAIAssistHandler(svc *service.AIAssistService, accountRepo repository.Acc
 	return &AIAssistHandler{service: svc, accountRepo: accountRepo}
 }
 
+// aiAssistMaxInputChars caps the text forwarded to the paid Anthropic API.
+// The endpoint is authenticated and rate-limited, but without a size cap a
+// single caller could drive very large (expensive) completions — a cost-
+// amplification vector. ~20k chars is well above any real RCE selection.
+const aiAssistMaxInputChars = 20000
+
 type aiAssistRequest struct {
 	Text  string `json:"text"`
 	Style string `json:"style"`
@@ -72,6 +78,9 @@ func (h *AIAssistHandler) Dispatch(c *fiber.Ctx) error {
 	}
 	if input.Text == "" {
 		return responses.BadRequest(c, "text is required")
+	}
+	if len(input.Text) > aiAssistMaxInputChars {
+		return responses.BadRequest(c, "text is too long")
 	}
 
 	// Wave 8: stamp the caller's account on the ctx so the settings

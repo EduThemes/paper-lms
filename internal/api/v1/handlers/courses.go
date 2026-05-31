@@ -67,7 +67,7 @@ func (h *CourseHandler) ListCourses(c *fiber.Ctx) error {
 	// Default: return user's enrolled courses (matches Canvas behavior)
 	// Use ?scope=all to get all courses (admin use case, e.g. course browser)
 	if c.Query("scope") == "all" {
-		r, err := h.courseService.List(c.Context(), params)
+		r, err := h.courseService.List(c.Context(), callerAccountID(c), params)
 		if err != nil {
 			return responses.InternalError(c, "Could not fetch courses")
 		}

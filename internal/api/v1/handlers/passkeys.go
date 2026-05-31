@@ -259,7 +259,7 @@ func (h *PasskeyHandler) BeginLogin(c *fiber.Ctx) error {
 }
 
 type finishLoginResponse struct {
-	Token string   `json:"token"`
+	Token string    `json:"token"`
 	User  fiber.Map `json:"user"`
 }
 
@@ -303,6 +303,7 @@ func (h *PasskeyHandler) FinishLogin(c *fiber.Ctx) error {
 		Value:    result.Token,
 		Path:     "/",
 		HTTPOnly: true,
+		Secure:   auth.SecureCookies(),
 		SameSite: "Lax",
 		MaxAge:   86400,
 		Expires:  time.Now().Add(24 * time.Hour),

@@ -83,6 +83,18 @@ func submissionCommentToJSON(sc *models.SubmissionComment) fiber.Map {
 	}
 }
 
+// callerIsCourseStaff reports whether the request's auth Locals mark the caller
+// as a teacher/TA (enrollment_type, set by RequireEnrolled/RequireInstructor)
+// or an admin — i.e. someone allowed to view other students' submissions.
+// Students get false.
+func callerIsCourseStaff(c *fiber.Ctx) bool {
+	if isAdmin, _ := c.Locals("is_admin").(bool); isAdmin {
+		return true
+	}
+	et, _ := c.Locals("enrollment_type").(string)
+	return et == "TeacherEnrollment" || et == "TaEnrollment"
+}
+
 func (h *SubmissionHandler) ListCourseSubmissions(c *fiber.Ctx) error {
 	courseID, err := c.ParamsInt("course_id")
 	if err != nil {
@@ -122,6 +134,14 @@ func (h *SubmissionHandler) ListCourseSubmissions(c *fiber.Ctx) error {
 		}
 	}
 
+	// Default-deny: a non-staff caller who did not scope the request to a
+	// specific (self or observee) user_id is restricted to their own
+	// submissions. Without this, omitting ?user_id returned every student's
+	// submissions to any enrolled member (IDOR / FERPA leak).
+	if filterUserID == 0 && !callerIsCourseStaff(c) {
+		filterUserID = requestingUserID
+	}
+
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
 
 	submissions := make([]fiber.Map, 0, len(result.Items))
@@ -148,12 +168,27 @@ func (h *SubmissionHandler) ListSubmissions(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not fetch submissions")
 	}
 
-	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
+	// Authorization: only course staff (teacher/TA/admin) may see the whole
+	// class's submissions. A student hitting this endpoint sees only their own
+	// row(s); cross-student visibility was an IDOR (any enrolled user could
+	// read every classmate's work).
+	callerID, _ := c.Locals("user_id").(uint)
+	isStaff := callerIsCourseStaff(c)
 
-	submissions := make([]fiber.Map, len(result.Items))
-	for i, s := range result.Items {
-		submissions[i] = submissionToJSON(&s)
+	submissions := make([]fiber.Map, 0, len(result.Items))
+	for i := range result.Items {
+		s := result.Items[i]
+		if !isStaff && s.UserID != callerID {
+			continue
+		}
+		submissions = append(submissions, submissionToJSON(&s))
 	}
+
+	total := result.TotalCount
+	if !isStaff {
+		total = int64(len(submissions))
+	}
+	responses.SetPaginationHeaders(c, total, result.Page, result.PerPage)
 
 	// 13.5 PII audit — bulk-read semantics (per-row would emit N rows
 	// per page load on a 200-student section, which floods the audit
@@ -181,6 +216,19 @@ func (h *SubmissionHandler) GetSubmission(c *fiber.Ctx) error {
 	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "submission")
+	}
+
+	// Authorization: only the submission owner, course staff (teacher/TA/admin),
+	// or a linked observer may view another student's submission. Mirrors
+	// QuizSubmissionHandler.GetSubmission. Existence-leak contract: 404 not 403.
+	if callerID, _ := c.Locals("user_id").(uint); callerID != submission.UserID && !callerIsCourseStaff(c) {
+		isObserver := false
+		if h.observerService != nil {
+			isObserver, _ = h.observerService.IsObserverOf(c.Context(), callerID, submission.UserID)
+		}
+		if !isObserver {
+			return responses.NotFound(c, "submission")
+		}
 	}
 
 	// 13.5 PII audit — single-student read; emit one row per access.

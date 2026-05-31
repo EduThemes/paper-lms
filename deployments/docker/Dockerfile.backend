@@ -24,6 +24,11 @@ WORKDIR /app
 COPY --from=builder /paper-lms .
 COPY --from=builder /migrate .
 
+# NOTE (security follow-up): run as a non-root USER. Deferred until the
+# compose layer makes the file-storage volume (/data/files) writable by that
+# user — a named volume is root-owned by default, so a bare `USER app` would
+# silently break uploads. Do it together with `user:`/an init-chown in
+# docker-compose.prod.yml, then verify an upload end-to-end.
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

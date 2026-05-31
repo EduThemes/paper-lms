@@ -139,7 +139,7 @@ func (r *Resolver) resolveAllCourses(ctx context.Context, args map[string]interf
 		PerPage: perPage,
 	}
 
-	result, err := r.courseService.List(ctx, params)
+	result, err := r.courseService.List(ctx, AccountIDFromContext(ctx), params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list courses: %w", err)
 	}

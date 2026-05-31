@@ -477,17 +477,44 @@ func (h *LTIHandler) CreateLineItem(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(lineItemToJSON(item, baseURL))
 }
 
+// requireLineItemInCourse loads an LTI line item and enforces the F-012/F-013
+// parent-tie: the item must belong to the course named in the URL. Returns
+// (item, wrote); wrote==true means a 4xx was already written and the caller
+// must `return nil`. Mirrors DeleteLineItem's inline check; existence-leak
+// contract → 404 on any mismatch. Without this, GetLineItem/UpdateLineItem/
+// PostScore/GetResults resolved a line item by :id alone, allowing cross-tenant
+// grade read and write (an actor in course A could address a line item owned by
+// course B in another tenant; the enrolled/instructor guard only ties the
+// caller to :course_id, not the line item to that course).
+func (h *LTIHandler) requireLineItemInCourse(c *fiber.Ctx) (*models.LTILineItem, bool) {
+	id, err := c.ParamsInt("id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid line item ID")
+		return nil, true
+	}
+	urlCourseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid course ID")
+		return nil, true
+	}
+	item, err := h.agsService.GetLineItem(c.Context(), uint(id))
+	if err != nil {
+		_ = responses.NotFound(c, "line item")
+		return nil, true
+	}
+	if item.CourseID != uint(urlCourseID) {
+		_ = responses.NotFound(c, "line item")
+		return nil, true
+	}
+	return item, false
+}
+
 // GetLineItem returns a single LTI line item.
 // GET /api/v1/lti/courses/:course_id/line_items/:id
 func (h *LTIHandler) GetLineItem(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid line item ID")
-	}
-
-	item, err := h.agsService.GetLineItem(c.Context(), uint(id))
-	if err != nil {
-		return responses.NotFound(c, "line item")
+	item, wrote := h.requireLineItemInCourse(c)
+	if wrote {
+		return nil
 	}
 
 	baseURL := fmt.Sprintf("%s%s", c.BaseURL(), c.Path())
@@ -498,14 +525,9 @@ func (h *LTIHandler) GetLineItem(c *fiber.Ctx) error {
 // UpdateLineItem updates an existing LTI line item.
 // PUT /api/v1/lti/courses/:course_id/line_items/:id
 func (h *LTIHandler) UpdateLineItem(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid line item ID")
-	}
-
-	item, err := h.agsService.GetLineItem(c.Context(), uint(id))
-	if err != nil {
-		return responses.NotFound(c, "line item")
+	item, wrote := h.requireLineItemInCourse(c)
+	if wrote {
+		return nil
 	}
 
 	var input struct {
@@ -595,9 +617,9 @@ type postScoreRequest struct {
 // PostScore posts a score (result) to an LTI line item.
 // POST /api/v1/lti/courses/:course_id/line_items/:id/scores
 func (h *LTIHandler) PostScore(c *fiber.Ctx) error {
-	lineItemID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid line item ID")
+	item, wrote := h.requireLineItemInCourse(c)
+	if wrote {
+		return nil
 	}
 
 	var input postScoreRequest
@@ -633,7 +655,7 @@ func (h *LTIHandler) PostScore(c *fiber.Ctx) error {
 		result.Timestamp = &t
 	}
 
-	if err := h.agsService.PostScore(c.Context(), uint(lineItemID), result); err != nil {
+	if err := h.agsService.PostScore(c.Context(), item.ID, result); err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 
@@ -664,14 +686,14 @@ func ltiResultToJSON(result *models.LTIResult) fiber.Map {
 // GetResults returns all results (scores) for an LTI line item.
 // GET /api/v1/lti/courses/:course_id/line_items/:id/results
 func (h *LTIHandler) GetResults(c *fiber.Ctx) error {
-	lineItemID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid line item ID")
+	item, wrote := h.requireLineItemInCourse(c)
+	if wrote {
+		return nil
 	}
 
 	params := middleware.GetPagination(c)
 
-	resultSet, err := h.agsService.GetResults(c.Context(), uint(lineItemID), params)
+	resultSet, err := h.agsService.GetResults(c.Context(), item.ID, params)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
@@ -699,9 +721,16 @@ func (h *LTIHandler) GetMemberships(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid course ID")
 	}
 
+	// Gap-2: the NRPS roster (names, emails, LTI roles) is staff/tool data.
+	// The `enrolled` route guard alone let any enrolled student pull the full
+	// course roster. Restrict to course staff (teacher/TA/admin).
+	if !callerIsCourseStaff(c) {
+		return responses.Forbidden(c, "not authorized to view course memberships")
+	}
+
 	params := middleware.GetPagination(c)
 
-	members, err := h.nrpsService.GetMemberships(c.Context(), uint(courseID), params)
+	members, err := h.nrpsService.GetMemberships(c.Context(), uint(courseID), callerAccountID(c), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch memberships")
 	}

@@ -73,8 +73,13 @@ func (s *CourseService) Delete(ctx context.Context, id uint) error {
 	return s.courseRepo.Delete(ctx, id)
 }
 
-func (s *CourseService) List(ctx context.Context, params repository.PaginationParams) (*repository.PaginatedResult[models.Course], error) {
-	return s.courseRepo.List(ctx, 0, params)
+// List returns courses scoped to accountID (the caller's tenant). Callers on
+// request paths MUST pass a non-zero tenant — GraphQL resolveAllCourses passes
+// AccountIDFromContext, the REST ?scope=all branch passes callerAccountID.
+// accountID==0 (no filter) is reserved for background/internal callers only.
+// SEC-001: previously hardcoded 0, which leaked every tenant's courses.
+func (s *CourseService) List(ctx context.Context, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Course], error) {
+	return s.courseRepo.List(ctx, accountID, params)
 }
 
 func (s *CourseService) ListForUser(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Course], error) {
