@@ -1,0 +1,121 @@
+name: Security
+
+# Security scanning gates. Split from ci.yml so security signal is legible on
+# its own and can evolve independently. Posture (deliberately staged so the
+# pipeline isn't flooded on day one):
+#   BLOCKING today  — govulncheck (call-path CVEs), gitleaks (committed secrets).
+#                     Both are very low false-positive, so a red build is real.
+#   ADVISORY today  — gosec, Trivy, npm audit. Findings surface in the Security
+#                     tab (SARIF) or logs for triage. Each job documents the
+#                     one-line change to promote it to blocking once its initial
+#                     backlog is cleared.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Mondays 06:37 UTC — re-scan unchanged code so newly disclosed CVEs in
+    # pinned dependencies are caught without a push.
+    - cron: '37 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write # required to upload SARIF to the Security tab
+
+env:
+  GO_VERSION: '1.25'
+  NODE_VERSION: '22'
+
+jobs:
+  govulncheck:
+    name: Go vuln scan (govulncheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Run govulncheck
+        # BLOCKING. govulncheck only reports vulnerabilities reachable from code
+        # this module actually calls, so a failure is a genuine exploitable path.
+        run: govulncheck ./...
+
+  gosec:
+    name: Go SAST (gosec)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run gosec
+        uses: securego/gosec@master
+        with:
+          # -no-fail keeps gosec ADVISORY: it never reds the build, it only
+          # produces SARIF. Drop "-no-fail" to make gosec blocking once the
+          # initial backlog is triaged. -exclude-dir keeps generated/vendored
+          # and test scaffolding out of the signal.
+          args: '-no-fail -fmt sarif -out gosec.sarif -severity medium -exclude-dir=web ./...'
+      - name: Upload gosec SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # full history: catch a secret committed in any prior commit
+      - name: Run gitleaks
+        # BLOCKING. A committed credential in a public repo is an incident; the
+        # detector is high-signal. gitleaks is free for public repositories.
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
+
+  trivy-fs:
+    name: Dependency + IaC scan (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln,secret,misconfig
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-fs.sarif
+          # ADVISORY: exit-code 0 never reds the build. Set to '1' to block on
+          # any CRITICAL/HIGH dependency CVE or Dockerfile misconfiguration
+          # (e.g. the "runs as root" finding in Dockerfile.backend).
+          exit-code: '0'
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+  npm-audit:
+    name: Frontend dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - name: npm audit (high+)
+        working-directory: web
+        # ADVISORY: "|| true" keeps transitive, often-unfixable dev advisories
+        # from blocking. Remove it to make the production tree's high/critical
+        # advisories blocking.
+        run: npm audit --omit=dev --audit-level=high || true
