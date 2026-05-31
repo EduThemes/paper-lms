@@ -751,6 +751,7 @@ func (h *SAMLHandler) HandleACS(c *fiber.Ctx) error {
 		Value:    result.Token,
 		Path:     "/",
 		HTTPOnly: true,
+		Secure:   SecureCookies(),
 		SameSite: "Lax",
 		MaxAge:   86400,
 		Expires:  time.Now().Add(24 * time.Hour),
@@ -964,7 +965,6 @@ func (h *SAMLHandler) verifyResponseSignature(c *fiber.Ctx, responseXML []byte) 
 	return "", fmt.Errorf("SAML signature verification failed: no valid Reference at Response or Assertion level")
 }
 
-
 // parseIDPCertificate parses an IDP certificate from PEM or raw base64 format.
 func parseIDPCertificate(certData string) (*x509.Certificate, error) {
 	certData = strings.TrimSpace(certData)
@@ -988,4 +988,3 @@ func parseIDPCertificate(certData string) (*x509.Certificate, error) {
 	}
 	return x509.ParseCertificate(certBytes)
 }
-

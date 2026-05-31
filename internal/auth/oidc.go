@@ -230,6 +230,7 @@ func (h *OIDCHandler) HandleCallback(c *fiber.Ctx) error {
 		Value:    result.Token,
 		Path:     "/",
 		HTTPOnly: true,
+		Secure:   SecureCookies(),
 		SameSite: "Lax",
 		MaxAge:   86400,
 		Expires:  time.Now().Add(24 * time.Hour),

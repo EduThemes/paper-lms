@@ -1,27 +1,27 @@
 // Package handlers' MFAHandler hosts the TOTP enrollment + step-up
 // flow. Five endpoints:
 //
-//   POST /api/v1/users/self/mfa/enroll
-//        Re-verify password → generate secret + recovery codes →
-//        return otpauth URL + plaintext codes ONCE. NOT FINAL — user
-//        must verify a code from their app before the secret persists.
+//	POST /api/v1/users/self/mfa/enroll
+//	     Re-verify password → generate secret + recovery codes →
+//	     return otpauth URL + plaintext codes ONCE. NOT FINAL — user
+//	     must verify a code from their app before the secret persists.
 //
-//   POST /api/v1/users/self/mfa/verify-enrollment
-//        User submits the first 6-digit code → server verifies →
-//        secret + recovery code hashes persist; users.totp_verified_at
-//        is set.
+//	POST /api/v1/users/self/mfa/verify-enrollment
+//	     User submits the first 6-digit code → server verifies →
+//	     secret + recovery code hashes persist; users.totp_verified_at
+//	     is set.
 //
-//   DELETE /api/v1/users/self/mfa
-//        User submits their current password OR a valid 6-digit code
-//        to disable. Wipes secret + recovery codes.
+//	DELETE /api/v1/users/self/mfa
+//	     User submits their current password OR a valid 6-digit code
+//	     to disable. Wipes secret + recovery codes.
 //
-//   POST /api/v1/auth/mfa/verify
-//        Login step-up. Body: {pending_token, code}. Verifies pending
-//        token, verifies TOTP code, mints real session.
+//	POST /api/v1/auth/mfa/verify
+//	     Login step-up. Body: {pending_token, code}. Verifies pending
+//	     token, verifies TOTP code, mints real session.
 //
-//   POST /api/v1/auth/mfa/recovery
-//        Login step-up via recovery code. Body: {pending_token, code}.
-//        Consumes the code; mints real session.
+//	POST /api/v1/auth/mfa/recovery
+//	     Login step-up via recovery code. Body: {pending_token, code}.
+//	     Consumes the code; mints real session.
 package handlers
 
 import (
@@ -41,11 +41,11 @@ import (
 
 // MFAHandler is the TOTP enrollment + step-up surface (Sprint 9-B).
 type MFAHandler struct {
-	users          repository.UserRepository
-	recoveryCodes  repository.UserRecoveryCodeRepository
-	jwtSecret      string
-	authService    *service.UserService // for password re-verification on enroll/disable
-	rateLimit      *auth.MFAAttemptTracker
+	users         repository.UserRepository
+	recoveryCodes repository.UserRecoveryCodeRepository
+	jwtSecret     string
+	authService   *service.UserService // for password re-verification on enroll/disable
+	rateLimit     *auth.MFAAttemptTracker
 }
 
 func NewMFAHandler(users repository.UserRepository, recovery repository.UserRecoveryCodeRepository, jwtSecret string, userSvc *service.UserService, tracker *auth.MFAAttemptTracker) *MFAHandler {
@@ -65,10 +65,10 @@ type enrollRequest struct {
 }
 
 type enrollResponse struct {
-	OTPAuthURL    string   `json:"otpauth_url"`     // user scans this as QR
-	Secret        string   `json:"secret"`          // displayed below the QR in case the app can't scan
-	RecoveryCodes []string `json:"recovery_codes"`  // shown ONCE
-	QRDataURL     string   `json:"qr_data_url"`     // optional: base64 PNG; v1 leaves QR-rendering to the client
+	OTPAuthURL    string   `json:"otpauth_url"`    // user scans this as QR
+	Secret        string   `json:"secret"`         // displayed below the QR in case the app can't scan
+	RecoveryCodes []string `json:"recovery_codes"` // shown ONCE
+	QRDataURL     string   `json:"qr_data_url"`    // optional: base64 PNG; v1 leaves QR-rendering to the client
 }
 
 // EnrollMFA begins MFA setup for the calling user. Re-verifies the
@@ -303,6 +303,7 @@ func (h *MFAHandler) VerifyAtLogin(c *fiber.Ctx) error {
 		Value:    token,
 		Path:     "/",
 		HTTPOnly: true,
+		Secure:   auth.SecureCookies(),
 		SameSite: "Lax",
 		MaxAge:   86400,
 		Expires:  time.Now().Add(24 * time.Hour),
@@ -365,7 +366,7 @@ func (h *MFAHandler) UseRecoveryCode(c *fiber.Ctx) error {
 			if err != nil {
 				return responses.InternalError(c, "failed to mint session")
 			}
-			c.Cookie(&fiber.Cookie{Name: "paper_session", Value: token, Path: "/", HTTPOnly: true, SameSite: "Lax", MaxAge: 86400, Expires: time.Now().Add(24 * time.Hour)})
+			c.Cookie(&fiber.Cookie{Name: "paper_session", Value: token, Path: "/", HTTPOnly: true, Secure: auth.SecureCookies(), SameSite: "Lax", MaxAge: 86400, Expires: time.Now().Add(24 * time.Hour)})
 			return c.JSON(stepUpResponse{
 				Token: token,
 				User:  fiber.Map{"id": user.ID, "name": user.Name, "email": user.Email, "role": user.Role},
