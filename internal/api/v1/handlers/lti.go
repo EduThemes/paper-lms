@@ -721,9 +721,16 @@ func (h *LTIHandler) GetMemberships(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid course ID")
 	}
 
+	// Gap-2: the NRPS roster (names, emails, LTI roles) is staff/tool data.
+	// The `enrolled` route guard alone let any enrolled student pull the full
+	// course roster. Restrict to course staff (teacher/TA/admin).
+	if !callerIsCourseStaff(c) {
+		return responses.Forbidden(c, "not authorized to view course memberships")
+	}
+
 	params := middleware.GetPagination(c)
 
-	members, err := h.nrpsService.GetMemberships(c.Context(), uint(courseID), params)
+	members, err := h.nrpsService.GetMemberships(c.Context(), uint(courseID), callerAccountID(c), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch memberships")
 	}

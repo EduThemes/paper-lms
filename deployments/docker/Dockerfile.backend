@@ -17,12 +17,18 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /migrate ./cmd/migrate
 # Run stage
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata \
+ && addgroup -S app && adduser -S -G app app
 
 WORKDIR /app
 
 COPY --from=builder /paper-lms .
 COPY --from=builder /migrate .
+
+# Run as a non-root user (defense in depth). The app binds :3000, which needs
+# no privileged port. If STORAGE_BACKEND=local, the mounted storage volume must
+# be writable by the 'app' user — chown it in the deploy/compose layer.
+USER app
 
 EXPOSE 3000
 

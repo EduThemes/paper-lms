@@ -27,9 +27,9 @@ func NewLTINRPSService(enrollmentRepo repository.EnrollmentRepository, userRepo 
 // GetMemberships returns all course memberships formatted according to the
 // LTI NRPS specification. Each enrollment is transformed into a member object
 // with LTI role URIs, user identity fields, and status.
-func (s *LTINRPSService) GetMemberships(ctx context.Context, courseID uint, params repository.PaginationParams) ([]map[string]interface{}, error) {
-	// Fetch enrollments for the course
-	enrollments, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, 0, params)
+func (s *LTINRPSService) GetMemberships(ctx context.Context, courseID, accountID uint, params repository.PaginationParams) ([]map[string]interface{}, error) {
+	// Fetch enrollments for the course (tenant-scoped)
+	enrollments, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, accountID, params)
 	if err != nil {
 		return nil, errors.New("failed to fetch course enrollments")
 	}
@@ -37,13 +37,9 @@ func (s *LTINRPSService) GetMemberships(ctx context.Context, courseID uint, para
 	members := make([]map[string]interface{}, 0, len(enrollments.Items))
 
 	for _, enrollment := range enrollments.Items {
-		// Fetch the user details for each enrollment
-		// LTI NRPS member lookup. The enrollment was already scoped to
-		// the LTI launch context (course → tenant), so a cross-tenant
-		// user.id can't appear here. accountID=0 preserves
-		// pre-widening semantics. Sprint 2.3 leftover: thread tenant
-		// from the LTI handler context.
-		user, err := s.userRepo.FindByID(ctx, enrollment.UserID, 0)
+		// Fetch the user details for each enrollment, scoped to the caller's
+		// tenant (Gap-2: previously accountID=0, i.e. unscoped).
+		user, err := s.userRepo.FindByID(ctx, enrollment.UserID, accountID)
 		if err != nil {
 			// Skip enrollments where the user cannot be found
 			continue
