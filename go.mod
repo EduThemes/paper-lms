@@ -2,6 +2,13 @@ module github.com/EduThemes/paper-lms
 
 go 1.25.0
 
+// Pin the build toolchain to a patched release. go1.26.2 carried a batch of
+// stdlib advisories (GO-2026-4918/4971/4980/4982/5037/5039 across html/template,
+// crypto/x509, net, net/http, net/textproto) that govulncheck flags; all are
+// fixed in go1.26.4. The `go` directive stays at 1.25 (language target); only
+// the toolchain moves forward.
+toolchain go1.26.4
+
 require (
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/aws/aws-sdk-go-v2 v1.41.7

@@ -50,7 +50,9 @@ func NewOneRosterService(
 		enrollmentRepo: enrollmentRepo,
 		accountRepo:    accountRepo,
 		db:             db,
-		httpClient:     &http.Client{Timeout: 30 * time.Second},
+		// SafeTransport re-validates the resolved IP at connect time
+		// (DNS-rebinding defense) on top of the up-front ValidateExternalURL.
+		httpClient:     &http.Client{Timeout: 30 * time.Second, Transport: security.SafeTransport()},
 	}
 }
 
@@ -303,7 +305,7 @@ func (s *OneRosterService) fetchToken(conn *models.OneRosterConnection) (string,
 	if err != nil {
 		return "", fmt.Errorf("sending token request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

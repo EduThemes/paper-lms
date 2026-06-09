@@ -99,3 +99,44 @@ func classifyIPString(t *testing.T, s string) string {
 	}
 	return classifyIP(parsed)
 }
+
+// SafeDialContext is the connect-time DNS-rebinding defense. It must
+// reject a non-443 port and any host whose resolved IP is internal,
+// before any TCP connection is attempted. These cases resolve locally
+// (no external network needed).
+func TestSafeDialContext_Blocks(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name string
+		addr string
+	}{
+		{"non-443 port", "example.com:80"},
+		{"loopback hostname", "localhost:443"},
+		{"private ip literal", "10.0.0.1:443"},
+		{"link-local metadata ip", "169.254.169.254:443"},
+		{"ipv6 loopback literal", "[::1]:443"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			conn, err := SafeDialContext(ctx, "tcp", c.addr)
+			if conn != nil {
+				_ = conn.Close()
+				t.Fatalf("expected no connection for %s", c.addr)
+			}
+			if !errors.Is(err, ErrSSRFBlocked) {
+				t.Errorf("expected ErrSSRFBlocked for %s, got %v", c.addr, err)
+			}
+		})
+	}
+}
+
+func TestSafeTransport_UsesSafeDialer(t *testing.T) {
+	tr := SafeTransport()
+	if tr.DialContext == nil {
+		t.Fatal("SafeTransport must set DialContext")
+	}
+	// The dialer must enforce the same block (sanity that it's wired).
+	if _, err := tr.DialContext(context.Background(), "tcp", "169.254.169.254:443"); !errors.Is(err, ErrSSRFBlocked) {
+		t.Errorf("SafeTransport.DialContext should block metadata IP, got %v", err)
+	}
+}

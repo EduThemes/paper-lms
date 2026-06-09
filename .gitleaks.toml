@@ -1,0 +1,32 @@
+# gitleaks configuration — promotes the secret scan from advisory to
+# BLOCKING (the `|| true` is removed from the CI step).
+#
+# The allowlist carves out test fixtures and documented placeholders so
+# the scan fails ONLY on a real secret in source/config, not on a fake
+# JWT secret or a bcrypt hash baked into a unit test. Because CI runs on
+# the PR before merge, a surprise false positive blocks the merge and
+# surfaces the exact finding to add here — the gate is self-correcting.
+
+title = "Paper LMS gitleaks config"
+
+[extend]
+# Inherit gitleaks' built-in rule set (AWS keys, private keys, tokens…).
+useDefault = true
+
+[allowlist]
+description = "Test fixtures, seed data, and example/template files are not real secrets."
+paths = [
+  # Go test files carry fabricated credentials by design.
+  '''.*_test\.go$''',
+  # Shared test helpers / mock fixtures.
+  '''internal/testutil/.*''',
+  # Local dev seed data.
+  '''seedtestdata/.*''',
+  # *.example templates ship placeholder values, never live secrets.
+  '''.*\.example$''',
+]
+regexes = [
+  # Fixed sentinels used in code/tests, not credentials.
+  '''test-jwt-secret''',
+  '''timing-oracle-defense''',
+]

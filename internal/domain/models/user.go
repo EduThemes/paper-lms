@@ -89,6 +89,14 @@ type User struct {
 	// provisioning sets it.
 	RequiresPasswordReset bool `json:"requires_password_reset" gorm:"column:requires_password_reset;not null;default:false"`
 
+	// Suspended (migration 000063) — an admin-set account-disable flag.
+	// The LoginPipeline fails closed for a suspended user across every
+	// credential path (local, SSO, passkey, MFA), so an account can be
+	// locked out without hard-deleting the row (which would destroy its
+	// grades, enrollments, and audit trail). DEFAULT false; only an
+	// explicit admin action sets it.
+	Suspended bool `json:"suspended" gorm:"not null;default:false"`
+
 	ResetToken          string     `json:"-"`
 	ResetTokenExpiresAt *time.Time `json:"-"`
 	CreatedAt           time.Time  `json:"created_at"`

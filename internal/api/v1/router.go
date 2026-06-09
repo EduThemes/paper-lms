@@ -230,6 +230,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Get("/users/:id/profile", selfOrAdmin, r.UserHandler.GetUserProfile)
 	protected.Put("/users/:id", selfOrAdmin, r.UserHandler.UpdateUser)
 	protected.Put("/users/:id/role", admin, r.UserHandler.UpdateUserRole)
+	protected.Put("/users/:id/suspension", admin, r.UserHandler.UpdateUserSuspension)
 
 	// Masquerade (admin only)
 	protected.Post("/users/:id/masquerade", admin, r.UserHandler.StartMasquerade)

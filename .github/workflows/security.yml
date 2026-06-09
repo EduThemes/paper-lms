@@ -5,10 +5,12 @@ name: Security
 # pipeline isn't flooded on day one):
 #   BLOCKING today  — govulncheck (call-path CVEs): very low false-positive, so
 #                     a red build is a real exploitable path.
-#   ADVISORY today  — gosec, Trivy, gitleaks, npm audit. Findings surface in the
-#                     Security tab (SARIF) or job logs for triage. Each job
-#                     documents how to promote it to blocking once its initial
-#                     backlog (and any allowlist) is settled.
+#                   — gitleaks (committed secrets): blocking now that
+#                     .gitleaks.toml carves out test fixtures / placeholders.
+#   ADVISORY today  — gosec, Trivy, npm audit. Findings surface in the Security
+#                     tab (SARIF) or job logs for triage. Each job documents how
+#                     to promote it to blocking once its initial backlog (and any
+#                     allowlist) is settled.
 on:
   push:
     branches: [main]
@@ -25,7 +27,9 @@ permissions:
   security-events: write # required to upload SARIF to the Security tab
 
 env:
-  GO_VERSION: '1.25'
+  # Patched toolchain — go1.26.4 clears the stdlib advisories govulncheck
+  # flagged in 1.26.2 (see go.mod toolchain directive).
+  GO_VERSION: '1.26.4'
   NODE_VERSION: '22'
 
 jobs:
@@ -75,12 +79,14 @@ jobs:
           fetch-depth: 0 # full history: catch a secret committed in any prior commit
       - name: Run gitleaks
         # The gitleaks GitHub Action requires a paid license for org-owned
-        # repos; the gitleaks BINARY is free, so run it directly. Advisory for
-        # now (|| true) — review the first run, add a .gitleaks.toml allowlist
-        # for any false positives, then drop "|| true" to make it blocking.
+        # repos; the gitleaks BINARY is free, so run it directly. Now
+        # BLOCKING (no "|| true"): a real secret reds the build. False
+        # positives from test fixtures / placeholders are carved out in
+        # .gitleaks.toml — extend that allowlist rather than re-adding
+        # "|| true" if a fixture trips it.
         run: |
           docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest \
-            detect --source=/repo --redact --no-banner -v || true
+            detect --source=/repo --config=/repo/.gitleaks.toml --redact --no-banner -v
 
   trivy-fs:
     name: Dependency + IaC scan (Trivy)

@@ -248,6 +248,26 @@ func TestPipeline_RequiresParentalConsent_RefusesSession(t *testing.T) {
 	}
 }
 
+// Account-suspension gate: a suspended user must NOT receive a session
+// through any path — fails closed before every mint branch.
+func TestPipeline_Suspended_RefusesSession(t *testing.T) {
+	h := newHarness(t, "off")
+	u := enrolledUser(1, "banned@paper.test", "user")
+	u.Suspended = true
+	h.users.put(u)
+
+	res, err := h.pipeline.Execute(context.Background(), SSOOutcome{
+		ProviderType: "local", ExternalSubject: "1", Email: u.Email, EmailVerified: true,
+	}, RequestMeta{})
+
+	if !errors.Is(err, ErrAccountSuspended) {
+		t.Fatalf("expected ErrAccountSuspended, got err=%v res=%+v", err, res)
+	}
+	if res != nil {
+		t.Errorf("no result (and no token) should be returned for a suspended user; got %+v", res)
+	}
+}
+
 // Local-password path: caller resolved the user; pipeline just
 // re-fetches by id, applies the gate, and mints.
 func TestPipeline_Local_NoMFAPolicy_MintsSession(t *testing.T) {

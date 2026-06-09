@@ -30,6 +30,9 @@ func NewCASAuthenticator() *CASAuthenticator {
 	return &CASAuthenticator{
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
+			// SafeTransport re-validates the resolved IP at connect time
+			// (DNS-rebinding defense) for both the initial fetch and any hop.
+			Transport: security.SafeTransport(),
 			// SECURITY: refuse to follow redirects. ValidateExternalURL
 			// runs once on the original CAS validate URL; if Go's default
 			// redirect-follow let a malicious CAS host 302 to

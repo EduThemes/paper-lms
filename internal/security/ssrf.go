@@ -13,8 +13,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // ErrSSRFBlocked is returned by ValidateExternalURL when the URL
@@ -89,6 +91,64 @@ func ValidateExternalURL(ctx context.Context, rawURL string) error {
 		}
 	}
 	return nil
+}
+
+// SafeDialContext is the connect-time half of the SSRF defense — the
+// "SafeDialer follow-up" the ValidateExternalURL comment promised. It
+// re-resolves the host, re-classifies every candidate IP, and dials the
+// validated IP DIRECTLY. This closes the TOCTOU / DNS-rebinding window:
+// without it, net/http re-resolves the hostname between
+// ValidateExternalURL's check and the actual connect, so a malicious
+// server could pass validation and then flip its A record to
+// 169.254.169.254. Because the connection is made to the IP (not the
+// hostname), net/http cannot re-resolve to an unvalidated address; TLS
+// still verifies against the original hostname (the Transport derives
+// SNI / ServerName from the request URL, not from this dial address).
+//
+// It also re-runs on every redirect hop (each makes a fresh DialContext),
+// so following a redirect to an internal host is blocked here too. Only
+// port 443 is dialable, matching ValidateExternalURL's https-only stance.
+func SafeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	if port != "443" {
+		return nil, fmt.Errorf("%w: only port 443 is permitted (got %q)", ErrSSRFBlocked, port)
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("%w: DNS lookup failed: %v", ErrSSRFBlocked, err)
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("%w: host did not resolve", ErrSSRFBlocked)
+	}
+	for _, ip := range ips {
+		if reason := classifyIP(ip.IP); reason != "" {
+			return nil, fmt.Errorf("%w: resolved IP %s is %s", ErrSSRFBlocked, ip.IP, reason)
+		}
+	}
+	d := &net.Dialer{Timeout: 10 * time.Second}
+	var dialErr error
+	for _, ip := range ips {
+		conn, derr := d.DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), port))
+		if derr == nil {
+			return conn, nil
+		}
+		dialErr = derr
+	}
+	return nil, dialErr
+}
+
+// SafeTransport returns an *http.Transport whose DialContext is
+// SafeDialContext. Set it on any *http.Client that fetches an external
+// URL (after ValidateExternalURL) to gain the connect-time IP
+// re-validation. Cloning the default transport preserves sane proxy /
+// keep-alive / timeout settings.
+func SafeTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = SafeDialContext
+	return t
 }
 
 // blockedHostSuffixes intercepts hostnames that resolve to internal

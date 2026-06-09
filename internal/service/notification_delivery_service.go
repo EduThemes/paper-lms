@@ -570,12 +570,14 @@ func (s *NotificationDeliveryService) sendWebhook(url, subject, body string) err
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "PaperLMS-Notification/1.0")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	// SafeTransport re-validates the resolved IP at connect time
+	// (DNS-rebinding defense) on top of the up-front ValidateExternalURL.
+	client := &http.Client{Timeout: 10 * time.Second, Transport: security.SafeTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("webhook request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
