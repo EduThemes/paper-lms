@@ -593,7 +593,7 @@ func (s *SISImportService) ExportUsersCSV(ctx context.Context, accountID uint) (
 
 		firstName, lastName := splitName(u.Name)
 
-		writer.Write([]string{
+		_ = writeCSVRow(writer, []string{
 			sisID,
 			u.LoginID,
 			firstName,
@@ -633,7 +633,7 @@ func (s *SISImportService) ExportCoursesCSV(ctx context.Context, accountID uint)
 			status = "deleted"
 		}
 
-		writer.Write([]string{
+		_ = writeCSVRow(writer, []string{
 			sisID,
 			c.CourseCode,
 			c.Name,
@@ -686,7 +686,7 @@ func (s *SISImportService) ExportSectionsCSV(ctx context.Context, accountID uint
 			status = "deleted"
 		}
 
-		writer.Write([]string{
+		_ = writeCSVRow(writer, []string{
 			sisSectionID,
 			sisCourseID,
 			sec.Name,
@@ -756,7 +756,7 @@ func (s *SISImportService) ExportEnrollmentsCSV(ctx context.Context, accountID u
 
 		status := string(e.WorkflowState)
 
-		writer.Write([]string{
+		_ = writeCSVRow(writer, []string{
 			sisCourseID,
 			sisUserID,
 			e.Role,

@@ -261,6 +261,14 @@ func setupGamificationHandler(callerID uint, isAdmin bool) (*fiber.App, *mockGam
 	return app, walletRepo, currencyRepo, userRepo, badgeRepo, badgeAwardRepo
 }
 
+// expectWalletUserInTenant registers the tenant-gate lookup that the
+// wallet reads now perform — userRepo.FindByID(ctx, userID, accountID)
+// resolving to a found user (same tenant). Cross-tenant misses return
+// ErrUserNotFound → 404; that path is covered in idor_fixes_test.go.
+func expectWalletUserInTenant(userRepo *mocks.MockUserRepository, userID, accountID uint) {
+	userRepo.On("FindByID", mock.Anything, userID, accountID).Return(&models.User{}, nil)
+}
+
 // fixtureXP / fixtureGems / fixtureHidden / fixtureBadge moved to
 // gamification_fixtures_test.go (F2.5 closeout).
 
@@ -269,7 +277,8 @@ func setupGamificationHandler(callerID uint, isAdmin bool) (*fiber.App, *mockGam
 // ---------------------------------------------------------------------------
 
 func TestGetUserWallet_Self_HappyPath(t *testing.T) {
-	app, walletRepo, currencyRepo, _, _, _ := setupGamificationHandler(42, false)
+	app, walletRepo, currencyRepo, userRepo, _, _ := setupGamificationHandler(42, false)
+	expectWalletUserInTenant(userRepo, 42, 1)
 
 	balances := []models.GamificationWalletBalance{
 		{UserID: 42, CurrencyTypeID: 11, Balance: 250, LifetimeEarned: 250},
@@ -317,7 +326,9 @@ func TestGetUserWallet_Self_HappyPath(t *testing.T) {
 }
 
 func TestGetUserWallet_AdminViewingOtherUser(t *testing.T) {
-	app, walletRepo, currencyRepo, _, _, _ := setupGamificationHandler(99, true /*isAdmin*/)
+	app, walletRepo, currencyRepo, userRepo, _, _ := setupGamificationHandler(99, true /*isAdmin*/)
+	// Admin and target both in account 1 — same-tenant admin access is allowed.
+	expectWalletUserInTenant(userRepo, 42, 1)
 
 	balances := []models.GamificationWalletBalance{
 		{UserID: 42, CurrencyTypeID: 11, Balance: 100, LifetimeEarned: 100},
@@ -346,7 +357,8 @@ func TestGetUserWallet_Unauthorized_NotSelfNotAdmin(t *testing.T) {
 }
 
 func TestGetUserWallet_EmptyBalances_ReturnsEmptyArrayNot404(t *testing.T) {
-	app, walletRepo, _, _, _, _ := setupGamificationHandler(42, false)
+	app, walletRepo, _, userRepo, _, _ := setupGamificationHandler(42, false)
+	expectWalletUserInTenant(userRepo, 42, 1)
 
 	walletRepo.On("ListBalancesForUser", mock.Anything, uint(42)).
 		Return([]models.GamificationWalletBalance{}, nil)
@@ -371,7 +383,8 @@ func TestGetUserWallet_InvalidUserID(t *testing.T) {
 }
 
 func TestGetUserWallet_WalletRepoError(t *testing.T) {
-	app, walletRepo, _, _, _, _ := setupGamificationHandler(42, false)
+	app, walletRepo, _, userRepo, _, _ := setupGamificationHandler(42, false)
+	expectWalletUserInTenant(userRepo, 42, 1)
 
 	walletRepo.On("ListBalancesForUser", mock.Anything, uint(42)).
 		Return(nil, errors.New("db down"))
@@ -455,7 +468,8 @@ func TestListCurrencies_RepoError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestListUserWalletTransactions_Self_HappyPath(t *testing.T) {
-	app, walletRepo, _, _, _, _ := setupGamificationHandler(42, false)
+	app, walletRepo, _, userRepo, _, _ := setupGamificationHandler(42, false)
+	expectWalletUserInTenant(userRepo, 42, 1)
 
 	occurredAt := time.Date(2026, 5, 13, 9, 30, 0, 0, time.UTC)
 	ruleID := uint(7)
@@ -493,7 +507,8 @@ func TestListUserWalletTransactions_Self_HappyPath(t *testing.T) {
 }
 
 func TestListUserWalletTransactions_Admin_OtherUser(t *testing.T) {
-	app, walletRepo, _, _, _, _ := setupGamificationHandler(99, true)
+	app, walletRepo, _, userRepo, _, _ := setupGamificationHandler(99, true)
+	expectWalletUserInTenant(userRepo, 42, 1)
 
 	walletRepo.On(
 		"ListTransactionsForUserAndCurrency", mock.Anything,
@@ -535,7 +550,8 @@ func TestListUserWalletTransactions_InvalidCurrencyTypeID(t *testing.T) {
 }
 
 func TestListUserWalletTransactions_PerPageClampedTo100(t *testing.T) {
-	app, walletRepo, _, _, _, _ := setupGamificationHandler(42, false)
+	app, walletRepo, _, userRepo, _, _ := setupGamificationHandler(42, false)
+	expectWalletUserInTenant(userRepo, 42, 1)
 
 	walletRepo.On(
 		"ListTransactionsForUserAndCurrency", mock.Anything,
@@ -552,7 +568,8 @@ func TestListUserWalletTransactions_PerPageClampedTo100(t *testing.T) {
 }
 
 func TestListUserWalletTransactions_RepoError(t *testing.T) {
-	app, walletRepo, _, _, _, _ := setupGamificationHandler(42, false)
+	app, walletRepo, _, userRepo, _, _ := setupGamificationHandler(42, false)
+	expectWalletUserInTenant(userRepo, 42, 1)
 
 	walletRepo.On(
 		"ListTransactionsForUserAndCurrency", mock.Anything,

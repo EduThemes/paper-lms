@@ -1,0 +1,17 @@
+# golangci-lint configuration (v2 schema — matches golangci-lint-action@v8).
+#
+# CI runs this with `only-new-issues: true` and the lint step is BLOCKING.
+# That combination holds newly-written code to the linter bar while the
+# ~79 pre-existing baseline findings (errcheck/staticcheck/unused, tracked
+# for a separate cleanup) do not gate the build. Drop only-new-issues once
+# the baseline is burned down to make the whole tree blocking.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # The standard high-signal set: errcheck, govet, ineffassign,
+  # staticcheck, unused. These catch unchecked errors, dead code, and
+  # real correctness smells without the noise of style-only linters.
+  default: standard

@@ -192,7 +192,7 @@ func (s *AuditService) ExportAuditLogCSV(ctx context.Context, filter postgres.Au
 			log.UserAgent,
 			log.CreatedAt.Format(time.RFC3339),
 		}
-		if err := writer.Write(row); err != nil {
+		if err := writeCSVRow(writer, row); err != nil {
 			return nil, err
 		}
 	}
@@ -247,7 +247,7 @@ func (s *AuditService) ExportGradeChangeLogCSV(ctx context.Context, filter postg
 			log.GradingMethod,
 			log.CreatedAt.Format(time.RFC3339),
 		}
-		if err := writer.Write(row); err != nil {
+		if err := writeCSVRow(writer, row); err != nil {
 			return nil, err
 		}
 	}

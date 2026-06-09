@@ -42,7 +42,14 @@ type WalletBalanceWithCurrency struct {
 // GetUserWallet returns the user's wallet balances with currency metadata
 // resolved. Stale balances pointing at deleted currencies surface with
 // Currency=nil so the caller can render a minimal entry.
-func (s *WalletService) GetUserWallet(ctx context.Context, userID uint) ([]WalletBalanceWithCurrency, error) {
+func (s *WalletService) GetUserWallet(ctx context.Context, userID, accountID uint) ([]WalletBalanceWithCurrency, error) {
+	// Tenant gate: wallet balance rows are not account-scoped, so confirm
+	// the target user belongs to accountID before returning anything.
+	// Cross-tenant → ErrUserNotFound (the handler maps it to 404). Without
+	// this, any account admin could read any user's balances across tenants.
+	if _, err := s.userRepo.FindByID(ctx, userID, accountID); err != nil {
+		return nil, ErrUserNotFound
+	}
 	balances, err := s.walletRepo.ListBalancesForUser(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -61,7 +68,11 @@ func (s *WalletService) GetUserWallet(ctx context.Context, userID uint) ([]Walle
 
 // ListTransactions returns paginated wallet transactions for a (user,
 // currency) pair.
-func (s *WalletService) ListTransactions(ctx context.Context, userID, currencyTypeID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.GamificationWalletTransaction], error) {
+func (s *WalletService) ListTransactions(ctx context.Context, userID, currencyTypeID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.GamificationWalletTransaction], error) {
+	// Tenant gate (see GetUserWallet): transactions are not account-scoped.
+	if _, err := s.userRepo.FindByID(ctx, userID, accountID); err != nil {
+		return nil, ErrUserNotFound
+	}
 	return s.walletRepo.ListTransactionsForUserAndCurrency(ctx, userID, currencyTypeID, params)
 }
 

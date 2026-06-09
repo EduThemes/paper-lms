@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -133,13 +135,35 @@ func (h *FileHandler) UploadCourseFile(c *fiber.Ctx) error {
 		return err
 	}
 
+	// SECURITY: don't trust the client Content-Type for the inline-render
+	// decision. Sniff the magic bytes; if the file CLAIMS an inline-safe
+	// image type but its actual bytes positively identify as something else
+	// (e.g. an SVG/HTML document uploaded as a .png with
+	// Content-Type: image/png), store the sniffed type so the download path
+	// serves it as an attachment, never inline. Unrecognized types
+	// (application/octet-stream — covers AVIF/HEIC the stdlib can't sniff)
+	// keep the client claim so legitimate modern images still render inline.
+	contentType := fileHeader.Header.Get("Content-Type")
+	sniffBuf := make([]byte, 512)
+	n, _ := io.ReadFull(file, sniffBuf)
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return responses.InternalError(c, "Could not read uploaded file")
+	}
+	if n > 0 {
+		sniffed := http.DetectContentType(sniffBuf[:n])
+		if isInlineSafeMIME(contentType) && !isInlineSafeMIME(sniffed) &&
+			!strings.HasPrefix(sniffed, "application/octet-stream") {
+			contentType = sniffed
+		}
+	}
+
 	attachment := &models.Attachment{
 		ContextType: "Course",
 		ContextID:   uint(courseID),
 		UserID:      uploaderID,
 		DisplayName: fileHeader.Filename,
 		Filename:    fileHeader.Filename,
-		ContentType: fileHeader.Header.Get("Content-Type"),
+		ContentType: contentType,
 		Size:        fileHeader.Size,
 	}
 

@@ -216,6 +216,12 @@ func (r *Router) Register(app *fiber.App) {
 	ltiAuthenticated.Post("/lti/oidc/login", authLimit, r.LTIHandler.OIDCLogin)
 	ltiAuthenticated.Post("/lti/launch", authLimit, r.LTIHandler.LaunchDirect)
 
+	// Logout runs behind auth + CSRF (moved off the public group). It
+	// revokes the caller's own session token and clears the cookie, so
+	// requiring a valid session is correct; authLimit caps blacklist
+	// churn. Bearer callers are CSRF-exempt (see csrf.go).
+	protected.Post("/logout", authLimit, r.UserHandler.Logout)
+
 	// Users (self access or admin)
 	protected.Get("/users/self", r.UserHandler.GetSelf)
 	protected.Post("/users/self/change_password", r.UserHandler.ChangePassword)

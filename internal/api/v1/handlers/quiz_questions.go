@@ -37,10 +37,50 @@ func quizQuestionToJSON(q *models.QuizQuestion) fiber.Map {
 	}
 }
 
+// scopedQuizQuestion loads the :question_id question and verifies it
+// belongs to :quiz_id, which must itself live in :course_id and the
+// caller's tenant. Returns wrote=true (a 404 has been written) on any
+// miss so the caller short-circuits with `return nil`. Closes the
+// nested-route cross-tenant / cross-quiz IDOR — the route middleware
+// only guards :course_id.
+func (h *QuizQuestionHandler) scopedQuizQuestion(c *fiber.Ctx) (*models.QuizQuestion, bool) {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid course ID")
+		return nil, true
+	}
+	quizID, err := c.ParamsInt("quiz_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid quiz ID")
+		return nil, true
+	}
+	questionID, err := c.ParamsInt("question_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid question ID")
+		return nil, true
+	}
+	if requireQuizInCourse(c, h.quizService, uint(quizID), uint(courseID)) {
+		return nil, true
+	}
+	question, err := h.quizService.GetQuestion(c.Context(), uint(questionID))
+	if err != nil || question.QuizID != uint(quizID) {
+		_ = responses.NotFound(c, "quiz question")
+		return nil, true
+	}
+	return question, false
+}
+
 func (h *QuizQuestionHandler) ListQuestions(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
+	}
+	if requireQuizInCourse(c, h.quizService, uint(quizID), uint(courseID)) {
+		return nil
 	}
 
 	params := middleware.GetPagination(c)
@@ -61,23 +101,25 @@ func (h *QuizQuestionHandler) ListQuestions(c *fiber.Ctx) error {
 }
 
 func (h *QuizQuestionHandler) GetQuestion(c *fiber.Ctx) error {
-	questionID, err := c.ParamsInt("question_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid question ID")
-	}
-
-	question, err := h.quizService.GetQuestion(c.Context(), uint(questionID))
-	if err != nil {
-		return responses.NotFound(c, "quiz question")
+	question, wrote := h.scopedQuizQuestion(c)
+	if wrote {
+		return nil
 	}
 
 	return c.JSON(quizQuestionToJSON(question))
 }
 
 func (h *QuizQuestionHandler) CreateQuestion(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
+	}
+	if requireQuizInCourse(c, h.quizService, uint(quizID), uint(courseID)) {
+		return nil
 	}
 
 	var input struct {
@@ -119,14 +161,9 @@ func (h *QuizQuestionHandler) CreateQuestion(c *fiber.Ctx) error {
 }
 
 func (h *QuizQuestionHandler) UpdateQuestion(c *fiber.Ctx) error {
-	questionID, err := c.ParamsInt("question_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid question ID")
-	}
-
-	question, err := h.quizService.GetQuestion(c.Context(), uint(questionID))
-	if err != nil {
-		return responses.NotFound(c, "quiz question")
+	question, wrote := h.scopedQuizQuestion(c)
+	if wrote {
+		return nil
 	}
 
 	var input struct {
@@ -183,12 +220,12 @@ func (h *QuizQuestionHandler) UpdateQuestion(c *fiber.Ctx) error {
 }
 
 func (h *QuizQuestionHandler) DeleteQuestion(c *fiber.Ctx) error {
-	questionID, err := c.ParamsInt("question_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid question ID")
+	question, wrote := h.scopedQuizQuestion(c)
+	if wrote {
+		return nil
 	}
 
-	if err := h.quizService.DeleteQuestion(c.Context(), uint(questionID)); err != nil {
+	if err := h.quizService.DeleteQuestion(c.Context(), question.ID); err != nil {
 		return responses.InternalError(c, "Could not delete quiz question")
 	}
 

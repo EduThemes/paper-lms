@@ -155,6 +155,12 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 	if quiz.CourseID != uint(courseID) {
 		return responses.NotFound(c, "quiz")
 	}
+	// A soft-deleted quiz is terminal — FindByID does not exclude deleted
+	// rows, so without this guard a PUT {"published":true} would resurrect
+	// it to `published`. Treat a deleted quiz as gone.
+	if quiz.WorkflowState == "deleted" {
+		return responses.NotFound(c, "quiz")
+	}
 
 	var input struct {
 		Quiz struct {

@@ -17,10 +17,61 @@ func NewModuleItemHandler(moduleService *service.ModuleService, pageService *ser
 	return &ModuleItemHandler{moduleService: moduleService, pageService: pageService}
 }
 
+// requireModuleInCourse verifies moduleID names a module that lives in
+// courseID and the caller's tenant (ModuleService.GetByID is tenant-
+// scoped). Returns wrote=true (404 written) on any miss so the caller
+// short-circuits with `return nil`. Closes the nested-route IDOR — the
+// route middleware only guards :course_id.
+func (h *ModuleItemHandler) requireModuleInCourse(c *fiber.Ctx, moduleID, courseID uint) bool {
+	module, err := h.moduleService.GetByID(c.Context(), moduleID, callerAccountID(c))
+	if err != nil || module == nil || module.CourseID != courseID {
+		_ = responses.NotFound(c, "module")
+		return true
+	}
+	return false
+}
+
+// scopedModuleItem loads the :item_id item and verifies it belongs to
+// :module_id, which must itself live in :course_id and the caller's
+// tenant. Returns wrote=true (404 written) on any miss.
+func (h *ModuleItemHandler) scopedModuleItem(c *fiber.Ctx) (*models.ContentTag, bool) {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid course ID")
+		return nil, true
+	}
+	moduleID, err := c.ParamsInt("module_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid module ID")
+		return nil, true
+	}
+	itemID, err := c.ParamsInt("item_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid item ID")
+		return nil, true
+	}
+	if h.requireModuleInCourse(c, uint(moduleID), uint(courseID)) {
+		return nil, true
+	}
+	item, err := h.moduleService.GetItem(c.Context(), uint(itemID))
+	if err != nil || item.ContextModuleID != uint(moduleID) {
+		_ = responses.NotFound(c, "module item")
+		return nil, true
+	}
+	return item, false
+}
+
 func (h *ModuleItemHandler) ListModuleItems(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	moduleID, err := c.ParamsInt("module_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid module ID")
+	}
+	if h.requireModuleInCourse(c, uint(moduleID), uint(courseID)) {
+		return nil
 	}
 
 	params := middleware.GetPagination(c)
@@ -41,14 +92,9 @@ func (h *ModuleItemHandler) ListModuleItems(c *fiber.Ctx) error {
 }
 
 func (h *ModuleItemHandler) GetModuleItem(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("item_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid item ID")
-	}
-
-	item, err := h.moduleService.GetItem(c.Context(), uint(id))
-	if err != nil {
-		return responses.NotFound(c, "module item")
+	item, wrote := h.scopedModuleItem(c)
+	if wrote {
+		return nil
 	}
 
 	return c.JSON(moduleItemToJSON(item))
@@ -63,6 +109,9 @@ func (h *ModuleItemHandler) CreateModuleItem(c *fiber.Ctx) error {
 	moduleID, err := c.ParamsInt("module_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid module ID")
+	}
+	if h.requireModuleInCourse(c, uint(moduleID), uint(courseID)) {
+		return nil
 	}
 
 	var input struct {
@@ -141,14 +190,9 @@ func (h *ModuleItemHandler) CreateModuleItem(c *fiber.Ctx) error {
 }
 
 func (h *ModuleItemHandler) UpdateModuleItem(c *fiber.Ctx) error {
-	itemID, err := c.ParamsInt("item_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid item ID")
-	}
-
-	item, err := h.moduleService.GetItem(c.Context(), uint(itemID))
-	if err != nil {
-		return responses.NotFound(c, "module item")
+	item, wrote := h.scopedModuleItem(c)
+	if wrote {
+		return nil
 	}
 
 	var input struct {
@@ -189,12 +233,12 @@ func (h *ModuleItemHandler) UpdateModuleItem(c *fiber.Ctx) error {
 }
 
 func (h *ModuleItemHandler) DeleteModuleItem(c *fiber.Ctx) error {
-	itemID, err := c.ParamsInt("item_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid item ID")
+	item, wrote := h.scopedModuleItem(c)
+	if wrote {
+		return nil
 	}
 
-	if err := h.moduleService.DeleteItem(c.Context(), uint(itemID)); err != nil {
+	if err := h.moduleService.DeleteItem(c.Context(), item.ID); err != nil {
 		return responses.InternalError(c, "Could not delete module item")
 	}
 
@@ -202,9 +246,16 @@ func (h *ModuleItemHandler) DeleteModuleItem(c *fiber.Ctx) error {
 }
 
 func (h *ModuleItemHandler) ReorderItems(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	moduleID, err := c.ParamsInt("module_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid module ID")
+	}
+	if h.requireModuleInCourse(c, uint(moduleID), uint(courseID)) {
+		return nil
 	}
 
 	var input struct {
@@ -227,9 +278,15 @@ func (h *ModuleItemHandler) ReorderItems(c *fiber.Ctx) error {
 }
 
 func (h *ModuleItemHandler) MoveItem(c *fiber.Ctx) error {
-	itemID, err := c.ParamsInt("item_id")
+	courseID, err := c.ParamsInt("course_id")
 	if err != nil {
-		return responses.BadRequest(c, "Invalid item ID")
+		return responses.BadRequest(c, "Invalid course ID")
+	}
+	// Verifies the source item belongs to :module_id in :course_id and
+	// the caller's tenant.
+	item, wrote := h.scopedModuleItem(c)
+	if wrote {
+		return nil
 	}
 
 	var input struct {
@@ -244,8 +301,13 @@ func (h *ModuleItemHandler) MoveItem(c *fiber.Ctx) error {
 	if input.ModuleID == 0 {
 		return responses.BadRequest(c, "Target module_id is required")
 	}
+	// The destination module must also live in the same course/tenant —
+	// otherwise an item could be moved into another tenant's module.
+	if h.requireModuleInCourse(c, input.ModuleID, uint(courseID)) {
+		return nil
+	}
 
-	if err := h.moduleService.MoveItemToModule(c.Context(), uint(itemID), input.ModuleID, input.Position); err != nil {
+	if err := h.moduleService.MoveItemToModule(c.Context(), item.ID, input.ModuleID, input.Position); err != nil {
 		return responses.InternalError(c, "Could not move item")
 	}
 

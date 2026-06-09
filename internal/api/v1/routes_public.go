@@ -25,7 +25,11 @@ func (r *Router) registerPublicRoutes(api fiber.Router, authLimit fiber.Handler)
 	// Public auth routes (rate-limited to prevent brute-force)
 	api.Post("/login", authLimit, r.UserHandler.Login)
 	api.Post("/register", authLimit, r.UserHandler.Register)
-	api.Post("/logout", r.UserHandler.Logout)
+	// NOTE: /logout is NOT here — it moved to the protected group
+	// (router.go) so it runs behind auth + CSRF. Logout revokes the
+	// caller's own session token, so requiring that session is correct,
+	// and the CSRF gate closes a forced-logout vector. Bearer/programmatic
+	// callers are CSRF-exempt, so PAT-based logout still works.
 	api.Post("/password/reset", authLimit, r.UserHandler.RequestPasswordReset)
 	api.Post("/password/reset/confirm", authLimit, r.UserHandler.ResetPassword)
 	// Wave 1.6 follow-up — password-set after SIS / OneRoster

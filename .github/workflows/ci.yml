@@ -16,6 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # only-new-issues diffs against the PR base, so the full history
+          # of the base branch must be available.
+          fetch-depth: 0
 
       - uses: actions/setup-go@v6
         with:
@@ -24,11 +28,16 @@ jobs:
       - name: Go vet
         run: go vet ./...
 
+      # golangci-lint is now BLOCKING (continue-on-error removed), but via
+      # only-new-issues: it fails the build on lint problems introduced by
+      # the PR while leaving the ~79 pre-existing baseline issues (tracked
+      # for a separate cleanup) from blocking. New code is held to the bar;
+      # the legacy debt doesn't gate. See .golangci.yml for the linter set.
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
           version: latest
-        continue-on-error: true
+          only-new-issues: true
 
   backend-test:
     name: Backend Test

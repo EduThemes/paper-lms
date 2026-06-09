@@ -227,6 +227,27 @@ func provider(id uint, ptype string, autoProvision bool) *models.AuthenticationP
 
 // ----- the matrix -----
 
+// COPPA gate: a user flagged RequiresParentalConsent must NOT receive a
+// session through any path — the pipeline fails closed before the
+// password-reset, MFA, and mint branches. Mirrors the model contract.
+func TestPipeline_RequiresParentalConsent_RefusesSession(t *testing.T) {
+	h := newHarness(t, "off")
+	u := enrolledUser(1, "kid@paper.test", "user")
+	u.RequiresParentalConsent = true
+	h.users.put(u)
+
+	res, err := h.pipeline.Execute(context.Background(), SSOOutcome{
+		ProviderType: "local", ExternalSubject: "1", Email: u.Email, EmailVerified: true,
+	}, RequestMeta{})
+
+	if !errors.Is(err, ErrParentalConsentRequired) {
+		t.Fatalf("expected ErrParentalConsentRequired, got err=%v res=%+v", err, res)
+	}
+	if res != nil {
+		t.Errorf("no result (and no token) should be returned when consent is required; got %+v", res)
+	}
+}
+
 // Local-password path: caller resolved the user; pipeline just
 // re-fetches by id, applies the gate, and mints.
 func TestPipeline_Local_NoMFAPolicy_MintsSession(t *testing.T) {

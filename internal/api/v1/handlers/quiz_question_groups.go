@@ -29,11 +29,51 @@ func quizQuestionGroupToJSON(g *models.QuizQuestionGroup) fiber.Map {
 	}
 }
 
+// scopedQuestionGroup loads the :group_id group and verifies it belongs
+// to :quiz_id, which must itself live in :course_id and the caller's
+// tenant. Returns wrote=true (a 404 has been written) on any miss so the
+// caller short-circuits with `return nil`. Closes the nested-route
+// cross-tenant / cross-quiz IDOR — the route middleware only guards
+// :course_id.
+func (h *QuizQuestionGroupHandler) scopedQuestionGroup(c *fiber.Ctx) (*models.QuizQuestionGroup, bool) {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid course ID")
+		return nil, true
+	}
+	quizID, err := c.ParamsInt("quiz_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid quiz ID")
+		return nil, true
+	}
+	groupID, err := c.ParamsInt("group_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid group ID")
+		return nil, true
+	}
+	if requireQuizInCourse(c, h.quizService, uint(quizID), uint(courseID)) {
+		return nil, true
+	}
+	group, err := h.quizService.GetQuestionGroup(c.Context(), uint(groupID))
+	if err != nil || group.QuizID != uint(quizID) {
+		_ = responses.NotFound(c, "quiz question group")
+		return nil, true
+	}
+	return group, false
+}
+
 // ListGroups handles GET /courses/:course_id/quizzes/:quiz_id/groups
 func (h *QuizQuestionGroupHandler) ListGroups(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
+	}
+	if requireQuizInCourse(c, h.quizService, uint(quizID), uint(courseID)) {
+		return nil
 	}
 
 	groups, err := h.quizService.ListQuestionGroups(c.Context(), uint(quizID))
@@ -51,9 +91,16 @@ func (h *QuizQuestionGroupHandler) ListGroups(c *fiber.Ctx) error {
 
 // CreateGroup handles POST /courses/:course_id/quizzes/:quiz_id/groups
 func (h *QuizQuestionGroupHandler) CreateGroup(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
+	}
+	if requireQuizInCourse(c, h.quizService, uint(quizID), uint(courseID)) {
+		return nil
 	}
 
 	var input struct {
@@ -86,14 +133,9 @@ func (h *QuizQuestionGroupHandler) CreateGroup(c *fiber.Ctx) error {
 
 // GetGroup handles GET /courses/:course_id/quizzes/:quiz_id/groups/:group_id
 func (h *QuizQuestionGroupHandler) GetGroup(c *fiber.Ctx) error {
-	groupID, err := c.ParamsInt("group_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid group ID")
-	}
-
-	group, err := h.quizService.GetQuestionGroup(c.Context(), uint(groupID))
-	if err != nil {
-		return responses.NotFound(c, "quiz question group")
+	group, wrote := h.scopedQuestionGroup(c)
+	if wrote {
+		return nil
 	}
 
 	return c.JSON(quizQuestionGroupToJSON(group))
@@ -101,14 +143,9 @@ func (h *QuizQuestionGroupHandler) GetGroup(c *fiber.Ctx) error {
 
 // UpdateGroup handles PUT /courses/:course_id/quizzes/:quiz_id/groups/:group_id
 func (h *QuizQuestionGroupHandler) UpdateGroup(c *fiber.Ctx) error {
-	groupID, err := c.ParamsInt("group_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid group ID")
-	}
-
-	group, err := h.quizService.GetQuestionGroup(c.Context(), uint(groupID))
-	if err != nil {
-		return responses.NotFound(c, "quiz question group")
+	group, wrote := h.scopedQuestionGroup(c)
+	if wrote {
+		return nil
 	}
 
 	var input struct {
@@ -148,12 +185,12 @@ func (h *QuizQuestionGroupHandler) UpdateGroup(c *fiber.Ctx) error {
 
 // DeleteGroup handles DELETE /courses/:course_id/quizzes/:quiz_id/groups/:group_id
 func (h *QuizQuestionGroupHandler) DeleteGroup(c *fiber.Ctx) error {
-	groupID, err := c.ParamsInt("group_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid group ID")
+	group, wrote := h.scopedQuestionGroup(c)
+	if wrote {
+		return nil
 	}
 
-	if err := h.quizService.DeleteQuestionGroup(c.Context(), uint(groupID)); err != nil {
+	if err := h.quizService.DeleteQuestionGroup(c.Context(), group.ID); err != nil {
 		return responses.InternalError(c, "Could not delete question group")
 	}
 
