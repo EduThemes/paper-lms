@@ -86,3 +86,52 @@ func TestMFAAttemptTracker_Reset(t *testing.T) {
 		t.Errorf("after Reset, attempts should be allowed again; got %v", err)
 	}
 }
+
+// The per-account cap is the defense against the per-token cap being
+// defeated by re-minting: it's keyed on the user id, not the token, so a
+// fresh pending token does not buy a fresh budget.
+func TestMFAAttemptTracker_PerAccount_SurvivesTokenReMint(t *testing.T) {
+	now := time.Unix(0, 0)
+	tr := NewMFAAttemptTracker(func() time.Time { return now })
+	const uid = uint(42)
+
+	for i := 0; i < MaxVerifyAttemptsPerAccount; i++ {
+		if err := tr.CheckAndIncrementVerifyForUser(uid); err != nil {
+			t.Fatalf("account attempt %d should succeed (cap %d); got %v", i+1, MaxVerifyAttemptsPerAccount, err)
+		}
+	}
+	if !IsTooManyMFAAttempts(tr.CheckAndIncrementVerifyForUser(uid)) {
+		t.Fatalf("account budget must be exhausted after %d attempts regardless of token re-mints", MaxVerifyAttemptsPerAccount)
+	}
+}
+
+func TestMFAAttemptTracker_PerAccount_WindowResets(t *testing.T) {
+	now := time.Unix(0, 0)
+	tr := NewMFAAttemptTracker(func() time.Time { return now })
+	const uid = uint(7)
+
+	for i := 0; i < MaxVerifyAttemptsPerAccount; i++ {
+		_ = tr.CheckAndIncrementVerifyForUser(uid)
+	}
+	if !IsTooManyMFAAttempts(tr.CheckAndIncrementVerifyForUser(uid)) {
+		t.Fatal("should be exhausted within the window")
+	}
+	// Advance past the window — the budget rolls over.
+	now = now.Add(accountAttemptWindow + time.Second)
+	if err := tr.CheckAndIncrementVerifyForUser(uid); err != nil {
+		t.Errorf("after the window elapses, attempts should be allowed again; got %v", err)
+	}
+}
+
+func TestMFAAttemptTracker_PerAccount_Independence(t *testing.T) {
+	tr := NewMFAAttemptTracker(nil)
+	for i := 0; i < MaxVerifyAttemptsPerAccount; i++ {
+		_ = tr.CheckAndIncrementVerifyForUser(1)
+	}
+	if !IsTooManyMFAAttempts(tr.CheckAndIncrementVerifyForUser(1)) {
+		t.Fatal("user 1 should be exhausted")
+	}
+	if err := tr.CheckAndIncrementVerifyForUser(2); err != nil {
+		t.Errorf("user 2 must be independent; got %v", err)
+	}
+}

@@ -30,6 +30,15 @@ func NewCASAuthenticator() *CASAuthenticator {
 	return &CASAuthenticator{
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
+			// SECURITY: refuse to follow redirects. ValidateExternalURL
+			// runs once on the original CAS validate URL; if Go's default
+			// redirect-follow let a malicious CAS host 302 to
+			// http://169.254.169.254/... the SSRF guard would be bypassed
+			// (the new URL is never re-validated). CAS /serviceValidate is
+			// a single GET; refusing redirects is the correct posture.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
 	}
 }

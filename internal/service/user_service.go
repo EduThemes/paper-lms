@@ -9,9 +9,19 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 )
+
+// dummyPasswordHash defends the login path against a username-enumeration
+// timing oracle. On a user-miss Authenticate still runs one bcrypt
+// comparison against this fixed hash, so the "user exists / wrong
+// password" and "user absent" branches take the same ~bcrypt-cost time.
+// Computed once at startup (bcrypt salts internally; the input is
+// irrelevant — it only needs to be a valid hash to compare against).
+var dummyPasswordHash, _ = bcrypt.GenerateFromPassword([]byte("timing-oracle-defense"), bcrypt.DefaultCost)
 
 type UserService struct {
 	repo repository.UserRepository
@@ -82,9 +92,13 @@ func (s *UserService) Authenticate(ctx context.Context, loginID, password string
 	if err != nil {
 		// Fallback to email lookup
 		user, err = s.repo.FindByEmail(ctx, loginID)
-		if err != nil {
-			return nil, errors.New("invalid credentials")
-		}
+	}
+	if err != nil || user == nil {
+		// User-miss: run a dummy bcrypt compare so this path costs the
+		// same as the wrong-password path below. Without it the absence
+		// of a bcrypt op (~tens of ms) is a username-enumeration oracle.
+		_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
+		return nil, errors.New("invalid credentials")
 	}
 
 	if err := user.CheckPassword(password); err != nil {

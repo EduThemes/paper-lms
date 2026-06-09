@@ -186,6 +186,14 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 	if assignment.CourseID != uint(courseID) {
 		return responses.NotFound(c, "assignment")
 	}
+	// A soft-deleted assignment is terminal — `deleted` has no outgoing
+	// transition in the workflow state machine. FindByID does not exclude
+	// deleted rows, so without this guard a PUT {"published":true} would
+	// resurrect it to `published`, bypassing the state machine entirely.
+	// Treat a deleted assignment as gone.
+	if assignment.WorkflowState == "deleted" {
+		return responses.NotFound(c, "assignment")
+	}
 
 	var input struct {
 		Assignment struct {

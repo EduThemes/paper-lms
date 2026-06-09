@@ -398,9 +398,11 @@ func (h *PortfolioHandler) AddSection(c *fiber.Ctx) error {
 		PortfolioID: portfolio.ID,
 		Title:       input.Section.Title,
 		SectionType: input.Section.SectionType,
-		Content:     input.Section.Content,
-		Layout:      input.Section.Layout,
-		IsVisible:   isVisible,
+		// Rich HTML, rendered raw into the exported portfolio site/PDF —
+		// sanitize on write (the locked rich-content rule) to close stored XSS.
+		Content:   service.SanitizeHTML(input.Section.Content),
+		Layout:    input.Section.Layout,
+		IsVisible: isVisible,
 	}
 	if err := h.portfolioService.AddSection(c.Context(), section); err != nil {
 		return responses.BadRequest(c, err.Error())
@@ -455,7 +457,8 @@ func (h *PortfolioHandler) UpdateSection(c *fiber.Ctx) error {
 		section.SectionType = *input.Section.SectionType
 	}
 	if input.Section.Content != nil {
-		section.Content = *input.Section.Content
+		// Sanitize on update too — see AddSection. Closes stored XSS.
+		section.Content = service.SanitizeHTML(*input.Section.Content)
 	}
 	if input.Section.Layout != nil {
 		section.Layout = *input.Section.Layout

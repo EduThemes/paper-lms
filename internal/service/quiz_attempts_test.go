@@ -25,7 +25,6 @@ import (
 // ---------- StartSubmission Tests ----------
 
 func TestStartSubmission_New(t *testing.T) {
-	t.Skip("known issue: MockQuizQuestionRepository.ListByQuizID expectation does not match generateSelectedQuestions; tracked for rewrite")
 	questionRepo := new(mocks.MockQuizQuestionRepository)
 	submissionRepo := new(mocks.MockQuizSubmissionRepository)
 	answerRepo := new(mocks.MockQuizSubmissionAnswerRepository)
@@ -38,6 +37,13 @@ func TestStartSubmission_New(t *testing.T) {
 	submissionRepo.On("FindByQuizAndUser", ctx, uint(1), uint(10)).Return(nil, errors.New("not found"))
 	submissionRepo.On("Create", ctx, mock.AnythingOfType("*models.QuizSubmission")).Return(nil)
 	quizRepo.On("FindByID", ctx, uint(1), uint(0)).Return(&models.Quiz{ID: 1, AllowedAttempts: -1}, nil)
+	// New submissions personalize their question set via
+	// generateSelectedQuestions → questionRepo.ListByQuizID. With no group
+	// repo configured it returns every question id for the quiz.
+	questionRepo.On("ListByQuizID", ctx, uint(1), repository.PaginationParams{Page: 1, PerPage: 10000}).
+		Return(&repository.PaginatedResult[models.QuizQuestion]{
+			Items: []models.QuizQuestion{{ID: 101, QuizID: 1}, {ID: 102, QuizID: 1}},
+		}, nil)
 
 	result, err := svc.StartSubmission(ctx, 1, 10, nil)
 
@@ -142,7 +148,6 @@ func TestStartSubmission_UnlockAtRejects(t *testing.T) {
 }
 
 func TestStartSubmission_TimeLimit(t *testing.T) {
-	t.Skip("known issue: shares the MockQuizQuestionRepository.ListByQuizID expectation gap with TestStartSubmission_New; tracked for rewrite")
 	questionRepo := new(mocks.MockQuizQuestionRepository)
 	submissionRepo := new(mocks.MockQuizSubmissionRepository)
 	answerRepo := new(mocks.MockQuizSubmissionAnswerRepository)
@@ -154,6 +159,10 @@ func TestStartSubmission_TimeLimit(t *testing.T) {
 	submissionRepo.On("FindByQuizAndUser", ctx, uint(1), uint(10)).Return(nil, errors.New("not found"))
 	submissionRepo.On("Create", ctx, mock.AnythingOfType("*models.QuizSubmission")).Return(nil)
 	quizRepo.On("FindByID", ctx, uint(1), uint(0)).Return(&models.Quiz{ID: 1, AllowedAttempts: -1}, nil)
+	questionRepo.On("ListByQuizID", ctx, uint(1), repository.PaginationParams{Page: 1, PerPage: 10000}).
+		Return(&repository.PaginatedResult[models.QuizQuestion]{
+			Items: []models.QuizQuestion{{ID: 101, QuizID: 1}},
+		}, nil)
 
 	timeLimit := 30
 	beforeStart := time.Now()

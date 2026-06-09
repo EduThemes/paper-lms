@@ -9,20 +9,23 @@ import (
 )
 
 type QuestionBankService struct {
-	bankRepo  repository.QuestionBankRepository
-	entryRepo repository.QuestionBankEntryRepository
-	quizRepo  repository.QuizQuestionRepository
+	bankRepo     repository.QuestionBankRepository
+	entryRepo    repository.QuestionBankEntryRepository
+	quizRepo     repository.QuizQuestionRepository
+	quizMetaRepo repository.QuizRepository
 }
 
 func NewQuestionBankService(
 	bankRepo repository.QuestionBankRepository,
 	entryRepo repository.QuestionBankEntryRepository,
 	quizRepo repository.QuizQuestionRepository,
+	quizMetaRepo repository.QuizRepository,
 ) *QuestionBankService {
 	return &QuestionBankService{
-		bankRepo:  bankRepo,
-		entryRepo: entryRepo,
-		quizRepo:  quizRepo,
+		bankRepo:     bankRepo,
+		entryRepo:    entryRepo,
+		quizRepo:     quizRepo,
+		quizMetaRepo: quizMetaRepo,
 	}
 }
 
@@ -87,12 +90,32 @@ func (s *QuestionBankService) DeleteQuestion(ctx context.Context, id uint) error
 	return s.entryRepo.Delete(ctx, id)
 }
 
+// GetEntry loads a single bank entry by id. Callers MUST verify the
+// returned entry's QuestionBankID matches the bank named in the request
+// path before acting on it — the entry repo is not tenant-scoped, so the
+// parent-bank tie is what enforces tenant/course isolation.
+func (s *QuestionBankService) GetEntry(ctx context.Context, id uint) (*models.QuestionBankEntry, error) {
+	return s.entryRepo.FindByID(ctx, id)
+}
+
 func (s *QuestionBankService) ListQuestions(ctx context.Context, bankID uint) ([]models.QuestionBankEntry, error) {
 	return s.entryRepo.ListByBankID(ctx, bankID)
 }
 
 // PullQuestionsToQuiz copies questions from a question bank into a quiz as QuizQuestions.
-func (s *QuestionBankService) PullQuestionsToQuiz(ctx context.Context, bankID, quizID uint, questionIDs []uint) (int, error) {
+func (s *QuestionBankService) PullQuestionsToQuiz(ctx context.Context, bankID, quizID, accountID uint, questionIDs []uint) (int, error) {
+	// Tenant/parent tie: the destination quiz must live in the same
+	// course as the bank (and the caller's tenant). Without this a teacher
+	// could copy bank questions INTO another tenant's quiz by id.
+	bank, err := s.bankRepo.FindByID(ctx, bankID)
+	if err != nil {
+		return 0, err
+	}
+	quiz, err := s.quizMetaRepo.FindByID(ctx, quizID, accountID)
+	if err != nil || quiz == nil || quiz.CourseID != bank.CourseID {
+		return 0, errors.New("target quiz not found in this course")
+	}
+
 	entries, err := s.entryRepo.ListByBankID(ctx, bankID)
 	if err != nil {
 		return 0, err

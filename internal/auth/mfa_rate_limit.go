@@ -43,10 +43,24 @@ const (
 	MaxRecoveryAttempts = 3
 )
 
+// Per-ACCOUNT caps over a rolling window. The per-token cap above is
+// defeated by re-minting: an attacker who knows the password can restart
+// the login flow to get a fresh pending token (and a fresh 5-attempt
+// budget) indefinitely. The per-account counter is keyed on the user id
+// inside the pending token, so re-minting does not reset it. The caps are
+// a small multiple of the per-token caps (≈3 token re-mints' worth) and
+// the window comfortably exceeds the 5-minute pending-token TTL.
+const (
+	MaxVerifyAttemptsPerAccount   = 15
+	MaxRecoveryAttemptsPerAccount = 6
+	accountAttemptWindow          = 15 * time.Minute
+)
+
 // MFAAttemptTracker is the per-process in-memory counter store.
 type MFAAttemptTracker struct {
-	store sync.Map // tokenHash → *attemptRecord
-	now   func() time.Time
+	store     sync.Map // tokenHash → *attemptRecord
+	userStore sync.Map // userID    → *accountRecord
+	now       func() time.Time
 }
 
 type attemptRecord struct {
@@ -54,6 +68,15 @@ type attemptRecord struct {
 	verify    int
 	recovery  int
 	createdAt time.Time
+}
+
+// accountRecord tracks attempts per user id across a rolling window,
+// surviving pending-token re-mints.
+type accountRecord struct {
+	mu          sync.Mutex
+	verify      int
+	recovery    int
+	windowStart time.Time
 }
 
 // NewMFAAttemptTracker constructs a tracker and starts a background
@@ -101,8 +124,47 @@ func (t *MFAAttemptTracker) checkAndIncrement(pendingToken string, isVerify bool
 	return nil
 }
 
+// CheckAndIncrementVerifyForUser applies the per-account window cap for a
+// TOTP verify. Call it in addition to CheckAndIncrementVerify so a fresh
+// pending token cannot reset the budget.
+func (t *MFAAttemptTracker) CheckAndIncrementVerifyForUser(userID uint) error {
+	return t.checkAndIncrementUser(userID, true)
+}
+
+// CheckAndIncrementRecoveryForUser is the recovery-code variant.
+func (t *MFAAttemptTracker) CheckAndIncrementRecoveryForUser(userID uint) error {
+	return t.checkAndIncrementUser(userID, false)
+}
+
+func (t *MFAAttemptTracker) checkAndIncrementUser(userID uint, isVerify bool) error {
+	v, _ := t.userStore.LoadOrStore(userID, &accountRecord{windowStart: t.now()})
+	rec := v.(*accountRecord)
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	// Roll the window forward once it has fully elapsed.
+	if t.now().Sub(rec.windowStart) >= accountAttemptWindow {
+		rec.verify = 0
+		rec.recovery = 0
+		rec.windowStart = t.now()
+	}
+	if isVerify {
+		if rec.verify >= MaxVerifyAttemptsPerAccount {
+			return errTooManyMFA
+		}
+		rec.verify++
+	} else {
+		if rec.recovery >= MaxRecoveryAttemptsPerAccount {
+			return errTooManyMFA
+		}
+		rec.recovery++
+	}
+	return nil
+}
+
 // Reset clears the counter for a token after a successful verify.
 // Not strictly necessary (the token is single-use anyway), but tidy.
+// The per-account window record is intentionally NOT cleared here: a
+// successful login should not hand an attacker a fresh budget.
 func (t *MFAAttemptTracker) Reset(pendingToken string) {
 	t.store.Delete(hashToken(pendingToken))
 }
@@ -121,6 +183,18 @@ func (t *MFAAttemptTracker) sweepLoop() {
 			rec.mu.Unlock()
 			if expired {
 				t.store.Delete(k)
+			}
+			return true
+		})
+		// Evict per-account records whose window has fully elapsed.
+		userCutoff := t.now().Add(-accountAttemptWindow)
+		t.userStore.Range(func(k, v any) bool {
+			rec := v.(*accountRecord)
+			rec.mu.Lock()
+			expired := rec.windowStart.Before(userCutoff)
+			rec.mu.Unlock()
+			if expired {
+				t.userStore.Delete(k)
 			}
 			return true
 		})

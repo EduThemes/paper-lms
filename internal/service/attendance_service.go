@@ -132,7 +132,7 @@ func (s *AttendanceService) ExportAttendanceCSV(ctx context.Context, courseID ui
 			fmt.Sprintf("%d", record.MarkedByID),
 			record.CreatedAt.Format(time.RFC3339),
 		}
-		if err := writer.Write(row); err != nil {
+		if err := writeCSVRow(writer, row); err != nil {
 			return nil, err
 		}
 	}

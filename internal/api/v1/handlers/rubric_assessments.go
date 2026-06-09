@@ -32,15 +32,63 @@ func rubricAssessmentToJSON(a *models.RubricAssessment) fiber.Map {
 	}
 }
 
+// requireAssociationInCourse loads :association_id and verifies it is a
+// Course-context association whose course is :course_id (and therefore
+// the caller's tenant — the route middleware pins :course_id to an
+// enrollment). Returns wrote=true (404 written) on any miss so the caller
+// short-circuits with `return nil`. Closes the nested-route IDOR.
+func (h *RubricAssessmentHandler) requireAssociationInCourse(c *fiber.Ctx, associationID, courseID uint) (*models.RubricAssociation, bool) {
+	assoc, err := h.rubricService.GetAssociation(c.Context(), associationID)
+	if err != nil || assoc == nil || assoc.ContextType != "Course" || assoc.ContextID != courseID {
+		_ = responses.NotFound(c, "rubric association")
+		return nil, true
+	}
+	return assoc, false
+}
+
+// scopedAssessment loads :assessment_id and verifies it belongs to
+// :association_id, which must itself be a Course-context association in
+// :course_id and the caller's tenant. Returns wrote=true on any miss.
+func (h *RubricAssessmentHandler) scopedAssessment(c *fiber.Ctx) (*models.RubricAssessment, bool) {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid course ID")
+		return nil, true
+	}
+	associationID, err := c.ParamsInt("association_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid association ID")
+		return nil, true
+	}
+	assessmentID, err := c.ParamsInt("assessment_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid assessment ID")
+		return nil, true
+	}
+	if _, wrote := h.requireAssociationInCourse(c, uint(associationID), uint(courseID)); wrote {
+		return nil, true
+	}
+	assessment, err := h.rubricService.GetAssessment(c.Context(), uint(assessmentID))
+	if err != nil || assessment.RubricAssociationID != uint(associationID) {
+		_ = responses.NotFound(c, "rubric assessment")
+		return nil, true
+	}
+	return assessment, false
+}
+
 func (h *RubricAssessmentHandler) CreateAssessment(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	associationID, err := c.ParamsInt("association_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid association ID")
 	}
 
-	assoc, err := h.rubricService.GetAssociation(c.Context(), uint(associationID))
-	if err != nil {
-		return responses.NotFound(c, "rubric association")
+	assoc, wrote := h.requireAssociationInCourse(c, uint(associationID), uint(courseID))
+	if wrote {
+		return nil
 	}
 
 	var input struct {
@@ -74,28 +122,18 @@ func (h *RubricAssessmentHandler) CreateAssessment(c *fiber.Ctx) error {
 }
 
 func (h *RubricAssessmentHandler) GetAssessment(c *fiber.Ctx) error {
-	assessmentID, err := c.ParamsInt("assessment_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid assessment ID")
-	}
-
-	assessment, err := h.rubricService.GetAssessment(c.Context(), uint(assessmentID))
-	if err != nil {
-		return responses.NotFound(c, "rubric assessment")
+	assessment, wrote := h.scopedAssessment(c)
+	if wrote {
+		return nil
 	}
 
 	return c.JSON(rubricAssessmentToJSON(assessment))
 }
 
 func (h *RubricAssessmentHandler) UpdateAssessment(c *fiber.Ctx) error {
-	assessmentID, err := c.ParamsInt("assessment_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid assessment ID")
-	}
-
-	assessment, err := h.rubricService.GetAssessment(c.Context(), uint(assessmentID))
-	if err != nil {
-		return responses.NotFound(c, "rubric assessment")
+	assessment, wrote := h.scopedAssessment(c)
+	if wrote {
+		return nil
 	}
 
 	var input struct {
@@ -124,9 +162,16 @@ func (h *RubricAssessmentHandler) UpdateAssessment(c *fiber.Ctx) error {
 }
 
 func (h *RubricAssessmentHandler) ListAssessments(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	associationID, err := c.ParamsInt("association_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid association ID")
+	}
+	if _, wrote := h.requireAssociationInCourse(c, uint(associationID), uint(courseID)); wrote {
+		return nil
 	}
 
 	params := middleware.GetPagination(c)

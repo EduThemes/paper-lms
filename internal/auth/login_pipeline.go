@@ -70,6 +70,11 @@ type PipelineResult struct {
 	MustResetPassword         bool         // RequiresPasswordReset flag is set; client must reset before session
 }
 
+// ErrParentalConsentRequired is returned by Execute when the resolved
+// user is flagged RequiresParentalConsent. The login fails closed — no
+// session token of any kind is minted until consent clears the flag.
+var ErrParentalConsentRequired = errors.New("parental consent required before this account can be used")
+
 // LoginPipeline orchestrates post-credential-verification work for
 // every login path.
 type LoginPipeline struct {
@@ -119,6 +124,19 @@ func (p *LoginPipeline) Execute(ctx context.Context, outcome SSOOutcome, meta Re
 	if err != nil {
 		p.audit.LoginFailed(ctx, outcome.Email, err.Error(), meta)
 		return nil, err
+	}
+
+	// 1.5 COPPA parental-consent gate.
+	//
+	// A user flagged RequiresParentalConsent (the tenant is coppa_strict,
+	// the signup age check indicated under-13, and no verified parental
+	// consent token was presented) MUST NOT receive a session through ANY
+	// credential path until consent is recorded — which clears the flag.
+	// This runs before every token-mint branch (local, SSO, passkey, MFA)
+	// and fails closed; the model's own comment promised this enforcement.
+	if user.RequiresParentalConsent {
+		p.audit.LoginFailed(ctx, outcome.Email, "parental consent required", meta)
+		return nil, ErrParentalConsentRequired
 	}
 
 	// 2. Password-reset gate (Wave 1.6 follow-up).

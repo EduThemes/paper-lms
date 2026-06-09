@@ -32,6 +32,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -267,6 +268,20 @@ func (h *OIDCHandler) buildConfig(ctx context.Context, provider *models.Authenti
 	if err := security.ValidateExternalURL(ctx, provider.OIDCIssuerURL); err != nil {
 		return nil, nil, fmt.Errorf("oidc issuer URL rejected by SSRF guard: %w", err)
 	}
+
+	// SECURITY: ValidateExternalURL only checks the original issuer URL.
+	// go-oidc's default client would follow a 3xx from the discovery or
+	// JWKS endpoint without re-validating, so a malicious IdP could 302
+	// to http://169.254.169.254/... and defeat the guard. Pin a client
+	// that refuses redirects and thread it through ClientContext so BOTH
+	// the discovery fetch and the lazily-built remote JWKS keyset use it.
+	discoveryClient := &http.Client{
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	ctx = oidc.ClientContext(ctx, discoveryClient)
 
 	// Discovery — coreos/go-oidc reads .well-known/openid-configuration.
 	prov, err := oidc.NewProvider(ctx, provider.OIDCIssuerURL)

@@ -100,26 +100,47 @@ func resolveVariables(args map[string]interface{}, variables map[string]interfac
 func (r *Resolver) resolveRootField(ctx context.Context, userID uint, name string, args map[string]interface{}, subFields []Field, variables map[string]interface{}) (interface{}, error) {
 	switch name {
 	case "course":
-		return r.resolveCourse(ctx, args, subFields, variables)
+		return r.resolveCourse(ctx, userID, args, subFields, variables)
 	case "allCourses":
 		return r.resolveAllCourses(ctx, args, subFields, variables)
 	case "assignment":
-		return r.resolveAssignment(ctx, args, subFields)
+		return r.resolveAssignment(ctx, userID, args, subFields)
 	case "self":
 		return r.resolveSelf(ctx, userID, subFields)
 	case "user":
-		return r.resolveUser(ctx, args, subFields)
+		return r.resolveUser(ctx, userID, args, subFields)
 	default:
 		return nil, fmt.Errorf("unknown field: %s", name)
 	}
 }
 
+// callerIsAdmin reports whether the caller holds an account- or
+// platform-admin role. Mirrors the REST PermissionMiddleware.isAdmin
+// check (role is tenant-independent) so admins get the same cross-
+// resource read access their REST equivalents allow.
+func (r *Resolver) callerIsAdmin(ctx context.Context, userID uint) bool {
+	u, err := r.userService.GetByID(ctx, userID, AccountIDFromContext(ctx))
+	if err != nil || u == nil {
+		return false
+	}
+	return u.Role == models.RoleAdmin || u.Role == models.RoleSuperUser
+}
+
 // --- Root resolvers ---
 
-func (r *Resolver) resolveCourse(ctx context.Context, args map[string]interface{}, subFields []Field, variables map[string]interface{}) (interface{}, error) {
+func (r *Resolver) resolveCourse(ctx context.Context, userID uint, args map[string]interface{}, subFields []Field, variables map[string]interface{}) (interface{}, error) {
 	id, err := getUintArg(args, "id")
 	if err != nil {
 		return nil, fmt.Errorf("course requires 'id' argument: %w", err)
+	}
+
+	// Authz parity with REST GET /courses/:id (RequireEnrolled): the
+	// caller must be enrolled in the course or be an admin. Without this,
+	// any authenticated user could read any course in their tenant by id.
+	if !r.callerIsAdmin(ctx, userID) {
+		if _, err := r.enrollmentService.GetUserRole(ctx, userID, id, AccountIDFromContext(ctx)); err != nil {
+			return nil, fmt.Errorf("not authorized to view this course")
+		}
 	}
 
 	course, err := r.courseService.GetByID(ctx, id, AccountIDFromContext(ctx))
@@ -156,7 +177,7 @@ func (r *Resolver) resolveAllCourses(ctx context.Context, args map[string]interf
 	return courses, nil
 }
 
-func (r *Resolver) resolveAssignment(ctx context.Context, args map[string]interface{}, subFields []Field) (interface{}, error) {
+func (r *Resolver) resolveAssignment(ctx context.Context, userID uint, args map[string]interface{}, subFields []Field) (interface{}, error) {
 	id, err := getUintArg(args, "id")
 	if err != nil {
 		return nil, fmt.Errorf("assignment requires 'id' argument: %w", err)
@@ -165,6 +186,15 @@ func (r *Resolver) resolveAssignment(ctx context.Context, args map[string]interf
 	assignment, err := r.assignmentService.GetByID(ctx, id, AccountIDFromContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("assignment not found: %w", err)
+	}
+
+	// Authz parity with REST GET /courses/:course_id/assignments/:id
+	// (RequireEnrolled): the caller must be enrolled in the assignment's
+	// course or be an admin.
+	if !r.callerIsAdmin(ctx, userID) {
+		if _, err := r.enrollmentService.GetUserRole(ctx, userID, assignment.CourseID, AccountIDFromContext(ctx)); err != nil {
+			return nil, fmt.Errorf("not authorized to view this assignment")
+		}
 	}
 
 	return buildAssignmentMap(assignment, subFields), nil
@@ -183,10 +213,16 @@ func (r *Resolver) resolveSelf(ctx context.Context, userID uint, subFields []Fie
 	return buildUserMap(user, subFields), nil
 }
 
-func (r *Resolver) resolveUser(ctx context.Context, args map[string]interface{}, subFields []Field) (interface{}, error) {
+func (r *Resolver) resolveUser(ctx context.Context, userID uint, args map[string]interface{}, subFields []Field) (interface{}, error) {
 	id, err := getUintArg(args, "id")
 	if err != nil {
 		return nil, fmt.Errorf("user requires 'id' argument: %w", err)
+	}
+
+	// Authz parity with REST GET /users/:id (RequireSelfOrAdmin): only
+	// self or an admin may read another user's record (email, login_id…).
+	if id != userID && !r.callerIsAdmin(ctx, userID) {
+		return nil, fmt.Errorf("not authorized to view this user")
 	}
 
 	user, err := r.userService.GetByID(ctx, id, AccountIDFromContext(ctx))

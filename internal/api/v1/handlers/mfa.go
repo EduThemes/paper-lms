@@ -260,6 +260,12 @@ func (h *MFAHandler) VerifyAtLogin(c *fiber.Ctx) error {
 		if err := h.rateLimit.CheckAndIncrementVerify(body.PendingToken); err != nil {
 			return responses.Error(c, fiber.StatusTooManyRequests, "too many attempts; log in again")
 		}
+		// Per-account window cap: re-minting a fresh pending token does
+		// not reset this, so the attacker can't multiply the budget by
+		// restarting the login flow.
+		if err := h.rateLimit.CheckAndIncrementVerifyForUser(userID); err != nil {
+			return responses.Error(c, fiber.StatusTooManyRequests, "too many attempts; try again later")
+		}
 	}
 	// Self lookup: userID is the JWT subject (or pending-MFA token
 	// subject). accountID=0 is correct — the user-id IS the caller,
@@ -340,6 +346,13 @@ func (h *MFAHandler) UseRecoveryCode(c *fiber.Ctx) error {
 	userID, _, err := auth.VerifyPendingMFAToken(h.jwtSecret, body.PendingToken)
 	if err != nil {
 		return responses.Error(c, fiber.StatusUnauthorized, "pending token invalid or expired")
+	}
+	// Per-account window cap (survives pending-token re-mints). Checked
+	// after the token is verified so we have a trustworthy user id.
+	if h.rateLimit != nil {
+		if err := h.rateLimit.CheckAndIncrementRecoveryForUser(userID); err != nil {
+			return responses.Error(c, fiber.StatusTooManyRequests, "too many attempts; try again later")
+		}
 	}
 	// Self lookup: userID is the JWT subject (or pending-MFA token
 	// subject). accountID=0 is correct — the user-id IS the caller,

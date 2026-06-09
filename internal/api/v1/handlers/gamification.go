@@ -341,8 +341,13 @@ func (h *GamificationHandler) GetUserWallet(c *fiber.Ctx) error {
 		return responses.Error(c, fiber.StatusForbidden, "you can only access your own wallet")
 	}
 
-	rows, err := h.walletService.GetUserWallet(c.Context(), targetUserID)
+	rows, err := h.walletService.GetUserWallet(c.Context(), targetUserID, callerAccountID(c))
 	if err != nil {
+		if errors.Is(err, gamification.ErrUserNotFound) {
+			// Target user is outside the caller's tenant (or absent) — 404,
+			// not 403, to avoid leaking cross-tenant existence.
+			return responses.NotFound(c, "user")
+		}
 		return responses.InternalError(c, "could not fetch wallet balances")
 	}
 
@@ -421,8 +426,11 @@ func (h *GamificationHandler) ListUserWalletTransactions(c *fiber.Ctx) error {
 		perPage = 100
 	}
 
-	result, err := h.walletService.ListTransactions(c.Context(), targetUserID, currencyTypeID, repository.PaginationParams{Page: page, PerPage: perPage})
+	result, err := h.walletService.ListTransactions(c.Context(), targetUserID, currencyTypeID, callerAccountID(c), repository.PaginationParams{Page: page, PerPage: perPage})
 	if err != nil {
+		if errors.Is(err, gamification.ErrUserNotFound) {
+			return responses.NotFound(c, "user")
+		}
 		return responses.InternalError(c, "could not fetch wallet transactions")
 	}
 

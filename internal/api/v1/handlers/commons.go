@@ -95,6 +95,26 @@ func callerAccountID(c *fiber.Ctx) uint {
 	return v
 }
 
+// requireQuizInCourse verifies quizID names a quiz that lives in courseID
+// AND in the caller's tenant. It returns wrote=true after writing a 404
+// when the quiz is missing, in another course, or in another tenant; the
+// caller MUST short-circuit (return nil) in that case.
+//
+// This closes the nested-route IDOR class where a leaf resource
+// (question, group, …) is addressed by its own id while the route
+// middleware only guards :course_id — without the tie a teacher in any
+// course of any tenant could reach another tenant's leaf by id.
+// Existence-leak contract: every failure is an identical 404 so the
+// caller can't distinguish "wrong course" / "other tenant" / "absent".
+func requireQuizInCourse(c *fiber.Ctx, qs *service.QuizService, quizID, courseID uint) bool {
+	quiz, err := qs.GetQuizScoped(c.Context(), quizID, callerAccountID(c))
+	if err != nil || quiz == nil || quiz.CourseID != courseID {
+		_ = responses.NotFound(c, "quiz")
+		return true
+	}
+	return false
+}
+
 // callerRoleForStateMachine maps the request's auth Locals onto a
 // role string the model state-machine helpers understand (see
 // internal/domain/models/state_transitions.go). is_admin takes

@@ -570,7 +570,7 @@ func main() {
 	portfolioService := service.NewPortfolioService(portfolioRepo, portfolioSectionRepo, portfolioArtifactRepo, portfolioReflectionRepo, portfolioTemplateRepo, portfolioCommentRepo, submissionRepo, assignmentRepo)
 	courseHomeService := service.NewCourseHomeService(courseRepo, courseHomeButtonRepo, todaysLessonOverrideRepo, courseVisitRepo, moduleRepo)
 	peerReviewService := service.NewPeerReviewService(peerReviewRepo, submissionRepo, enrollmentRepo)
-	questionBankService := service.NewQuestionBankService(questionBankRepo, questionBankEntryRepo, quizQuestionRepo)
+	questionBankService := service.NewQuestionBankService(questionBankRepo, questionBankEntryRepo, quizQuestionRepo, quizRepo)
 	// P3 Feature services
 	featureFlagService := service.NewFeatureFlagService(featureFlagRepo, courseRepo, accountRepo, userRepo)
 	customGradebookColumnService := service.NewCustomGradebookColumnService(customGradebookColumnRepo, customColumnDatumRepo)

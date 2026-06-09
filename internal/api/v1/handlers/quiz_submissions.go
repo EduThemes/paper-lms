@@ -62,20 +62,11 @@ func quizSubmissionAnswerToJSON(a *models.QuizSubmissionAnswer) fiber.Map {
 //
 // Returns wrote=true if the response has already been written (404 on
 // quiz-not-in-course); caller short-circuits. Returns wrote=false on
-// success.
+// success. Delegates to the package-level requireQuizInCourse so the
+// quiz-in-course/tenant tie has a single implementation shared with the
+// quiz-question and question-group handlers.
 func (h *QuizSubmissionHandler) requireQuizInCourse(c *fiber.Ctx, quizID, courseID uint) bool {
-	quiz, err := h.quizService.GetQuizScoped(c.Context(), quizID, callerAccountID(c))
-	if err != nil || quiz == nil {
-		_ = responses.NotFound(c, "quiz")
-		return true
-	}
-	if quiz.CourseID != courseID {
-		// Existence-leak contract: don't distinguish "wrong course" from
-		// "quiz doesn't exist."
-		_ = responses.NotFound(c, "quiz")
-		return true
-	}
-	return false
+	return requireQuizInCourse(c, h.quizService, quizID, courseID)
 }
 
 // StartSubmission handles POST /courses/:course_id/quizzes/:quiz_id/submissions.
