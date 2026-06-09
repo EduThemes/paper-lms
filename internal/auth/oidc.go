@@ -277,6 +277,9 @@ func (h *OIDCHandler) buildConfig(ctx context.Context, provider *models.Authenti
 	// the discovery fetch and the lazily-built remote JWKS keyset use it.
 	discoveryClient := &http.Client{
 		Timeout: 15 * time.Second,
+		// SafeTransport re-validates the resolved IP at connect time
+		// (DNS-rebinding defense); CheckRedirect refuses 3xx hops.
+		Transport: security.SafeTransport(),
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},

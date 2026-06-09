@@ -7,7 +7,9 @@ on:
     branches: [main]
 
 env:
-  GO_VERSION: '1.25'
+  # Patched toolchain — go1.26.4 clears the stdlib advisories govulncheck
+  # flagged in 1.26.2 (see go.mod toolchain directive).
+  GO_VERSION: '1.26.4'
   NODE_VERSION: '22'
 
 jobs:

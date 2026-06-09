@@ -75,6 +75,11 @@ type PipelineResult struct {
 // session token of any kind is minted until consent clears the flag.
 var ErrParentalConsentRequired = errors.New("parental consent required before this account can be used")
 
+// ErrAccountSuspended is returned by Execute when the resolved user is
+// flagged Suspended. The login fails closed across every credential path
+// until an admin un-suspends the account.
+var ErrAccountSuspended = errors.New("account is suspended")
+
 // LoginPipeline orchestrates post-credential-verification work for
 // every login path.
 type LoginPipeline struct {
@@ -124,6 +129,16 @@ func (p *LoginPipeline) Execute(ctx context.Context, outcome SSOOutcome, meta Re
 	if err != nil {
 		p.audit.LoginFailed(ctx, outcome.Email, err.Error(), meta)
 		return nil, err
+	}
+
+	// 1.4 Account-suspension gate.
+	//
+	// A suspended user MUST NOT receive a session through ANY credential
+	// path until an admin un-suspends them. Like the consent gate below it
+	// runs before every token-mint branch and fails closed.
+	if user.Suspended {
+		p.audit.LoginFailed(ctx, outcome.Email, "account suspended", meta)
+		return nil, ErrAccountSuspended
 	}
 
 	// 1.5 COPPA parental-consent gate.

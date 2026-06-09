@@ -556,6 +556,34 @@ func (h *UserHandler) UpdateUserRole(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"id": user.ID, "email": user.Email, "role": user.Role})
 }
 
+// UpdateUserSuspension sets/clears a user's account-disable flag.
+// Admin-only at the route level. A suspended user is blocked from minting
+// a session through any credential path (see auth.LoginPipeline) without
+// destroying their data, so this is the safe alternative to deletion.
+func (h *UserHandler) UpdateUserSuspension(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid user ID")
+	}
+
+	var input struct {
+		Suspended *bool `json:"suspended"`
+	}
+	if err := c.BodyParser(&input); err != nil || input.Suspended == nil {
+		return responses.BadRequest(c, "suspended (bool) is required")
+	}
+
+	user, err := h.userService.GetByID(c.Context(), uint(id), callerAccountID(c))
+	if err != nil {
+		return responses.NotFound(c, "user")
+	}
+	user.Suspended = *input.Suspended
+	if err := h.userService.Update(c.Context(), user); err != nil {
+		return responses.InternalError(c, "Could not update suspension")
+	}
+	return c.JSON(fiber.Map{"id": user.ID, "email": user.Email, "suspended": user.Suspended})
+}
+
 func (h *UserHandler) GetSelf(c *fiber.Ctx) error {
 	userID, err := getUserID(c)
 	if err != nil {
