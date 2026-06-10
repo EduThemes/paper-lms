@@ -292,6 +292,34 @@ func (h *FERPAHandler) DenyDeletionRequest(c *fiber.Ctx) error {
 	return c.JSON(dataDeletionRequestToJSON(request))
 }
 
+// ProcessDeletionRequest handles POST /admin/data_deletion_requests/:id/process.
+// EXECUTES an already-approved deletion: anonymizes the subject user row
+// and erases dependent-table PII. Kept separate from approval so execution
+// is a deliberate, audited step (and reversible up to this point). Mirrors
+// the approve handler's cross-tenant existence-leak contract.
+func (h *FERPAHandler) ProcessDeletionRequest(c *fiber.Ctx) error {
+	requestID, err := c.ParamsInt("id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid request ID")
+	}
+
+	reviewerAcct, _ := c.Locals("account_id").(uint)
+	isSuper, _ := c.Locals("is_super_admin").(bool)
+
+	if err := h.ferpaService.ProcessDeletionScoped(c.Context(), uint(requestID), reviewerAcct, isSuper); err != nil {
+		if err == service.ErrFERPACrossTenant {
+			return responses.NotFound(c, "deletion request")
+		}
+		return responses.BadRequest(c, err.Error())
+	}
+
+	request, err := h.ferpaService.GetDeletionRequest(c.Context(), uint(requestID))
+	if err != nil {
+		return responses.InternalError(c, "Could not fetch updated request")
+	}
+	return c.JSON(dataDeletionRequestToJSON(request))
+}
+
 // GetPIIAccessLog handles GET /api/v1/users/:user_id/pii_access_log
 func (h *FERPAHandler) GetPIIAccessLog(c *fiber.Ctx) error {
 	userID, err := strconv.Atoi(c.Params("user_id"))

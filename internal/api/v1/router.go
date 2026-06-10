@@ -231,6 +231,8 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Put("/users/:id", selfOrAdmin, r.UserHandler.UpdateUser)
 	protected.Put("/users/:id/role", admin, r.UserHandler.UpdateUserRole)
 	protected.Put("/users/:id/suspension", admin, r.UserHandler.UpdateUserSuspension)
+	protected.Post("/users/bulk_suspension", admin, r.UserHandler.BulkUpdateSuspension)
+	protected.Put("/users/:id/force_password_reset", admin, r.UserHandler.ForcePasswordReset)
 
 	// Masquerade (admin only)
 	protected.Post("/users/:id/masquerade", admin, r.UserHandler.StartMasquerade)
@@ -753,6 +755,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Post("/users/:user_id/data_deletion", selfOrAdmin, r.FERPAHandler.CreateDeletionRequest)
 	protected.Get("/admin/data_deletion_requests", admin, r.FERPAHandler.ListPendingDeletionRequests)
 	protected.Post("/admin/data_deletion_requests/:id/approve", admin, r.FERPAHandler.ApproveDeletionRequest)
+	protected.Post("/admin/data_deletion_requests/:id/process", admin, r.FERPAHandler.ProcessDeletionRequest)
 	protected.Post("/admin/data_deletion_requests/:id/deny", admin, r.FERPAHandler.DenyDeletionRequest)
 	protected.Get("/users/:user_id/pii_access_log", admin, r.FERPAHandler.GetPIIAccessLog)
 	protected.Get("/admin/retention_policies", admin, r.FERPAHandler.ListRetentionPolicies)

@@ -282,6 +282,26 @@ func (s *FERPAService) ProcessDeletion(ctx context.Context, requestID uint) erro
 	return s.deletionRepo.Update(ctx, request)
 }
 
+// ProcessDeletionScoped is the tenant-gated entry point for EXECUTING an
+// approved deletion. It mirrors ApproveDeletionRequest's cross-tenant
+// guard (F-005) before delegating to ProcessDeletion, so an admin can only
+// process deletions for subjects in their own tenant. Without this wrapper
+// the approval workflow had no execution step at all — requests sat in
+// "approved" forever and no PII was ever erased.
+func (s *FERPAService) ProcessDeletionScoped(ctx context.Context, requestID, reviewerAccountID uint, isSuperAdmin bool) error {
+	request, err := s.deletionRepo.FindByID(ctx, requestID)
+	if err != nil {
+		return errors.New("deletion request not found")
+	}
+	if !isSuperAdmin {
+		acct, err := s.resolveSubjectAccount(ctx, request.UserID)
+		if err != nil || acct != reviewerAccountID {
+			return ErrFERPACrossTenant
+		}
+	}
+	return s.ProcessDeletion(ctx, requestID)
+}
+
 // GetDeletionRequest retrieves a deletion request by ID.
 func (s *FERPAService) GetDeletionRequest(ctx context.Context, id uint) (*models.DataDeletionRequest, error) {
 	request, err := s.deletionRepo.FindByID(ctx, id)
