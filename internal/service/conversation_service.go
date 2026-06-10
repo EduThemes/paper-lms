@@ -111,6 +111,10 @@ func (s *ConversationService) CreateMessage(ctx context.Context, msg *models.Con
 	if msg.Body == "" {
 		return errors.New("message body is required")
 	}
+	// Sanitize at the single message-creation chokepoint (covers 1:1, bulk,
+	// and any future sender) — message bodies render as rich content, so an
+	// unsanitized body was a stored-XSS vector in private DMs.
+	msg.Body = SanitizeHTML(msg.Body)
 	if msg.WorkflowState == "" {
 		msg.WorkflowState = "active"
 	}

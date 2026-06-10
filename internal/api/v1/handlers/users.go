@@ -584,6 +584,55 @@ func (h *UserHandler) UpdateUserSuspension(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"id": user.ID, "email": user.Email, "suspended": user.Suspended})
 }
 
+// BulkUpdateSuspension suspends/unsuspends many users in one call (e.g.,
+// end-of-year offboarding of a graduating class). Admin-only; every id is
+// tenant-scoped via callerAccountID, so a cross-tenant id is silently
+// skipped rather than acted on.
+func (h *UserHandler) BulkUpdateSuspension(c *fiber.Ctx) error {
+	var input struct {
+		UserIDs   []uint `json:"user_ids"`
+		Suspended *bool  `json:"suspended"`
+	}
+	if err := c.BodyParser(&input); err != nil || input.Suspended == nil || len(input.UserIDs) == 0 {
+		return responses.BadRequest(c, "user_ids (non-empty) and suspended (bool) are required")
+	}
+
+	acct := callerAccountID(c)
+	updated := make([]uint, 0, len(input.UserIDs))
+	for _, id := range input.UserIDs {
+		user, err := h.userService.GetByID(c.Context(), id, acct)
+		if err != nil {
+			continue // cross-tenant or missing — skip, don't leak
+		}
+		user.Suspended = *input.Suspended
+		if err := h.userService.Update(c.Context(), user); err == nil {
+			updated = append(updated, user.ID)
+		}
+	}
+	return c.JSON(fiber.Map{"suspended": *input.Suspended, "updated_ids": updated, "count": len(updated)})
+}
+
+// ForcePasswordReset flags a user so their next login must set a new
+// password (the LoginPipeline issues a password-set pending token instead
+// of a session). Admin-only. The reset flag + login gate + set flow all
+// exist; this is the missing admin trigger (e.g., on a credential leak).
+// Pair with suspension if you also need to kill active sessions now.
+func (h *UserHandler) ForcePasswordReset(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid user ID")
+	}
+	user, err := h.userService.GetByID(c.Context(), uint(id), callerAccountID(c))
+	if err != nil {
+		return responses.NotFound(c, "user")
+	}
+	user.RequiresPasswordReset = true
+	if err := h.userService.Update(c.Context(), user); err != nil {
+		return responses.InternalError(c, "Could not flag password reset")
+	}
+	return c.JSON(fiber.Map{"id": user.ID, "email": user.Email, "requires_password_reset": true})
+}
+
 func (h *UserHandler) GetSelf(c *fiber.Ctx) error {
 	userID, err := getUserID(c)
 	if err != nil {

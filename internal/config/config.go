@@ -80,6 +80,14 @@ func (c *Config) Validate() {
 	}
 
 	if c.Environment == "production" {
+		// A short HMAC signing key is brute-forceable. The default-value
+		// check above catches the placeholder; this catches a real-but-weak
+		// secret. Kept a loud WARNING (not fatal) so it can't brick a running
+		// deploy whose key length hasn't been verified — promote to log.Fatal
+		// once operators confirm every environment uses a 32+ char secret.
+		if len(c.JWTSecret) < 32 {
+			log.Printf("WARNING: JWT_SECRET is only %d characters; a session-signing key should be at least 32 characters of high-entropy randomness. Rotate it.", len(c.JWTSecret))
+		}
 		if c.DatabaseURL == "postgres://paper:paper@localhost:5432/paper_lms?sslmode=disable" {
 			log.Fatal("FATAL: DATABASE_URL must be configured for production. Do not use the default development database URL.")
 		}
