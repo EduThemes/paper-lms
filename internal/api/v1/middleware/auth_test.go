@@ -11,6 +11,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/auth"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
 	"github.com/EduThemes/paper-lms/internal/testutil"
 	"github.com/EduThemes/paper-lms/internal/testutil/mocks"
@@ -44,7 +45,14 @@ func setupProtectedApp(tokenRepo *mocks.MockAccessTokenRepository, userRepo *moc
 		accessTokenSvc = service.NewAccessTokenService(tokenRepo)
 	}
 
-	authMW := middleware.NewAuthMiddleware(testJWTSecret, accessTokenSvc, userRepo, nil)
+	// Pass a TRUE nil interface (not a typed-nil *MockUserRepository) when
+	// no repo is provided, so the middleware's `m.userRepo != nil` guard
+	// behaves the same as in production (where the repo is always real).
+	var userRepoIface repository.UserRepository
+	if userRepo != nil {
+		userRepoIface = userRepo
+	}
+	authMW := middleware.NewAuthMiddleware(testJWTSecret, accessTokenSvc, userRepoIface, nil)
 
 	app.Get("/protected", authMW.Protected(), func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
@@ -95,6 +103,37 @@ func TestProtected_ValidJWTCookie(t *testing.T) {
 	body, err := testutil.ParseJSONMap(resp)
 	assert.NoError(t, err)
 	assert.Equal(t, float64(42), body["user_id"])
+}
+
+// A suspended user's still-valid JWT must be rejected on EVERY request —
+// the kill-switch that makes suspension take effect immediately, not just
+// at next login.
+func TestProtected_SuspendedUser_JWT_Returns401(t *testing.T) {
+	userRepo := new(mocks.MockUserRepository)
+	userRepo.On("FindByID", mock.Anything, uint(42), uint(0)).
+		Return(&models.User{ID: 42, AccountID: 1, Suspended: true}, nil)
+	app := setupProtectedApp(nil, userRepo)
+
+	token, err := auth.GenerateToken(testUser(), testJWTSecret)
+	assert.NoError(t, err)
+
+	resp := testutil.MakeAuthenticatedRequest(app, http.MethodGet, "/protected", token, nil)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+// Control: a found-but-NOT-suspended user is allowed through — the
+// per-request check doesn't over-block when the user repo is present.
+func TestProtected_ActiveUser_JWT_Allowed(t *testing.T) {
+	userRepo := new(mocks.MockUserRepository)
+	userRepo.On("FindByID", mock.Anything, uint(42), uint(0)).
+		Return(&models.User{ID: 42, AccountID: 1, Suspended: false}, nil)
+	app := setupProtectedApp(nil, userRepo)
+
+	token, err := auth.GenerateToken(testUser(), testJWTSecret)
+	assert.NoError(t, err)
+
+	resp := testutil.MakeAuthenticatedRequest(app, http.MethodGet, "/protected", token, nil)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 func TestProtected_NoToken(t *testing.T) {
@@ -324,7 +363,12 @@ func superAdminTestUser() *models.User {
 // this to assert what the middleware did or did not set.
 func setupLocalsInspector(userRepo *mocks.MockUserRepository) *fiber.App {
 	app := testutil.SetupTestApp()
-	authMW := middleware.NewAuthMiddleware(testJWTSecret, nil, userRepo, nil)
+	// True nil interface when no repo is provided (avoid the typed-nil trap).
+	var userRepoIface repository.UserRepository
+	if userRepo != nil {
+		userRepoIface = userRepo
+	}
+	authMW := middleware.NewAuthMiddleware(testJWTSecret, nil, userRepoIface, nil)
 
 	app.Get("/inspect", authMW.Protected(), func(c *fiber.Ctx) error {
 		out := fiber.Map{

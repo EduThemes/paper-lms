@@ -91,10 +91,12 @@ type User struct {
 
 	// Suspended (migration 000063) — an admin-set account-disable flag.
 	// The LoginPipeline fails closed for a suspended user across every
-	// credential path (local, SSO, passkey, MFA), so an account can be
-	// locked out without hard-deleting the row (which would destroy its
-	// grades, enrollments, and audit trail). DEFAULT false; only an
-	// explicit admin action sets it.
+	// credential path (local, SSO, passkey, MFA), AND the auth middleware
+	// rejects every request from a suspended user (checking the DB per
+	// request) so EXISTING sessions / PATs die immediately, not just at
+	// next login. An account can thus be locked out without hard-deleting
+	// the row (which would destroy its grades, enrollments, and audit
+	// trail). DEFAULT false; only an explicit admin action sets it.
 	Suspended bool `json:"suspended" gorm:"not null;default:false"`
 
 	ResetToken          string     `json:"-"`

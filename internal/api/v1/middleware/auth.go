@@ -98,6 +98,24 @@ func (m *AuthMiddleware) Protected() fiber.Handler {
 			}
 			email, _ := claims["email"].(string)
 			c.Locals("user_id", uint(idFloat))
+
+			// Account-suspension kill-switch. A suspended account must lose
+			// access IMMEDIATELY, not just at next login — so we check the
+			// DB (source of truth) on every request rather than trusting the
+			// still-valid JWT. One indexed PK lookup; multi-pod correct with
+			// no cache to go stale. Only a positively-found, suspended user
+			// is rejected — a lookup miss/error falls through to preserve the
+			// existing "self-contained JWT" behavior (and is re-asserted by
+			// the account_id backfill below). On reject we also clear the
+			// session cookie so the SPA's 401 handler tears the session down.
+			if m.userRepo != nil {
+				if u, lookupErr := m.userRepo.FindByID(c.Context(), uint(idFloat), 0); lookupErr == nil && u != nil && u.Suspended {
+					c.ClearCookie("paper_session")
+					return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+						"errors": []fiber.Map{{"message": "account is suspended"}},
+					})
+				}
+			}
 			c.Locals("user_email", email)
 			if name, ok := claims["name"].(string); ok {
 				c.Locals("user_name", name)
@@ -180,6 +198,13 @@ func (m *AuthMiddleware) Protected() fiber.Handler {
 					// Locals is populated from this lookup downstream.
 					user, userErr := m.userRepo.FindByID(c.Context(), accessToken.UserID, 0)
 					if userErr == nil {
+						// Account-suspension kill-switch: a suspended user's
+						// personal access / OAuth2 tokens stop working too.
+						if user.Suspended {
+							return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+								"errors": []fiber.Map{{"message": "account is suspended"}},
+							})
+						}
 						c.Locals("user_email", user.Email)
 						c.Locals("user_name", user.Name)
 						// Access-token path: same provenance contract as
