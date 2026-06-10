@@ -17,7 +17,12 @@ type OneRosterConnection struct {
 	SyncFilter       string     `json:"sync_filter" gorm:"type:text"` // JSON: which orgs, terms to include
 	AutoSync         bool       `json:"auto_sync" gorm:"default:false"`
 	AutoSyncInterval int        `json:"auto_sync_interval" gorm:"default:24"` // hours
-	WorkflowState    string     `json:"workflow_state" gorm:"not null;default:'active'"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	// DeprovisionEnabled (migration 000064) — per-connection opt-in for
+	// roster-driven deprovisioning: a FULL sync suspends managed users
+	// absent from the roster and unsuspends ones that reappear. Default
+	// false keeps the sync additive-only until a district enables it.
+	DeprovisionEnabled bool      `json:"deprovision_enabled" gorm:"not null;default:false"`
+	WorkflowState      string    `json:"workflow_state" gorm:"not null;default:'active'"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }

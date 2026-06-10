@@ -99,6 +99,14 @@ type User struct {
 	// trail). DEFAULT false; only an explicit admin action sets it.
 	Suspended bool `json:"suspended" gorm:"not null;default:false"`
 
+	// SuspendedBySIS (migration 000064) — suspension provenance. TRUE only
+	// when the OneRoster deprovision pass set Suspended; roster-driven
+	// reactivation is limited to rows with this flag so a sync can never
+	// silently undo a manual/disciplinary admin suspension. Any manual
+	// suspend/unsuspend clears it (the admin's decision supersedes the
+	// roster's).
+	SuspendedBySIS bool `json:"suspended_by_sis" gorm:"column:suspended_by_sis;not null;default:false"`
+
 	ResetToken          string     `json:"-"`
 	ResetTokenExpiresAt *time.Time `json:"-"`
 	CreatedAt           time.Time  `json:"created_at"`

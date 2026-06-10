@@ -578,6 +578,9 @@ func (h *UserHandler) UpdateUserSuspension(c *fiber.Ctx) error {
 		return responses.NotFound(c, "user")
 	}
 	user.Suspended = *input.Suspended
+	// A manual decision supersedes roster provenance: clear the SIS flag
+	// so a OneRoster deprovision pass never reverses what an admin set.
+	user.SuspendedBySIS = false
 	if err := h.userService.Update(c.Context(), user); err != nil {
 		return responses.InternalError(c, "Could not update suspension")
 	}
@@ -605,6 +608,8 @@ func (h *UserHandler) BulkUpdateSuspension(c *fiber.Ctx) error {
 			continue // cross-tenant or missing — skip, don't leak
 		}
 		user.Suspended = *input.Suspended
+		// Manual decision supersedes roster provenance (see UpdateUserSuspension).
+		user.SuspendedBySIS = false
 		if err := h.userService.Update(c.Context(), user); err == nil {
 			updated = append(updated, user.ID)
 		}

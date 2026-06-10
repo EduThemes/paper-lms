@@ -119,6 +119,12 @@ func (f *fakeUserRepo) Search(context.Context, string, uint, repository.Paginati
 func (f *fakeUserRepo) FilterPublicLeaderboardCandidates(context.Context, []uint) ([]uint, error) {
 	return nil, nil
 }
+func (f *fakeUserRepo) ListSISManaged(context.Context, uint, string) ([]models.User, error) {
+	return nil, nil
+}
+func (f *fakeUserRepo) ApplySISDeprovision(context.Context, []uint, []uint, uint) error {
+	return nil
+}
 
 type fakeFederationRepo struct {
 	bySubject map[string]*models.FederatedIdentity // key = providerID + ":" + subject

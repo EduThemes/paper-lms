@@ -517,11 +517,11 @@ func (s *OneRosterService) runSync(ctx context.Context, conn *models.OneRosterCo
 	}
 
 	// 3. Sync users
-	users, err := s.fetchUsers(conn.BaseURL, token, filter)
-	if err != nil {
-		errDetails = append(errDetails, fmt.Sprintf("users fetch failed: %v", err))
+	users, usersErr := s.fetchUsers(conn.BaseURL, token, filter)
+	if usersErr != nil {
+		errDetails = append(errDetails, fmt.Sprintf("users fetch failed: %v", usersErr))
 	} else {
-		created, updated, errs := s.syncUsers(ctx, users)
+		created, updated, errs := s.syncUsers(ctx, conn.AccountID, users)
 		syncLog.UsersCreated = created
 		syncLog.UsersUpdated = updated
 		errDetails = append(errDetails, errs...)
@@ -547,6 +547,22 @@ func (s *OneRosterService) runSync(ctx context.Context, conn *models.OneRosterCo
 		syncLog.EnrollmentsCreated = created
 		syncLog.EnrollmentsUpdated = updated
 		errDetails = append(errDetails, errs...)
+	}
+
+	// 6. Deprovision pass — opt-in, FULL syncs only (an incremental
+	// sync is a delta; absence from it means nothing), and only when
+	// the roster fetch above succeeded so "absent" reflects the real
+	// roster rather than a failed request.
+	if conn.DeprovisionEnabled && syncLog.SyncType == "full" && usersErr == nil {
+		result, err := s.reconcileDeprovision(ctx, conn, onerosterPresentSet(users), true)
+		if err != nil {
+			errDetails = append(errDetails, fmt.Sprintf("deprovision pass failed: %v", err))
+		} else if result.Aborted {
+			syncLog.DeprovisionAbortedReason = result.AbortReason
+		} else {
+			syncLog.UsersDeprovisioned = len(result.ToSuspend)
+			syncLog.UsersReactivated = len(result.ToReactivate)
+		}
 	}
 }
 
@@ -583,7 +599,7 @@ func (s *OneRosterService) syncOrgs(ctx context.Context, accountID uint, orgs []
 	return created, updated, errs
 }
 
-func (s *OneRosterService) syncUsers(ctx context.Context, users []onerosterUser) (int, int, []string) {
+func (s *OneRosterService) syncUsers(ctx context.Context, accountID uint, users []onerosterUser) (int, int, []string) {
 	var created, updated int
 	var errs []string
 
@@ -624,8 +640,12 @@ func (s *OneRosterService) syncUsers(ctx context.Context, users []onerosterUser)
 				updated++
 			}
 		} else {
-			// Create new user
+			// Create new user. AccountID must be the connection's tenant:
+			// User.BeforeCreate defaults a zero AccountID to 1, which
+			// would both leak the user into the root account and make
+			// the account-scoped deprovision pass blind to them.
 			newUser := &models.User{
+				AccountID:    accountID,
 				Name:         name,
 				SortableName: orUser.FamilyName + ", " + orUser.GivenName,
 				ShortName:    orUser.GivenName,
