@@ -1,5 +1,9 @@
 # Build stage
-FROM golang:1.25-alpine AS builder
+# go1.26.x to match the go.mod `toolchain go1.26.4` directive (patched
+# stdlib — see GO-2026-* in the toolchain comment). A 1.25 base would force
+# `go build` to download the toolchain at build time; matching it here keeps
+# the production binary on the patched stdlib with no build-time download.
+FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache git
 
