@@ -42,6 +42,18 @@ type UserRepository interface {
 	// for a row to surface on a public board. Ships in W2-C so Wave 3's
 	// leaderboard primitives don't retrofit the privacy guard later.
 	FilterPublicLeaderboardCandidates(ctx context.Context, candidateIDs []uint) ([]uint, error)
+	// ListSISManaged returns the users whose sis_user_id matches
+	// `sisPrefix` (SQL LIKE pattern, e.g. 'oneroster:%') within the
+	// account. Roster deprovisioning uses this to compute the managed
+	// population — manually-created users (sis_user_id IS NULL) and
+	// users from other SIS sources never match.
+	ListSISManaged(ctx context.Context, accountID uint, sisPrefix string) ([]models.User, error)
+	// ApplySISDeprovision suspends suspendIDs (suspended_by_sis=true, so
+	// the suspension is attributable to the roster) and reactivates
+	// reactivateIDs (both flags cleared) in ONE transaction — a partial
+	// apply would corrupt the sync log's audit counts. accountID bounds
+	// both UPDATEs so a caller can never touch rows outside its tenant.
+	ApplySISDeprovision(ctx context.Context, suspendIDs, reactivateIDs []uint, accountID uint) error
 }
 
 type AccountRepository interface {

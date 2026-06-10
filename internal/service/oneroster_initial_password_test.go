@@ -45,7 +45,7 @@ func TestOneRosterSyncUsers_NewUser_PasswordNotDerivedFromSourcedID(t *testing.T
 		}).
 		Return(nil)
 
-	created, _, errs := svc.syncUsers(context.Background(), []onerosterUser{
+	created, _, errs := svc.syncUsers(context.Background(), 7, []onerosterUser{
 		{
 			SourcedID:  sourcedID,
 			Status:     "active",
@@ -74,6 +74,10 @@ func TestOneRosterSyncUsers_NewUser_PasswordNotDerivedFromSourcedID(t *testing.T
 	// LoginPipeline gates session minting and forces the user to
 	// choose a real password before getting a session.
 	assert.True(t, captured.RequiresPasswordReset, "OneRoster-provisioned user must have RequiresPasswordReset=true")
+
+	// Tenant containment: the created user must live in the connection's
+	// account, not fall through to BeforeCreate's account-1 default.
+	assert.Equal(t, uint(7), captured.AccountID, "OneRoster-provisioned user must carry the connection's AccountID")
 
 	mockUserRepo.AssertExpectations(t)
 }

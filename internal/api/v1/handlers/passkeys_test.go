@@ -426,6 +426,12 @@ func (r *fakePasskeyUserRepo) Search(context.Context, string, uint, repository.P
 func (r *fakePasskeyUserRepo) FilterPublicLeaderboardCandidates(context.Context, []uint) ([]uint, error) {
 	panic("unused")
 }
+func (r *fakePasskeyUserRepo) ListSISManaged(context.Context, uint, string) ([]models.User, error) {
+	panic("unused")
+}
+func (r *fakePasskeyUserRepo) ApplySISDeprovision(context.Context, []uint, []uint, uint) error {
+	panic("unused")
+}
 
 type fakeCredsRepo struct {
 	byUser map[uint][]models.UserWebauthnCredential

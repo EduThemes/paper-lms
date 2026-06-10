@@ -87,6 +87,19 @@ func (m *MockUserRepository) FindByIDs(ctx context.Context, ids []uint, accountI
 	return args.Get(0).([]models.User), args.Error(1)
 }
 
+func (m *MockUserRepository) ListSISManaged(ctx context.Context, accountID uint, sisPrefix string) ([]models.User, error) {
+	args := m.Called(ctx, accountID, sisPrefix)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.User), args.Error(1)
+}
+
+func (m *MockUserRepository) ApplySISDeprovision(ctx context.Context, suspendIDs, reactivateIDs []uint, accountID uint) error {
+	args := m.Called(ctx, suspendIDs, reactivateIDs, accountID)
+	return args.Error(0)
+}
+
 // FilterPublicLeaderboardCandidates mocks the W2-C privacy filter that
 // strips opted-out learners from leaderboard candidate sets.
 func (m *MockUserRepository) FilterPublicLeaderboardCandidates(ctx context.Context, candidateIDs []uint) ([]uint, error) {

@@ -723,6 +723,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Post("/accounts/:account_id/oneroster_connections/:id/test", admin, r.OneRosterHandler.TestConnection)
 	protected.Post("/accounts/:account_id/oneroster_connections/:id/sync", admin, r.OneRosterHandler.SyncFull)
 	protected.Post("/accounts/:account_id/oneroster_connections/:id/sync_incremental", admin, r.OneRosterHandler.SyncIncremental)
+	protected.Post("/accounts/:account_id/oneroster_connections/:id/sync_preview", admin, r.OneRosterHandler.SyncPreview)
 	protected.Get("/accounts/:account_id/oneroster_connections/:id/sync_logs", admin, r.OneRosterHandler.GetSyncLogs)
 
 	// Document Annotations (enrolled)

@@ -240,3 +240,46 @@ func (r *userRepo) FilterPublicLeaderboardCandidates(ctx context.Context, candid
 	}
 	return ids, nil
 }
+
+// ListSISManaged returns the users in `accountID` whose sis_user_id
+// matches the LIKE pattern `sisPrefix` (e.g. 'oneroster:%'). Selects
+// only the columns deprovision set-math needs; sis_user_id IS NULL
+// rows (manually created users) can never match a LIKE pattern.
+func (r *userRepo) ListSISManaged(ctx context.Context, accountID uint, sisPrefix string) ([]models.User, error) {
+	var users []models.User
+	err := r.db.WithContext(ctx).
+		Select("id", "name", "login_id", "sis_user_id", "suspended", "suspended_by_sis").
+		Where("account_id = ? AND sis_user_id LIKE ?", accountID, sisPrefix).
+		Find(&users).Error
+	if err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+// ApplySISDeprovision executes one deprovision pass's writes atomically:
+// suspendIDs get suspended=true + suspended_by_sis=true (roster-attributable),
+// reactivateIDs get both cleared. One transaction — a partial apply would
+// leave the sync log's audit counts wrong. Both UPDATEs are tenant-bounded.
+func (r *userRepo) ApplySISDeprovision(ctx context.Context, suspendIDs, reactivateIDs []uint, accountID uint) error {
+	if len(suspendIDs) == 0 && len(reactivateIDs) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if len(suspendIDs) > 0 {
+			if err := tx.Model(&models.User{}).
+				Where("id IN ? AND account_id = ?", suspendIDs, accountID).
+				Updates(map[string]interface{}{"suspended": true, "suspended_by_sis": true}).Error; err != nil {
+				return err
+			}
+		}
+		if len(reactivateIDs) > 0 {
+			if err := tx.Model(&models.User{}).
+				Where("id IN ? AND account_id = ?", reactivateIDs, accountID).
+				Updates(map[string]interface{}{"suspended": false, "suspended_by_sis": false}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
