@@ -58,7 +58,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-i18next": "^17.0.7",
-    "react-router-dom": "^7.13.0",
+    "react-router-dom": "^7.18.2",
     "react-window": "^2.2.7",
     "tailwind-merge": "^3.5.0",
     "tailwindcss-logical": "^3.0.1"
