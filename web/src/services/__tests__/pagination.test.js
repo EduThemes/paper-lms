@@ -59,6 +59,33 @@ describe('auto-paginated list helpers', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
+  test('quiz, question and rubric-assessment lists past 100 rows are not truncated', async () => {
+    global.fetch
+      .mockResolvedValueOnce(page(rows(1, 100), { next: true }))
+      .mockResolvedValueOnce(page(rows(101, 40)));
+    const subs = await api.getQuizSubmissions(7, 3, 1, 500);
+    expect(subs.data).toHaveLength(140);
+    expect(global.fetch.mock.calls[1][0]).toBe('/api/v1/courses/7/quizzes/3/submissions?page=2&per_page=100');
+
+    global.fetch.mockReset();
+    global.fetch
+      .mockResolvedValueOnce(page(rows(1, 100), { next: true }))
+      .mockResolvedValueOnce(page(rows(101, 5)));
+    expect((await api.getQuizzes(7, 1, 200)).data).toHaveLength(105);
+
+    global.fetch.mockReset();
+    global.fetch
+      .mockResolvedValueOnce(page(rows(1, 100), { next: true }))
+      .mockResolvedValueOnce(page(rows(101, 2)));
+    expect((await api.getQuizQuestions(7, 3, 1, 200)).data).toHaveLength(102);
+
+    global.fetch.mockReset();
+    global.fetch
+      .mockResolvedValueOnce(page(rows(1, 100), { next: true }))
+      .mockResolvedValueOnce(page(rows(101, 1)));
+    expect((await api.getRubricAssessments(7, 9, 1, 200)).data).toHaveLength(101);
+  });
+
   test('a request within the server cap is a single call', async () => {
     global.fetch.mockResolvedValueOnce(page(rows(1, 25)));
 

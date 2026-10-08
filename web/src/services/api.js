@@ -824,7 +824,7 @@ export const api = {
 
   // Quizzes
   getQuizzes: async (courseId, page = 1, perPage = 10) => {
-    return request(`/courses/${courseId}/quizzes?page=${page}&per_page=${perPage}`);
+    return requestPaged(`/courses/${courseId}/quizzes`, page, perPage);
   },
   getQuiz: async (courseId, quizId) => {
     const { data } = await request(`/courses/${courseId}/quizzes/${quizId}`);
@@ -849,7 +849,7 @@ export const api = {
 
   // Quiz Questions
   getQuizQuestions: async (courseId, quizId, page = 1, perPage = 50) => {
-    return request(`/courses/${courseId}/quizzes/${quizId}/questions?page=${page}&per_page=${perPage}`);
+    return requestPaged(`/courses/${courseId}/quizzes/${quizId}/questions`, page, perPage);
   },
   getQuizQuestion: async (courseId, quizId, questionId) => {
     const { data } = await request(`/courses/${courseId}/quizzes/${quizId}/questions/${questionId}`);
@@ -914,7 +914,7 @@ export const api = {
     return data?.quiz_submissions?.[0] || data;
   },
   getQuizSubmissions: async (courseId, quizId, page = 1, perPage = 50) => {
-    const { data } = await request(`/courses/${courseId}/quizzes/${quizId}/submissions?page=${page}&per_page=${perPage}`);
+    const { data } = await requestPaged(`/courses/${courseId}/quizzes/${quizId}/submissions`, page, perPage);
     return { data: data?.quiz_submissions || data || [] };
   },
   getQuizSubmissionAnswers: async (courseId, quizId, submissionId) => {
@@ -965,7 +965,7 @@ export const api = {
 
   // Rubric Assessments
   getRubricAssessments: async (courseId, associationId, page = 1, perPage = 50) => {
-    return request(`/courses/${courseId}/rubric_associations/${associationId}/rubric_assessments?page=${page}&per_page=${perPage}`);
+    return requestPaged(`/courses/${courseId}/rubric_associations/${associationId}/rubric_assessments`, page, perPage);
   },
   getRubricAssessment: async (courseId, associationId, assessmentId) => {
     const { data } = await request(`/courses/${courseId}/rubric_associations/${associationId}/rubric_assessments/${assessmentId}`);
