@@ -105,11 +105,18 @@ func (h *EnrollmentHandler) loadManagedEnrollment(c *fiber.Ctx) (e *models.Enrol
 	if findErr != nil {
 		return nil, true, responses.NotFound(c, "enrollment")
 	}
+	// People outside a section-limited caller's sections are hidden.
 	if !sectionVisibleUser(c, e.UserID) {
 		return nil, true, responses.NotFound(c, "enrollment")
 	}
 	if !canAddEnrollmentType(c, e.Type) {
 		return nil, true, responses.Forbidden(c, "You are not allowed to manage this enrollment")
+	}
+	// ...and a section-limited caller manages only enrollments in their
+	// own sections: staff of other sections are visible on the roster,
+	// but not theirs to edit, conclude or remove.
+	if !callerMaySection(c, e.CourseSectionID) {
+		return nil, true, responses.NotFound(c, "enrollment")
 	}
 	callerID, _ := c.Locals("user_id").(uint)
 	isAdmin, _ := c.Locals("is_admin").(bool)
@@ -117,6 +124,27 @@ func (h *EnrollmentHandler) loadManagedEnrollment(c *fiber.Ctx) (e *models.Enrol
 		return nil, true, responses.Forbidden(c, "You can't change your own enrollment")
 	}
 	return e, false, nil
+}
+
+// callerMaySection reports whether the caller may place or manage an
+// enrollment in sectionID (nil = the course's default section). Only a
+// section-limited caller (G107) is restricted, to their own sections;
+// admins never are.
+func callerMaySection(c *fiber.Ctx, sectionID *uint) bool {
+	ids, limited := middleware.VisibleSectionIDs(c)
+	if !limited {
+		return true
+	}
+	target := uint(0)
+	if sectionID != nil {
+		target = *sectionID
+	}
+	for _, id := range ids {
+		if id == target {
+			return true
+		}
+	}
+	return false
 }
 
 func lifecycleError(c *fiber.Ctx, err error) error {
@@ -212,20 +240,8 @@ func (h *EnrollmentHandler) UpdateEnrollment(c *fiber.Ctx) error {
 		}
 	}
 	// A section-limited teacher can't move someone out of their sections.
-	if ids, limited := middleware.VisibleSectionIDs(c); limited && upd.SectionSet {
-		target := uint(0)
-		if upd.CourseSectionID != nil {
-			target = *upd.CourseSectionID
-		}
-		allowed := false
-		for _, id := range ids {
-			if id == target {
-				allowed = true
-			}
-		}
-		if !allowed {
-			return responses.NotFound(c, "course section")
-		}
+	if upd.SectionSet && !callerMaySection(c, upd.CourseSectionID) {
+		return responses.NotFound(c, "course section")
 	}
 
 	if err := h.lifecycle.Update(c.Context(), e, upd); err != nil {

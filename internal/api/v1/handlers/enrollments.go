@@ -219,6 +219,19 @@ func (h *EnrollmentHandler) CreateEnrollment(c *fiber.Ctx) error {
 	if !canAddEnrollmentType(c, input.Enrollment.Type) {
 		return responses.Forbidden(c, "You are not allowed to add this enrollment type")
 	}
+	// Now that a user may hold several enrollments in a course (G110),
+	// a non-admin can't add one for themselves: a section-limited TA
+	// adding an unlimited student role would otherwise widen their own
+	// section access (and nobody but an admin edits their own roles).
+	if callerID, _ := c.Locals("user_id").(uint); callerID != 0 && input.Enrollment.UserID == callerID {
+		if isAdmin, _ := c.Locals("is_admin").(bool); !isAdmin {
+			return responses.Forbidden(c, "You can't add yourself to a course")
+		}
+	}
+	// A section-limited caller adds people only to their own sections.
+	if !callerMaySection(c, input.Enrollment.CourseSectionID) {
+		return responses.NotFound(c, "course section")
+	}
 
 	state := models.EnrollmentActive
 	if input.Enrollment.EnrollmentState != "" {

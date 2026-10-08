@@ -362,13 +362,18 @@ func TestAdminEnrollments_DateBasedAccess(t *testing.T) {
 	code, _ = aeDo(t, student, http.MethodPost, modules, nil)
 	assert.Equal(t, http.StatusOK, code, "section dates override the term")
 
-	// Restricted course dates in the future hold teachers back entirely
-	// once the term no longer covers today... but the teacher still
-	// participates in the term window, so use a course without a term.
+	// Restricted course dates in the future: the teacher keeps the
+	// (dateless default) term window and can still prepare the course,
+	// and can still undo the setting.
 	require.NoError(t, f.g.Model(&models.Course{}).Where("id = ?", aeCourse2).
 		Updates(map[string]interface{}{"start_at": future, "end_at": later, "restrict_enrollments_to_course_dates": true}).Error)
+	code, _ = aeDo(t, f.app(aeTeacher, 1), http.MethodPost, fmt.Sprintf("/api/v1/courses/%d/modules", aeCourse2), nil)
+	assert.Equal(t, http.StatusOK, code, "staff are not locked out by future course dates")
+	// Staff whose own enrollment dates are in the future have no access.
+	require.NoError(t, f.g.Model(&models.Enrollment{}).Where("id = ?", f.enrollments["teacher2"]).
+		Updates(map[string]interface{}{"start_at": future, "end_at": later}).Error)
 	code, _ = aeDo(t, f.app(aeTeacher, 1), http.MethodGet, fmt.Sprintf("/api/v1/courses/%d/modules", aeCourse2), nil)
-	assert.Equal(t, http.StatusForbidden, code, "staff before restricted course dates have no access")
+	assert.Equal(t, http.StatusForbidden, code, "staff before their own enrollment dates have no access")
 	// Admins are never date-restricted.
 	code, _ = aeDo(t, f.app(aeAdmin, 1), http.MethodPost, fmt.Sprintf("/api/v1/courses/%d/modules", aeCourse2), nil)
 	assert.Equal(t, http.StatusOK, code)
@@ -417,6 +422,33 @@ func TestAdminEnrollments_SectionLimitedTA(t *testing.T) {
 		"enrollment": map[string]interface{}{"course_section_id": aeSectionB},
 	})
 	assert.Equal(t, http.StatusNotFound, code)
+	// ...or add someone to another section, though their own works.
+	addAs := func(app *fiber.App, body map[string]interface{}) int {
+		code, _ := aeDo(t, app, http.MethodPost, fmt.Sprintf("/api/v1/courses/%d/enrollments", aeCourse), map[string]interface{}{"enrollment": body})
+		return code
+	}
+	assert.Equal(t, http.StatusNotFound, addAs(ta, map[string]interface{}{"user_id": aeOutsider, "type": "StudentEnrollment", "course_section_id": aeSectionB}))
+	assert.Equal(t, http.StatusNotFound, addAs(ta, map[string]interface{}{"user_id": aeOutsider, "type": "StudentEnrollment"}), "default section is not theirs either")
+	// Nor widen their own access with an unlimited student role (G110).
+	assert.Equal(t, http.StatusForbidden, addAs(ta, map[string]interface{}{"user_id": aeTA, "type": "StudentEnrollment", "course_section_id": aeSectionA}))
+	assert.Equal(t, http.StatusCreated, addAs(ta, map[string]interface{}{"user_id": aeOutsider, "type": "StudentEnrollment", "course_section_id": aeSectionA}))
+
+	require.NoError(t, f.g.Where("user_id = ? AND course_id = ? AND type = ?", aeOutsider, aeCourse, "StudentEnrollment").Delete(&models.Enrollment{}).Error)
+
+	// A section-limited teacher sees other sections' staff on the roster
+	// but can't manage their enrollments.
+	sa, sb := aeSectionA, aeSectionB
+	limitedTeacher := &models.Enrollment{UserID: aeOutsider, CourseID: aeCourse, CourseSectionID: &sa, Type: "TeacherEnrollment", Role: "TeacherEnrollment", WorkflowState: models.EnrollmentActive, LimitPrivilegesToCourseSection: true}
+	otherTA := &models.Enrollment{UserID: aeStudentA, CourseID: aeCourse, CourseSectionID: &sb, Type: "TaEnrollment", Role: "TaEnrollment", WorkflowState: models.EnrollmentActive}
+	require.NoError(t, f.g.Create(limitedTeacher).Error)
+	require.NoError(t, f.g.Create(otherTA).Error)
+	code, _ = aeDo(t, f.app(aeOutsider, 1), http.MethodDelete, enrollmentPath(aeCourse, otherTA.ID)+"?task=deactivate", nil)
+	assert.Equal(t, http.StatusNotFound, code)
+	var stillActive models.Enrollment
+	require.NoError(t, f.g.First(&stillActive, otherTA.ID).Error)
+	assert.Equal(t, models.EnrollmentActive, stillActive.WorkflowState)
+	require.NoError(t, f.g.Delete(limitedTeacher).Error)
+	require.NoError(t, f.g.Delete(otherTA).Error)
 
 	// The unlimited teacher sees everyone.
 	_, roster = aeList(t, f.app(aeTeacher, 1), fmt.Sprintf("/api/v1/courses/%d/enrollments", aeCourse))
