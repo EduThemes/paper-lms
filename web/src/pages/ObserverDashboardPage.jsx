@@ -20,6 +20,7 @@ import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
 import RedeemCodeForm from '../components/pairing/RedeemCodeForm';
+import ObserverAlertsPanel from '../components/learner/ObserverAlertsPanel';
 import useDocumentTitle from '../hooks/useDocumentTitle';
 import {
   Card,
@@ -664,6 +665,9 @@ const ObserverDashboardPage = () => {
               </CardContent>
             </Card>
           </div>
+
+          {/* G149: observer alerts + missing work for the selected child */}
+          {selectedChildId && <ObserverAlertsPanel studentId={selectedChildId} studentName={selectedKid?.name} />}
 
           <Separator className="my-8" />
 
