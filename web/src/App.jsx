@@ -8,6 +8,7 @@ const AssignmentsPage = React.lazy(() => import('./pages/AssignmentsPage'));
 const GradebookPage = React.lazy(() => import('./pages/GradebookPage'));
 const StudentGradesPage = React.lazy(() => import('./pages/StudentGradesPage'));
 const ContentImportPage = React.lazy(() => import('./pages/ContentImportPage'));
+const CourseExportPage = React.lazy(() => import('./pages/CourseExportPage'));
 const ModulesPage = React.lazy(() => import('./pages/ModulesPage'));
 const PeoplePage = React.lazy(() => import('./pages/PeoplePage'));
 const AccessTokensPage = React.lazy(() => import('./pages/AccessTokensPage'));
@@ -235,6 +236,7 @@ const App = () => {
           <Route path="attendance" element={<AttendancePage />} />
           <Route path="question_banks" element={<QuestionBanksPage />} />
           <Route path="content_import" element={<ContentImportPage />} />
+          <Route path="content_export" element={<CourseExportPage />} />
           {/* P3 Features */}
           <Route path="assignments/:assignmentId/mastery_paths" element={<MasteryPathsEditorPage />} />
           <Route path="appointment_groups" element={<AppointmentGroupsPage />} />
