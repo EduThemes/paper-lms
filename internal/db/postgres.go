@@ -110,6 +110,11 @@ func allAutoMigrateModels() []interface{} {
 		&models.Attachment{},
 		&models.SISBatch{},
 		&models.SISBatchError{},
+		&models.SISBatchFile{},
+		&models.UserLogin{},
+		&models.AccountReport{},
+		&models.BrandConfig{},
+		&models.StorageQuota{},
 		// Quiz Engine, Rubrics, Grading Periods, Overrides
 		&models.QuizQuestion{},
 		&models.QuizSubmission{},

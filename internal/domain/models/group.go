@@ -13,6 +13,8 @@ type Group struct {
 	ContextType     string    `json:"context_type" gorm:"not null;default:'Course'"`
 	ContextID       uint      `json:"context_id" gorm:"not null;index"`
 	WorkflowState   string    `json:"workflow_state" gorm:"not null;default:'available'"`
+	// SISSourceID is the groups.csv group_id (G111, migration 000152).
+	SISSourceID     *string   `json:"sis_source_id" gorm:"column:sis_source_id;index"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
