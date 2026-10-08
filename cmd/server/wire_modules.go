@@ -24,6 +24,7 @@ type modulesLaneDeps struct {
 	ToolRepo          repository.ContextExternalToolRepository
 	DevKeyRepo        repository.DeveloperKeyRepository
 	CourseRepo        repository.CourseRepository
+	IMSCCParser       *service.IMSCCParser
 }
 
 // wireModulesLane builds the module progression engine (G061/G062) and
@@ -41,5 +42,9 @@ func wireModulesLane(database *gorm.DB, d modulesLaneDeps) *handlers.ModuleProgr
 	d.ModuleItemHandler.SetProgressionService(progression)
 	d.ModuleService.SetLinkRepos(d.AttachmentRepo, d.ToolRepo, d.DevKeyRepo, d.CourseRepo)
 	d.CoursePaces.SetPacingRepos(postgres.NewBlackoutDateRepository(database), d.QuizRepo, d.TopicRepo)
+	if d.IMSCCParser != nil {
+		// G068: imported module prerequisites.
+		d.IMSCCParser.SetPrerequisiteRepo(postgres.NewModulePrerequisiteRepository(database))
+	}
 	return handlers.NewModuleProgressionHandler(progression)
 }

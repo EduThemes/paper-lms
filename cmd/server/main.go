@@ -1094,7 +1094,7 @@ func main() {
 		ModuleService: moduleService, ModuleHandler: moduleHandler, ModuleItemHandler: moduleItemHandler,
 		AssignmentService: assignmentService, MasteryPaths: masteryPathService, CoursePaces: coursePaceService,
 		QuizRepo: quizRepo, TopicRepo: discussionTopicRepo, AttachmentRepo: attachmentRepo,
-		ToolRepo: externalToolRepo, DevKeyRepo: devKeyRepo, CourseRepo: courseRepo,
+		ToolRepo: externalToolRepo, DevKeyRepo: devKeyRepo, CourseRepo: courseRepo, IMSCCParser: imsccParser,
 	})
 
 	// Create Fiber app
