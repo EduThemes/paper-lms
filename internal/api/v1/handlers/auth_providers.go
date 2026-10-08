@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -71,17 +72,37 @@ func authProviderToJSON(p *models.AuthenticationProvider) fiber.Map {
 	return result
 }
 
+// authProviderAccountScope parses the URL :account_id and enforces that
+// it is the caller's own tenant (super_admin excepted). It returns
+// wrote=true after writing a 400/404; the caller MUST short-circuit.
+//
+// Every provider route goes through here: SSO configuration is the
+// most sensitive per-tenant setting (rewriting another tenant's OIDC
+// issuer is a full account takeover), so the URL account_id is never
+// trusted on its own and every by-id lookup is tied back to it.
+func authProviderAccountScope(c *fiber.Ctx) (uint, bool) {
+	accountID, err := strconv.Atoi(c.Params("account_id"))
+	if err != nil || accountID <= 0 {
+		_ = responses.BadRequest(c, "Invalid account ID")
+		return 0, true
+	}
+	if assertSameTenant(c, uint(accountID)) {
+		return 0, true
+	}
+	return uint(accountID), false
+}
+
 // ListProviders returns a paginated list of authentication providers for an account.
 // GET /api/v1/accounts/:account_id/authentication_providers
 func (h *AuthProviderHandler) ListProviders(c *fiber.Ctx) error {
-	accountID, err := strconv.Atoi(c.Params("account_id"))
-	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
+	accountID, wrote := authProviderAccountScope(c)
+	if wrote {
+		return nil
 	}
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.service.ListProviders(c.Context(), uint(accountID), params)
+	result, err := h.service.ListProviders(c.Context(), accountID, params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch authentication providers")
 	}
@@ -99,12 +120,16 @@ func (h *AuthProviderHandler) ListProviders(c *fiber.Ctx) error {
 // GetProvider returns a single authentication provider.
 // GET /api/v1/accounts/:account_id/authentication_providers/:id
 func (h *AuthProviderHandler) GetProvider(c *fiber.Ctx) error {
+	accountID, wrote := authProviderAccountScope(c)
+	if wrote {
+		return nil
+	}
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return responses.BadRequest(c, "Invalid authentication provider ID")
 	}
 
-	provider, err := h.service.GetProvider(c.Context(), uint(id))
+	provider, err := h.service.GetProvider(c.Context(), uint(id), accountID)
 	if err != nil {
 		return responses.NotFound(c, "authentication provider")
 	}
@@ -136,9 +161,9 @@ func (h *AuthProviderHandler) ListOIDCPresets(c *fiber.Ctx) error {
 // CreateProvider creates a new authentication provider.
 // POST /api/v1/accounts/:account_id/authentication_providers
 func (h *AuthProviderHandler) CreateProvider(c *fiber.Ctx) error {
-	accountID, err := strconv.Atoi(c.Params("account_id"))
-	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
+	accountID, wrote := authProviderAccountScope(c)
+	if wrote {
+		return nil
 	}
 
 	var input struct {
@@ -213,7 +238,7 @@ func (h *AuthProviderHandler) CreateProvider(c *fiber.Ctx) error {
 	}
 
 	provider := &models.AuthenticationProvider{
-		AccountID:                 uint(accountID),
+		AccountID:                 accountID,
 		AuthType:                  input.AuthType,
 		Position:                  input.Position,
 		IDPEntityID:               input.IDPEntityID,
@@ -253,6 +278,10 @@ func (h *AuthProviderHandler) CreateProvider(c *fiber.Ctx) error {
 // UpdateProvider updates an existing authentication provider.
 // PUT /api/v1/accounts/:account_id/authentication_providers/:id
 func (h *AuthProviderHandler) UpdateProvider(c *fiber.Ctx) error {
+	accountID, wrote := authProviderAccountScope(c)
+	if wrote {
+		return nil
+	}
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return responses.BadRequest(c, "Invalid authentication provider ID")
@@ -351,8 +380,11 @@ func (h *AuthProviderHandler) UpdateProvider(c *fiber.Ctx) error {
 		AutoProvision:             input.AutoProvision,
 	}
 
-	provider, err := h.service.UpdateProvider(c.Context(), uint(id), updates)
+	provider, err := h.service.UpdateProvider(c.Context(), uint(id), accountID, updates)
 	if err != nil {
+		if errors.Is(err, service.ErrAuthProviderNotFound) {
+			return responses.NotFound(c, "authentication provider")
+		}
 		return responses.BadRequest(c, err.Error())
 	}
 
@@ -362,12 +394,16 @@ func (h *AuthProviderHandler) UpdateProvider(c *fiber.Ctx) error {
 // DeleteProvider soft-deletes an authentication provider.
 // DELETE /api/v1/accounts/:account_id/authentication_providers/:id
 func (h *AuthProviderHandler) DeleteProvider(c *fiber.Ctx) error {
+	accountID, wrote := authProviderAccountScope(c)
+	if wrote {
+		return nil
+	}
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return responses.BadRequest(c, "Invalid authentication provider ID")
 	}
 
-	if err := h.service.DeleteProvider(c.Context(), uint(id)); err != nil {
+	if err := h.service.DeleteProvider(c.Context(), uint(id), accountID); err != nil {
 		return responses.NotFound(c, "authentication provider")
 	}
 
@@ -377,12 +413,16 @@ func (h *AuthProviderHandler) DeleteProvider(c *fiber.Ctx) error {
 // TestConnection tests the LDAP connection for an authentication provider.
 // POST /api/v1/accounts/:account_id/authentication_providers/:id/test
 func (h *AuthProviderHandler) TestConnection(c *fiber.Ctx) error {
+	accountID, wrote := authProviderAccountScope(c)
+	if wrote {
+		return nil
+	}
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return responses.BadRequest(c, "Invalid authentication provider ID")
 	}
 
-	result, err := h.service.TestLDAPConnection(c.Context(), uint(id))
+	result, err := h.service.TestLDAPConnection(c.Context(), uint(id), accountID)
 	if err != nil {
 		return responses.NotFound(c, "authentication provider")
 	}

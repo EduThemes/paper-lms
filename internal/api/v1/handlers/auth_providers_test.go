@@ -130,7 +130,7 @@ func TestCreateProvider_EncryptsLDAPBindPassword(t *testing.T) {
 	svc := service.NewAuthProviderService(repo)
 	h := NewAuthProviderHandler(svc)
 
-	app := fiber.New()
+	app := newAuthProviderTestApp(1, false)
 	app.Post("/accounts/:account_id/authentication_providers", h.CreateProvider)
 
 	body := map[string]any{
@@ -197,7 +197,7 @@ func TestCreateProvider_NonLDAPDoesNotTouchLDAPColumns(t *testing.T) {
 	svc := service.NewAuthProviderService(repo)
 	h := NewAuthProviderHandler(svc)
 
-	app := fiber.New()
+	app := newAuthProviderTestApp(1, false)
 	app.Post("/accounts/:account_id/authentication_providers", h.CreateProvider)
 
 	body := map[string]any{
@@ -251,7 +251,7 @@ func TestUpdateProvider_EncryptsRotatedLDAPBindPassword(t *testing.T) {
 	svc := service.NewAuthProviderService(repo)
 	h := NewAuthProviderHandler(svc)
 
-	app := fiber.New()
+	app := newAuthProviderTestApp(1, false)
 	app.Put("/accounts/:account_id/authentication_providers/:id", h.UpdateProvider)
 
 	// Rotation: admin supplies a new bind password.
@@ -313,6 +313,130 @@ func TestUpdateProvider_EncryptsRotatedLDAPBindPassword(t *testing.T) {
 	stored2 := repo.updated[len(repo.updated)-1]
 	if !bytes.Equal(stored2.LDAPBindPasswordEncrypted, stored.LDAPBindPasswordEncrypted) {
 		t.Error("no-op update clobbered the existing ciphertext — rotation guard broken")
+	}
+}
+
+// newAuthProviderTestApp returns a fiber app whose requests carry the
+// auth Locals an account admin of callerAccountID would have after the
+// Protected + admin middleware ran.
+func newAuthProviderTestApp(callerAccountID uint, superAdmin bool) *fiber.App {
+	app := fiber.New()
+	app.Use(func(c *fiber.Ctx) error {
+		c.Locals("user_id", uint(42))
+		c.Locals("account_id", callerAccountID)
+		c.Locals("is_admin", true)
+		if superAdmin {
+			c.Locals("is_super_admin", true)
+		}
+		return c.Next()
+	})
+	return app
+}
+
+func mountAuthProviderRoutes(app *fiber.App, h *AuthProviderHandler) {
+	app.Get("/accounts/:account_id/authentication_providers", h.ListProviders)
+	app.Post("/accounts/:account_id/authentication_providers", h.CreateProvider)
+	app.Get("/accounts/:account_id/authentication_providers/:id", h.GetProvider)
+	app.Put("/accounts/:account_id/authentication_providers/:id", h.UpdateProvider)
+	app.Delete("/accounts/:account_id/authentication_providers/:id", h.DeleteProvider)
+	app.Post("/accounts/:account_id/authentication_providers/:id/test", h.TestConnection)
+}
+
+// TestAuthProviders_CrossTenantRefused is the B062 regression: an admin
+// of tenant 2 must not be able to read, rewrite, delete or probe tenant
+// 1's SSO provider — neither by addressing it under their own account
+// (id-only lookup) nor by naming tenant 1 in the URL. Every attempt
+// is an indistinguishable 404 and the stored row is untouched.
+func TestAuthProviders_CrossTenantRefused(t *testing.T) {
+	setEncryptionKeyForTest(t)
+	repo := newFakeAuthProviderRepo()
+	victim := &models.AuthenticationProvider{
+		AccountID:     1,
+		AuthType:      "oidc",
+		OIDCIssuerURL: "https://idp.tenant-one.example",
+		OIDCClientID:  "tenant-one-client",
+		WorkflowState: "active",
+	}
+	_ = repo.Create(context.Background(), victim)
+
+	h := NewAuthProviderHandler(service.NewAuthProviderService(repo))
+	app := newAuthProviderTestApp(2, false)
+	mountAuthProviderRoutes(app, h)
+
+	hijack, _ := json.Marshal(map[string]any{
+		"auth_type":       "oidc",
+		"oidc_issuer_url": "https://attacker.example",
+		"oidc_client_id":  "attacker",
+	})
+
+	cases := []struct {
+		method, path string
+		body         []byte
+	}{
+		// Own account in URL, victim id — id-only lookup must not resolve.
+		{"GET", "/accounts/2/authentication_providers/1", nil},
+		{"PUT", "/accounts/2/authentication_providers/1", hijack},
+		{"POST", "/accounts/2/authentication_providers/1/test", nil},
+		{"DELETE", "/accounts/2/authentication_providers/1", nil},
+		// Victim account in URL — rejected before any lookup.
+		{"GET", "/accounts/1/authentication_providers", nil},
+		{"POST", "/accounts/1/authentication_providers", hijack},
+		{"GET", "/accounts/1/authentication_providers/1", nil},
+		{"PUT", "/accounts/1/authentication_providers/1", hijack},
+		{"DELETE", "/accounts/1/authentication_providers/1", nil},
+	}
+	for _, tc := range cases {
+		var body io.Reader
+		if tc.body != nil {
+			body = bytes.NewReader(tc.body)
+		}
+		req := httptest.NewRequest(tc.method, tc.path, body)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := app.Test(req, -1)
+		if err != nil {
+			t.Fatalf("%s %s: %v", tc.method, tc.path, err)
+		}
+		if resp.StatusCode != fiber.StatusNotFound {
+			t.Errorf("%s %s: got %d, want 404", tc.method, tc.path, resp.StatusCode)
+		}
+	}
+
+	stored, err := repo.FindByID(context.Background(), 1)
+	if err != nil {
+		t.Fatal("victim provider was deleted by a cross-tenant admin")
+	}
+	if stored.OIDCIssuerURL != "https://idp.tenant-one.example" || stored.OIDCClientID != "tenant-one-client" {
+		t.Errorf("victim provider was rewritten: issuer=%q client=%q", stored.OIDCIssuerURL, stored.OIDCClientID)
+	}
+	if len(repo.created) != 1 {
+		t.Errorf("cross-tenant create landed a row: %d rows", len(repo.created))
+	}
+}
+
+// TestAuthProviders_SameTenantAndSuperAdmin confirms the guard does not
+// lock out the legitimate owner or a platform super_admin.
+func TestAuthProviders_SameTenantAndSuperAdmin(t *testing.T) {
+	repo := newFakeAuthProviderRepo()
+	_ = repo.Create(context.Background(), &models.AuthenticationProvider{AccountID: 1, AuthType: "saml", WorkflowState: "active"})
+	h := NewAuthProviderHandler(service.NewAuthProviderService(repo))
+
+	owner := newAuthProviderTestApp(1, false)
+	mountAuthProviderRoutes(owner, h)
+	resp, _ := owner.Test(httptest.NewRequest("GET", "/accounts/1/authentication_providers/1", nil), -1)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Errorf("owner GET: got %d, want 200", resp.StatusCode)
+	}
+
+	super := newAuthProviderTestApp(9, true)
+	mountAuthProviderRoutes(super, h)
+	resp, _ = super.Test(httptest.NewRequest("GET", "/accounts/1/authentication_providers/1", nil), -1)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Errorf("super_admin GET: got %d, want 200", resp.StatusCode)
+	}
+	// Even a super_admin can't address a provider under the wrong account.
+	resp, _ = super.Test(httptest.NewRequest("GET", "/accounts/9/authentication_providers/1", nil), -1)
+	if resp.StatusCode != fiber.StatusNotFound {
+		t.Errorf("super_admin wrong-parent GET: got %d, want 404", resp.StatusCode)
 	}
 }
 
