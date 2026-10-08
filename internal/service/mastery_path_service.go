@@ -63,6 +63,9 @@ func (s *MasteryPathService) CreateRule(ctx context.Context, courseID, triggerAs
 	if len(ranges) < 2 || len(ranges) > 3 {
 		return nil, errors.New("a Mastery Paths rule must have 2 or 3 scoring ranges")
 	}
+	if err := s.validateRuleAssignments(ctx, courseID, triggerAssignmentID, ranges); err != nil {
+		return nil, err
+	}
 	// Normalize bounds: if any value > 1, assume the whole set is 0-100.
 	scale := 1.0
 	for _, r := range ranges {
@@ -135,6 +138,49 @@ func (s *MasteryPathService) CreateRule(ctx context.Context, courseID, triggerAs
 		return nil, err
 	}
 	return s.masteryRepo.FindRuleByID(ctx, rule.ID)
+}
+
+// GetRule returns an active rule by id (nil, err when missing).
+func (s *MasteryPathService) GetRule(ctx context.Context, id uint) (*models.ConditionalReleaseRule, error) {
+	return s.masteryRepo.FindRuleByID(ctx, id)
+}
+
+// ErrMasteryPathForeignAssignment is returned when a rule names a trigger
+// or released assignment outside the rule's course.
+var ErrMasteryPathForeignAssignment = errors.New("assignments must belong to this course")
+
+// validateRuleAssignments checks that the trigger and every released
+// assignment belong to courseID. Without it a teacher could wire another
+// course's assignment into their rule and have grading in their course
+// release (assign) foreign content.
+func (s *MasteryPathService) validateRuleAssignments(ctx context.Context, courseID, triggerAssignmentID uint, ranges []RangeInput) error {
+	if s.assignmentRepo == nil {
+		return nil
+	}
+	check := func(id uint) error {
+		a, err := s.assignmentRepo.FindByID(ctx, id, 0)
+		if err != nil || a == nil || a.CourseID != courseID || a.WorkflowState == models.AssignmentDeleted {
+			return ErrMasteryPathForeignAssignment
+		}
+		return nil
+	}
+	if err := check(triggerAssignmentID); err != nil {
+		return err
+	}
+	for _, r := range ranges {
+		sets := r.Sets
+		if len(sets) == 0 {
+			sets = [][]uint{r.AssignmentIDs}
+		}
+		for _, ids := range sets {
+			for _, id := range ids {
+				if err := check(id); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // ReplaceRule replaces an existing rule's structure (used by PUT).

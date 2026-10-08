@@ -37,10 +37,19 @@ func (r *moduleItemRepo) Delete(ctx context.Context, id uint) error {
 }
 
 func (r *moduleItemRepo) ListByModuleID(ctx context.Context, moduleID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.ContentTag], error) {
+	return r.listByModule(ctx, r.db.WithContext(ctx).Model(&models.ContentTag{}).Where("context_module_id = ? AND workflow_state != ?", moduleID, "deleted"), params)
+}
+
+// ListPublishedByModuleID returns only published (active) items — the
+// student-facing view (B045).
+func (r *moduleItemRepo) ListPublishedByModuleID(ctx context.Context, moduleID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.ContentTag], error) {
+	return r.listByModule(ctx, r.db.WithContext(ctx).Model(&models.ContentTag{}).Where("context_module_id = ? AND workflow_state = ?", moduleID, models.ContentTagActive), params)
+}
+
+func (r *moduleItemRepo) listByModule(ctx context.Context, query *gorm.DB, params repository.PaginationParams) (*repository.PaginatedResult[models.ContentTag], error) {
 	var items []models.ContentTag
 	var count int64
 
-	query := r.db.WithContext(ctx).Model(&models.ContentTag{}).Where("context_module_id = ? AND workflow_state != ?", moduleID, "deleted")
 	query.Count(&count)
 
 	offset := (params.Page - 1) * params.PerPage

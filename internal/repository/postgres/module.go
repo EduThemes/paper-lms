@@ -66,6 +66,31 @@ func (r *moduleRepo) ListByCourseID(ctx context.Context, courseID uint, params r
 	}, nil
 }
 
+// ListPublishedByCourseID returns only published (workflow_state =
+// 'active') modules with only their published items — what a student or
+// observer may see (B045).
+func (r *moduleRepo) ListPublishedByCourseID(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.ContextModule], error) {
+	var modules []models.ContextModule
+	var count int64
+
+	query := r.db.WithContext(ctx).Model(&models.ContextModule{}).Where("course_id = ? AND workflow_state = ?", courseID, "active")
+	query.Count(&count)
+
+	offset := (params.Page - 1) * params.PerPage
+	if err := query.Preload("Items", func(db *gorm.DB) *gorm.DB {
+		return db.Where("workflow_state = ?", models.ContentTagActive).Order("position ASC")
+	}).Offset(offset).Limit(params.PerPage).Order("position ASC").Find(&modules).Error; err != nil {
+		return nil, err
+	}
+
+	return &repository.PaginatedResult[models.ContextModule]{
+		Items:      modules,
+		TotalCount: count,
+		Page:       params.Page,
+		PerPage:    params.PerPage,
+	}, nil
+}
+
 func (r *moduleRepo) FindActiveByDateRange(ctx context.Context, courseID uint, date time.Time) (*models.ContextModule, error) {
 	var module models.ContextModule
 	if err := r.db.WithContext(ctx).

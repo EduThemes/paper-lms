@@ -142,29 +142,58 @@ func (h *ContentMigrationHandler) CreateMigration(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(contentMigrationToJSON(migration))
 }
 
-func (h *ContentMigrationHandler) GetMigration(c *fiber.Ctx) error {
-	migrationID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid content migration ID")
+// requireMigrationInCourse loads :id and verifies it belongs to the
+// URL's :course_id (F-013 parent-tie). The instructor middleware has
+// already tied :course_id to the caller and their tenant, so the course
+// tie is also the tenant tie. Writes a 404 and returns wrote=true on any
+// miss — the caller must `return nil`.
+//
+// B142: the repo's FindByID is keyed by id alone, so pre-fix an
+// instructor of course A could read (error text, attachment path,
+// settings) or rewrite any course's migration in any tenant.
+func (h *ContentMigrationHandler) requireMigrationInCourse(c *fiber.Ctx) (*models.ContentMigration, bool) {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil || courseID <= 0 {
+		_ = responses.BadRequest(c, "Invalid course ID")
+		return nil, true
 	}
-
+	migrationID, err := c.ParamsInt("id")
+	if err != nil || migrationID <= 0 {
+		_ = responses.BadRequest(c, "Invalid content migration ID")
+		return nil, true
+	}
 	migration, err := h.migrationService.GetMigration(c.Context(), uint(migrationID))
-	if err != nil {
-		return responses.NotFound(c, "content migration")
+	if err != nil || migration == nil || migration.CourseID != uint(courseID) {
+		_ = responses.NotFound(c, "content migration")
+		return nil, true
+	}
+	return migration, false
+}
+
+// validContentMigrationStates is the closed set of workflow_state values
+// a PUT may write.
+var validContentMigrationStates = map[models.ContentMigrationWorkflow]bool{
+	models.ContentMigrationQueued:        true,
+	models.ContentMigrationCreated:       true,
+	models.ContentMigrationPreProcessing: true,
+	models.ContentMigrationRunning:       true,
+	models.ContentMigrationCompleted:     true,
+	models.ContentMigrationFailed:        true,
+}
+
+func (h *ContentMigrationHandler) GetMigration(c *fiber.Ctx) error {
+	migration, wrote := h.requireMigrationInCourse(c)
+	if wrote {
+		return nil
 	}
 
 	return c.JSON(contentMigrationToJSON(migration))
 }
 
 func (h *ContentMigrationHandler) UpdateMigration(c *fiber.Ctx) error {
-	migrationID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid content migration ID")
-	}
-
-	migration, err := h.migrationService.GetMigration(c.Context(), uint(migrationID))
-	if err != nil {
-		return responses.NotFound(c, "content migration")
+	migration, wrote := h.requireMigrationInCourse(c)
+	if wrote {
+		return nil
 	}
 
 	var input struct {
@@ -180,7 +209,11 @@ func (h *ContentMigrationHandler) UpdateMigration(c *fiber.Ctx) error {
 	}
 
 	if input.ContentMigration.WorkflowState != nil {
-		migration.WorkflowState = models.ContentMigrationWorkflow(*input.ContentMigration.WorkflowState)
+		state := models.ContentMigrationWorkflow(*input.ContentMigration.WorkflowState)
+		if !validContentMigrationStates[state] {
+			return responses.BadRequest(c, "Invalid workflow_state")
+		}
+		migration.WorkflowState = state
 	}
 	raw := input.ContentMigration.MigrationSettings
 	if len(raw) == 0 {

@@ -44,6 +44,14 @@ func (m *MockModuleItemRepository) ListByModuleID(ctx context.Context, moduleID 
 	return args.Get(0).(*repository.PaginatedResult[models.ContentTag]), args.Error(1)
 }
 
+func (m *MockModuleItemRepository) ListPublishedByModuleID(ctx context.Context, moduleID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.ContentTag], error) {
+	args := m.Called(ctx, moduleID, params)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*repository.PaginatedResult[models.ContentTag]), args.Error(1)
+}
+
 func (m *MockModuleItemRepository) ReorderItems(ctx context.Context, moduleID uint, itemIDs []uint) error {
 	args := m.Called(ctx, moduleID, itemIDs)
 	return args.Error(0)

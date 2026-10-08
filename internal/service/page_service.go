@@ -57,6 +57,26 @@ func (s *PageService) ListByCourse(ctx context.Context, courseID uint, params re
 	return s.repo.ListByCourseID(ctx, courseID, params)
 }
 
+// ListPublishedByCourse is the student-facing page list (published only).
+func (s *PageService) ListPublishedByCourse(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.WikiPage], error) {
+	return s.repo.ListPublishedByCourseID(ctx, courseID, params)
+}
+
+// GetFrontPage returns the course's front page.
+func (s *PageService) GetFrontPage(ctx context.Context, courseID uint) (*models.WikiPage, error) {
+	return s.repo.FindFrontPage(ctx, courseID)
+}
+
+// EnsureSingleFrontPage clears front_page on every other page of the
+// course once page has been made the front page (Canvas: a course has at
+// most one front page).
+func (s *PageService) EnsureSingleFrontPage(ctx context.Context, page *models.WikiPage) error {
+	if page == nil || !page.FrontPage {
+		return nil
+	}
+	return s.repo.ClearFrontPage(ctx, page.CourseID, page.ID)
+}
+
 var nonAlphanumeric = regexp.MustCompile(`[^a-z0-9]+`)
 
 func slugify(title string) string {

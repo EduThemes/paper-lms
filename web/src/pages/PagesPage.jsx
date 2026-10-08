@@ -10,6 +10,9 @@ import { clearRceDraft } from '../components/rce/rceDrafts';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import ListPager from '../components/ListPager';
+
+const PAGES_PER_PAGE = 50;
 
 const PagesPage = () => {
   const { courseId } = useParams();
@@ -22,20 +25,29 @@ const PagesPage = () => {
   const [newPage, setNewPage] = useState({ title: '', body: '', published: true });
   const { issues: crossCourseIssues, checkAndSave, dismiss: dismissCrossCourse, confirm: confirmCrossCourse } = useCrossCourseCheck(courseId);
 
+  // B148: the API pages its results; page through them instead of
+  // silently showing only the first page.
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({});
+
   useEffect(() => {
+    let cancelled = false;
     const fetchPages = async () => {
       try {
-        const result = await api.getPages(courseId);
+        const result = await api.getPages(courseId, page, PAGES_PER_PAGE);
+        if (cancelled) return;
         setPages(result.data || []);
+        setPagination(result.pagination || {});
       } catch (err) {
-        setError(err.message);
+        if (!cancelled) setError(err.message);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchPages();
-  }, [courseId]);
+    return () => { cancelled = true; };
+  }, [courseId, page]);
 
   const doCreate = async () => {
     setCreating(true);
@@ -202,6 +214,7 @@ const PagesPage = () => {
           </div>
         )}
       </div>
+      <ListPager page={page} pagination={pagination} onPageChange={setPage} label="Pages pagination" />
       <CrossCourseWarningDialog issues={crossCourseIssues} onGoBack={dismissCrossCourse} onSaveAnyway={confirmCrossCourse} />
     </Layout>
   );

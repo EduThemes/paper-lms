@@ -318,6 +318,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Get("/courses/:course_id/pages/:url_or_id", enrolled, r.PageHandler.GetPage)
 	protected.Put("/courses/:course_id/pages/:url_or_id", instructor, r.PageHandler.UpdatePage)
 	protected.Delete("/courses/:course_id/pages/:url_or_id", instructor, r.PageHandler.DeletePage)
+	protected.Get("/courses/:course_id/front_page", enrolled, r.PageHandler.GetFrontPage)
 
 	// Assignments (view: enrolled; manage: instructor)
 	protected.Get("/courses/:course_id/assignments", enrolled, r.AssignmentHandler.ListAssignments)

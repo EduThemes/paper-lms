@@ -139,6 +139,7 @@ func allAutoMigrateModels() []interface{} {
 		&models.BlueprintTemplate{},
 		&models.BlueprintSubscription{},
 		&models.BlueprintMigration{},
+		&models.BlueprintContentTag{},
 		&models.CoursePace{},
 		&models.CoursePaceModuleItem{},
 		// Collaborations, Conferences, Analytics

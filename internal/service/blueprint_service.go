@@ -33,6 +33,21 @@ type BlueprintService struct {
 	quizRepo   repository.QuizRepository
 	qqRepo     repository.QuizQuestionRepository
 	discRepo   repository.DiscussionTopicRepository
+
+	// Optional dependencies (SetDeps). courseRepo + enrollmentRepo gate
+	// which courses may be associated (B037); tagRepo is the sync
+	// identity map that lets edits propagate (B041).
+	courseRepo     repository.CourseRepository
+	enrollmentRepo repository.EnrollmentRepository
+	tagRepo        repository.BlueprintContentTagRepository
+}
+
+// SetDeps wires the optional association-authorization and sync
+// identity-map repositories.
+func (s *BlueprintService) SetDeps(courseRepo repository.CourseRepository, enrollmentRepo repository.EnrollmentRepository, tagRepo repository.BlueprintContentTagRepository) {
+	s.courseRepo = courseRepo
+	s.enrollmentRepo = enrollmentRepo
+	s.tagRepo = tagRepo
 }
 
 func NewBlueprintService(

@@ -59,3 +59,24 @@ func (m *MockPageRepository) FindPublicByCourseAndURL(ctx context.Context, cours
 	}
 	return args.Get(0).(*models.WikiPage), args.Error(1)
 }
+
+func (m *MockPageRepository) ListPublishedByCourseID(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.WikiPage], error) {
+	args := m.Called(ctx, courseID, params)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*repository.PaginatedResult[models.WikiPage]), args.Error(1)
+}
+
+func (m *MockPageRepository) FindFrontPage(ctx context.Context, courseID uint) (*models.WikiPage, error) {
+	args := m.Called(ctx, courseID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.WikiPage), args.Error(1)
+}
+
+func (m *MockPageRepository) ClearFrontPage(ctx context.Context, courseID, exceptID uint) error {
+	args := m.Called(ctx, courseID, exceptID)
+	return args.Error(0)
+}

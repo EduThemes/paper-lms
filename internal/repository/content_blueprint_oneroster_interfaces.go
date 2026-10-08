@@ -44,6 +44,17 @@ type BlueprintMigrationRepository interface {
 	ListBySubscriptionID(ctx context.Context, subscriptionID uint, params PaginationParams) (*PaginatedResult[models.BlueprintMigration], error)
 }
 
+// BlueprintContentTagRepository stores the blueprint sync identity map
+// (source item → child copy per associated course).
+type BlueprintContentTagRepository interface {
+	// Find returns the tag for one source item in one child course, or
+	// (nil, nil) when none exists.
+	Find(ctx context.Context, templateID, childCourseID uint, contentType string, sourceID uint) (*models.BlueprintContentTag, error)
+	// Upsert inserts the tag or updates child_id/synced_at of the
+	// existing (template, child course, content type, source) row.
+	Upsert(ctx context.Context, tag *models.BlueprintContentTag) error
+}
+
 type OneRosterConnectionRepository interface {
 	Create(ctx context.Context, conn *models.OneRosterConnection) error
 	// 13.1.D — direct account_id column.

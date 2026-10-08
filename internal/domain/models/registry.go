@@ -71,6 +71,7 @@ func AllModels() []interface{} {
 		&BlueprintTemplate{},
 		&BlueprintSubscription{},
 		&BlueprintMigration{},
+		&BlueprintContentTag{},
 		&CoursePace{},
 		&CoursePaceModuleItem{},
 		&Collaboration{},
