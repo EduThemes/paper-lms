@@ -489,9 +489,12 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 
 	var input struct {
 		User struct {
-			Name     string `json:"name"`
-			Locale   string `json:"locale"`
-			TimeZone string `json:"time_zone"`
+			Name string `json:"name"`
+			// G158: a pointer so "" can clear the saved language (back to
+			// the device choice / account default) while an absent field
+			// leaves it unchanged.
+			Locale   *string `json:"locale"`
+			TimeZone string  `json:"time_zone"`
 		} `json:"user"`
 	}
 
@@ -502,8 +505,15 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 	if input.User.Name != "" {
 		user.Name = input.User.Name
 	}
-	if input.User.Locale != "" {
-		user.Locale = input.User.Locale
+	// A profile form echoes the stored locale back on every save; a value
+	// saved before validation existed (e.g. "fr") must not block saving
+	// the name or time zone, so an unchanged locale is left as is.
+	if input.User.Locale != nil && *input.User.Locale != user.Locale {
+		locale, err := service.NormalizeUserLocale(*input.User.Locale)
+		if err != nil {
+			return responses.BadRequest(c, "locale is not a supported language")
+		}
+		user.Locale = locale
 	}
 	if input.User.TimeZone != "" && input.User.TimeZone != user.TimeZone {
 		// G157: due dates are shown and entered in this zone, so a new

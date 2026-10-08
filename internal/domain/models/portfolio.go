@@ -25,11 +25,21 @@ type Portfolio struct {
 	LinkedInURL    string     `json:"linkedin_url"`
 	WebsiteURL     string     `json:"website_url"`
 	IsPublic       bool       `json:"is_public" gorm:"default:false"`
-	PublicURL      string     `json:"public_url" gorm:"uniqueIndex"`
+	// PublicURL is set when the portfolio is first published. *string so an
+	// unpublished portfolio stores NULL: the UNIQUE index treats NULLs as
+	// distinct, while '' collided and blocked a user's second portfolio
+	// (migration 000170).
+	PublicURL *string `json:"public_url" gorm:"uniqueIndex"`
 	CustomDomain   string     `json:"custom_domain"`
 	WorkflowState  string     `json:"workflow_state" gorm:"not null;default:'draft'"` // draft, published, archived
 	ViewCount      int64      `json:"view_count" gorm:"default:0"`
 	LastExportedAt *time.Time `json:"last_exported_at"`
+	// ShareToken is the secret of the private sharing link
+	// (/portfolios/shared/:token). NULL = no link. *string because a
+	// partial UNIQUE index (migration 000169) skips NULL rows only.
+	ShareToken *string `json:"-" gorm:"column:share_token"`
+	// CommentsDisabled turns viewer comments off (Canvas allow_comments).
+	CommentsDisabled bool `json:"comments_disabled" gorm:"column:comments_disabled;not null;default:false"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 }

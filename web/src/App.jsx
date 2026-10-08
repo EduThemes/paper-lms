@@ -94,6 +94,7 @@ import { OAuthConsentGate, ResumePendingOAuthConsent } from './components/OAuthC
 import SuperAdminGate from './components/SuperAdminGate';
 import { CourseUIProvider } from './contexts/CourseUIContext';
 import CourseTabGate from './components/CourseTabGate';
+import CoursePageViewTracker from './components/analytics/CoursePageViewTracker';
 import { useAuth } from './contexts/AuthContext';
 import { api } from './services/api';
 const SetupWizardPage = React.lazy(() => import('./pages/SetupWizardPage'));
@@ -104,6 +105,9 @@ const AppointmentGroupsPage = React.lazy(() => import('./pages/AppointmentGroups
 const AppointmentGroupEditorPage = React.lazy(() => import('./pages/AppointmentGroupEditorPage'));
 const OutcomeProficiencyPage = React.lazy(() => import('./pages/OutcomeProficiencyPage'));
 const MasteryGradebookPage = React.lazy(() => import('./pages/MasteryGradebookPage'));
+const StudentAnalyticsPage = React.lazy(() => import('./pages/StudentAnalyticsPage'));
+const StudentMasteryPage = React.lazy(() => import('./pages/StudentMasteryPage'));
+const PortfolioSharedPage = React.lazy(() => import('./pages/PortfolioSharedPage'));
 const ReadingPreferencesPage = React.lazy(() => import('./pages/ReadingPreferencesPage'));
 const GamificationPreferencesPage = React.lazy(() => import('./pages/GamificationPreferencesPage'));
 const LanguagePreferencesPage = React.lazy(() => import('./pages/LanguagePreferencesPage'));
@@ -186,6 +190,7 @@ const App = () => {
         <Route path="/users/self/passkeys/enroll" element={<ProtectedRoute><PasskeyEnrollPage /></ProtectedRoute>} />
         <Route path="/consent/verify/:token" element={<ParentalConsentPage />} />
         <Route path="/portfolios/public/:slug" element={<PortfolioPublicPage />} />
+        <Route path="/portfolios/shared/:token" element={<PortfolioSharedPage />} />
         <Route path="/courses/:courseId/p/:slug" element={<PublicPageView />} />
         <Route
           path="/"
@@ -209,7 +214,7 @@ const App = () => {
           path="/courses/:courseId"
           element={
             <ProtectedRoute>
-              <CourseUIProvider><CourseTabGate><Outlet /></CourseTabGate></CourseUIProvider>
+              <CourseUIProvider><CoursePageViewTracker /><CourseTabGate><Outlet /></CourseTabGate></CourseUIProvider>
             </ProtectedRoute>
           }
         >
@@ -260,6 +265,8 @@ const App = () => {
           <Route path="collaborations" element={<CollaborationsPage />} />
           <Route path="conferences" element={<ConferencesPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
+          <Route path="analytics/users/:userId" element={<StudentAnalyticsPage />} />
+          <Route path="outcomes/mastery" element={<StudentMasteryPage />} />
           <Route path="audit_log" element={<AuditLogPage />} />
           <Route path="gamification/currencies" element={<GamificationCurrenciesPage />} />
           <Route path="gamification/badges" element={<GamificationBadgesPage />} />

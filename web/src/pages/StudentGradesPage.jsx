@@ -381,6 +381,13 @@ const StudentGradesPage = () => {
                       {whatIf ? 'Exit What-If' : 'What-If grades'}
                     </button>
                   )}
+                  {/* G152: the student's outcome mastery view. */}
+                  <Link
+                    to={`/courses/${courseId}/outcomes/mastery${observeeId ? `?observee_id=${observeeId}` : ''}`}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border-default bg-surface-0 px-3 py-1.5 text-sm font-medium"
+                  >
+                    Learning Mastery
+                  </Link>
                 </div>
               </div>
             </div>

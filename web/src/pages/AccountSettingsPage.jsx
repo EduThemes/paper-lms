@@ -36,7 +36,9 @@ function Banner({ kind, children }) {
 function ProfileTab({ user, onSaved }) {
   const { t } = useTranslation();
   const [name, setName] = useState(user?.name || '');
-  const [locale, setLocale] = useState(user?.locale || 'en');
+  // '' = no saved language: the account's default applies (G158). Defaulting
+  // the field to 'en' pinned English on every profile save.
+  const [locale, setLocale] = useState(user?.locale || '');
   const [timeZone, setTimeZone] = useState(user?.time_zone || '');
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState('');
@@ -93,6 +95,7 @@ function ProfileTab({ user, onSaved }) {
               onChange={(e) => setLocale(e.target.value)}
               className="w-full rounded-md border border-border-default bg-surface-0 px-3 py-2 text-sm"
             >
+              <option value="">School default</option>
               <option value="en">English</option>
               <option value="es">Español</option>
             </select>

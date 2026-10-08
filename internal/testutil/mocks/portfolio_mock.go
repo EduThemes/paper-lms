@@ -34,6 +34,14 @@ func (m *MockPortfolioRepository) FindBySlug(ctx context.Context, slug string) (
 	return args.Get(0).(*models.Portfolio), args.Error(1)
 }
 
+func (m *MockPortfolioRepository) FindByShareToken(ctx context.Context, token string) (*models.Portfolio, error) {
+	args := m.Called(ctx, token)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Portfolio), args.Error(1)
+}
+
 func (m *MockPortfolioRepository) FindByPublicURL(ctx context.Context, publicURL string) (*models.Portfolio, error) {
 	args := m.Called(ctx, publicURL)
 	if args.Get(0) == nil {

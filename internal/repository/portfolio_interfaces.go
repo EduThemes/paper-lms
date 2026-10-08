@@ -13,6 +13,9 @@ type PortfolioRepository interface {
 	// callers; handler-routed callers MUST pass callerAccountID(c).
 	FindByID(ctx context.Context, id, accountID uint) (*models.Portfolio, error)
 	FindBySlug(ctx context.Context, slug string) (*models.Portfolio, error)
+	// FindByShareToken resolves a private sharing link (G155). Deleted
+	// portfolios are not found.
+	FindByShareToken(ctx context.Context, token string) (*models.Portfolio, error)
 	FindByPublicURL(ctx context.Context, publicURL string) (*models.Portfolio, error)
 	Update(ctx context.Context, portfolio *models.Portfolio) error
 	Delete(ctx context.Context, id uint) error

@@ -215,6 +215,7 @@ func (r *Router) Register(app *fiber.App) {
 	authLimit := middleware.AuthRateLimit()
 	r.registerPublicRoutes(api, authLimit)
 	r.registerLTIToolRoutes(api, enrolled, instructor, authLimit)
+	r.registerLearnerOutcomesPublicRoutes(api)
 
 	// Protected routes (authentication required)
 	protected := api.Group("", r.AuthMiddleware.Protected(), middleware.CSRFProtection())
@@ -226,6 +227,7 @@ func (r *Router) Register(app *fiber.App) {
 	// route declarations on this group.
 	protected.Use(middleware.AuditWrites(r.AuditService, "http.write"))
 	r.useCanvasIDs(protected)
+	protected.Use(r.AnalyticsHandler.ParticipationRecorder()) // course analytics participations (G154)
 	if r.BlueprintLockGuard != nil {
 		protected.Use(r.BlueprintLockGuard) // blueprint locks in associated courses (G069)
 	}
@@ -891,4 +893,5 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerLTIRoutes(protected, admin, enrolled, instructor)
 	r.registerAPICompatRoutes(app, protected, authLimit, admin, enrolled, selfOrAdmin)
 	r.registerLearnerRoutes(protected, enrolled)
+	r.registerLearnerOutcomesRoutes(protected, enrolled, instructor)
 }
