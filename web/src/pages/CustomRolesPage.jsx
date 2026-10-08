@@ -3,6 +3,7 @@ import { Shield, Plus, Edit2, Trash2, Copy, Search, ChevronDown, ChevronRight, T
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import { getCSRFToken } from '../services/api';
+import { getCurrentAccountId } from '../services/currentAccount';
 
 const PERMISSION_CATEGORIES = {
   'Course Management': 'bg-brand-100 text-brand-800',
@@ -42,7 +43,7 @@ const CustomRolesPage = () => {
     permissions: {},
   });
 
-  const accountId = 1;
+  const accountId = getCurrentAccountId();
 
   const authHeaders = () => ({
     'Content-Type': 'application/json',

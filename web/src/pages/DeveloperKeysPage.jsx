@@ -2,8 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { KeyRound, Plus, Trash2, Copy, Check, AlertTriangle, X, ToggleLeft, ToggleRight, Eye, EyeOff } from 'lucide-react';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
-
-const ACCOUNT_ID = 1;
+import { getCurrentAccountId } from '../services/currentAccount';
 
 const DeveloperKeysPage = () => {
   const [keys, setKeys] = useState([]);
@@ -19,7 +18,7 @@ const DeveloperKeysPage = () => {
 
   const fetchKeys = useCallback(async () => {
     try {
-      const { data } = await api.getDeveloperKeys(ACCOUNT_ID, 1, 100);
+      const { data } = await api.getDeveloperKeys(getCurrentAccountId(), 1, 100);
       setKeys(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err.message);
@@ -63,7 +62,7 @@ const DeveloperKeysPage = () => {
     );
 
     try {
-      const data = await api.createDeveloperKey(ACCOUNT_ID, developerKey);
+      const data = await api.createDeveloperKey(getCurrentAccountId(), developerKey);
       setNewKeyData(data);
       setShowForm(false);
       fetchKeys();
@@ -94,7 +93,7 @@ const DeveloperKeysPage = () => {
     setError(null);
     const newState = key.workflow_state === 'active' ? 'inactive' : 'active';
     try {
-      await api.updateDeveloperKey(ACCOUNT_ID, key.id, { workflow_state: newState });
+      await api.updateDeveloperKey(getCurrentAccountId(), key.id, { workflow_state: newState });
       fetchKeys();
     } catch (err) {
       setError(err.message);
@@ -107,7 +106,7 @@ const DeveloperKeysPage = () => {
     setDeleting(true);
     setError(null);
     try {
-      await api.deleteDeveloperKey(ACCOUNT_ID, keyId);
+      await api.deleteDeveloperKey(getCurrentAccountId(), keyId);
       setDeleteConfirm(null);
       fetchKeys();
     } catch (err) {

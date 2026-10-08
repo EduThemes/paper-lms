@@ -3,6 +3,7 @@ import { Calendar, Plus, Edit2, Trash2, Clock, CheckCircle } from 'lucide-react'
 import { api, getCSRFToken } from '../services/api';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
+import { getCurrentAccountId } from '../services/currentAccount';
 
 const EnrollmentTermsPage = () => {
   const { user } = useAuth();
@@ -22,7 +23,7 @@ const EnrollmentTermsPage = () => {
     grading_period_group_id: '',
   });
 
-  const accountId = 1;
+  const accountId = getCurrentAccountId();
 
   const fetchTerms = async () => {
     try {

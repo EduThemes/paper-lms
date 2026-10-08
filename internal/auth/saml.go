@@ -703,6 +703,15 @@ func (h *SAMLHandler) HandleACS(c *fiber.Ctx) error {
 	// the SAML handler grows multi-IDP support, this field will be
 	// resolved from the RelayState's `provider_id` query param.
 	providerID := h.resolveProviderID(c)
+	// An unverified response must never log anyone in. signedID is ""
+	// only on the no-IdP-certificate dev path above; if that response
+	// still resolves to a real provider, refuse it here rather than hand
+	// a forged assertion to the pipeline.
+	if signedID == "" && providerID != 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"errors": []fiber.Map{{"message": "SAML signature verification failed: no IdP certificate configured for this provider"}},
+		})
+	}
 	outcome := SSOOutcome{
 		ProviderID:      providerID,
 		ProviderType:    "saml",
@@ -771,28 +780,39 @@ func (h *SAMLHandler) HandleACS(c *fiber.Ctx) error {
 // active SAML provider on account 1; if there are several, the
 // first one wins. Callers that need precise routing should pre-set
 // RelayState with the provider_id encoded.
+//
+// SECURITY: the provider decides which tenant the LoginPipeline resolves
+// (and JIT-provisions) the user in, while verifyResponseSignature checks
+// the response only against account 1's SAML providers. A provider_id
+// from the request is therefore honoured only when it names one of those
+// active account-1 SAML providers. It used to be taken verbatim, so a
+// response could be attributed to any provider of any type in any tenant
+// — and, when account 1 had no SAML provider (signature check skipped),
+// an unsigned, forged assertion logged in as any user of that tenant.
+// An ineligible explicit provider_id resolves to 0, which the pipeline
+// refuses. Returns 0 when no eligible provider exists.
 func (h *SAMLHandler) resolveProviderID(c *fiber.Ctx) uint {
-	// If a provider_id query/form param is set (e.g. via RelayState
-	// the SP carved out earlier), honor it.
-	if raw := c.Query("provider_id"); raw != "" {
-		if id, err := strconv.ParseUint(raw, 10, 64); err == nil {
-			return uint(id)
-		}
+	var requested uint
+	raw := c.Query("provider_id")
+	if raw == "" {
+		raw = c.FormValue("provider_id")
 	}
-	if raw := c.FormValue("provider_id"); raw != "" {
-		if id, err := strconv.ParseUint(raw, 10, 64); err == nil {
-			return uint(id)
+	if raw != "" {
+		id, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || id == 0 {
+			return 0
 		}
+		requested = uint(id)
 	}
-	// Fallback: pick the first active SAML provider on account 1.
-	// Returns 0 if none — pipeline.resolveUser refuses to JIT when
-	// ProviderID is 0, so that's a safe failure mode.
 	page, err := h.authProviderRepo.ListByAccountID(c.Context(), 1, repository.PaginationParams{Page: 1, PerPage: 100})
 	if err != nil || page == nil {
 		return 0
 	}
 	for _, p := range page.Items {
-		if p.AuthType == "saml" && p.WorkflowState == "active" {
+		if p.AuthType != "saml" || p.WorkflowState != "active" {
+			continue
+		}
+		if requested == 0 || p.ID == requested {
 			return p.ID
 		}
 	}

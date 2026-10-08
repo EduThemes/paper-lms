@@ -41,7 +41,9 @@ const AssignmentsPage = () => {
   const fetchData = async () => {
     try {
       const [assignmentsResult, groupsResult] = await Promise.all([
-        api.getAssignments(courseId),
+        // The index has no pager: load every assignment (the API client
+        // walks the 100-row server pages).
+        api.getAssignments(courseId, 1, 10000),
         api.getAssignmentGroups(courseId),
       ]);
       setAssignments(assignmentsResult.data || []);

@@ -550,7 +550,7 @@ func TestTenantIsolation_GetCalendarEvent(t *testing.T) {
 		expectAccountIDPassThrough(&calRepo.Mock, "FindByID", resourceID, ownerOf(resourceID), row)
 
 		svc := service.NewCalendarService(calRepo)
-		authz := handlers.NewResourceAuthorizer(enrollRepo, userRepo)
+		authz := handlers.NewResourceAuthorizer(enrollRepo, userRepo, new(mocks.MockCourseRepository))
 		h := handlers.NewCalendarEventHandler(svc, authz)
 
 		app := testutil.SetupTestApp()
@@ -583,7 +583,7 @@ func TestTenantIsolation_GetFolder(t *testing.T) {
 		expectAccountIDPassThrough(&folderRepo.Mock, "FindByID", resourceID, ownerOf(resourceID), row)
 
 		fileSvc := service.NewFileService(folderRepo, attachmentRepo, "")
-		authz := handlers.NewResourceAuthorizer(enrollRepo, userRepo)
+		authz := handlers.NewResourceAuthorizer(enrollRepo, userRepo, new(mocks.MockCourseRepository))
 		h := handlers.NewFolderHandler(fileSvc, authz)
 
 		app := testutil.SetupTestApp()
@@ -968,7 +968,7 @@ func TestTenantIsolation_GetPortfolio(t *testing.T) {
 		expectAccountIDPassThrough(&portfolioRepo.Mock, "FindByID", resourceID, ownerOf(resourceID), row)
 
 		svc := service.NewPortfolioService(portfolioRepo, sectionRepo, artifactRepo, reflectionRepo, templateRepo, commentRepo, submissionRepo, assignmentRepo)
-		authz := handlers.NewResourceAuthorizer(enrollRepo, userRepo)
+		authz := handlers.NewResourceAuthorizer(enrollRepo, userRepo, new(mocks.MockCourseRepository))
 		h := handlers.NewPortfolioHandler(svc, authz)
 
 		app := testutil.SetupTestApp()

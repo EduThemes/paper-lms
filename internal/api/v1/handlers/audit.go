@@ -27,6 +27,7 @@ func auditLogToJSON(log *models.AuditLog) fiber.Map {
 		"id":           log.ID,
 		"event_type":   log.EventType,
 		"user_id":      log.UserID,
+		"real_user_id": log.RealUserID,
 		"course_id":    log.CourseID,
 		"account_id":   log.AccountID,
 		"context_type": log.ContextType,
@@ -203,6 +204,15 @@ func (h *AuditHandler) GetAccountAuditLog(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid account ID")
 	}
 
+	// RequireAdmin already ties :account_id to the caller's tenant; keep
+	// the handler self-defending too (404, not 403, across tenants).
+	if accountID <= 0 {
+		return responses.NotFound(c, "account")
+	}
+	if assertSameTenant(c, uint(accountID)) {
+		return nil
+	}
+
 	params := middleware.GetPagination(c)
 	filter := parseAuditLogFilter(c)
 	aid := uint(accountID)
@@ -240,7 +250,15 @@ func (h *AuditHandler) GetAuditLogSummary(c *fiber.Ctx) error {
 		}
 	}
 
-	summary, err := h.auditService.GetActivitySummary(c.Context(), dateFrom, dateTo)
+	// An account admin only sees their own tenant's activity; only a
+	// platform super_admin gets the deployment-wide summary.
+	var scope *uint
+	if isSuper, _ := c.Locals("is_super_admin").(bool); !isSuper {
+		aid := callerAccountID(c)
+		scope = &aid
+	}
+
+	summary, err := h.auditService.GetActivitySummary(c.Context(), scope, dateFrom, dateTo)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch activity summary")
 	}

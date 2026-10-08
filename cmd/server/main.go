@@ -777,7 +777,7 @@ func main() {
 	discussionHandler := handlers.NewDiscussionHandler(discussionService)
 	discussionEntryHandler := handlers.NewDiscussionEntryHandler(discussionService)
 	fileHandler := handlers.NewFileHandler(fileService, enrollmentRepo, groupMembershipRepo, auditService)
-	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo)
+	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo, courseRepo)
 	folderHandler := handlers.NewFolderHandler(fileService, authz)
 	sectionHandler = handlers.NewSectionHandler(sectionRepo, authz)
 	sisImportHandler := handlers.NewSISImportHandler(sisImportService)
@@ -884,7 +884,7 @@ func main() {
 	qtiImportHandler := handlers.NewQTIImportHandler(qtiImportService)
 
 	authMiddleware := middleware.NewAuthMiddleware(cfg.JWTSecret, accessTokenService, userRepo, tokenBlacklist)
-	permMiddleware := middleware.NewPermissionMiddleware(enrollmentRepo, userRepo)
+	permMiddleware := middleware.NewPermissionMiddleware(enrollmentRepo, userRepo, courseRepo)
 
 	// Create router
 	router := &v1.Router{

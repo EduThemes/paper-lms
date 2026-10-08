@@ -27,6 +27,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from './api';
+import { getCurrentAccountId } from './currentAccount';
 
 // ---------------------------------------------------------------------------
 // queryKeys — single source of truth. Keys are arrays so partial matches
@@ -89,7 +90,7 @@ export function useCourseModules(courseId, page = 1, perPage = 100, includeItems
   });
 }
 
-export function useAccount(accountId = 1, options = {}) {
+export function useAccount(accountId = getCurrentAccountId(), options = {}) {
   return useQuery({
     queryKey: queryKeys.accounts.detail(accountId),
     queryFn: () => api.getAccount(accountId),
@@ -192,7 +193,7 @@ export function useUpdateSetting(key, options = {}) {
   });
 }
 
-export function useUpdateAccount(accountId = 1, options = {}) {
+export function useUpdateAccount(accountId = getCurrentAccountId(), options = {}) {
   const queryClient = useQueryClient();
   const { onSuccess: callerOnSuccess, ...rest } = options;
   return useMutation({

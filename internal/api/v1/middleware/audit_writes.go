@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -54,11 +55,25 @@ func AuditWrites(emitter AuditEventEmitter, eventType string) fiber.Handler {
 		if aid, ok := c.Locals("account_id").(uint); ok && aid > 0 {
 			accountID = &aid
 		}
-		payload := method + " " + c.Path()
+		// audit_logs.payload is jsonb — a bare "POST /path" string made
+		// every one of these inserts fail (silently: fire-and-forget).
+		payloadFields := map[string]interface{}{
+			"method": method,
+			"path":   c.Path(),
+		}
+		// Masquerade attribution: user_id above is the impersonated user;
+		// record the admin who actually made the request.
+		ctx := context.Context(c.Context())
+		if realUserID, ok := c.Locals("masquerade_by").(uint); ok && realUserID != 0 {
+			payloadFields["masquerade_by"] = realUserID
+			ctx = service.WithMasquerader(ctx, realUserID)
+		}
+		payloadBytes, _ := json.Marshal(payloadFields)
+		payload := string(payloadBytes)
 		// Fire-and-forget — the request has already succeeded; an
 		// audit-write failure should NOT 5xx the client.
 		_ = emitter.LogEvent(
-			c.Context(),
+			ctx,
 			eventType,
 			userID,
 			courseID,

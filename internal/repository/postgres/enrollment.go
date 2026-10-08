@@ -80,11 +80,27 @@ func (r *enrollmentRepo) Update(ctx context.Context, enrollment *models.Enrollme
 	return r.db.WithContext(ctx).Save(enrollment).Error
 }
 
+// enrollmentPrivilegeOrder ranks enrollment types from most to least
+// privileged (Canvas's role order). A user can hold several active
+// enrollments in one course — e.g. a teacher who is also the parent-observer
+// of their own child — and authorization must use the highest one.
+const enrollmentPrivilegeOrder = `CASE type
+	WHEN 'TeacherEnrollment' THEN 0
+	WHEN 'TaEnrollment' THEN 1
+	WHEN 'DesignerEnrollment' THEN 2
+	WHEN 'StudentEnrollment' THEN 3
+	WHEN 'ObserverEnrollment' THEN 4
+	ELSE 5 END`
+
+// FindByUserAndCourse returns the user's MOST PRIVILEGED active enrollment
+// in the course. It used to return First() by primary key, so an observer
+// enrollment created before the teacher enrollment shadowed it and the
+// teacher was locked out of their own course.
 func (r *enrollmentRepo) FindByUserAndCourse(ctx context.Context, userID, courseID, accountID uint) (*models.Enrollment, error) {
 	var enrollment models.Enrollment
 	q := r.db.WithContext(ctx).Where("user_id = ? AND course_id = ? AND workflow_state = ?", userID, courseID, "active")
 	q = tenantScopedByCourse(q, accountID)
-	if err := q.First(&enrollment).Error; err != nil {
+	if err := q.Order(enrollmentPrivilegeOrder).Order("id ASC").Take(&enrollment).Error; err != nil {
 		return nil, err
 	}
 	return &enrollment, nil
