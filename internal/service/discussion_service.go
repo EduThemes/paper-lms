@@ -31,6 +31,7 @@ type ratingRepoWithSum interface {
 type DiscussionEntryPostedCallback func(ctx context.Context, entryID uint)
 
 type DiscussionService struct {
+	discussionAudienceHolder
 	topicRepo  repository.DiscussionTopicRepository
 	entryRepo  repository.DiscussionEntryRepository
 	ratingRepo ratingRepoWithSum
@@ -206,6 +207,8 @@ type EntryView struct {
 	RatingCount       int         `json:"rating_count"`
 	RatingSum         int         `json:"rating_sum"`
 	WorkflowState     string      `json:"workflow_state"`
+	AttachmentID      *uint       `json:"attachment_id"`
+	IsAnonymousAuthor bool        `json:"is_anonymous_author"`
 	CreatedAt         time.Time   `json:"created_at"`
 	UpdatedAt         time.Time   `json:"updated_at"`
 	Replies           []EntryView `json:"replies"`
@@ -244,6 +247,8 @@ func buildTree(entries []models.DiscussionEntry) []EntryView {
 			RatingCount:       e.RatingCount,
 			RatingSum:         e.RatingSum,
 			WorkflowState:     e.WorkflowState,
+			AttachmentID:      e.AttachmentID,
+			IsAnonymousAuthor: e.IsAnonymousAuthor,
 			CreatedAt:         e.CreatedAt,
 			UpdatedAt:         e.UpdatedAt,
 			Replies:           []EntryView{},
@@ -299,6 +304,7 @@ func visibleThreadEntries(all []models.DiscussionEntry) []models.DiscussionEntry
 		if hasLiveDescendant[e.ID] {
 			placeholder := e
 			placeholder.Message = ""
+			placeholder.AttachmentID = nil
 			placeholder.RatingCount = 0
 			placeholder.RatingSum = 0
 			out = append(out, placeholder)

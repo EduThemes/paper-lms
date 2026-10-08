@@ -890,14 +890,28 @@ func main() {
 	conversationHandler.SetNotifier(notificationDeliveryService)
 	conversationHandler.SetRecipientSearch(postgres.NewRecipientSearchRepository(database))
 	conferenceService.SetSettingsLookup(settingsLookup)
-	discussionService.OnEntryCreated(service.DiscussionReplyNotificationCallback(discussionEntryRepo, discussionTopicRepo, notificationDeliveryService))
+	// Discussions parity: section / group visibility, graded submissions,
+	// subscription + @mention notifications (replaces notifying only the
+	// parent post's author).
+	discussionParityService := service.NewDiscussionParityService(discussionTopicRepo, discussionEntryRepo,
+		postgres.NewDiscussionParityRepository(database), discussionTopicParticipantRepo,
+		assignmentRepo, submissionRepo, notificationDeliveryService)
+	discussionParityService.SetAttachmentRepo(attachmentRepo)
+	discussionService.SetAudience(discussionParityService)
+	discussionV2Service.SetAudience(discussionParityService)
+	discussionCheckpointService.SetAudience(discussionParityService)
+	discussionService.OnEntryCreated(discussionParityService.EntryNotificationCallback())
+	discussionService.OnEntryCreated(discussionParityService.SubmissionCallback())
+	discussionHandler.SetParity(discussionParityService)
+	discussionEntryHandler.SetParity(discussionParityService)
+	discussionParityHandler := handlers.NewDiscussionParityHandler(discussionService, discussionParityService, fileService)
 	auditHandler := handlers.NewAuditHandler(auditService)
 	// handlers
 	customRoleHandler := handlers.NewCustomRoleHandler(customRoleService)
 	onerosterHandler := handlers.NewOneRosterHandler(onerosterService)
 	documentAnnotationHandler := handlers.NewDocumentAnnotationHandler(documentAnnotationService, submissionService, assignmentRepo, submissionRepo, authz).SetObserverService(observerService)
 	// handlers
-	discussionV2Handler := handlers.NewDiscussionV2Handler(discussionV2Service)
+	discussionV2Handler := handlers.NewDiscussionV2Handler(discussionV2Service).SetParity(discussionParityService)
 	contentImportHandler := handlers.NewContentImportHandler(imsccParser, contentMigrationService, cfg.FileStoragePath)
 	batchHandler := handlers.NewBatchHandler(batchService, authz)
 	// handlers
@@ -1064,6 +1078,7 @@ func main() {
 		PairingCodeHandler: pairingCodeHandler,
 
 		DiscussionCheckpointHandler: discussionCheckpointHandler,
+		DiscussionParityHandler:     discussionParityHandler,
 		SmartSearchHandler:          smartSearchHandler,
 		CommonsHandler:              commonsHandler,
 		AIAssistHandler:             aiAssistHandler,
@@ -1223,6 +1238,7 @@ func main() {
 		publishJob, deliverJob := scheduler.NewMinuteJobs(announcementService, notificationDeliveryService)
 		minuteSched.Register("publishScheduledAnnouncements", scheduler.EveryTick(), publishJob)
 		minuteSched.Register("deliverImmediateNotifications", scheduler.EveryTick(), deliverJob)
+		minuteSched.Register("releaseDelayedDiscussions", scheduler.EveryTick(), discussionParityService.ReleaseDelayedTopicsJob)
 		minuteSched.Start(schedCtx)
 	}
 

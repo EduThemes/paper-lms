@@ -9,6 +9,8 @@ type DiscussionTopicParticipant struct {
 	Subscribed        bool       `json:"subscribed" gorm:"default:true"`
 	ForcedReadState   *string    `json:"forced_read_state"` // "read" or nil
 	LastReadAt        *time.Time `json:"last_read_at"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	// AnonymousID is the participant's alias in an anonymous topic.
+	AnonymousID *string   `json:"-" gorm:"type:text"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }

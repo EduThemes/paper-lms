@@ -85,6 +85,8 @@ func AllModels() []interface{} {
 		&DiscussionEntryParticipant{},
 		&DiscussionTopicParticipant{},
 		&DiscussionEntryVersion{},
+		&DiscussionTopicSectionVisibility{},
+		&DiscussionEntryMention{},
 		&Announcement{},
 		&AnnouncementReadReceipt{},
 		&EnrollmentTerm{},

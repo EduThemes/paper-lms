@@ -16,19 +16,28 @@ import (
 // requireEntryInTopic before touching the service.
 type DiscussionV2Handler struct {
 	discussionV2Service *service.DiscussionV2Service
+	// parity adds attachments, anonymity, group and graded topic details
+	// and @mentions. Optional (nil in some tests).
+	parity *service.DiscussionParityService
 }
 
 func NewDiscussionV2Handler(svc *service.DiscussionV2Service) *DiscussionV2Handler {
 	return &DiscussionV2Handler{discussionV2Service: svc}
 }
 
-func entryViewV2ToJSON(e *service.EntryViewV2) fiber.Map {
+// SetParity enables the Canvas-parity discussion features on the V2 view.
+func (h *DiscussionV2Handler) SetParity(p *service.DiscussionParityService) *DiscussionV2Handler {
+	h.parity = p
+	return h
+}
+
+func entryViewV2ToJSON(e *service.EntryViewV2, p *discussionPresenter) fiber.Map {
 	replies := make([]fiber.Map, len(e.Replies))
 	for i := range e.Replies {
-		replies[i] = entryViewV2ToJSON(&e.Replies[i])
+		replies[i] = entryViewV2ToJSON(&e.Replies[i], p)
 	}
 
-	return fiber.Map{
+	m := fiber.Map{
 		"id":                  e.ID,
 		"discussion_topic_id": e.DiscussionTopicID,
 		"user_id":             e.UserID,
@@ -43,10 +52,17 @@ func entryViewV2ToJSON(e *service.EntryViewV2) fiber.Map {
 		"edited_at":           e.EditedAt,
 		"version_count":       e.VersionCount,
 		"workflow_state":      e.WorkflowState,
+		"attachment_id":       e.AttachmentID,
+		"is_anonymous_author": e.IsAnonymousAuthor,
 		"created_at":          e.CreatedAt,
 		"updated_at":          e.UpdatedAt,
 		"replies":             replies,
 	}
+	p.decorate(m, discussionEntryRef{
+		ID: e.ID, UserID: e.UserID, IsAnonymousAuthor: e.IsAnonymousAuthor,
+		AttachmentID: e.AttachmentID, Deleted: e.WorkflowState == discussionEntryDeletedState,
+	})
+	return m
 }
 
 // GetFullViewV2 returns the topic + tree with read states and user info.
@@ -64,15 +80,24 @@ func (h *DiscussionV2Handler) GetFullViewV2(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not load discussion")
 	}
 
-	entries := make([]fiber.Map, len(view.Entries))
-	for i := range view.Entries {
-		entries[i] = entryViewV2ToJSON(&view.Entries[i])
-	}
-
 	topicJSON := topicToJSON(view.Topic)
+	addDiscussionTopicExtras(c, h.discussionV2Service, h.parity, view.Topic, topicJSON)
 	topicJSON["subscribed"] = view.Subscribed
 	topicJSON["can_rate"] = discussionCallerMayRate(c, view.Topic)
 	topicJSON["locked_for_user"] = discussionTopicLockedForCaller(c, view.Topic)
+
+	// Someone who must post first, and the root of a group discussion
+	// (posts live on the group topics), get no entries.
+	entries := []fiber.Map{}
+	if !discussionInitialPostRequired(c, h.discussionV2Service, view.Topic) && !discussionIsGroupRoot(view.Topic) {
+		var refs []discussionEntryRef
+		collectV2Refs(view.Entries, &refs)
+		p := newDiscussionPresenter(c, h.parity, view.Topic, refs)
+		entries = make([]fiber.Map, len(view.Entries))
+		for i := range view.Entries {
+			entries[i] = entryViewV2ToJSON(&view.Entries[i], p)
+		}
+	}
 	// Resolve topic author name
 	if view.Topic.UserID > 0 {
 		userInfoMap := h.discussionV2Service.ResolveUserInfo(c.Context(), []uint{view.Topic.UserID})
@@ -176,6 +201,9 @@ func (h *DiscussionV2Handler) GetEntryVersions(c *fiber.Ctx) error {
 	if wrote {
 		return nil
 	}
+	if requirePostsVisible(c, h.discussionV2Service, topic) {
+		return nil
+	}
 	entry, wrote := requireEntryInTopic(c, h.discussionV2Service, topic.ID, "entry_id")
 	if wrote {
 		return nil
@@ -186,12 +214,19 @@ func (h *DiscussionV2Handler) GetEntryVersions(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not fetch entry versions")
 	}
 
+	// An anonymous post's history must not name its editors either.
+	callerID, _ := c.Locals("user_id").(uint)
+	hideEditors := service.EntryIsAnonymous(topic, entry)
 	result := make([]fiber.Map, len(versions))
 	for i, v := range versions {
+		var editor interface{} = v.UserID
+		if hideEditors && v.UserID != callerID {
+			editor = nil
+		}
 		result[i] = fiber.Map{
 			"id":                  v.ID,
 			"discussion_entry_id": v.DiscussionEntryID,
-			"user_id":             v.UserID,
+			"user_id":             editor,
 			"message":             v.Message,
 			"version":             v.Version,
 			"created_at":          v.CreatedAt,
@@ -219,9 +254,7 @@ func (h *DiscussionV2Handler) UpdateEntryV2(c *fiber.Ctx) error {
 		return nil
 	}
 
-	var input struct {
-		Message string `json:"message"`
-	}
+	var input entryUpdateInput
 
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
@@ -246,7 +279,11 @@ func (h *DiscussionV2Handler) UpdateEntryV2(c *fiber.Ctx) error {
 		editedAt = &entry.UpdatedAt
 	}
 
-	return c.JSON(fiber.Map{
+	if h.parity != nil && len(input.MentionedUserIDs) > 0 && userID == entry.UserID {
+		_, _ = h.parity.ProcessMentions(c.Context(), topic, entry, input.MentionedUserIDs)
+	}
+
+	out := fiber.Map{
 		"id":                  entry.ID,
 		"discussion_topic_id": entry.DiscussionTopicID,
 		"user_id":             entry.UserID,
@@ -259,7 +296,12 @@ func (h *DiscussionV2Handler) UpdateEntryV2(c *fiber.Ctx) error {
 		"edited_at":           editedAt,
 		"version_count":       len(versions),
 		"workflow_state":      entry.WorkflowState,
+		"attachment_id":       entry.AttachmentID,
+		"is_anonymous_author": entry.IsAnonymousAuthor,
 		"created_at":          entry.CreatedAt,
 		"updated_at":          entry.UpdatedAt,
-	})
+	}
+	ref := entryRef(entry)
+	newDiscussionPresenter(c, h.parity, topic, []discussionEntryRef{ref}).decorate(out, ref)
+	return c.JSON(out)
 }

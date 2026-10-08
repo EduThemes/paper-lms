@@ -156,6 +156,8 @@ func allAutoMigrateModels() []interface{} {
 		&models.DiscussionEntryParticipant{},
 		&models.DiscussionTopicParticipant{},
 		&models.DiscussionEntryVersion{},
+		&models.DiscussionTopicSectionVisibility{},
+		&models.DiscussionEntryMention{},
 		// Announcements, Enrollment Terms
 		&models.Announcement{},
 		&models.AnnouncementReadReceipt{},

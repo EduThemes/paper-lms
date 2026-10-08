@@ -64,7 +64,8 @@ func requireTopicInCourse(c *fiber.Ctx, svc discussionTopicGetter) (*models.Disc
 	if err != nil || topic == nil ||
 		topic.CourseID != uint(courseID) ||
 		topic.WorkflowState == models.DiscussionTopicDeleted ||
-		!discussionTopicVisibleToCaller(c, topic) {
+		!discussionTopicVisibleToCaller(c, topic) ||
+		!discussionAudienceAllows(c, svc, topic) {
 		_ = responses.NotFound(c, "discussion topic")
 		return nil, true
 	}
@@ -79,6 +80,68 @@ func discussionTopicVisibleToCaller(c *fiber.Ctx, topic *models.DiscussionTopic)
 		return true
 	}
 	return service.DiscussionTopicVisibleToStudents(topic, discussionNow())
+}
+
+// discussionAudienceOf returns the section / group visibility rules
+// installed on a discussion service, or nil.
+func discussionAudienceOf(svc interface{}) service.DiscussionAudience {
+	if p, ok := svc.(interface {
+		Audience() service.DiscussionAudience
+	}); ok {
+		return p.Audience()
+	}
+	return nil
+}
+
+// discussionAudienceAllows applies the section-specific and group-topic
+// rules to a non-staff caller (staff always pass).
+func discussionAudienceAllows(c *fiber.Ctx, svc interface{}, topic *models.DiscussionTopic) bool {
+	if discussionCallerIsStaff(c) {
+		return true
+	}
+	aud := discussionAudienceOf(svc)
+	if aud == nil {
+		return true
+	}
+	userID, _ := c.Locals("user_id").(uint)
+	return aud.TopicVisibleToUser(c.Context(), topic, userID)
+}
+
+// discussionInitialPostGate is implemented by the parity service.
+type discussionInitialPostGate interface {
+	InitialPostRequired(ctx context.Context, topic *models.DiscussionTopic, userID uint) bool
+}
+
+// discussionInitialPostRequired reports whether a require_initial_post
+// topic still hides other people's posts from the caller (Canvas
+// initial_post_required?). Staff are never gated.
+func discussionInitialPostRequired(c *fiber.Ctx, svc interface{}, topic *models.DiscussionTopic) bool {
+	if !topic.RequireInitialPost || discussionCallerIsStaff(c) {
+		return false
+	}
+	gate, ok := discussionAudienceOf(svc).(discussionInitialPostGate)
+	if !ok {
+		return false
+	}
+	userID, _ := c.Locals("user_id").(uint)
+	return gate.InitialPostRequired(c.Context(), topic, userID)
+}
+
+// discussionIsGroupRoot reports whether the topic is the root of a group
+// discussion: its posts live on the per-group child topics.
+func discussionIsGroupRoot(topic *models.DiscussionTopic) bool {
+	return topic.GroupCategoryID != nil && topic.RootTopicID == nil
+}
+
+// requireTopicAcceptsPosts writes a 400 and returns wrote=true when the
+// topic is a group discussion's root (members post in their group's
+// topic instead).
+func requireTopicAcceptsPosts(c *fiber.Ctx, topic *models.DiscussionTopic) bool {
+	if discussionIsGroupRoot(topic) {
+		_ = responses.BadRequest(c, "This is a group discussion: post in your group's topic")
+		return true
+	}
+	return false
 }
 
 // discussionTopicLockedForCaller reports whether the caller may no longer
