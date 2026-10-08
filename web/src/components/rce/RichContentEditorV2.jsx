@@ -61,6 +61,9 @@ export default function RichContentEditorV2({
   className,
 }) {
   const [restorePrompt, setRestorePrompt] = useState(null); // { html, savedAt }
+  // Last HTML passed to onChange, so the value-sync effect can tell our own
+  // echo apart from a real external change (parent reset, restore, ...).
+  const lastEmittedRef = useRef(null);
   // AI Assist UI state
   const [aiMenuOpen, setAiMenuOpen] = useState(false);
   const [aiBusy, setAiBusy] = useState(null); // null | 'outline' | 'summarize' | 'rewrite'
@@ -110,6 +113,7 @@ export default function RichContentEditorV2({
     },
     onUpdate: ({ editor: ed }) => {
       const html = sanitizeHTML(ed.getHTML());
+      lastEmittedRef.current = html;
       onChange?.(html);
       if (autoSaveKey) {
         scheduleRceDraftWrite(autoSaveKey, html, AUTOSAVE_DEBOUNCE_MS);
@@ -138,6 +142,11 @@ export default function RichContentEditorV2({
   // Sync external value changes (e.g. parent reset)
   useEffect(() => {
     if (!editor) return;
+    // Our own onChange echoing back. It is the *sanitized* HTML, which need
+    // not match editor.getHTML() byte for byte (the sanitizer disables task
+    // list checkboxes, for instance); treating that as an external change
+    // reset the document and threw the caret on every keystroke.
+    if (value !== undefined && value === lastEmittedRef.current) return;
     const current = editor.getHTML();
     if (value !== undefined && value !== current) {
       editor.commands.setContent(value || '', { emitUpdate: false });
