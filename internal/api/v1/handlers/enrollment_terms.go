@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"errors"
+	"time"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/service"
-	"time"
 )
 
 type EnrollmentTermHandler struct {
@@ -32,15 +34,38 @@ func enrollmentTermToJSON(term *models.EnrollmentTerm) fiber.Map {
 	}
 }
 
-func (h *EnrollmentTermHandler) ListTerms(c *fiber.Ctx) error {
+// termAccountScope parses :account_id and enforces that it is the
+// caller's own tenant (super_admin excepted). wrote=true means a 400/404
+// was written and the caller MUST short-circuit. By-id lookups are then
+// tied to this account, so another tenant's term id is a 404.
+func termAccountScope(c *fiber.Ctx) (uint, bool) {
 	accountID, err := c.ParamsInt("account_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
+	if err != nil || accountID <= 0 {
+		_ = responses.BadRequest(c, "Invalid account ID")
+		return 0, true
+	}
+	if assertSameTenant(c, uint(accountID)) {
+		return 0, true
+	}
+	return uint(accountID), false
+}
+
+func termWriteError(c *fiber.Ctx, err error) error {
+	if errors.Is(err, service.ErrSISTermIDTaken) {
+		return responses.Error(c, fiber.StatusConflict, err.Error())
+	}
+	return responses.BadRequest(c, err.Error())
+}
+
+func (h *EnrollmentTermHandler) ListTerms(c *fiber.Ctx) error {
+	accountID, wrote := termAccountScope(c)
+	if wrote {
+		return nil
 	}
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.termService.ListTerms(c.Context(), uint(accountID), params)
+	result, err := h.termService.ListTerms(c.Context(), accountID, params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch enrollment terms")
 	}
@@ -56,17 +81,15 @@ func (h *EnrollmentTermHandler) ListTerms(c *fiber.Ctx) error {
 }
 
 func (h *EnrollmentTermHandler) CreateTerm(c *fiber.Ctx) error {
-	accountID, err := c.ParamsInt("account_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
+	accountID, wrote := termAccountScope(c)
+	if wrote {
+		return nil
 	}
-
-	// user_id verified by auth middleware
 
 	var input struct {
 		EnrollmentTerm struct {
 			Name                 string  `json:"name"`
-			SISTermID            string  `json:"sis_term_id"`
+			SISTermID            *string `json:"sis_term_id"`
 			StartAt              *string `json:"start_at"`
 			EndAt                *string `json:"end_at"`
 			GradingPeriodGroupID *uint   `json:"grading_period_group_id"`
@@ -78,13 +101,13 @@ func (h *EnrollmentTermHandler) CreateTerm(c *fiber.Ctx) error {
 	}
 
 	term := &models.EnrollmentTerm{
-		AccountID:            uint(accountID),
+		AccountID:            accountID,
 		Name:                 input.EnrollmentTerm.Name,
-		SISTermID:            input.EnrollmentTerm.SISTermID,
+		SISTermID:            service.NormalizeSISTermID(input.EnrollmentTerm.SISTermID),
 		GradingPeriodGroupID: input.EnrollmentTerm.GradingPeriodGroupID,
 	}
 
-	if input.EnrollmentTerm.StartAt != nil {
+	if input.EnrollmentTerm.StartAt != nil && *input.EnrollmentTerm.StartAt != "" {
 		t, err := time.Parse(time.RFC3339, *input.EnrollmentTerm.StartAt)
 		if err != nil {
 			return responses.BadRequest(c, "Invalid start_at date format, use RFC3339")
@@ -92,7 +115,7 @@ func (h *EnrollmentTermHandler) CreateTerm(c *fiber.Ctx) error {
 		term.StartAt = &t
 	}
 
-	if input.EnrollmentTerm.EndAt != nil {
+	if input.EnrollmentTerm.EndAt != nil && *input.EnrollmentTerm.EndAt != "" {
 		t, err := time.Parse(time.RFC3339, *input.EnrollmentTerm.EndAt)
 		if err != nil {
 			return responses.BadRequest(c, "Invalid end_at date format, use RFC3339")
@@ -101,16 +124,16 @@ func (h *EnrollmentTermHandler) CreateTerm(c *fiber.Ctx) error {
 	}
 
 	if err := h.termService.CreateTerm(c.Context(), term); err != nil {
-		return responses.BadRequest(c, err.Error())
+		return termWriteError(c, err)
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(enrollmentTermToJSON(term))
 }
 
 func (h *EnrollmentTermHandler) GetTerm(c *fiber.Ctx) error {
-	_, err := c.ParamsInt("account_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
+	accountID, wrote := termAccountScope(c)
+	if wrote {
+		return nil
 	}
 
 	termID, err := c.ParamsInt("id")
@@ -118,7 +141,7 @@ func (h *EnrollmentTermHandler) GetTerm(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid term ID")
 	}
 
-	term, err := h.termService.GetTerm(c.Context(), uint(termID))
+	term, err := h.termService.GetTerm(c.Context(), uint(termID), accountID)
 	if err != nil {
 		return responses.NotFound(c, "enrollment term")
 	}
@@ -127,9 +150,9 @@ func (h *EnrollmentTermHandler) GetTerm(c *fiber.Ctx) error {
 }
 
 func (h *EnrollmentTermHandler) UpdateTerm(c *fiber.Ctx) error {
-	_, err := c.ParamsInt("account_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
+	accountID, wrote := termAccountScope(c)
+	if wrote {
+		return nil
 	}
 
 	termID, err := c.ParamsInt("id")
@@ -137,9 +160,7 @@ func (h *EnrollmentTermHandler) UpdateTerm(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid term ID")
 	}
 
-	// user_id verified by auth middleware
-
-	term, err := h.termService.GetTerm(c.Context(), uint(termID))
+	term, err := h.termService.GetTerm(c.Context(), uint(termID), accountID)
 	if err != nil {
 		return responses.NotFound(c, "enrollment term")
 	}
@@ -162,37 +183,46 @@ func (h *EnrollmentTermHandler) UpdateTerm(c *fiber.Ctx) error {
 		term.Name = *input.EnrollmentTerm.Name
 	}
 	if input.EnrollmentTerm.SISTermID != nil {
-		term.SISTermID = *input.EnrollmentTerm.SISTermID
+		// "" clears the SIS id (stored as NULL).
+		term.SISTermID = service.NormalizeSISTermID(input.EnrollmentTerm.SISTermID)
 	}
 	if input.EnrollmentTerm.GradingPeriodGroupID != nil {
 		term.GradingPeriodGroupID = input.EnrollmentTerm.GradingPeriodGroupID
 	}
 	if input.EnrollmentTerm.StartAt != nil {
-		t, err := time.Parse(time.RFC3339, *input.EnrollmentTerm.StartAt)
-		if err != nil {
-			return responses.BadRequest(c, "Invalid start_at date format, use RFC3339")
+		if *input.EnrollmentTerm.StartAt == "" {
+			term.StartAt = nil
+		} else {
+			t, err := time.Parse(time.RFC3339, *input.EnrollmentTerm.StartAt)
+			if err != nil {
+				return responses.BadRequest(c, "Invalid start_at date format, use RFC3339")
+			}
+			term.StartAt = &t
 		}
-		term.StartAt = &t
 	}
 	if input.EnrollmentTerm.EndAt != nil {
-		t, err := time.Parse(time.RFC3339, *input.EnrollmentTerm.EndAt)
-		if err != nil {
-			return responses.BadRequest(c, "Invalid end_at date format, use RFC3339")
+		if *input.EnrollmentTerm.EndAt == "" {
+			term.EndAt = nil
+		} else {
+			t, err := time.Parse(time.RFC3339, *input.EnrollmentTerm.EndAt)
+			if err != nil {
+				return responses.BadRequest(c, "Invalid end_at date format, use RFC3339")
+			}
+			term.EndAt = &t
 		}
-		term.EndAt = &t
 	}
 
 	if err := h.termService.UpdateTerm(c.Context(), term); err != nil {
-		return responses.BadRequest(c, err.Error())
+		return termWriteError(c, err)
 	}
 
 	return c.JSON(enrollmentTermToJSON(term))
 }
 
 func (h *EnrollmentTermHandler) DeleteTerm(c *fiber.Ctx) error {
-	_, err := c.ParamsInt("account_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
+	accountID, wrote := termAccountScope(c)
+	if wrote {
+		return nil
 	}
 
 	termID, err := c.ParamsInt("id")
@@ -200,9 +230,11 @@ func (h *EnrollmentTermHandler) DeleteTerm(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid term ID")
 	}
 
-	// user_id verified by auth middleware
+	if _, err := h.termService.GetTerm(c.Context(), uint(termID), accountID); err != nil {
+		return responses.NotFound(c, "enrollment term")
+	}
 
-	if err := h.termService.DeleteTerm(c.Context(), uint(termID)); err != nil {
+	if err := h.termService.DeleteTerm(c.Context(), uint(termID), accountID); err != nil {
 		return responses.InternalError(c, "Could not delete enrollment term")
 	}
 
@@ -210,12 +242,12 @@ func (h *EnrollmentTermHandler) DeleteTerm(c *fiber.Ctx) error {
 }
 
 func (h *EnrollmentTermHandler) GetCurrentTerm(c *fiber.Ctx) error {
-	accountID, err := c.ParamsInt("account_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
+	accountID, wrote := termAccountScope(c)
+	if wrote {
+		return nil
 	}
 
-	term, err := h.termService.GetCurrentTerm(c.Context(), uint(accountID))
+	term, err := h.termService.GetCurrentTerm(c.Context(), accountID)
 	if err != nil {
 		return responses.NotFound(c, "current enrollment term")
 	}

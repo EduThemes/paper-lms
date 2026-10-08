@@ -21,9 +21,15 @@ func (r *EnrollmentTermRepository) Create(ctx context.Context, term *models.Enro
 	return r.db.WithContext(ctx).Create(term).Error
 }
 
-func (r *EnrollmentTermRepository) FindByID(ctx context.Context, id uint) (*models.EnrollmentTerm, error) {
+// FindByID loads a live term. accountID scopes the read to one tenant;
+// 0 is the internal "no scope" escape hatch and is not used by handlers.
+func (r *EnrollmentTermRepository) FindByID(ctx context.Context, id, accountID uint) (*models.EnrollmentTerm, error) {
 	var term models.EnrollmentTerm
-	if err := r.db.WithContext(ctx).Where("id = ? AND workflow_state != ?", id, "deleted").First(&term).Error; err != nil {
+	q := r.db.WithContext(ctx).Where("id = ? AND workflow_state != ?", id, "deleted")
+	if accountID != 0 {
+		q = q.Where("account_id = ?", accountID)
+	}
+	if err := q.First(&term).Error; err != nil {
 		return nil, err
 	}
 	return &term, nil
@@ -33,8 +39,13 @@ func (r *EnrollmentTermRepository) Update(ctx context.Context, term *models.Enro
 	return r.db.WithContext(ctx).Save(term).Error
 }
 
-func (r *EnrollmentTermRepository) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Model(&models.EnrollmentTerm{}).Where("id = ?", id).Update("workflow_state", "deleted").Error
+// Delete soft-deletes a term within accountID (0 = unscoped, internal).
+func (r *EnrollmentTermRepository) Delete(ctx context.Context, id, accountID uint) error {
+	q := r.db.WithContext(ctx).Model(&models.EnrollmentTerm{}).Where("id = ?", id)
+	if accountID != 0 {
+		q = q.Where("account_id = ?", accountID)
+	}
+	return q.Update("workflow_state", "deleted").Error
 }
 
 func (r *EnrollmentTermRepository) ListByAccountID(ctx context.Context, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.EnrollmentTerm], error) {
@@ -57,9 +68,10 @@ func (r *EnrollmentTermRepository) ListByAccountID(ctx context.Context, accountI
 	}, nil
 }
 
-func (r *EnrollmentTermRepository) FindBySISTermID(ctx context.Context, sisTermID string) (*models.EnrollmentTerm, error) {
+// FindBySISTermID — SIS term ids are unique per account (000091).
+func (r *EnrollmentTermRepository) FindBySISTermID(ctx context.Context, sisTermID string, accountID uint) (*models.EnrollmentTerm, error) {
 	var term models.EnrollmentTerm
-	if err := r.db.WithContext(ctx).Where("sis_term_id = ? AND workflow_state != ?", sisTermID, "deleted").First(&term).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("sis_term_id = ? AND account_id = ? AND workflow_state != ?", sisTermID, accountID, "deleted").First(&term).Error; err != nil {
 		return nil, err
 	}
 	return &term, nil
