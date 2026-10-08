@@ -342,7 +342,7 @@ func detectQuestionType(item qtiItem) string {
 		}
 
 		if resp.RCardinality == "Multiple" {
-			return "multiple_answers"
+			return "multiple_answer"
 		}
 
 		// Multiple response_lid groups: matching by default. Canvas's
@@ -367,7 +367,7 @@ func ccProfileToQuestionType(profile string) string {
 	case "cc.multiple_choice.v0p1":
 		return "multiple_choice"
 	case "cc.multiple_response.v0p1":
-		return "multiple_answers"
+		return "multiple_answer"
 	case "cc.true_false.v0p1":
 		return "true_false"
 	case "cc.fib.v0p1":
@@ -397,13 +397,21 @@ func normalizeQuestionType(t string) string {
 	case "matching_question":
 		return "matching"
 	case "multiple_answers_question":
-		return "multiple_answers"
+		return "multiple_answer"
 	case "fill_in_multiple_blanks_question":
 		return "fill_in_multiple_blanks"
 	case "multiple_dropdowns_question":
-		return "multiple_dropdowns"
+		return "multiple_dropdown"
+	case "file_upload_question":
+		return "file_upload"
+	case "text_only_question":
+		return "text_only"
+	case "calculated_question":
+		return "formula"
 	}
-	return t
+	// Any other spelling is mapped through the grader's normalizer so the
+	// stored type is always one Paper can grade and render.
+	return NormalizeQuizQuestionType(t)
 }
 
 // hasNumericalRange reports whether the item has a vargte/varlte condition,
@@ -497,19 +505,21 @@ type matchOption struct {
 
 func extractAnswers(item qtiItem, questionType string) []answerChoice {
 	switch questionType {
-	case "multiple_choice", "true_false", "multiple_answers":
+	case "multiple_choice", "true_false", "multiple_answer":
 		return extractMultipleChoiceAnswers(item)
 	case "short_answer":
 		return extractShortAnswers(item)
 	case "fill_in_multiple_blanks":
 		return extractFillInMultipleBlanksAnswers(item)
-	case "multiple_dropdowns":
+	case "multiple_dropdown":
 		return extractMultipleDropdownsAnswers(item)
 	case "matching":
 		return extractMatchingAnswers(item)
 	case "numerical_question":
 		return extractNumericalAnswers(item)
-	case "essay":
+	case "essay", "file_upload", "text_only", "formula":
+		// Not auto-gradable from QTI (calculated questions need per-student
+		// variable generation) — no answer key is imported.
 		return nil
 	default:
 		return extractMultipleChoiceAnswers(item)
@@ -645,19 +655,46 @@ func extractMatchingAnswers(item qtiItem) []answerChoice {
 // label in the material. Correct answers come from varequal in scoring
 // respconditions, keyed by respident → blank_id.
 func extractFillInMultipleBlanksAnswers(item qtiItem) []answerChoice {
-	// blank_id by respident, derived from the response material.
+	// blank_id by respident, derived from the response material (Canvas
+	// writes the bare blank name there; the ident is "response_<blank>").
 	blankByRespident := make(map[string]string)
-	respidentOrder := make([]string, 0)
-	for _, resp := range item.Presentation.Responses {
-		blankByRespident[resp.Ident] = textOrIdent(extractMatText(resp.Material), resp.Ident)
-		respidentOrder = append(respidentOrder, resp.Ident)
-	}
-	for _, rs := range item.Presentation.ResponseStr {
-		blankByRespident[rs.Ident] = textOrIdent(extractMatText(rs.Material), rs.Ident)
-		respidentOrder = append(respidentOrder, rs.Ident)
-	}
+	// Canvas emits FIMB blanks as <response_lid> whose render_choice lists
+	// every accepted answer for the blank (all FIMB answers are correct
+	// alternatives); resprocessing then references ONE of them by its
+	// label ident, not its text. Map ident → text so the stored key holds
+	// accepted strings, never opaque answer ids.
+	labelText := make(map[string]map[string]string)
 
 	var answers []answerChoice
+	seen := map[string]bool{}
+	add := func(blankID, text string) {
+		text = strings.TrimSpace(text)
+		if blankID == "" || text == "" || seen[blankID+"\x00"+text] {
+			return
+		}
+		seen[blankID+"\x00"+text] = true
+		answers = append(answers, answerChoice{
+			ID:      fmt.Sprintf("%s_%d", blankID, len(answers)+1),
+			Text:    text,
+			BlankID: blankID,
+			Weight:  100,
+		})
+	}
+
+	for _, resp := range item.Presentation.Responses {
+		blankID := strings.TrimPrefix(textOrIdent(extractMatText(resp.Material), resp.Ident), "response_")
+		blankByRespident[resp.Ident] = blankID
+		labelText[resp.Ident] = map[string]string{}
+		for _, label := range resp.RenderChoice.Labels {
+			text := extractMatText(label.Material)
+			labelText[resp.Ident][label.Ident] = text
+			add(blankID, text)
+		}
+	}
+	for _, rs := range item.Presentation.ResponseStr {
+		blankByRespident[rs.Ident] = strings.TrimPrefix(textOrIdent(extractMatText(rs.Material), rs.Ident), "response_")
+	}
+
 	for _, cond := range item.ResponseProcessing.Conditions {
 		if !conditionScores(cond) {
 			continue
@@ -669,14 +706,13 @@ func extractFillInMultipleBlanksAnswers(item qtiItem) []answerChoice {
 		for _, ve := range varEquals {
 			blankID := blankByRespident[ve.RespIdent]
 			if blankID == "" {
-				blankID = ve.RespIdent
+				blankID = strings.TrimPrefix(ve.RespIdent, "response_")
 			}
-			answers = append(answers, answerChoice{
-				ID:      ve.Value,
-				Text:    ve.Value,
-				BlankID: blankID,
-				Weight:  100,
-			})
+			value := ve.Value
+			if t, ok := labelText[ve.RespIdent][strings.TrimSpace(ve.Value)]; ok && t != "" {
+				value = t
+			}
+			add(blankID, value)
 		}
 	}
 
@@ -707,7 +743,7 @@ func extractMultipleDropdownsAnswers(item qtiItem) []answerChoice {
 
 	var answers []answerChoice
 	for _, resp := range item.Presentation.Responses {
-		blankID := textOrIdent(extractMatText(resp.Material), resp.Ident)
+		blankID := strings.TrimPrefix(textOrIdent(extractMatText(resp.Material), resp.Ident), "response_")
 		for _, label := range resp.RenderChoice.Labels {
 			weight := 0.0
 			if correct[resp.Ident][label.Ident] {

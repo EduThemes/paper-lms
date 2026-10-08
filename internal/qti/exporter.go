@@ -247,6 +247,9 @@ func writeMatchingLikePresentation(buf *bytes.Buffer, q models.QuizQuestion) err
 		return err
 	}
 	for _, opt := range opts {
+		if opt.BlankID == "_match_options_" {
+			continue // right-hand match pool, not a left item
+		}
 		ident := opt.ID
 		if ident == "" {
 			ident = opt.Left
