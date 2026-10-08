@@ -6,9 +6,35 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
+	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
+
+// syllabusAssignmentPublished reports whether an assignment is released
+// to learners. Assignments carry both a workflow_state and a legacy
+// published flag; either marks it published.
+func syllabusAssignmentPublished(a *models.Assignment) bool {
+	return a.WorkflowState == models.AssignmentPublished || a.Published
+}
+
+// VisibleSyllabusAssignments returns the assignments a syllabus viewer
+// may see: never deleted ones, and unpublished drafts only when
+// showDrafts (course managers).
+func VisibleSyllabusAssignments(items []models.Assignment, showDrafts bool) []models.Assignment {
+	visible := make([]models.Assignment, 0, len(items))
+	for i := range items {
+		a := &items[i]
+		if a.WorkflowState == models.AssignmentDeleted {
+			continue
+		}
+		if !showDrafts && !syllabusAssignmentPublished(a) {
+			continue
+		}
+		visible = append(visible, *a)
+	}
+	return visible
+}
 
 // groupColors is a palette of 8 colors for assignment groups, cycled through.
 var groupColors = []string{
@@ -133,6 +159,13 @@ func (h *SyllabusHandler) GetSyllabus(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch assignments")
 	}
+
+	// B136: Canvas lists only published assignments on a learner's
+	// syllabus. Drop deleted rows for everyone and unpublished drafts for
+	// students/observers, BEFORE the status, breakdown-count and timeline
+	// passes — otherwise a draft due yesterday shows up as "missing" and
+	// future drafts leak as "upcoming".
+	assignmentsResult.Items = VisibleSyllabusAssignments(assignmentsResult.Items, canViewUnpublishedContent(c))
 
 	// Count assignments per group for the grading breakdown
 	groupAssignmentCount := make(map[uint]int)
