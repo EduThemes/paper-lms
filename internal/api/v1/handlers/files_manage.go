@@ -54,13 +54,35 @@ func (h *FileHandler) managesCourseFiles(c *fiber.Ctx, courseID uint) bool {
 	if et, ok := c.Locals("enrollment_type").(string); ok && et != "" {
 		return canViewUnpublishedContent(c)
 	}
-	if callerIsAdmin(c, h.authz) {
-		return true
-	}
 	if h.authz != nil {
-		return h.authz.RequireCourseInstructor(c, courseID) == nil
+		return courseContentManager(c, h.authz, courseID)
 	}
 	return canViewUnpublishedContent(c)
+}
+
+// courseContentManager is canViewUnpublishedContent for routes that carry
+// no course middleware (/files/:id/download, /folders/:id): it asks the
+// database whether the caller is an admin of the course's tenant or holds
+// an active teacher, TA or designer enrollment. Designers count here as
+// they do on course routes, or they would see an unpublished file in the
+// course listing and then get a 404 downloading it.
+func courseContentManager(c *fiber.Ctx, a *ResourceAuthorizer, courseID uint) bool {
+	if a == nil || a.RequireCourseEnrolled(c, courseID) != nil {
+		return false
+	}
+	if callerIsAdmin(c, a) {
+		return true
+	}
+	userID, _ := c.Locals("user_id").(uint)
+	e, err := a.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, courseID, callerAccountID(c))
+	if err != nil || e == nil || e.WorkflowState != "active" {
+		return false
+	}
+	switch e.Type {
+	case "TeacherEnrollment", "TaEnrollment", "DesignerEnrollment":
+		return true
+	}
+	return false
 }
 
 // learnerCannotSeeFile: the file is unpublished, or sits in a deleted or

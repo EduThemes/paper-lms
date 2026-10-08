@@ -320,3 +320,34 @@ func TestCourseStorageQuota(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Nil(t, out["storage_quota_mb"])
 }
+
+// A designer sees unpublished files and folders in the course listing, so
+// the routes without course middleware (/files/:id/download, /folders/:id)
+// must let them through too, not answer 404 as they do for learners.
+func TestFileVisibility_DesignerReachesUnpublishedByLink(t *testing.T) {
+	f := newFilesLaneFixture(t)
+	const designerID = uint(43)
+	require.NoError(t, postgres.NewUserRepository(f.g).Create(context.Background(), &models.User{
+		ID: designerID, AccountID: 1, Name: "Dana Designer", LoginID: "dana.fl@example.test", Email: "dana.fl@example.test", PasswordHash: "x", Role: "user",
+	}))
+	require.NoError(t, f.g.Create(&models.Enrollment{UserID: designerID, CourseID: flCourse, Type: "DesignerEnrollment", Role: "DesignerEnrollment", WorkflowState: models.EnrollmentActive}).Error)
+
+	teacher := f.app(flTeacher, "TeacherEnrollment")
+	designer := f.app(designerID, "DesignerEnrollment")
+	student := f.app(flStudent, "StudentEnrollment")
+
+	_, key := flUpload(t, teacher, flCourse, "answer-key.txt", "secret", nil)
+	resp, _ := flJSON(t, teacher, http.MethodPut, fmt.Sprintf("/courses/%d/files/%v", flCourse, key["id"]), map[string]any{"locked": true})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp, folder := flJSON(t, teacher, http.MethodPost, fmt.Sprintf("/courses/%d/folders", flCourse), map[string]any{"name": "Drafts", "locked": true})
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	assert.Contains(t, flNames(t, testutil.MakeRequest(designer, http.MethodGet, fmt.Sprintf("/courses/%d/files", flCourse), nil)), "answer-key.txt")
+	assert.Equal(t, http.StatusOK, testutil.MakeRequest(designer, http.MethodGet, fmt.Sprintf("/files/%v/download", key["id"]), nil).StatusCode)
+	assert.Equal(t, http.StatusOK, testutil.MakeRequest(designer, http.MethodGet, fmt.Sprintf("/folders/%v", folder["id"]), nil).StatusCode)
+	assert.Equal(t, http.StatusOK, testutil.MakeRequest(designer, http.MethodGet, fmt.Sprintf("/folders/%v/files", folder["id"]), nil).StatusCode)
+
+	// Learners are still kept out.
+	assert.Equal(t, http.StatusNotFound, testutil.MakeRequest(student, http.MethodGet, fmt.Sprintf("/files/%v/download", key["id"]), nil).StatusCode)
+	assert.Equal(t, http.StatusNotFound, testutil.MakeRequest(student, http.MethodGet, fmt.Sprintf("/folders/%v", folder["id"]), nil).StatusCode)
+}

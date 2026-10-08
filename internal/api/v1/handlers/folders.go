@@ -56,13 +56,7 @@ func (h *FolderHandler) managesFolderCourse(c *fiber.Ctx, courseID uint) bool {
 	if et, ok := c.Locals("enrollment_type").(string); ok && et != "" {
 		return canViewUnpublishedContent(c)
 	}
-	if callerIsAdmin(c, h.authz) {
-		return true
-	}
-	if h.authz != nil {
-		return h.authz.RequireCourseInstructor(c, courseID) == nil
-	}
-	return false
+	return courseContentManager(c, h.authz, courseID)
 }
 
 // learnerBlockedFolder: a learner may not open a deleted, unpublished or
