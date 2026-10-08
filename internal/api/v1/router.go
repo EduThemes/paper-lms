@@ -882,4 +882,5 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerSuperAdminRoutes(protected)
 	r.registerRCEMediaRoutes(protected)
 	r.registerModuleRoutes(protected, enrolled, instructor)
+	r.registerGroupsConferencesRoutes(protected, enrolled)
 }

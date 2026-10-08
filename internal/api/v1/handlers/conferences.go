@@ -1,14 +1,16 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
+	"net/url"
 	"strconv"
 
-	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/gofiber/fiber/v2"
 )
 
 type ConferenceHandler struct {
@@ -22,22 +24,24 @@ func NewConferenceHandler(conferenceService *service.ConferenceService, authz *R
 
 func conferenceToJSON(conf *models.Conference) fiber.Map {
 	return fiber.Map{
-		"id":              conf.ID,
-		"context_type":    conf.ContextType,
-		"context_id":      conf.ContextID,
-		"conference_type": conf.ConferenceType,
-		"title":           conf.Title,
-		"description":     conf.Description,
-		"user_id":         conf.UserID,
-		"started_at":      conf.StartedAt,
-		"ended_at":        conf.EndedAt,
-		"duration":        conf.Duration,
-		"join_url":        conf.JoinURL,
-		"recordings":      conf.Recordings,
-		"settings":        conf.Settings,
-		"workflow_state":  conf.WorkflowState,
-		"created_at":      conf.CreatedAt,
-		"updated_at":      conf.UpdatedAt,
+		"id":                   conf.ID,
+		"context_type":         conf.ContextType,
+		"context_id":           conf.ContextID,
+		"conference_type":      conf.ConferenceType,
+		"title":                conf.Title,
+		"description":          conf.Description,
+		"user_id":              conf.UserID,
+		"started_at":           conf.StartedAt,
+		"ended_at":             conf.EndedAt,
+		"duration":             conf.Duration,
+		"join_url":             conf.JoinURL,
+		"recording_enabled":    conf.RecordingEnabled,
+		"has_provider_meeting": conf.ProviderMeetingID != "",
+		"recordings":           conf.Recordings,
+		"settings":             conf.Settings,
+		"workflow_state":       conf.WorkflowState,
+		"created_at":           conf.CreatedAt,
+		"updated_at":           conf.UpdatedAt,
 	}
 }
 
@@ -72,16 +76,21 @@ func (h *ConferenceHandler) loadConference(c *fiber.Ctx, manage bool) (*models.C
 	if err != nil {
 		return nil, true, responses.NotFound(c, "conference")
 	}
-	if conference.ContextType == "Course" {
-		var aerr error
-		if manage {
-			aerr = h.authz.RequireCourseInstructor(c, conference.ContextID)
-		} else {
-			aerr = h.authz.RequireCourseEnrolled(c, conference.ContextID)
-		}
-		if authzDenied(c, aerr) {
-			return nil, true, aerr
-		}
+	// Only course conferences are reachable through the API. Group and
+	// account conferences have no routes or role gate (group spaces are
+	// deferred), so they are default-denied rather than open to every
+	// user of the tenant.
+	if conference.ContextType != "Course" {
+		return nil, true, responses.NotFound(c, "conference")
+	}
+	var aerr error
+	if manage {
+		aerr = h.authz.RequireCourseInstructor(c, conference.ContextID)
+	} else {
+		aerr = h.authz.RequireCourseEnrolled(c, conference.ContextID)
+	}
+	if authzDenied(c, aerr) {
+		return nil, true, aerr
 	}
 	return conference, false, nil
 }
@@ -91,10 +100,14 @@ func conferenceLifecycleError(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, service.ErrConferenceNotConfigured),
 		errors.Is(err, service.ErrConferenceNotStarted),
-		errors.Is(err, service.ErrConferenceEnded):
+		errors.Is(err, service.ErrConferenceNotRunning),
+		errors.Is(err, service.ErrConferenceEnded),
+		errors.Is(err, service.ErrRecordingsUnsupported):
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"errors": []fiber.Map{{"message": err.Error()}},
 		})
+	case errors.Is(err, service.ErrRecordingNotFound):
+		return responses.NotFound(c, "recording")
 	default:
 		return responses.Error(c, fiber.StatusBadGateway, err.Error())
 	}
@@ -110,7 +123,7 @@ func (h *ConferenceHandler) ListConferences(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.conferenceService.ListByContext(c.Context(), "Course", uint(courseID), params)
+	result, err := h.conferenceService.ListByContext(c.Context(), "Course", uint(courseID), callerAccountID(c), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch conferences")
 	}
@@ -140,6 +153,8 @@ func (h *ConferenceHandler) CreateConference(c *fiber.Ctx) error {
 			ConferenceType string `json:"conference_type"`
 			Duration       int    `json:"duration"`
 			Settings       string `json:"settings"`
+			// RecordingEnabled makes the provider meeting recordable.
+			RecordingEnabled bool `json:"recording_enabled"`
 			// JoinURL is an optional external meeting link (e.g. a Zoom
 			// link) used when no BigBlueButton server is configured.
 			JoinURL string `json:"join_url"`
@@ -162,6 +177,11 @@ func (h *ConferenceHandler) CreateConference(c *fiber.Ctx) error {
 		Settings:       input.Conference.Settings,
 		JoinURL:        input.Conference.JoinURL,
 		UserID:         userID,
+
+		RecordingEnabled: input.Conference.RecordingEnabled,
+	}
+	if conference.Settings != "" && !json.Valid([]byte(conference.Settings)) {
+		return responses.BadRequest(c, "settings must be a JSON object")
 	}
 
 	if err := h.conferenceService.Create(c.Context(), conference); err != nil {
@@ -200,6 +220,8 @@ func (h *ConferenceHandler) UpdateConference(c *fiber.Ctx) error {
 			Duration       *int    `json:"duration"`
 			Settings       *string `json:"settings"`
 			JoinURL        *string `json:"join_url"`
+
+			RecordingEnabled *bool `json:"recording_enabled"`
 		} `json:"conference"`
 	}
 
@@ -220,10 +242,19 @@ func (h *ConferenceHandler) UpdateConference(c *fiber.Ctx) error {
 		conference.ConferenceType = *input.Conference.ConferenceType
 	}
 	if input.Conference.Duration != nil {
+		if *input.Conference.Duration < 0 {
+			return responses.BadRequest(c, "duration must not be negative")
+		}
 		conference.Duration = *input.Conference.Duration
 	}
 	if input.Conference.Settings != nil {
+		if !json.Valid([]byte(*input.Conference.Settings)) {
+			return responses.BadRequest(c, "settings must be a JSON object")
+		}
 		conference.Settings = *input.Conference.Settings
+	}
+	if input.Conference.RecordingEnabled != nil {
+		conference.RecordingEnabled = *input.Conference.RecordingEnabled
 	}
 	if input.Conference.JoinURL != nil {
 		if err := service.ValidateMeetingURL(*input.Conference.JoinURL); err != nil {
@@ -330,14 +361,41 @@ func (h *ConferenceHandler) GetRecordings(c *fiber.Ctx) error {
 		return err
 	}
 
-	recordings, err := h.conferenceService.GetRecordings(c.Context(), conference.ID)
+	recordings, err := h.conferenceService.GetRecordings(c.Context(), conference, callerAccountID(c))
 	if err != nil {
-		return responses.NotFound(c, "conference")
+		return conferenceLifecycleError(c, err)
 	}
 
 	return c.JSON(fiber.Map{
 		"conference_id": conference.ID,
 		"recordings":    recordings,
+	})
+}
+
+// DeleteRecording deletes one of the conference's provider recordings
+// (instructor only).
+// DELETE /api/v1/conferences/:id/recordings/:recording_id
+func (h *ConferenceHandler) DeleteRecording(c *fiber.Ctx) error {
+	conference, wrote, err := h.loadConference(c, true)
+	if wrote {
+		return err
+	}
+	recordingID, uerr := url.PathUnescape(c.Params("recording_id"))
+	if uerr != nil || recordingID == "" {
+		return responses.BadRequest(c, "Invalid recording ID")
+	}
+	if err := h.conferenceService.DeleteRecording(c.Context(), conference, recordingID, callerAccountID(c)); err != nil {
+		return conferenceLifecycleError(c, err)
+	}
+	return c.JSON(fiber.Map{"delete": true})
+}
+
+// ListProviders reports which conference types this tenant can hold
+// natively (BigBlueButton / Zoom configured) for the course's UI.
+// GET /api/v1/courses/:course_id/conferences/providers
+func (h *ConferenceHandler) ListProviders(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{
+		"providers": h.conferenceService.Providers(c.Context(), callerAccountID(c)),
 	})
 }
 

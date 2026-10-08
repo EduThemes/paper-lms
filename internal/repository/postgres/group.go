@@ -42,6 +42,11 @@ func (r *groupRepo) Update(ctx context.Context, group *models.Group) error {
 	return r.db.WithContext(ctx).Save(group).Error
 }
 
+func (r *groupRepo) SetLeader(ctx context.Context, groupID uint, leaderID *uint) error {
+	return r.db.WithContext(ctx).Model(&models.Group{}).Where("id = ?", groupID).
+		Update("leader_id", leaderID).Error
+}
+
 func (r *groupRepo) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Model(&models.Group{}).Where("id = ?", id).Update("workflow_state", "deleted").Error
 }

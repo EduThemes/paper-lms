@@ -41,7 +41,7 @@ func conferenceTenantSubquery(conferenceColumn string) string {
 		SELECT id FROM conferences WHERE
 			(context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))
 			OR (context_type = 'Account' AND context_id = ?)
-			OR (context_type = 'Group' AND context_id IN (SELECT id FROM groups WHERE course_id IN (SELECT id FROM courses WHERE account_id = ?)))
+			OR (context_type = 'Group' AND context_id IN (SELECT id FROM groups WHERE context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?)))
 	)`
 }
 

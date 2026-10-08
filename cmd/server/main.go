@@ -502,6 +502,7 @@ func main() {
 	speedGraderService := service.NewSpeedGraderService(submissionRepo, submissionCommentRepo, assignmentRepo, enrollmentRepo, rubricAssessRepo)
 	// services
 	groupService := service.NewGroupService(groupCategoryRepo, groupRepo, groupMembershipRepo, enrollmentRepo)
+	groupService.SetUserRepository(userRepo) // G100: unassigned roster + CSV import/export
 	blueprintService := service.NewBlueprintService(
 		blueprintTemplateRepo, blueprintSubscriptionRepo, blueprintMigrationRepo,
 		moduleRepo, moduleItemRepo, assignmentRepo, pageRepo,

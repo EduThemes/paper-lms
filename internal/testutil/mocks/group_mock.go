@@ -31,6 +31,11 @@ func (m *MockGroupRepository) Update(ctx context.Context, group *models.Group) e
 	return args.Error(0)
 }
 
+func (m *MockGroupRepository) SetLeader(ctx context.Context, groupID uint, leaderID *uint) error {
+	args := m.Called(ctx, groupID, leaderID)
+	return args.Error(0)
+}
+
 func (m *MockGroupRepository) Delete(ctx context.Context, id uint) error {
 	args := m.Called(ctx, id)
 	return args.Error(0)

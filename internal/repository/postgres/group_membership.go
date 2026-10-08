@@ -75,6 +75,38 @@ func (r *groupMembershipRepo) FindByGroupAndUser(ctx context.Context, groupID, u
 	return &membership, nil
 }
 
+func (r *groupMembershipRepo) ListUserIDsInCategory(ctx context.Context, groupCategoryID uint) ([]uint, error) {
+	var ids []uint
+	err := r.db.WithContext(ctx).Model(&models.GroupMembership{}).
+		Joins("INNER JOIN groups ON groups.id = group_memberships.group_id").
+		Where("groups.group_category_id = ? AND groups.workflow_state != ? AND group_memberships.workflow_state = ?",
+			groupCategoryID, "deleted", "accepted").
+		Distinct().Pluck("group_memberships.user_id", &ids).Error
+	return ids, err
+}
+
+func (r *groupMembershipRepo) CountByGroupIDs(ctx context.Context, groupIDs []uint) (map[uint]int64, error) {
+	out := make(map[uint]int64, len(groupIDs))
+	if len(groupIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		GroupID uint
+		Count   int64
+	}
+	err := r.db.WithContext(ctx).Model(&models.GroupMembership{}).
+		Select("group_id, COUNT(*) AS count").
+		Where("group_id IN ?", groupIDs).
+		Group("group_id").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.GroupID] = row.Count
+	}
+	return out, nil
+}
+
 func (r *groupMembershipRepo) FindUserGroupInCategory(ctx context.Context, userID, groupCategoryID uint) (*models.Group, error) {
 	var group models.Group
 	if err := r.db.WithContext(ctx).
