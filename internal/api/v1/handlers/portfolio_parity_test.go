@@ -209,6 +209,27 @@ func TestPortfolio_UpdateWorkflowStateArchives(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
+// Portfolio links render as href on the public page: script URLs are
+// refused and bare hosts get https://.
+func TestPortfolio_UpdateRejectsScriptURLs(t *testing.T) {
+	f := newPortfolioFixture(t, 5)
+	f.sectionRepo.On("ListByPortfolioID", mock.Anything, uint(10)).Return([]models.PortfolioSection{}, nil)
+	f.artifactRepo.On("ListByPortfolioID", mock.Anything, uint(10), mock.Anything).Return(&repository.PaginatedResult[models.PortfolioArtifact]{}, nil)
+	var saved *models.Portfolio
+	f.portfolioRepo.On("Update", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		saved = args.Get(1).(*models.Portfolio)
+	}).Return(nil)
+
+	resp := testutil.MakeRequest(f.app, http.MethodPut, "/portfolios/10", body(`{"portfolio":{"linkedin_url":"javascript:alert(1)"}}`))
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Nil(t, saved)
+
+	resp = testutil.MakeRequest(f.app, http.MethodPut, "/portfolios/10", body(`{"portfolio":{"linkedin_url":"linkedin.com/in/jane-doe"}}`))
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NotNil(t, saved)
+	assert.Equal(t, "https://linkedin.com/in/jane-doe", saved.LinkedInURL)
+}
+
 // B198: import takes the course from the body, imports only the owner's
 // submitted work in that course, and skips anyone else's submission.
 func TestPortfolio_ImportFromCourse(t *testing.T) {

@@ -105,7 +105,7 @@ func writeChildNotFound(c *fiber.Ctx, err error, what string) error {
 // Portfolio links are rendered as href/src on the public page, so
 // javascript:/data: URLs would be stored XSS.
 func safePortfolioURL(raw string) bool {
-	raw = strings.TrimSpace(raw)
+	raw = strings.TrimSpace(normalizePortfolioURL(raw))
 	if raw == "" {
 		return true
 	}
@@ -118,6 +118,26 @@ func safePortfolioURL(raw string) bool {
 	}
 	scheme := strings.ToLower(u.Scheme)
 	return (scheme == "http" || scheme == "https") && u.Host != ""
+}
+
+// normalizePortfolioURL adds https:// to a bare host link such as
+// "linkedin.com/in/jane" so it is stored as a working absolute URL.
+func normalizePortfolioURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.HasPrefix(raw, "/") || strings.Contains(raw, ":") {
+		return raw
+	}
+	if strings.Contains(raw, ".") {
+		return "https://" + raw
+	}
+	return raw
+}
+
+// normalizeURLPtr normalizes an optional URL field in place.
+func normalizeURLPtr(p *string) {
+	if p != nil {
+		*p = normalizePortfolioURL(*p)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -331,8 +351,9 @@ func (h *PortfolioHandler) CreatePortfolio(c *fiber.Ctx) error {
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
-	for _, u := range []string{input.Portfolio.HeaderImageURL, input.Portfolio.AvatarURL, input.Portfolio.LinkedInURL, input.Portfolio.WebsiteURL} {
-		if !safePortfolioURL(u) {
+	for _, u := range []*string{&input.Portfolio.HeaderImageURL, &input.Portfolio.AvatarURL, &input.Portfolio.LinkedInURL, &input.Portfolio.WebsiteURL} {
+		normalizeURLPtr(u)
+		if !safePortfolioURL(*u) {
 			return responses.BadRequest(c, "URLs must be http(s)")
 		}
 	}
@@ -395,6 +416,7 @@ func (h *PortfolioHandler) UpdatePortfolio(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 	for _, u := range []*string{input.Portfolio.HeaderImageURL, input.Portfolio.AvatarURL, input.Portfolio.LinkedInURL, input.Portfolio.WebsiteURL} {
+		normalizeURLPtr(u)
 		if u != nil && !safePortfolioURL(*u) {
 			return responses.BadRequest(c, "URLs must be http(s)")
 		}
@@ -707,6 +729,8 @@ func (h *PortfolioHandler) AddArtifact(c *fiber.Ctx) error {
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
+	normalizeURLPtr(&input.Artifact.ContentURL)
+	normalizeURLPtr(&input.Artifact.ThumbnailURL)
 	if !safePortfolioURL(input.Artifact.ContentURL) || !safePortfolioURL(input.Artifact.ThumbnailURL) {
 		return responses.BadRequest(c, "URLs must be http(s)")
 	}
@@ -932,6 +956,8 @@ func (h *PortfolioHandler) UpdateArtifact(c *fiber.Ctx) error {
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
+	normalizeURLPtr(input.Artifact.ContentURL)
+	normalizeURLPtr(input.Artifact.ThumbnailURL)
 	if (input.Artifact.ContentURL != nil && !safePortfolioURL(*input.Artifact.ContentURL)) ||
 		(input.Artifact.ThumbnailURL != nil && !safePortfolioURL(*input.Artifact.ThumbnailURL)) {
 		return responses.BadRequest(c, "URLs must be http(s)")
