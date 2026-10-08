@@ -13,6 +13,10 @@ const OAuthConsentPage = () => {
   const redirectUri = searchParams.get('redirect_uri') || '';
   const scope = searchParams.get('scope') || '';
   const state = searchParams.get('state') || '';
+  // PKCE (G136): the challenge travels from /login/oauth2/auth through this
+  // screen to the authorization code; the app proves it with the verifier.
+  const codeChallenge = searchParams.get('code_challenge') || '';
+  const codeChallengeMethod = searchParams.get('code_challenge_method') || '';
 
   const [info, setInfo] = useState(null);
   const [error, setError] = useState(null);
@@ -47,6 +51,7 @@ const OAuthConsentPage = () => {
         scope,
         state,
         approve,
+        ...(codeChallenge ? { code_challenge: codeChallenge, code_challenge_method: codeChallengeMethod } : {}),
       });
       if (data?.redirect_url) {
         window.location.assign(data.redirect_url);
