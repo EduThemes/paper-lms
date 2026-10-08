@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, BookOpen } from 'lucide-react';
 import { api } from '../services/api';
+import { listAccountCourses } from '../services/api_api';
 import Layout from '../components/Layout';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -18,7 +19,9 @@ const AdminCoursesPage = () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await api.getAllCourses(1, 100);
+      // Canvas GET /accounts/self/courses (G138): every course of the
+      // account with its teachers and active student count.
+      const result = await listAccountCourses('self', { include: ['total_students', 'teachers'], per_page: 2000 });
       setCourses(result.data || []);
     } catch (err) {
       setError(err.message);
@@ -56,7 +59,9 @@ const AdminCoursesPage = () => {
     const q = search.toLowerCase();
     return (
       (c.name || '').toLowerCase().includes(q) ||
-      (c.course_code || '').toLowerCase().includes(q)
+      (c.course_code || '').toLowerCase().includes(q) ||
+      (c.sis_course_id || '').toLowerCase().includes(q) ||
+      (c.teachers || []).some((t) => (t.display_name || '').toLowerCase().includes(q))
     );
   });
 
@@ -107,7 +112,7 @@ const AdminCoursesPage = () => {
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search courses by name or code"
+            placeholder="Search courses by name, code, SIS ID or teacher"
             className="w-full max-w-md rounded-md border border-border-strong bg-surface-0 pl-9 pr-3 py-2 text-sm"
           />
         </div>
@@ -137,6 +142,8 @@ const AdminCoursesPage = () => {
                 <tr>
                   <th className="px-4 py-2 text-left font-medium">Name</th>
                   <th className="px-4 py-2 text-left font-medium">Code</th>
+                  <th className="px-4 py-2 text-left font-medium">Teachers</th>
+                  <th className="px-4 py-2 text-right font-medium">Students</th>
                   <th className="px-4 py-2 text-left font-medium">State</th>
                   <th className="px-4 py-2"></th>
                 </tr>
@@ -148,6 +155,10 @@ const AdminCoursesPage = () => {
                       <Link to={`/courses/${c.id}`} className="hover:text-brand-700">{c.name || '(unnamed)'}</Link>
                     </td>
                     <td className="px-4 py-2 text-text-secondary">{c.course_code || '—'}</td>
+                    <td className="px-4 py-2 text-text-secondary">
+                      {(c.teachers || []).map((t) => t.display_name).join(', ') || '—'}
+                    </td>
+                    <td className="px-4 py-2 text-right text-text-secondary">{c.total_students ?? '—'}</td>
                     <td className="px-4 py-2 text-text-secondary">{c.workflow_state || '—'}</td>
                     <td className="px-4 py-2 text-right">
                       <Link to={`/courses/${c.id}/settings`} className="text-xs text-brand-600 hover:text-brand-800">Settings</Link>

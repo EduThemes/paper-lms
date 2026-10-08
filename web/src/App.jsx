@@ -72,6 +72,7 @@ const ObserverDashboardPage = React.lazy(() => import('./pages/ObserverDashboard
 const AdminHomePage = React.lazy(() => import('./pages/AdminHomePage'));
 const AdminCoursesPage = React.lazy(() => import('./pages/AdminCoursesPage'));
 const AdminPeoplePage = React.lazy(() => import('./pages/AdminPeoplePage'));
+const AccountReportsPage = React.lazy(() => import('./pages/AccountReportsPage'));
 const AdminSettingsPage = React.lazy(() => import('./pages/AdminSettingsPage'));
 const SuperAdminSettingsPage = React.lazy(() => import('./pages/SuperAdminSettingsPage'));
 import PublicPageView from './pages/PublicPageView';
@@ -414,6 +415,7 @@ const App = () => {
             </ProtectedRoute>
           }
         />
+        <Route path="/admin/reports" element={<ProtectedRoute><AccountReportsPage /></ProtectedRoute>} />
         <Route
           path="/admin/settings"
           element={
