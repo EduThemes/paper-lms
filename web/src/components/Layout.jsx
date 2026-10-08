@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, BookOpen, Calendar, Mail, LogOut,
-  Briefcase, Eye, Settings, Home, Inbox, Menu, X, AlertTriangle, Library, Shield
+  Briefcase, Eye, Settings, Home, Inbox, Menu, X, AlertTriangle, Library, Shield, ListTodo
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
@@ -24,6 +24,7 @@ import useHasObservees from '../hooks/useHasObservees';
 // active language changes (useTranslation only runs in the render tree).
 const buildBaseNav = (t) => [
   { to: '/', icon: LayoutDashboard, label: t('nav.dashboard') },
+  { to: '/planner', icon: ListTodo, label: t('nav.todo', 'To do') },
   { to: '/courses', icon: BookOpen, label: t('nav.courses') },
   { to: '/calendar', icon: Calendar, label: t('nav.calendar') },
   { to: '/inbox', icon: Mail, label: t('nav.inbox') },
@@ -348,7 +349,7 @@ const Layout = ({ children }) => {
       {/* Mobile sidebar overlay */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
-          <div className="fixed inset-0 bg-black/50" onClick={() => setMobileMenuOpen(false)} />
+          <div aria-hidden="true" className="fixed inset-0 bg-black/50" onClick={() => setMobileMenuOpen(false)} />
           <aside
             className="fixed inset-y-0 left-0 z-50 flex flex-col items-center w-16 bg-chrome-sidebar"
             style={sidebarTopOffset}
