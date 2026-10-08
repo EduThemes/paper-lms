@@ -49,11 +49,14 @@ func (r *ltiResultRepo) Upsert(ctx context.Context, result *models.LTIResult) er
 	return r.db.WithContext(ctx).Save(&existing).Error
 }
 
-func (r *ltiResultRepo) ListByLineItem(ctx context.Context, lineItemID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LTIResult], error) {
+func (r *ltiResultRepo) ListByLineItem(ctx context.Context, lineItemID, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LTIResult], error) {
 	var results []models.LTIResult
 	var count int64
 
 	query := r.db.WithContext(ctx).Model(&models.LTIResult{}).Where("line_item_id = ?", lineItemID)
+	if userID != 0 {
+		query = query.Where("user_id = ?", userID)
+	}
 	query.Count(&count)
 
 	offset := (params.Page - 1) * params.PerPage

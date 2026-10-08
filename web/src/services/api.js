@@ -569,10 +569,10 @@ export const api = {
   },
 
   // Developer Keys
-  getDeveloperKeys: async (accountId = 1, page = 1, perPage = 10) => {
+  getDeveloperKeys: async (accountId = 'self', page = 1, perPage = 10) => {
     return request(`/accounts/${accountId}/developer_keys?page=${page}&per_page=${perPage}`);
   },
-  createDeveloperKey: async (accountId = 1, developerKey) => {
+  createDeveloperKey: async (accountId = 'self', developerKey) => {
     const { data } = await request(`/accounts/${accountId}/developer_keys`, {
       method: 'POST', body: JSON.stringify({ developer_key: developerKey }),
     });
@@ -586,6 +586,18 @@ export const api = {
   },
   deleteDeveloperKey: async (accountId, keyId) => {
     const { data } = await request(`/accounts/${accountId}/developer_keys/${keyId}`, { method: 'DELETE' });
+    return data;
+  },
+
+  // OAuth2 consent screen (B076): info for the screen, then the decision.
+  getOAuthAuthorizeInfo: async (params) => {
+    const { data } = await request(`/login/oauth2/auth/info?${new URLSearchParams(params).toString()}`);
+    return data;
+  },
+  submitOAuthConsent: async (consent) => {
+    const { data } = await request('/login/oauth2/auth', {
+      method: 'POST', body: JSON.stringify(consent),
+    });
     return data;
   },
 

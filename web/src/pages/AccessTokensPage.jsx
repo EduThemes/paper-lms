@@ -198,10 +198,11 @@ const AccessTokensPage = () => {
                 name="scopes"
                 rows={2}
                 className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                placeholder="e.g., read:courses, write:submissions, read:users"
+                placeholder="e.g., url:GET|/api/v1/courses, url:GET|/api/v1/courses/:course_id/assignments"
               />
               <p className="text-xs text-text-tertiary mt-1">
-                Comma-separated list of scopes. Leave blank for full access.
+                Comma-separated list of endpoint scopes (url:METHOD|/api/v1/path). The token can only call
+                the endpoints listed. Leave blank for full access.
               </p>
             </div>
             <div className="flex gap-3">

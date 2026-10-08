@@ -40,6 +40,9 @@ func (r *Router) registerPublicRoutes(api fiber.Router, authLimit fiber.Handler)
 
 	// Public OAuth2 token endpoint (no auth required)
 	api.Post("/login/oauth2/token", r.OAuth2Handler.Token)
+	// OAuth2 authorization endpoint: validates the client and redirects
+	// to the SPA consent screen. Never issues a code (B076).
+	api.Get("/login/oauth2/auth", authLimit, r.OAuth2Handler.Authorize)
 
 	// Public LTI endpoints (no auth required)
 	//

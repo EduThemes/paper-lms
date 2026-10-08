@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"strings"
@@ -11,6 +13,19 @@ import (
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 )
+
+// clientSecretHashPrefix marks a developer_keys.client_secret value that
+// holds a SHA-256 digest rather than the secret itself (B191). Migration
+// 000095 rewrites legacy plaintext rows into this form.
+const clientSecretHashPrefix = "sha256:"
+
+// HashClientSecret returns the at-rest form of an OAuth2 client secret.
+// The secret is 256 bits of CSPRNG output, so an unsalted fast hash is
+// sufficient: there is nothing to brute-force.
+func HashClientSecret(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return clientSecretHashPrefix + hex.EncodeToString(sum[:])
+}
 
 // DeveloperKeyService manages OAuth2 developer keys (client applications).
 type DeveloperKeyService struct {
@@ -22,11 +37,13 @@ func NewDeveloperKeyService(devKeyRepo repository.DeveloperKeyRepository) *Devel
 	return &DeveloperKeyService{devKeyRepo: devKeyRepo}
 }
 
-// Create generates a new developer key with a random ClientID and ClientSecret.
-// The Name field is required; if missing, an error is returned.
-func (s *DeveloperKeyService) Create(ctx context.Context, key *models.DeveloperKey) error {
+// Create generates a new developer key with a random ClientID and
+// ClientSecret. It returns the raw client secret: only its hash is
+// persisted, so the caller must hand the raw value to the admin now or
+// never. The Name field is required.
+func (s *DeveloperKeyService) Create(ctx context.Context, key *models.DeveloperKey) (string, error) {
 	if key.Name == "" {
-		return errors.New("developer key name is required")
+		return "", errors.New("developer key name is required")
 	}
 
 	// Generate ClientID: "dk_" + UUID
@@ -35,16 +52,41 @@ func (s *DeveloperKeyService) Create(ctx context.Context, key *models.DeveloperK
 	// Generate ClientSecret: random 64-character hex string (32 bytes)
 	secretBytes := make([]byte, 32)
 	if _, err := rand.Read(secretBytes); err != nil {
-		return errors.New("failed to generate client secret")
+		return "", errors.New("failed to generate client secret")
 	}
-	key.ClientSecret = hex.EncodeToString(secretBytes)
+	rawSecret := hex.EncodeToString(secretBytes)
+	key.ClientSecret = HashClientSecret(rawSecret)
 
 	// Set default workflow state if not provided
 	if key.WorkflowState == "" {
 		key.WorkflowState = "active"
 	}
 
-	return s.devKeyRepo.Create(ctx, key)
+	if err := s.devKeyRepo.Create(ctx, key); err != nil {
+		return "", err
+	}
+	return rawSecret, nil
+}
+
+// VerifyClientSecret reports whether presented is the key's client secret.
+// Comparison is constant-time. Legacy rows that still hold the plaintext
+// (written before migration 000095) are compared directly.
+func (s *DeveloperKeyService) VerifyClientSecret(key *models.DeveloperKey, presented string) bool {
+	return VerifyClientSecret(key, presented)
+}
+
+// VerifyClientSecret is the package-level form used by services that hold
+// a *models.DeveloperKey but not a DeveloperKeyService.
+func VerifyClientSecret(key *models.DeveloperKey, presented string) bool {
+	if key == nil || presented == "" || key.ClientSecret == "" {
+		return false
+	}
+	stored := key.ClientSecret
+	candidate := presented
+	if strings.HasPrefix(stored, clientSecretHashPrefix) {
+		candidate = HashClientSecret(presented)
+	}
+	return subtle.ConstantTimeCompare([]byte(stored), []byte(candidate)) == 1
 }
 
 // GetByID retrieves a developer key by its primary key ID, scoped to the
@@ -78,6 +120,8 @@ func (s *DeveloperKeyService) Update(ctx context.Context, key *models.DeveloperK
 	// Preserve the original ClientID and ClientSecret; they must never change
 	key.ClientID = existing.ClientID
 	key.ClientSecret = existing.ClientSecret
+	// The owning tenant is immutable too.
+	key.AccountID = existing.AccountID
 
 	return s.devKeyRepo.Update(ctx, key)
 }
@@ -101,7 +145,13 @@ func (s *DeveloperKeyService) List(ctx context.Context, accountID uint, params r
 // this developer key. It matches against the key's RedirectURI (single value)
 // and the newline-separated list in RedirectURIs.
 func (s *DeveloperKeyService) ValidateRedirectURI(key *models.DeveloperKey, uri string) bool {
-	if uri == "" {
+	return DeveloperKeyAllowsRedirect(key, uri)
+}
+
+// DeveloperKeyAllowsRedirect is the package-level redirect-URI allow-list
+// check, shared with the LTI OIDC authorization endpoint.
+func DeveloperKeyAllowsRedirect(key *models.DeveloperKey, uri string) bool {
+	if uri == "" || key == nil {
 		return false
 	}
 

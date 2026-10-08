@@ -36,6 +36,8 @@ func AllModels() []interface{} {
 		&LTILineItem{},
 		&LTIResult{},
 		&Nonce{},
+		&OAuthAuthorizationCode{},
+		&LTIPlatformKey{},
 		&DiscussionTopic{},
 		&DiscussionEntry{},
 		&DiscussionEntryRating{},

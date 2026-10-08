@@ -136,6 +136,22 @@ func main() {
 		}
 	}
 
+	// B191: seal any LTI 1.1 shared secrets still stored in plaintext.
+	// Idempotent; no-ops once every row carries the sealed prefix.
+	{
+		bctx, bcancel := context.WithTimeout(context.Background(), 60*time.Second)
+		sealed, err := auth.BackfillExternalToolSharedSecrets(bctx, database)
+		bcancel()
+		if err != nil {
+			if cfg.Environment == "production" {
+				log.Fatalf("external tool shared secret backfill failed: %v", err)
+			}
+			log.Printf("warning: external tool shared secret backfill skipped (%v) — set MFA_ENCRYPTION_KEY and reboot to seal them", err)
+		} else if sealed > 0 {
+			log.Printf("external tool shared secret backfill: sealed %d row(s)", sealed)
+		}
+	}
+
 	// Backfill system gamification currencies for every tenant. Idempotent —
 	// re-runs on every boot, no-ops on already-populated tenants thanks to
 	// the uniq_gam_currency_scope_code index + ON CONFLICT DO NOTHING.
@@ -362,16 +378,32 @@ func main() {
 	devKeyService := service.NewDeveloperKeyService(devKeyRepo)
 	accessTokenService := service.NewAccessTokenService(accessTokenRepo)
 	oauth2Service := service.NewOAuth2Service(devKeyService, accessTokenService)
+	// Authorization codes live in Postgres so any replica can redeem them (B192).
+	oauth2Service.SetCodeRepository(postgres.NewOAuthAuthorizationCodeRepository(database))
 	externalToolService := service.NewExternalToolService(externalToolRepo, devKeyRepo)
 
 	// Determine platform issuer URL from frontend URL or fallback
 	platformIssuer := cfg.FrontendURL
-	ltiService, err := service.NewLTIService(devKeyRepo, ltiConfigRepo, nonceRepo, enrollmentRepo, courseRepo, platformIssuer)
+	ltiService, err := service.NewLTIService(devKeyRepo, ltiConfigRepo, nonceRepo, enrollmentRepo, courseRepo, externalToolRepo, platformIssuer)
 	if err != nil {
 		log.Fatalf("Failed to initialize LTI service: %v", err)
 	}
+	// B181: sign LTI launches with the persisted, replica-shared platform
+	// key (LTI_PLATFORM_PRIVATE_KEY, else the secretbox-sealed DB row).
+	{
+		kctx, kcancel := context.WithTimeout(context.Background(), 30*time.Second)
+		keyErr := ltiService.LoadPersistentPlatformKey(kctx, postgres.NewLTIPlatformKeyRepository(database),
+			os.Getenv(service.LTIPlatformKeyEnvVar), auth.Encrypt, auth.Decrypt)
+		kcancel()
+		if keyErr != nil {
+			if cfg.Environment == "production" {
+				log.Fatalf("LTI platform key unavailable: %v", keyErr)
+			}
+			log.Printf("warning: LTI platform key not persisted (%v) — using an ephemeral key; launches break across restarts/replicas. Set MFA_ENCRYPTION_KEY or %s.", keyErr, service.LTIPlatformKeyEnvVar)
+		}
+	}
 
-	agsService := service.NewLTIAGSService(lineItemRepo, resultRepo, submissionRepo, assignmentRepo)
+	agsService := service.NewLTIAGSService(lineItemRepo, resultRepo, assignmentRepo, enrollmentRepo, submissionService)
 	nrpsService := service.NewLTINRPSService(enrollmentRepo, userRepo)
 	// services
 	discussionService := service.NewDiscussionService(discussionTopicRepo, discussionEntryRepo, discussionRatingRepo)
@@ -771,6 +803,7 @@ func main() {
 	developerKeyHandler := handlers.NewDeveloperKeyHandler(devKeyService)
 	accessTokenHandler := handlers.NewAccessTokenHandler(accessTokenService)
 	oauth2Handler := handlers.NewOAuth2Handler(oauth2Service, devKeyService, accessTokenService, userService)
+	oauth2Handler.SetFrontendURL(cfg.FrontendURL)
 	externalToolHandler := handlers.NewExternalToolHandler(externalToolService, devKeyService)
 	ltiHandler := handlers.NewLTIHandler(ltiService, agsService, nrpsService, externalToolRepo, ltiConfigRepo, userRepo, accountRepo, parentalConsentRepo)
 	// handlers

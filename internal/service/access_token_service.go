@@ -5,13 +5,19 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 )
+
+// OAuthAccessTokenTTL is the lifetime of an OAuth2 access token. Refresh
+// tokens do not expire on their own; they die with the token row.
+const OAuthAccessTokenTTL = 1 * time.Hour
 
 // AccessTokenService manages OAuth2 tokens and Personal Access Tokens.
 type AccessTokenService struct {
@@ -52,16 +58,11 @@ func (s *AccessTokenService) CreatePersonalAccessToken(ctx context.Context, user
 	tokenHash := hashToken(rawToken)
 	hint := rawToken[len(rawToken)-4:] // last 4 characters
 
-	scopeStr := "[]"
-	if len(scopes) > 0 {
-		scopeStr = scopesToJSON(scopes)
-	}
-
 	token := &models.AccessToken{
 		UserID:        userID,
 		Token:         tokenHash,
 		TokenHint:     hint,
-		Scopes:        scopeStr,
+		Scopes:        ScopesToJSON(scopes),
 		Purpose:       purpose,
 		WorkflowState: "active",
 	}
@@ -93,13 +94,7 @@ func (s *AccessTokenService) CreateOAuthToken(ctx context.Context, userID uint, 
 	refreshHash := hashToken(rawRefreshToken)
 	hint := rawAccessToken[len(rawAccessToken)-4:]
 
-	scopeStr := "[]"
-	if len(scopes) > 0 {
-		scopeStr = scopesToJSON(scopes)
-	}
-
-	// OAuth tokens expire after 1 hour
-	expiresAt := time.Now().Add(1 * time.Hour)
+	expiresAt := time.Now().Add(OAuthAccessTokenTTL)
 
 	token := &models.AccessToken{
 		UserID:         userID,
@@ -107,7 +102,7 @@ func (s *AccessTokenService) CreateOAuthToken(ctx context.Context, userID uint, 
 		Token:          accessHash,
 		TokenHint:      hint,
 		RefreshToken:   &refreshHash,
-		Scopes:         scopeStr,
+		Scopes:         ScopesToJSON(scopes),
 		ExpiresAt:      &expiresAt,
 		WorkflowState:  "active",
 	}
@@ -122,6 +117,11 @@ func (s *AccessTokenService) CreateOAuthToken(ctx context.Context, userID uint, 
 // ValidateToken hashes the provided raw token, looks it up in the database,
 // and verifies that it has not expired or been deleted. On success it updates
 // LastUsedAt and returns the token record.
+//
+// B183: an OAuth2 token is only as alive as its developer key. The repo
+// preloads token.DeveloperKey; a key that is missing, deactivated or
+// deleted kills every token minted for it immediately (Canvas parity: an
+// inactive key's tokens are rejected).
 func (s *AccessTokenService) ValidateToken(ctx context.Context, rawToken string) (*models.AccessToken, error) {
 	tokenHash := hashToken(rawToken)
 
@@ -140,6 +140,12 @@ func (s *AccessTokenService) ValidateToken(ctx context.Context, rawToken string)
 		return nil, errors.New("token has expired")
 	}
 
+	if token.DeveloperKeyID != nil {
+		if token.DeveloperKey == nil || token.DeveloperKey.WorkflowState != "active" {
+			return nil, errors.New("developer key is not active")
+		}
+	}
+
 	// Update LastUsedAt
 	now := time.Now()
 	token.LastUsedAt = &now
@@ -151,39 +157,52 @@ func (s *AccessTokenService) ValidateToken(ctx context.Context, rawToken string)
 	return token, nil
 }
 
-// RefreshOAuthToken uses a raw refresh token to rotate the access and refresh
-// tokens. The old token record is deleted and a new one is created. Returns
-// the new model, new raw access token, and new raw refresh token.
-func (s *AccessTokenService) RefreshOAuthToken(ctx context.Context, rawRefreshToken string) (*models.AccessToken, string, string, error) {
+// RefreshOAuthToken uses a raw refresh token to mint a new access token.
+//
+// B184: the refresh token must have been issued to the authenticating
+// client (devKeyID); presenting another client's refresh token fails.
+//
+// B193 (Canvas parity): the refresh token is NOT rotated. Canvas keeps the
+// original refresh token valid for the life of the grant and its refresh
+// response carries no new refresh_token, so Canvas-API clients store the
+// first one forever. The token row is updated in place with a new access
+// token hash and expiry; the previous access token stops working.
+func (s *AccessTokenService) RefreshOAuthToken(ctx context.Context, rawRefreshToken string, devKeyID uint) (*models.AccessToken, string, error) {
 	refreshHash := hashToken(rawRefreshToken)
 
-	oldToken, err := s.tokenRepo.FindByRefreshToken(ctx, refreshHash)
+	token, err := s.tokenRepo.FindByRefreshToken(ctx, refreshHash)
 	if err != nil {
-		return nil, "", "", errors.New("invalid refresh token")
+		return nil, "", errors.New("invalid refresh token")
 	}
 
-	if oldToken.WorkflowState != "active" {
-		return nil, "", "", errors.New("refresh token has been revoked")
+	if token.WorkflowState != "active" {
+		return nil, "", errors.New("refresh token has been revoked")
 	}
 
 	// The refresh token must belong to an OAuth token (has a developer key)
-	if oldToken.DeveloperKeyID == nil {
-		return nil, "", "", errors.New("refresh token is not associated with an OAuth token")
+	if token.DeveloperKeyID == nil {
+		return nil, "", errors.New("refresh token is not associated with an OAuth token")
+	}
+	if *token.DeveloperKeyID != devKeyID {
+		// Same message as an unknown token: don't confirm to client B
+		// that client A's refresh token exists.
+		return nil, "", errors.New("invalid refresh token")
 	}
 
-	devKeyID := *oldToken.DeveloperKeyID
-	userID := oldToken.UserID
+	rawAccessToken, err := generateRandomHex(32)
+	if err != nil {
+		return nil, "", errors.New("failed to generate access token")
+	}
+	expiresAt := time.Now().Add(OAuthAccessTokenTTL)
+	token.Token = hashToken(rawAccessToken)
+	token.TokenHint = rawAccessToken[len(rawAccessToken)-4:]
+	token.ExpiresAt = &expiresAt
 
-	// Parse existing scopes from the old token
-	scopes := parseScopesJSON(oldToken.Scopes)
-
-	// Delete the old token
-	if err := s.tokenRepo.Delete(ctx, oldToken.ID); err != nil {
-		return nil, "", "", errors.New("failed to revoke old token")
+	if err := s.tokenRepo.Update(ctx, token); err != nil {
+		return nil, "", errors.New("failed to refresh token")
 	}
 
-	// Create a new OAuth token
-	return s.CreateOAuthToken(ctx, userID, devKeyID, scopes)
+	return token, rawAccessToken, nil
 }
 
 // RevokeToken marks a token as deleted. It verifies that the requesting user
@@ -207,44 +226,130 @@ func (s *AccessTokenService) ListUserTokens(ctx context.Context, userID uint, pa
 	return s.tokenRepo.ListByUserID(ctx, userID, params)
 }
 
-// scopesToJSON converts a slice of scope strings into a JSON array string.
-func scopesToJSON(scopes []string) string {
+// ScopesToJSON converts a slice of scope strings into the JSON-array string
+// stored in access_tokens.scopes / developer_keys.scopes.
+func ScopesToJSON(scopes []string) string {
 	if len(scopes) == 0 {
 		return "[]"
 	}
-	var b strings.Builder
-	b.WriteByte('[')
-	for i, scope := range scopes {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		b.WriteByte('"')
-		b.WriteString(scope)
-		b.WriteByte('"')
+	b, err := json.Marshal(scopes)
+	if err != nil {
+		return "[]"
 	}
-	b.WriteByte(']')
-	return b.String()
+	return string(b)
 }
 
-// parseScopesJSON parses a JSON array string like `["a","b"]` into a string
-// slice. This is intentionally simple and does not handle edge cases beyond
-// the format produced by scopesToJSON.
-func parseScopesJSON(s string) []string {
+// ParseScopes parses a stored JSON array string like `["a","b"]` into a
+// string slice. Malformed legacy values fall back to a tolerant split.
+func ParseScopes(s string) []string {
 	s = strings.TrimSpace(s)
 	if s == "" || s == "[]" {
-		return nil
+		return []string{}
 	}
-	// Strip brackets
+	var out []string
+	if err := json.Unmarshal([]byte(s), &out); err == nil {
+		return out
+	}
 	s = strings.TrimPrefix(s, "[")
 	s = strings.TrimSuffix(s, "]")
-	parts := strings.Split(s, ",")
-	var result []string
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		p = strings.Trim(p, "\"")
+	out = []string{}
+	for _, p := range strings.Split(s, ",") {
+		p = strings.Trim(strings.TrimSpace(p), "\"")
 		if p != "" {
-			result = append(result, p)
+			out = append(out, p)
 		}
 	}
-	return result
+	return out
+}
+
+// TokenScopeRestriction reports whether the token is scope-restricted and,
+// if so, the scopes it holds (B085).
+//
+//   - OAuth2 tokens follow Canvas: scopes are enforced only when the
+//     developer key has require_scopes on.
+//   - Personal access tokens are enforced whenever the user asked for
+//     scopes at creation; a PAT created without scopes is full-access.
+func TokenScopeRestriction(token *models.AccessToken) ([]string, bool) {
+	if token == nil {
+		return nil, false
+	}
+	scopes := ParseScopes(token.Scopes)
+	if token.DeveloperKeyID != nil {
+		if token.DeveloperKey != nil && token.DeveloperKey.RequireScopes {
+			return scopes, true
+		}
+		return nil, false
+	}
+	if len(scopes) > 0 {
+		return scopes, true
+	}
+	return nil, false
+}
+
+var validScopeMethods = map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true, "HEAD": true}
+
+// IsValidScope reports whether scope is a Canvas-format URL scope
+// ("url:<METHOD>|/api/...").
+func IsValidScope(scope string) bool {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(scope), "url:")
+	if !ok {
+		return false
+	}
+	method, path, ok := strings.Cut(rest, "|")
+	return ok && validScopeMethods[strings.ToUpper(method)] && strings.HasPrefix(path, "/api/")
+}
+
+// scopeParamSegment matches a Canvas route-style placeholder segment.
+var scopeParamSegment = regexp.MustCompile(`^:[A-Za-z_][A-Za-z0-9_]*$`)
+
+// ScopeAllowsRequest reports whether any Canvas-format scope
+// ("url:GET|/api/v1/courses/:course_id/assignments") permits the request.
+// HEAD is treated as GET. ":param" segments match exactly one path
+// segment, "*glob" matches the remainder, and Canvas's optional
+// "(.:format)" suffix is ignored.
+func ScopeAllowsRequest(scopes []string, method, path string) bool {
+	method = strings.ToUpper(method)
+	if method == "HEAD" {
+		method = "GET"
+	}
+	path = strings.TrimSuffix(path, "/")
+	for _, scope := range scopes {
+		rest, ok := strings.CutPrefix(scope, "url:")
+		if !ok {
+			continue
+		}
+		scopeMethod, pattern, ok := strings.Cut(rest, "|")
+		if !ok || strings.ToUpper(scopeMethod) != method {
+			continue
+		}
+		pattern = strings.TrimSuffix(pattern, "(.:format)")
+		pattern = strings.TrimSuffix(pattern, "/")
+		if scopePathMatches(pattern, path) {
+			return true
+		}
+	}
+	return false
+}
+
+func scopePathMatches(pattern, path string) bool {
+	ps := strings.Split(pattern, "/")
+	rs := strings.Split(path, "/")
+	for i, seg := range ps {
+		if strings.HasPrefix(seg, "*") {
+			return i < len(rs)
+		}
+		if i >= len(rs) {
+			return false
+		}
+		if scopeParamSegment.MatchString(seg) {
+			if rs[i] == "" {
+				return false
+			}
+			continue
+		}
+		if seg != rs[i] {
+			return false
+		}
+	}
+	return len(ps) == len(rs)
 }

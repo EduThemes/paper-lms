@@ -12,6 +12,7 @@ const ModulesPage = React.lazy(() => import('./pages/ModulesPage'));
 const PeoplePage = React.lazy(() => import('./pages/PeoplePage'));
 const AccessTokensPage = React.lazy(() => import('./pages/AccessTokensPage'));
 const DeveloperKeysPage = React.lazy(() => import('./pages/DeveloperKeysPage'));
+const OAuthConsentPage = React.lazy(() => import('./pages/OAuthConsentPage'));
 const ExternalToolsPage = React.lazy(() => import('./pages/ExternalToolsPage'));
 const DiscussionsPage = React.lazy(() => import('./pages/DiscussionsPage'));
 const DiscussionTopicPage = React.lazy(() => import('./pages/DiscussionTopicPageV2'));
@@ -154,6 +155,7 @@ const App = () => {
         {/* Wave 1.6 follow-up — anonymous (pending-password-reset
             JWT is the credential). Mirrors /mfa/verify in spirit. */}
         <Route path="/auth/password-set" element={<PasswordResetRequiredPage />} />
+        <Route path="/login/oauth2/confirm" element={<ProtectedRoute><OAuthConsentPage /></ProtectedRoute>} />
         <Route path="/users/self/passkeys" element={<ProtectedRoute><PasskeyListPage /></ProtectedRoute>} />
         <Route path="/users/self/passkeys/enroll" element={<ProtectedRoute><PasskeyEnrollPage /></ProtectedRoute>} />
         <Route path="/consent/verify/:token" element={<ParentalConsentPage />} />
