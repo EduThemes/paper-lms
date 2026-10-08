@@ -103,6 +103,23 @@ type LoginPipeline struct {
 	accounts    repository.AccountRepository
 	audit       *AuthAudit
 	jwtSecret   string
+	// logins resolves an admin-created SSO login (G115, Canvas pseudonym
+	// with an authentication provider). Optional; see SetProviderLogins.
+	logins ProviderLoginLookup
+}
+
+// ProviderLoginLookup finds the additional login an SSO provider's
+// subject names, inside the provider's account (*service.UserLoginService).
+type ProviderLoginLookup interface {
+	FindForProvider(ctx context.Context, providerID, accountID uint, subject string) (*models.UserLogin, error)
+	TouchLastLogin(ctx context.Context, loginID uint)
+}
+
+// SetProviderLogins enables matching SSO subjects against admin-created
+// logins before the email auto-link (G115).
+func (p *LoginPipeline) SetProviderLogins(l ProviderLoginLookup) *LoginPipeline {
+	p.logins = l
+	return p
 }
 
 // AuthProviderRepository is the narrow contract LoginPipeline depends
@@ -335,6 +352,14 @@ func (p *LoginPipeline) resolveUser(ctx context.Context, outcome SSOOutcome, met
 			_ = p.federations.TouchLastSeen(ctx, fi.ID, marshalAttrsIfRicher(fi.ClaimsSnapshot, outcome.Attributes))
 			return user, false, nil
 		}
+	}
+
+	// (a2) An admin-created login for this provider (G115): the subject
+	// (or the provider's login_id attribute) names the user explicitly.
+	if user, ok, err := p.resolveProviderLogin(ctx, outcome, provider.ID, provider.AccountID, meta); err != nil {
+		return nil, false, err
+	} else if ok {
+		return user, false, nil
 	}
 
 	// (b) Email auto-link to an existing local user. Only when the

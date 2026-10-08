@@ -25,6 +25,20 @@ var dummyPasswordHash, _ = bcrypt.GenerateFromPassword([]byte("timing-oracle-def
 
 type UserService struct {
 	repo repository.UserRepository
+	// extraLogins resolves additional local logins (G115). Optional.
+	extraLogins LocalLoginAuthenticator
+}
+
+// LocalLoginAuthenticator verifies a password against an additional
+// local login (*UserLoginService).
+type LocalLoginAuthenticator interface {
+	AuthenticateLocal(ctx context.Context, name, password string) (*models.User, error)
+}
+
+// SetExtraLogins enables sign-in with additional local logins (G115).
+func (s *UserService) SetExtraLogins(a LocalLoginAuthenticator) *UserService {
+	s.extraLogins = a
+	return s
 }
 
 func NewUserService(repo repository.UserRepository) *UserService {
@@ -89,6 +103,13 @@ func (s *UserService) Register(ctx context.Context, name, email, password string
 
 func (s *UserService) Authenticate(ctx context.Context, loginID, password string) (*models.User, error) {
 	user, err := s.repo.FindByLoginID(ctx, loginID)
+	if err != nil && s.extraLogins != nil {
+		// An additional local login (G115) carries its own password, or
+		// uses the user's; either way the password is verified there.
+		if u, lerr := s.extraLogins.AuthenticateLocal(ctx, loginID, password); lerr == nil {
+			return u, nil
+		}
+	}
 	if err != nil {
 		// Fallback to email lookup
 		user, err = s.repo.FindByEmail(ctx, loginID)
