@@ -47,7 +47,9 @@ func SecurityHeaders(cfg SecurityConfig) fiber.Handler {
 		c.Set("X-Frame-Options", "DENY")
 		c.Set("X-XSS-Protection", "1; mode=block")
 		c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		c.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		// camera/microphone are allowed for this origin only: the rich content
+		// editor records audio/video in the browser (G002).
+		c.Set("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()")
 		c.Set("Content-Security-Policy", csp)
 
 		// Only send HSTS when the request arrived over TLS (indicated by a

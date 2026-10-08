@@ -44,6 +44,8 @@ func AllModels() []interface{} {
 		&DiscussionEntryRating{},
 		&Folder{},
 		&Attachment{},
+		&MediaObject{},
+		&MediaTrack{},
 		&SISBatch{},
 		&SISBatchError{},
 		&QuizQuestion{},

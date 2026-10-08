@@ -132,6 +132,9 @@ type Router struct {
 	CommonsHandler              *handlers.CommonsHandler
 	AIAssistHandler             *handlers.AIAssistHandler
 
+	// Rich-content media: uploads, recordings, captions (rce-media lane).
+	MediaObjectHandler *handlers.MediaObjectHandler
+
 	// Quiz item banks, stimuli, per-question outcome alignments
 	QuizItemBankHandler         *handlers.QuizItemBankHandler
 	QuizStimulusHandler         *handlers.QuizStimulusHandler
@@ -853,4 +856,5 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerQuizExtensionRoutes(protected, enrolled, instructor)
 	r.registerGamificationRoutes(protected, admin, instructor, selfOrAdmin)
 	r.registerSuperAdminRoutes(protected)
+	r.registerRCEMediaRoutes(protected)
 }
