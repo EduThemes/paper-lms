@@ -110,6 +110,7 @@ func newGUEnv(t *testing.T) *guEnv {
 	asgH := handlers.NewAssignmentHandler(service.NewAssignmentService(assignmentRepo))
 	asgH.SetGradingUIDeps(enrollments, attachmentRepo)
 	guH := handlers.NewGradingUIHandler(gu, subH, users, peerSvc, nil)
+	guH.SetRubricService(service.NewRubricService(postgres.NewRubricRepository(g), postgres.NewRubricAssociationRepository(g), postgres.NewRubricAssessmentRepository(g)))
 
 	return &guEnv{g: g, subSvc: subSvc, gu: gu, subH: subH, sgH: sgH, gbH: gbH, guH: guH, prH: prH, asgH: asgH}
 }
@@ -140,6 +141,9 @@ func (e *guEnv) app(userID, accountID uint, enrollmentType string, isAdmin bool)
 	anon := a + "/anonymous_submissions/:anonymous_id"
 	app.Put(anon, e.guH.UpdateAnonymousSubmission)
 	app.Get(anon+"/comments", e.guH.ListAnonymousSubmissionComments)
+	app.Get(anon+"/rubric_assessment", e.guH.GetAnonymousRubricAssessment)
+	app.Put(anon+"/rubric_assessment", e.guH.SaveAnonymousRubricAssessment)
+	app.Get("/courses/:course_id/grading_periods", e.guH.ListCourseGradingPeriods)
 	app.Post(anon+"/comments", e.guH.CreateAnonymousSubmissionComment)
 	app.Put(a+"/provisional_grades", e.guH.SaveProvisionalGrade)
 	app.Get(a+"/moderation", e.guH.GetModeration)

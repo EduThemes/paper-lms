@@ -45,6 +45,7 @@ func addGradingUIFields(m fiber.Map, a *models.Assignment) {
 	m["grades_published_at"] = a.GradesPublishedAt
 	m["anonymous_peer_reviews"] = a.AnonymousPeerReviews
 	m["peer_reviews_due_at"] = a.PeerReviewsDueAt
+	m["omit_from_final_grade"] = a.OmitFromFinalGrade
 }
 
 // gradingUISettingsInput is the writable part (all optional).
@@ -61,6 +62,7 @@ type gradingUISettingsInput struct {
 	GraderNamesVisibleToFinalGrader *bool           `json:"grader_names_visible_to_final_grader"`
 	AnonymousPeerReviews            *bool           `json:"anonymous_peer_reviews"`
 	PeerReviewsDueAt                *time.Time      `json:"peer_reviews_due_at"`
+	OmitFromFinalGrade              *bool           `json:"omit_from_final_grade"`
 }
 
 // applyGradingUISettings reads the settings from the request body onto
@@ -130,6 +132,9 @@ func (h *AssignmentHandler) applyGradingUISettings(c *fiber.Ctx, a *models.Assig
 
 	if in.GradeGroupStudentsIndividually != nil {
 		a.GradeGroupStudentsIndividually = *in.GradeGroupStudentsIndividually
+	}
+	if in.OmitFromFinalGrade != nil {
+		a.OmitFromFinalGrade = *in.OmitFromFinalGrade
 	}
 	if in.AnonymousPeerReviews != nil {
 		a.AnonymousPeerReviews = *in.AnonymousPeerReviews

@@ -21,6 +21,13 @@ type AGSGrader interface {
 	Grade(ctx context.Context, assignmentID, userID, graderID, callerAccountID uint, postedGrade string) (*models.Submission, error)
 }
 
+// externalToolActivityRecorder is implemented by *SubmissionService:
+// it records a basic_lti_launch submission for an external_tool
+// assignment when the tool reports the student submitted.
+type externalToolActivityRecorder interface {
+	RecordExternalToolActivity(ctx context.Context, assignment *models.Assignment, userID uint) error
+}
+
 // AGS errors. Handlers map ErrAGSInvalid → 400, ErrAGSUserNotInCourse and
 // ErrAGSGradeRefused → 422 (Canvas's status for both), ErrAGSNotFound → 404.
 var (
@@ -205,6 +212,14 @@ func (s *LTIAGSService) PostScore(ctx context.Context, lineItem *models.LTILineI
 		assignment, aErr := s.assignmentRepo.FindByID(ctx, *lineItem.AssignmentID, accountID)
 		if aErr != nil || assignment == nil || assignment.CourseID != lineItem.CourseID {
 			return agsErr(ErrAGSNotFound, "line item assignment not found")
+		}
+
+		// A tool reporting the student's work as submitted creates the
+		// basic_lti_launch submission (grading-ui lane, G026).
+		if result.ActivityProgress == "Submitted" || result.ActivityProgress == "Completed" {
+			if rec, ok := s.grader.(externalToolActivityRecorder); ok {
+				_ = rec.RecordExternalToolActivity(ctx, assignment, result.UserID)
+			}
 		}
 
 		if result.ResultScore != nil && acceptGivenScore[result.GradingProgress] {

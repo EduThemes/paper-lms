@@ -23,6 +23,7 @@ type GradingUIHandler struct {
 	userRepo          repository.UserRepository
 	peerReviewService *service.PeerReviewService
 	fileService       *service.FileService
+	rubricService     *service.RubricService // optional (SetRubricService)
 }
 
 // NewGradingUIHandler wires the handler.

@@ -42,6 +42,10 @@ type Assignment struct {
 	GradesPublishedAt               *time.Time `json:"grades_published_at"`
 	AnonymousPeerReviews            bool       `json:"anonymous_peer_reviews" gorm:"default:false"`
 	PeerReviewsDueAt                *time.Time `json:"peer_reviews_due_at"`
+
+	// OmitFromFinalGrade keeps a graded assignment out of the course
+	// total (Canvas omit_from_final_grade; migration 000097).
+	OmitFromFinalGrade bool `json:"omit_from_final_grade" gorm:"default:false"`
 }
 
 // IsPublished reports whether students may see and submit to the

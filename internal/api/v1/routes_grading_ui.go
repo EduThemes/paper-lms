@@ -26,6 +26,8 @@ func (r *Router) registerGradingUIRoutes(protected fiber.Router, admin, enrolled
 	protected.Post(anon+"/comment_files", append(upload, instructor, h.UploadAnonymousCommentFile)...)
 	protected.Get(anon+"/files/:file_id/download", instructor, h.DownloadAnonymousSubmissionFile)
 	protected.Get(anon+"/comments/:comment_id/files/:file_id/download", instructor, h.DownloadAnonymousCommentFile)
+	protected.Get(anon+"/rubric_assessment", instructor, h.GetAnonymousRubricAssessment)
+	protected.Put(anon+"/rubric_assessment", instructor, h.SaveAnonymousRubricAssessment)
 
 	// Comment management and comment files (submission owner or staff).
 	sub := "/courses/:course_id/assignments/:assignment_id/submissions/:user_id"

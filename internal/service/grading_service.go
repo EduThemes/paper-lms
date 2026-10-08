@@ -205,12 +205,13 @@ func (s *GradingService) GetStudentGrade(ctx context.Context, courseID, studentI
 // assignmentCounts decides whether an assignment takes part in a
 // student's grade and with how many points possible (Canvas grade
 // calculator rules, B115/B206):
-//   - unpublished / deleted assignments and not_graded ones never count;
+//   - unpublished / deleted assignments, not_graded ones and ones
+//     omitted from the final grade never count;
 //   - an excused submission is dropped from both earned and possible;
 //   - a 0-point (or point-less) assignment counts as extra credit: its
 //     score is added to earned with nothing added to possible.
 func assignmentCounts(a *models.Assignment, sub *models.Submission) (pointsPossible float64, counts bool) {
-	if a == nil || !a.IsPublished() || a.GradingType == "not_graded" {
+	if a == nil || !a.IsPublished() || a.GradingType == "not_graded" || a.OmitFromFinalGrade {
 		return 0, false
 	}
 	if sub != nil && sub.Excused {

@@ -24,6 +24,7 @@ type gradingUIDeps struct {
 	submissionService *service.SubmissionService
 	peerReviewService *service.PeerReviewService
 	fileService       *service.FileService
+	rubricService     *service.RubricService
 
 	submissionHandler  *handlers.SubmissionHandler
 	speedGraderHandler *handlers.SpeedGraderHandler
@@ -47,5 +48,7 @@ func wireGradingUI(database *gorm.DB, d gradingUIDeps) *handlers.GradingUIHandle
 	d.assignmentHandler.SetGradingUIDeps(d.enrollmentRepo, d.attachmentRepo)
 	d.peerReviewHandler.SetUserRepository(d.userRepo)
 
-	return handlers.NewGradingUIHandler(svc, d.submissionHandler, d.userRepo, d.peerReviewService, d.fileService)
+	h := handlers.NewGradingUIHandler(svc, d.submissionHandler, d.userRepo, d.peerReviewService, d.fileService)
+	h.SetRubricService(d.rubricService)
+	return h
 }

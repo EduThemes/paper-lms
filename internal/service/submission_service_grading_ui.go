@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"sort"
+	"strings"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -79,4 +80,31 @@ func (s *SubmissionService) CourseGradingPeriods(ctx context.Context, courseID, 
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].StartDate.Before(out[j].StartDate) })
 	return out, nil
+}
+
+// RecordExternalToolActivity turns an LTI tool's report that the student
+// submitted (AGS activityProgress Submitted / Completed) into a
+// basic_lti_launch submission on an external_tool assignment, the way
+// Canvas does, unless the student has already submitted. It is a no-op
+// for assignments that are not external_tool ones. Lock windows and
+// attempt limits still apply (an error means no submission was made).
+func (s *SubmissionService) RecordExternalToolActivity(ctx context.Context, assignment *models.Assignment, userID uint) error {
+	if assignment == nil || !assignmentHasType(assignment, "external_tool") {
+		return nil
+	}
+	if existing, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignment.ID, userID, 0); err == nil && existing != nil && existing.SubmittedAt != nil {
+		return nil
+	}
+	_, err := s.RecordExternalToolSubmission(ctx, assignment, userID, "")
+	return err
+}
+
+// assignmentHasType reports whether t is one of a's submission types.
+func assignmentHasType(a *models.Assignment, t string) bool {
+	for _, st := range strings.Split(a.SubmissionTypes, ",") {
+		if strings.TrimSpace(st) == t {
+			return true
+		}
+	}
+	return false
 }
