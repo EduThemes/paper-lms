@@ -1,9 +1,51 @@
-import React, { useState } from 'react';
-import { Send, Clock, CheckCircle, Upload, Link as LinkIcon, FileText, Download, Paperclip } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Send, Clock, CheckCircle, Upload, Link as LinkIcon, FileText, Paperclip, Mic, PenLine, Plug, X } from 'lucide-react';
 import { SubmissionBody } from './SafeHTML';
 import { plainTextToHtml } from '../utils/html';
+import MediaRecorderButton from './grading/MediaRecorderButton';
+import AttachmentPreview, { formatSize } from './grading/AttachmentPreview';
+import AnnotationSubmission from './grading/AnnotatableDocument';
 
-const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, submissionTypes = ['online_text_entry'] }) => {
+const MAX_UPLOAD_FILES = 20;
+
+// fileExtension returns a file name's lower-case extension without the dot.
+export const fileExtension = (name) => {
+  const m = /\.([^.]+)$/.exec(String(name || ''));
+  return m ? m[1].toLowerCase() : '';
+};
+
+// attemptsRemaining mirrors the server's limit: allowed_attempts plus
+// the instructor's extra attempts, minus the attempts already used.
+// null means unlimited.
+export const attemptsRemaining = (assignment, submission) => {
+  const allowed = assignment?.allowed_attempts;
+  if (!allowed || allowed <= 0) return null;
+  const used = submission && submission.workflow_state !== 'unsubmitted' && submission.submitted_at ? (submission.attempt || 0) : 0;
+  return Math.max(0, allowed + (submission?.extra_attempts || 0) - used);
+};
+
+// LocalMediaPreview plays a recorded / chosen file before it is uploaded.
+const LocalMediaPreview = ({ file }) => {
+  const [src, setSrc] = useState('');
+  useEffect(() => {
+    if (!file || typeof URL.createObjectURL !== 'function') return undefined;
+    const u = URL.createObjectURL(file);
+    setSrc(u);
+    return () => URL.revokeObjectURL?.(u);
+  }, [file]);
+  if (!src) return null;
+  return <AttachmentPreview file={{ url: src, content_type: file.type, display_name: file.name }} showLink={false} />;
+};
+
+const SubmissionForm = ({
+  courseId,
+  assignmentId,
+  existingSubmission,
+  onSubmit,
+  submissionTypes = ['online_text_entry'],
+  assignment = null,
+  currentUserId = null,
+}) => {
   const types = Array.isArray(submissionTypes)
     ? submissionTypes.map(t => t.trim())
     : String(submissionTypes).split(',').map(t => t.trim());
@@ -11,12 +53,27 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
   const hasText = types.includes('online_text_entry');
   const hasUpload = types.includes('online_upload');
   const hasUrl = types.includes('online_url');
-  const submittableTypes = [hasText && 'text', hasUpload && 'file', hasUrl && 'url'].filter(Boolean);
+  const hasMedia = types.includes('media_recording');
+  const hasAnnotation = types.includes('student_annotation');
+  const hasExternalTool = types.includes('external_tool');
+  const submittableTypes = [
+    hasText && 'text',
+    hasUpload && 'file',
+    hasUrl && 'url',
+    hasMedia && 'media',
+    hasAnnotation && 'annotation',
+    hasExternalTool && 'external_tool',
+  ].filter(Boolean);
+
+  const allowedExtensions = Array.isArray(assignment?.allowed_extensions) ? assignment.allowed_extensions : [];
+  const remaining = attemptsRemaining(assignment, existingSubmission);
+  const outOfAttempts = remaining === 0;
 
   const [activeTab, setActiveTab] = useState(submittableTypes[0] || 'text');
   const [body, setBody] = useState('');
   const [url, setUrl] = useState('');
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
+  const [mediaFile, setMediaFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
@@ -39,9 +96,15 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
         await onSubmit({ submission_type: 'online_url', url });
         setUrl('');
       } else if (activeTab === 'file') {
-        if (!file) return;
-        await onSubmit({ submission_type: 'online_upload', file });
-        setFile(null);
+        if (files.length === 0) return;
+        const bad = files.find((f) => allowedExtensions.length > 0 && !allowedExtensions.includes(fileExtension(f.name)));
+        if (bad) throw new Error(`${bad.name}: allowed file types are ${allowedExtensions.join(', ')}`);
+        await onSubmit({ submission_type: 'online_upload', files });
+        setFiles([]);
+      } else if (activeTab === 'media') {
+        if (!mediaFile) return;
+        await onSubmit({ submission_type: 'media_recording', files: [mediaFile] });
+        setMediaFile(null);
       }
       setSuccess(true);
       setTimeout(() => setSuccess(false), 5000);
@@ -55,7 +118,8 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
   const isValid = () => {
     if (activeTab === 'text') return body.trim().length > 0;
     if (activeTab === 'url') return url.trim().length > 0;
-    if (activeTab === 'file') return file !== null;
+    if (activeTab === 'file') return files.length > 0;
+    if (activeTab === 'media') return mediaFile !== null;
     return false;
   };
 
@@ -64,8 +128,12 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
     return new Date(dateStr).toLocaleString();
   };
 
-  const tabLabel = { text: 'Text Entry', file: 'File Upload', url: 'Website URL' };
-  const tabIcon = { text: FileText, file: Upload, url: LinkIcon };
+  const tabLabel = {
+    text: 'Text Entry', file: 'File Upload', url: 'Website URL', media: 'Media Recording',
+    annotation: 'Student Annotation', external_tool: 'External Tool',
+  };
+  const tabIcon = { text: FileText, file: Upload, url: LinkIcon, media: Mic, annotation: PenLine, external_tool: Plug };
+  const addFiles = (list) => setFiles((prev) => [...prev, ...Array.from(list || [])].slice(0, MAX_UPLOAD_FILES));
 
   return (
     <div className="space-y-4">
@@ -108,23 +176,21 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
               </p>
               <div className="space-y-1.5">
                 {existingSubmission.attachments.map((att) => (
-                  <a
-                    key={att.id}
-                    href={att.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-sm text-brand-600 hover:underline"
-                  >
-                    <Download className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span>{att.display_name || att.filename}</span>
-                    {att.size && (
-                      <span className="text-xs text-text-disabled">
-                        ({att.size >= 1048576
-                          ? `${(att.size / 1048576).toFixed(1)} MB`
-                          : `${(att.size / 1024).toFixed(1)} KB`})
-                      </span>
-                    )}
-                  </a>
+                  existingSubmission.submission_type === 'media_recording' ? (
+                    <AttachmentPreview key={att.id} file={att} showLink />
+                  ) : (
+                    <a
+                      key={att.id}
+                      href={att.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-sm text-brand-600 hover:underline"
+                    >
+                      <Paperclip className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span>{att.display_name || att.filename}</span>
+                      {att.size ? <span className="text-xs text-text-disabled">({formatSize(att.size)})</span> : null}
+                    </a>
+                  )
                 ))}
               </div>
             </div>
@@ -139,6 +205,14 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
             </div>
           )}
         </div>
+      )}
+
+      {remaining !== null && (
+        <p className={`text-sm ${outOfAttempts ? 'text-accent-danger' : 'text-text-tertiary'}`} role="status">
+          {outOfAttempts
+            ? 'You have used all of your attempts for this assignment.'
+            : `${remaining} attempt${remaining === 1 ? '' : 's'} remaining`}
+        </p>
       )}
 
       {/* Submission type tabs */}
@@ -165,6 +239,19 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
         </div>
       )}
 
+      {activeTab === 'annotation' ? (
+        <AnnotationSubmission
+          courseId={courseId}
+          assignmentId={assignmentId}
+          userId={currentUserId}
+          disabled={outOfAttempts}
+          onSubmit={async (data) => {
+            await onSubmit(data);
+            setSuccess(true);
+            setTimeout(() => setSuccess(false), 5000);
+          }}
+        />
+      ) : (
       <form onSubmit={handleSubmit}>
         <label className="block text-sm font-medium text-text-secondary mb-1">
           {existingSubmission && existingSubmission.workflow_state !== 'unsubmitted'
@@ -195,33 +282,82 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
         )}
 
         {activeTab === 'file' && (
-          <div className="border-2 border-dashed border-border-strong rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
-            {file ? (
-              <div className="flex items-center justify-center gap-3">
-                <Upload className="w-5 h-5 text-brand-600" />
-                <span className="text-sm text-text-primary font-medium">{file.name}</span>
-                <span className="text-xs text-text-disabled">({(file.size / 1024).toFixed(1)} KB)</span>
-                <button
-                  type="button"
-                  onClick={() => setFile(null)}
-                  className="text-accent-danger hover:text-accent-danger text-sm ml-2"
-                >
-                  Remove
-                </button>
+          <div className="border-2 border-dashed border-border-strong rounded-lg p-6 text-center hover:border-blue-400 transition-colors space-y-3">
+            {files.length > 0 && (
+              <ul className="space-y-1 text-left">
+                {files.map((f, i) => (
+                  <li key={`${f.name}-${i}`} className="flex items-center gap-3">
+                    <Upload className="w-4 h-4 text-brand-600" />
+                    <span className="text-sm text-text-primary font-medium truncate">{f.name}</span>
+                    <span className="text-xs text-text-disabled">({(f.size / 1024).toFixed(1)} KB)</span>
+                    <button
+                      type="button"
+                      onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
+                      className="text-accent-danger text-sm ml-auto"
+                      aria-label={`Remove ${f.name}`}
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <label className="cursor-pointer block">
+              <Upload className="w-8 h-8 text-text-disabled mx-auto mb-2" />
+              <p className="text-sm text-text-secondary">
+                {files.length > 0 ? 'Add another file' : 'Click to choose files or drag and drop'}
+              </p>
+              <p className="text-xs text-text-disabled mt-1">
+                {allowedExtensions.length > 0
+                  ? `Allowed file types: ${allowedExtensions.join(', ')}`
+                  : 'PDF, Word, images, or other supported formats'}
+              </p>
+              <input
+                type="file"
+                multiple
+                data-testid="submission-file-input"
+                accept={allowedExtensions.length > 0 ? allowedExtensions.map((e) => `.${e}`).join(',') : undefined}
+                onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
+                className="hidden"
+                disabled={submitting}
+              />
+            </label>
+          </div>
+        )}
+
+        {activeTab === 'media' && (
+          <div className="border-2 border-dashed border-border-strong rounded-lg p-6 space-y-3">
+            {mediaFile ? (
+              <div className="space-y-2">
+                <LocalMediaPreview file={mediaFile} />
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="text-text-primary font-medium truncate">{mediaFile.name}</span>
+                  <button type="button" onClick={() => setMediaFile(null)} className="text-accent-danger">Remove</button>
+                </div>
               </div>
             ) : (
-              <label className="cursor-pointer">
-                <Upload className="w-8 h-8 text-text-disabled mx-auto mb-2" />
-                <p className="text-sm text-text-secondary">Click to choose a file or drag and drop</p>
-                <p className="text-xs text-text-disabled mt-1">PDF, Word, images, or other supported formats</p>
-                <input
-                  type="file"
-                  onChange={(e) => setFile(e.target.files?.[0] || null)}
-                  className="hidden"
-                  disabled={submitting}
-                />
-              </label>
+              <div className="flex flex-col items-center gap-3 text-center">
+                <p className="text-sm text-text-secondary">Record audio or video, or upload a media file.</p>
+                <MediaRecorderButton disabled={submitting} onRecorded={setMediaFile} />
+                <label className="cursor-pointer text-sm text-brand-600 hover:underline">
+                  Upload a media file
+                  <input
+                    type="file"
+                    accept="audio/*,video/*"
+                    data-testid="media-file-input"
+                    className="hidden"
+                    onChange={(e) => { setMediaFile(e.target.files?.[0] || null); e.target.value = ''; }}
+                  />
+                </label>
+              </div>
             )}
+          </div>
+        )}
+
+        {activeTab === 'external_tool' && (
+          <div className="border border-border-default rounded-lg p-6 text-sm text-text-secondary">
+            This assignment is completed in an external tool. Open it from the course, and your work is
+            submitted here automatically when the tool reports it.
           </div>
         )}
 
@@ -242,7 +378,7 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
           )}
           <button
             type="submit"
-            disabled={submitting || !isValid()}
+            disabled={submitting || !isValid() || outOfAttempts || activeTab === 'external_tool'}
             className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium ml-auto"
           >
             <Send className="w-4 h-4" />
@@ -250,6 +386,13 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
           </button>
         </div>
       </form>
+      )}
+      {activeTab === 'annotation' && success && (
+        <div className="flex items-center gap-2 text-accent-success bg-accent-success/10 border border-accent-success/30 rounded-md p-3 text-sm">
+          <CheckCircle className="w-4 h-4 flex-shrink-0" />
+          <span>Annotations submitted.</span>
+        </div>
+      )}
     </div>
   );
 };

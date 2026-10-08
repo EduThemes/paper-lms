@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Calendar, Award, Clock, User, CheckCircle, AlertCircle, MinusCircle, Zap, Eye, EyeOff, Users, Pencil, X, Save, MessageCircle, ArrowRight, Send, Star, Target } from 'lucide-react';
+import { Calendar, Award, Clock, User, CheckCircle, AlertCircle, MinusCircle, Zap, Eye, EyeOff, Users, Pencil, X, Save, MessageCircle, ArrowRight, Star, Target } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -15,6 +15,18 @@ import { SubmissionBody } from '../components/SafeHTML';
 import RichContentEditor from '../components/RichContentEditor';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
+import AssignmentGradingSettings, {
+  gradingSettingsFromAssignment,
+  gradingSettingsPayload,
+  validateGradingSettings,
+} from '../components/grading/AssignmentGradingSettings';
+import {
+  PeerReviewForm,
+  ReceivedPeerReviews,
+  PeerReviewManager,
+  DeletePeerReviewButton,
+  parseRubricCriteria,
+} from '../components/grading/PeerReviews';
 
 function toLocalDatetimeValue(date) {
   const y = date.getFullYear();
@@ -55,13 +67,14 @@ const AssignmentPage = () => {
   const [myPeerReviews, setMyPeerReviews] = useState([]);
   const [peerReviewCount, setPeerReviewCount] = useState(1);
   const [assigningReviews, setAssigningReviews] = useState(false);
-  const [reviewForms, setReviewForms] = useState({});
-  const [submittingReview, setSubmittingReview] = useState(null);
   const [expandedReview, setExpandedReview] = useState(null);
   const [alignments, setAlignments] = useState([]);
   const [courseOutcomes, setCourseOutcomes] = useState([]);
   const [selectedOutcomeId, setSelectedOutcomeId] = useState('');
   const [addingAlignment, setAddingAlignment] = useState(false);
+  const [gradingForm, setGradingForm] = useState(gradingSettingsFromAssignment());
+  const [courseFiles, setCourseFiles] = useState([]);
+  const [rubricCriteria, setRubricCriteria] = useState([]);
 
   useUnsavedChanges(isDirty);
   const { issues: crossCourseIssues, checkAndSave, dismiss: dismissCrossCourse, confirm: confirmCrossCourse } = useCrossCourseCheck(courseId);
@@ -134,6 +147,16 @@ const AssignmentPage = () => {
     fetchData();
   }, [courseId, assignmentId, user?.id, isTeacher]);
 
+  // The assignment rubric drives rubric-based peer reviews.
+  useEffect(() => {
+    if (!courseId || !assignmentId || typeof api.getAssignmentRubric !== 'function') return;
+    let cancelled = false;
+    Promise.resolve(api.getAssignmentRubric(courseId, assignmentId))
+      .then((data) => { if (!cancelled) setRubricCriteria(parseRubricCriteria(data)); })
+      .catch(() => { if (!cancelled) setRubricCriteria([]); });
+    return () => { cancelled = true; };
+  }, [courseId, assignmentId]);
+
   // Fetch outcome alignments and available outcomes for teachers
   useEffect(() => {
     if (!isTeacher || !courseId || !assignmentId) return;
@@ -188,15 +211,20 @@ const AssignmentPage = () => {
 
   const handleSubmit = async (submissionData) => {
     let result;
-    if (submissionData.submission_type === 'online_upload' && submissionData.file) {
-      // Upload file first, then create submission with file ID. B013: the
-      // course files route is instructor-only; students upload to the
-      // submission-file endpoint (their own space).
-      const uploadResult = await api.uploadSubmissionFile(courseId, assignmentId, submissionData.file);
-      const fileData = uploadResult.data || uploadResult;
+    const uploads = submissionData.files || (submissionData.file ? [submissionData.file] : []);
+    if ((submissionData.submission_type === 'online_upload' || submissionData.submission_type === 'media_recording') && uploads.length > 0) {
+      // Upload the files first, then create the submission with their IDs.
+      // B013: the course files route is instructor-only; students upload
+      // to the submission-file endpoint (their own space).
+      const fileIds = [];
+      for (const f of uploads) {
+        const uploadResult = await api.uploadSubmissionFile(courseId, assignmentId, f);
+        const fileData = uploadResult.data || uploadResult;
+        fileIds.push(fileData.id);
+      }
       result = await api.createSubmission(courseId, assignmentId, {
-        submission_type: 'online_upload',
-        file_ids: [fileData.id],
+        submission_type: submissionData.submission_type,
+        file_ids: fileIds,
       });
     } else {
       result = await api.createSubmission(courseId, assignmentId, submissionData);
@@ -221,10 +249,22 @@ const AssignmentPage = () => {
       is_group_assignment: assignment.is_group_assignment || false,
       group_category_id: assignment.group_category_id || '',
     });
+    setGradingForm(gradingSettingsFromAssignment(assignment));
     setEditing(true);
+    if (courseFiles.length === 0 && typeof api.getCourseFiles === 'function') {
+      api.getCourseFiles(courseId, 1, 100)
+        .then((res) => setCourseFiles(Array.isArray(res?.data) ? res.data : []))
+        .catch(() => setCourseFiles([]));
+    }
   };
 
   const doSaveEdit = async () => {
+    const invalid = validateGradingSettings(gradingForm, editForm.submission_types);
+    if (invalid) {
+      setError(null);
+      window.alert(invalid);
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -235,6 +275,7 @@ const AssignmentPage = () => {
         submission_types: editForm.submission_types,
         anonymous_grading: editForm.anonymous_grading,
         post_policy: editForm.post_policy,
+        ...gradingSettingsPayload(gradingForm, editForm.submission_types),
       };
       if (editForm.assignment_group_id) {
         payload.assignment_group_id = Number(editForm.assignment_group_id);
@@ -244,10 +285,11 @@ const AssignmentPage = () => {
       } else {
         payload.group_category_id = null;
       }
-      await api.updateAssignment(courseId, assignmentId, payload);
+      const saved = await api.updateAssignment(courseId, assignmentId, payload);
       setAssignment((prev) => ({
         ...prev,
         ...payload,
+        ...(saved && typeof saved === 'object' && saved.id ? saved : {}),
         is_group_assignment: !!(editForm.is_group_assignment && editForm.group_category_id),
       }));
       setIsDirty(false);
@@ -310,32 +352,23 @@ const AssignmentPage = () => {
     }
   };
 
-  const handleSubmitPeerReview = async (reviewId) => {
-    const form = reviewForms[reviewId];
-    if (!form?.score && form?.score !== 0) return;
-    setSubmittingReview(reviewId);
+  const handlePeerReviewSubmitted = async () => {
     try {
-      await api.submitPeerReview(reviewId, Number(form.score), form.comments || '');
-      // Refresh my peer reviews
       const myReviews = await api.listMyPeerReviews(courseId, assignmentId);
       setMyPeerReviews(myReviews || []);
-      setReviewForms((prev) => {
-        const next = { ...prev };
-        delete next[reviewId];
-        return next;
-      });
+      setExpandedReview(null);
     } catch (err) {
       setError(err.message);
-    } finally {
-      setSubmittingReview(null);
     }
   };
 
-  const updateReviewForm = (reviewId, field, value) => {
-    setReviewForms((prev) => ({
-      ...prev,
-      [reviewId]: { ...prev[reviewId], [field]: value },
-    }));
+  const refreshPeerReviews = async () => {
+    try {
+      const reviews = await api.listPeerReviews(courseId, assignmentId);
+      setPeerReviews(reviews || []);
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
   const getPeerReviewStatusConfig = (status) => {
@@ -431,6 +464,9 @@ const AssignmentPage = () => {
                 { value: 'online_text_entry', label: 'Text Entry' },
                 { value: 'online_upload', label: 'File Upload' },
                 { value: 'online_url', label: 'URL' },
+                { value: 'media_recording', label: 'Media Recording' },
+                { value: 'student_annotation', label: 'Student Annotation' },
+                { value: 'external_tool', label: 'External Tool' },
                 { value: 'on_paper', label: 'On Paper' },
                 { value: 'none', label: 'No Submission' },
               ].map((opt) => (
@@ -518,6 +554,19 @@ const AssignmentPage = () => {
               </div>
             )}
           </div>
+          <div className="border-t border-border-default pt-4">
+            <h4 className="text-sm font-semibold text-text-secondary mb-3">Availability, attempts and grading</h4>
+            <AssignmentGradingSettings
+              value={gradingForm}
+              onChange={(patch) => { setGradingForm((prev) => ({ ...prev, ...patch })); setIsDirty(true); }}
+              submissionTypes={editForm.submission_types}
+              isGroupAssignment={!!(editForm.is_group_assignment && editForm.group_category_id)}
+              graders={enrollments
+                .filter((e) => e.type === 'TeacherEnrollment' || e.type === 'TaEnrollment')
+                .map((e) => ({ id: e.user_id || e.user?.id, name: e.user?.name || `User ${e.user_id}` }))}
+              courseFiles={courseFiles}
+            />
+          </div>
           <div className="flex justify-end space-x-3 pt-2">
             <button type="button" onClick={() => { setEditing(false); setIsDirty(false); }} className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary">
               Cancel
@@ -592,6 +641,24 @@ const AssignmentPage = () => {
                 Manual Posting
               </span>
             )}
+            {assignment.moderated_grading && (
+              <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-sky-100 text-sky-700">
+                Moderated{assignment.grades_published ? ' (published)' : ''}
+              </span>
+            )}
+            {(assignment.unlock_at || assignment.lock_at) && (
+              <span className="text-xs">
+                {assignment.unlock_at && <>Available {formatDate(assignment.unlock_at)}</>}
+                {assignment.unlock_at && assignment.lock_at && ' – '}
+                {assignment.lock_at && <>until {formatDate(assignment.lock_at)}</>}
+              </span>
+            )}
+            {assignment.allowed_attempts > 0 && (
+              <span className="text-xs">{assignment.allowed_attempts} attempt{assignment.allowed_attempts === 1 ? '' : 's'} allowed</span>
+            )}
+            {Array.isArray(assignment.allowed_extensions) && assignment.allowed_extensions.length > 0 && (
+              <span className="text-xs">File types: {assignment.allowed_extensions.join(', ')}</span>
+            )}
             {assignment.submission_types && (
               <div className="text-text-disabled">
                 Type: {(() => {
@@ -600,6 +667,8 @@ const AssignmentPage = () => {
                     online_upload: 'File Upload',
                     online_url: 'URL',
                     media_recording: 'Media Recording',
+                    student_annotation: 'Student Annotation',
+                    external_tool: 'External Tool',
                     on_paper: 'On Paper',
                     none: 'No Submission',
                   };
@@ -780,6 +849,8 @@ const AssignmentPage = () => {
                   existingSubmission={mySubmission}
                   onSubmit={handleSubmit}
                   submissionTypes={assignment.submission_types}
+                  assignment={assignment}
+                  currentUserId={user?.id}
                 />
               </div>
             );
@@ -793,9 +864,18 @@ const AssignmentPage = () => {
                 assignmentId={assignmentId}
                 userId={user?.id}
                 isTeacher={false}
+                isGroupAssignment={!!assignment.is_group_assignment}
               />
             </div>
           )}
+
+          {/* Feedback received from peer reviews */}
+          <ReceivedPeerReviews
+            courseId={courseId}
+            assignmentId={assignmentId}
+            pointsPossible={assignment.points_possible}
+            criteria={rubricCriteria}
+          />
 
           {/* My Peer Reviews (Student) */}
           {myPeerReviews.length > 0 && (
@@ -812,7 +892,6 @@ const AssignmentPage = () => {
                   const ReviewStatusIcon = statusConfig.icon;
                   const isCompleted = review.workflow_state === 'completed' || review.status === 'completed' || review.workflow_state === 'submitted' || review.status === 'submitted';
                   const isExpanded = expandedReview === review.id;
-                  const form = reviewForms[review.id] || {};
 
                   return (
                     <div key={review.id} className="p-4">
@@ -885,42 +964,14 @@ const AssignmentPage = () => {
                         </div>
                       )}
 
-                      {/* Review form for pending reviews */}
+                      {/* Review form for pending reviews (score or rubric) */}
                       {!isCompleted && isExpanded && (
-                        <div className="mt-3 space-y-3 border-t pt-3">
-                          <div>
-                            <label className="block text-sm font-medium text-text-secondary mb-1">
-                              Score {assignment.points_possible ? `(out of ${assignment.points_possible})` : ''}
-                            </label>
-                            <input
-                              type="number"
-                              min="0"
-                              max={assignment.points_possible || undefined}
-                              value={form.score ?? ''}
-                              onChange={(e) => updateReviewForm(review.id, 'score', e.target.value)}
-                              className="w-32 border border-border-strong rounded-md px-3 py-2 text-sm"
-                              placeholder="0"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-text-secondary mb-1">Comments</label>
-                            <textarea
-                              value={form.comments ?? ''}
-                              onChange={(e) => updateReviewForm(review.id, 'comments', e.target.value)}
-                              className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
-                              rows={3}
-                              placeholder="Provide feedback on this submission..."
-                            />
-                          </div>
-                          <button
-                            onClick={() => handleSubmitPeerReview(review.id)}
-                            disabled={submittingReview === review.id || (!form.score && form.score !== 0)}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 text-sm font-medium disabled:opacity-50"
-                          >
-                            <Send className="w-4 h-4" />
-                            {submittingReview === review.id ? 'Submitting...' : 'Submit Review'}
-                          </button>
-                        </div>
+                        <PeerReviewForm
+                          review={review}
+                          pointsPossible={assignment.points_possible}
+                          criteria={rubricCriteria}
+                          onSubmitted={handlePeerReviewSubmitted}
+                        />
                       )}
                     </div>
                   );
@@ -936,13 +987,24 @@ const AssignmentPage = () => {
         <div className="bg-surface-0 rounded-lg shadow">
           <div className="p-4 border-b flex items-center justify-between">
             <h3 className="font-semibold">Submissions ({submissions.length})</h3>
-            <Link
-              to={`/courses/${courseId}/assignments/${assignmentId}/speedgrader`}
-              className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
-            >
-              <Zap className="w-4 h-4" />
-              <span>SpeedGrader</span>
-            </Link>
+            <div className="flex items-center gap-2">
+              {assignment.moderated_grading && (
+                <Link
+                  to={`/courses/${courseId}/assignments/${assignmentId}/moderate`}
+                  className="inline-flex items-center space-x-2 bg-surface-2 text-text-secondary px-4 py-2 rounded-md hover:bg-border-default text-sm font-medium"
+                >
+                  <Users className="w-4 h-4" />
+                  <span>Moderate</span>
+                </Link>
+              )}
+              <Link
+                to={`/courses/${courseId}/assignments/${assignmentId}/speedgrader`}
+                className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+              >
+                <Zap className="w-4 h-4" />
+                <span>SpeedGrader</span>
+              </Link>
+            </div>
           </div>
           {submissions.length === 0 ? (
             <div className="p-6 text-center text-text-tertiary">No submissions yet.</div>
@@ -991,6 +1053,7 @@ const AssignmentPage = () => {
                         assignmentId={assignmentId}
                         userId={submission.user_id}
                         isTeacher={true}
+                        isGroupAssignment={!!assignment.is_group_assignment}
                       />
                     </div>
                   </div>
@@ -1032,6 +1095,16 @@ const AssignmentPage = () => {
               </button>
             </div>
 
+            <PeerReviewManager
+              courseId={courseId}
+              assignmentId={assignmentId}
+              students={enrollments
+                .filter((e) => e.type === 'StudentEnrollment' || e.role === 'StudentEnrollment')
+                .map((e) => ({ id: e.user_id || e.user?.id, name: e.user?.name || `User ${e.user_id}` }))}
+              reviews={peerReviews}
+              onChanged={refreshPeerReviews}
+            />
+
             {/* List of Assigned Peer Reviews */}
             {peerReviews.length > 0 ? (
               <div>
@@ -1063,6 +1136,7 @@ const AssignmentPage = () => {
                             <ReviewStatusIcon className="w-3 h-3" />
                             {statusConfig.label}
                           </span>
+                          <DeletePeerReviewButton courseId={courseId} assignmentId={assignmentId} review={review} onChanged={refreshPeerReviews} />
                         </div>
                       </div>
                     );

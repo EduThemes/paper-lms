@@ -44,6 +44,10 @@ import {
   DialogDescription,
   DialogFooter,
 } from '../components/ui/dialog';
+import gradingApi from '../services/api_grading_ui';
+import { GradebookFilterBar, CustomColumnCell, CustomColumnHeader } from '../components/grading/GradebookExtras';
+import { filterAssignments, filterStudentsBySection, moduleAssignmentIds } from '../utils/gradebookFilters';
+import { mapGradebookCSV } from '../utils/gradebookImport';
 
 const Skeleton = ({ className = '' }) => (
   <div className={`animate-pulse rounded-md bg-border-default ${className}`} />
@@ -64,8 +68,14 @@ const HEADER_HEIGHT = 72;
 const cellStatus = (cell) => {
   if (!cell) return 'empty';
   if (cell.excused) return 'excused';
-  if (cell.late) return 'late';
-  if (cell.missing || cell.workflow_state === 'unsubmitted') return 'missing';
+  // A grader-set status (late / missing / extended / none) wins over the
+  // computed flags.
+  const set = cell.late_policy_status;
+  if (set === 'late') return 'late';
+  if (set === 'missing') return 'missing';
+  const overridden = set === 'extended' || set === 'none';
+  if (!overridden && cell.late) return 'late';
+  if (!overridden && (cell.missing || cell.workflow_state === 'unsubmitted')) return 'missing';
   if (cell.workflow_state === 'graded' && cell.score != null) return 'graded';
   if (cell.workflow_state === 'submitted' || cell.submitted_at) return 'submitted';
   return 'empty';
@@ -536,6 +546,8 @@ const GradebookCell = memo(function GradebookCell({
   onCommit,
   isFocused,
   onFocusCell,
+  anonymized = false,
+  customStatus = null,
 }) {
   const status = cellStatus(cell);
   const isExcused = status === 'excused';
@@ -553,11 +565,21 @@ const GradebookCell = memo(function GradebookCell({
       tabIndex={isFocused ? 0 : -1}
       onClick={() => onFocusCell(rowIndex, columnIndex)}
       style={style}
-      className={`relative flex items-center justify-center border-b border-r border-border-subtle px-2 ${statusBg[status]} ${
+      className={`relative flex items-center justify-center border-b border-r border-border-subtle px-2 ${customStatus ? '' : statusBg[status]} ${
         isFocused ? 'ring-2 ring-brand-500 ring-offset-1 z-10' : ''
       }`}
+      title={customStatus ? customStatus.name : undefined}
     >
-      {isExcused ? (
+      {customStatus && (
+        <span
+          aria-hidden="true"
+          className="absolute inset-0 opacity-30 pointer-events-none"
+          style={{ backgroundColor: customStatus.color }}
+        />
+      )}
+      {anonymized ? (
+        <span className="text-xs text-text-disabled italic" title="Grades are hidden while students are anonymized">Anonymous</span>
+      ) : isExcused ? (
         <span className="text-xs text-text-disabled italic">EX</span>
       ) : (
         <div
@@ -704,6 +726,7 @@ const FrozenHeaderRow = memo(function FrozenHeaderRow({
   onSortDesc,
   scrollRef,
   width,
+  onHideCustomColumn,
 }) {
   return (
     <div className="sticky top-0 z-20 bg-surface-1 border-b border-border-default">
@@ -728,7 +751,9 @@ const FrozenHeaderRow = memo(function FrozenHeaderRow({
         </div>
         <div ref={scrollRef} className="overflow-hidden" style={{ width: width || '100%' }}>
           <div className="flex" style={{ width: assignments.length * COL_WIDTH }}>
-            {assignments.map((a) => (
+            {assignments.map((a) => a.__custom ? (
+              <CustomColumnHeader key={`custom-${a.id}`} column={a} width={COL_WIDTH} height={HEADER_HEIGHT} onHide={onHideCustomColumn} />
+            ) : (
               <AssignmentColumnHeader
                 key={a.id}
                 assignment={a}
@@ -807,6 +832,11 @@ const GradebookGrid = ({
   height,
   width,
   gridContainerRef,
+  anonymizedIds,
+  statusesById,
+  customData,
+  onCustomCommit,
+  onHideCustomColumn,
 }) => {
   const gridRef = useGridRef();
   const headerScrollRef = useRef(null);
@@ -824,15 +854,28 @@ const GradebookGrid = ({
   );
 
   const cellProps = useMemo(
-    () => ({ students, assignments, getCellData, onCommit, focusedCell, onFocusCell }),
-    [students, assignments, getCellData, onCommit, focusedCell, onFocusCell]
+    () => ({ students, assignments, getCellData, onCommit, focusedCell, onFocusCell, anonymizedIds, statusesById, customData, onCustomCommit }),
+    [students, assignments, getCellData, onCommit, focusedCell, onFocusCell, anonymizedIds, statusesById, customData, onCustomCommit]
   );
 
   const Cell = useCallback(
-    ({ rowIndex, columnIndex, style, ariaAttributes, students: s, assignments: a, getCellData: g, onCommit: c, focusedCell: fc, onFocusCell: ofc }) => {
+    ({ rowIndex, columnIndex, style, ariaAttributes, students: s, assignments: a, getCellData: g, onCommit: c, focusedCell: fc, onFocusCell: ofc, anonymizedIds: anon, statusesById: sbi, customData: cd, onCustomCommit: occ }) => {
       const student = s[rowIndex];
       const assignment = a[columnIndex];
       if (!student || !assignment) return <div style={style} />;
+      if (assignment.__custom) {
+        return (
+          <CustomColumnCell
+            style={style}
+            column={assignment}
+            value={cd?.[assignment.id]?.[student.id] ?? ''}
+            onSave={(text) => occ(assignment.id, student.id, text)}
+            rowIndex={rowIndex}
+            columnIndex={columnIndex}
+            studentName={student.name}
+          />
+        );
+      }
       const cell = g(student.id, assignment.id);
       const isFocused = fc && fc.row === rowIndex && fc.col === columnIndex;
       return (
@@ -847,6 +890,8 @@ const GradebookGrid = ({
           onCommit={c}
           isFocused={isFocused}
           onFocusCell={ofc}
+          anonymized={!!anon?.has(assignment.id)}
+          customStatus={cell?.custom_grade_status_id ? sbi?.[cell.custom_grade_status_id] || null : null}
         />
       );
     },
@@ -918,6 +963,7 @@ const GradebookGrid = ({
         onSortDesc={onSortDesc}
         scrollRef={headerScrollRef}
         width={gridWidth}
+        onHideCustomColumn={onHideCustomColumn}
       />
       <div className="flex" style={{ height: bodyHeight }}>
         <FrozenStudentColumn
@@ -1018,6 +1064,21 @@ const GradebookPage = () => {
   // Keyboard cell focus
   const [focusedCell, setFocusedCell] = useState({ row: 0, col: 0 });
 
+  // Filters, custom columns and statuses (gradebook parity).
+  const [sections, setSections] = useState([]);
+  const [periods, setPeriods] = useState([]);
+  const [modules, setModules] = useState([]);
+  const [filters, setFilters] = useState(() => {
+    try { return JSON.parse(window.localStorage.getItem(`gradebook-filters-${courseId}`) || '{}') || {}; } catch { return {}; }
+  });
+  const [customColumns, setCustomColumns] = useState([]);
+  const [customData, setCustomData] = useState({});
+  const [statuses, setStatuses] = useState([]);
+
+  useEffect(() => {
+    try { window.localStorage.setItem(`gradebook-filters-${courseId}`, JSON.stringify(filters || {})); } catch { /* storage unavailable */ }
+  }, [filters, courseId]);
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -1051,18 +1112,22 @@ const GradebookPage = () => {
             e.enrollment_type === 'student'
         );
 
-        const seen = new Set();
+        const seen = new Map();
         const uniqueStudents = [];
         for (const enrollment of studentEnrollments) {
           const uid = enrollment.user_id || enrollment.user?.id;
-          if (uid && !seen.has(uid)) {
-            seen.add(uid);
-            uniqueStudents.push({
+          if (!uid) continue;
+          if (!seen.has(uid)) {
+            const row = {
               id: uid,
               name: enrollment.user?.name || enrollment.user?.display_name || `User ${uid}`,
               sortable_name: enrollment.user?.sortable_name || enrollment.user?.name || `User ${uid}`,
-            });
+              section_ids: [],
+            };
+            seen.set(uid, row);
+            uniqueStudents.push(row);
           }
+          if (enrollment.course_section_id) seen.get(uid).section_ids.push(enrollment.course_section_id);
         }
         uniqueStudents.sort((a, b) => a.sortable_name.localeCompare(b.sortable_name));
         setStudents(uniqueStudents);
@@ -1115,6 +1180,85 @@ const GradebookPage = () => {
     return () => window.removeEventListener('resize', measure);
   }, [loading]);
 
+  // Filters, custom columns and grade statuses load beside the grid; a
+  // failure only hides that feature.
+  useEffect(() => {
+    if (!isTeacher) return undefined;
+    let cancelled = false;
+    const safe = (p) => Promise.resolve().then(() => p()).catch(() => null);
+    (async () => {
+      const [sec, per, mods, cols, sts] = await Promise.all([
+        safe(() => api.getSections(courseId)),
+        safe(() => gradingApi.listCourseGradingPeriods(courseId)),
+        safe(() => api.getModules(courseId, 1, 100, true)),
+        safe(() => api.listCustomGradebookColumns(courseId)),
+        safe(() => gradingApi.listCourseGradeStatuses(courseId)),
+      ]);
+      if (cancelled) return;
+      setSections(Array.isArray(sec?.data) ? sec.data : []);
+      setPeriods(Array.isArray(per) ? per : []);
+      setModules(Array.isArray(mods?.data) ? mods.data : []);
+      setStatuses(Array.isArray(sts) ? sts : []);
+      const columns = (Array.isArray(cols?.data) ? cols.data : []).filter((c) => !c.hidden);
+      setCustomColumns(columns);
+      const entries = await Promise.all(columns.map((c) => safe(() => api.getCustomColumnData(courseId, c.id))));
+      if (cancelled) return;
+      const dataByColumn = {};
+      columns.forEach((c, i) => {
+        const rows = Array.isArray(entries[i]?.data) ? entries[i].data : [];
+        dataByColumn[c.id] = Object.fromEntries(rows.map((r) => [r.user_id, r.content]));
+      });
+      setCustomData(dataByColumn);
+    })();
+    return () => { cancelled = true; };
+  }, [courseId, isTeacher]);
+
+  const anonymizedIds = useMemo(
+    () => new Set((gradebook?.anonymized_assignment_ids || []).map(Number)),
+    [gradebook]
+  );
+  const statusesById = useMemo(() => Object.fromEntries(statuses.map((st) => [st.id, st])), [statuses]);
+  const modulesById = useMemo(() => moduleAssignmentIds(modules), [modules]);
+
+  const handleCustomCommit = useCallback(async (columnId, studentId, text) => {
+    try {
+      await api.setCustomColumnCell(courseId, columnId, studentId, text);
+      setCustomData((prev) => ({ ...prev, [columnId]: { ...(prev[columnId] || {}), [studentId]: text } }));
+    } catch (err) {
+      setError(err.message);
+    }
+  }, [courseId]);
+
+  const handleHideCustomColumn = useCallback(async (column) => {
+    try {
+      await api.updateCustomGradebookColumn(courseId, column.id, { hidden: true });
+      setCustomColumns((prev) => prev.filter((c) => c.id !== column.id));
+    } catch (err) {
+      setError(err.message);
+    }
+  }, [courseId]);
+
+  const handleAddCustomColumn = useCallback(async () => {
+    const title = window.prompt('Name of the new notes column');
+    if (!title || !title.trim()) return;
+    try {
+      const res = await api.createCustomGradebookColumn(courseId, { title: title.trim(), teacher_notes: true, position: customColumns.length + 1 });
+      const col = res?.data || res;
+      if (col?.id) setCustomColumns((prev) => [...prev, col]);
+    } catch (err) {
+      setError(err.message);
+    }
+  }, [courseId, customColumns.length]);
+
+  const handleToggleHideTotals = useCallback(async (hide) => {
+    try {
+      await api.updateCourse(courseId, { hide_final_grades: hide });
+      setCourse((prev) => ({ ...(prev || {}), hide_final_grades: hide }));
+    } catch (err) {
+      setError(err.message);
+    }
+  }, [courseId]);
+
   const orderedAssignments = useMemo(() => {
     if (assignmentGroups.length === 0) return assignments;
     const groupOrder = new Map(assignmentGroups.map((g, i) => [g.id, i]));
@@ -1153,6 +1297,25 @@ const GradebookPage = () => {
     return arr;
   }, [students, sortOverride, getCellData]);
 
+  // Filtered views. Totals follow the grading-period filter (Canvas shows
+  // the period's grade); the module filter only narrows the columns.
+  const periodAssignments = useMemo(
+    () => filterAssignments(assignments, { gradingPeriodId: filters.gradingPeriodId }, { periods }),
+    [assignments, filters.gradingPeriodId, periods]
+  );
+  const visibleAssignments = useMemo(
+    () => filterAssignments(orderedAssignments, filters, { periods, modules: modulesById }),
+    [orderedAssignments, filters, periods, modulesById]
+  );
+  const gridColumns = useMemo(
+    () => [...customColumns.map((c) => ({ ...c, __custom: true })), ...visibleAssignments],
+    [customColumns, visibleAssignments]
+  );
+  const visibleStudentRows = useMemo(
+    () => filterStudentsBySection(studentRows, filters.sectionId),
+    [studentRows, filters.sectionId]
+  );
+
   const totals = useMemo(() => {
     const result = {};
     const useWeights =
@@ -1170,7 +1333,7 @@ const GradebookPage = () => {
 
         for (const group of assignmentGroups) {
           if (!group.group_weight || group.group_weight <= 0) continue;
-          const groupAssignments = assignments.filter((a) => a.assignment_group_id === group.id);
+          const groupAssignments = periodAssignments.filter((a) => a.assignment_group_id === group.id);
           groupAssignments.forEach((a) => groupedIds.add(a.id));
           let groupEarned = 0;
           let groupPossible = 0;
@@ -1190,7 +1353,7 @@ const GradebookPage = () => {
           }
         }
 
-        for (const a of assignments) {
+        for (const a of periodAssignments) {
           if (groupedIds.has(a.id)) continue;
           const cell = getCellData(student.id, a.id);
           const w = assignmentGradeWeight(a, cell);
@@ -1215,7 +1378,7 @@ const GradebookPage = () => {
         // B115: excused, unpublished and not_graded work never counts;
         // a 0-point assignment's score is extra credit (same rules as
         // GradingService.GetStudentGrade and the student Grades page).
-        for (const a of assignments) {
+        for (const a of periodAssignments) {
           const cell = getCellData(student.id, a.id);
           const w = assignmentGradeWeight(a, cell);
           if (w.counts && cell && cell.score != null) {
@@ -1230,7 +1393,7 @@ const GradebookPage = () => {
       }
     }
     return result;
-  }, [students, assignments, assignmentGroups, course, getCellData]);
+  }, [students, periodAssignments, assignmentGroups, course, getCellData]);
 
   const letterGrades = useMemo(() => {
     const out = {};
@@ -1417,8 +1580,8 @@ const GradebookPage = () => {
   }, []);
 
   // ---------- Keyboard cell navigation ----------
-  const numRows = studentRows.length;
-  const numCols = orderedAssignments.length;
+  const numRows = visibleStudentRows.length;
+  const numCols = gridColumns.length;
 
   const moveFocus = useCallback(
     (dRow, dCol) => {
@@ -1605,38 +1768,17 @@ const GradebookPage = () => {
       // B118: a real CSV parser — quoted fields (e.g. an assignment named
       // "Essay 1, Draft" or a "Doe, Jane" student) used to shift columns.
       const rows = parseCSV(text);
-      if (rows.length < 2) throw new Error('CSV must have a header row and at least one data row');
-      const headers = rows[0];
-      const studentIdIdx = headers.findIndex((h) => /student\s*id/i.test(h));
-      if (studentIdIdx === -1) throw new Error('CSV must include a "Student ID" column');
-      const assignmentMap = {};
-      for (const a of assignments) assignmentMap[a.name.toLowerCase().trim()] = a;
-      let skipped = 0;
+      // Paper's export and Canvas's export ("ID" column, "Name (id)"
+      // headers, a "Points Possible" row) both map.
+      const { entries, skipped } = mapGradebookCSV(rows, assignments);
       const gradeData = [];
-      for (let i = 1; i < rows.length; i++) {
-        const cells = rows[i];
-        const studentId = parseInt(cells[studentIdIdx], 10);
-        if (!studentId) {
-          skipped++;
-          continue;
-        }
-        for (let col = 0; col < headers.length; col++) {
-          if (col === 0 || col === studentIdIdx) continue;
-          const headerName = headers[col].toLowerCase().trim();
-          if (/total|percentage|letter/i.test(headerName)) continue;
-          const assignment = assignmentMap[headerName];
-          if (!assignment) continue;
-          const scoreStr = cells[col];
-          if (scoreStr === '' || scoreStr === undefined) continue;
-          const score = parseFloat(scoreStr);
-          if (isNaN(score)) continue;
-          // Re-importing an unchanged value (the exported final score, or
-          // the entered score) must not re-grade it — that would re-apply
-          // the late penalty (B021).
-          const current = getCellData(studentId, assignment.id);
-          if (current && (parseFloat(current.score) === score || parseFloat(enteredScore(current)) === score)) continue;
-          gradeData.push({ assignment_id: assignment.id, user_id: studentId, posted_grade: String(score) });
-        }
+      for (const { user_id: studentId, assignment_id: assignmentId, score } of entries) {
+        // Re-importing an unchanged value (the exported final score, or
+        // the entered score) must not re-grade it — that would re-apply
+        // the late penalty (B021).
+        const current = getCellData(studentId, assignmentId);
+        if (current && (parseFloat(current.score) === score || parseFloat(enteredScore(current)) === score)) continue;
+        gradeData.push({ assignment_id: assignmentId, user_id: studentId, posted_grade: String(score) });
       }
       const errors = [];
       let updated = 0;
@@ -1727,8 +1869,8 @@ const GradebookPage = () => {
     );
   }
 
-  const focusedAssignment = orderedAssignments[focusedCell.col];
-  const focusedStudent = studentRows[focusedCell.row];
+  const focusedAssignment = gridColumns[focusedCell.col];
+  const focusedStudent = visibleStudentRows[focusedCell.row];
 
   return (
     <Layout>
@@ -1837,19 +1979,35 @@ const GradebookPage = () => {
         </div>
       )}
 
+      <GradebookFilterBar
+        courseId={courseId}
+        sections={sections}
+        periods={periods}
+        modules={modules}
+        filters={filters}
+        onFiltersChange={setFilters}
+        hideTotals={!!course?.hide_final_grades}
+        onToggleHideTotals={handleToggleHideTotals}
+        onAddCustomColumn={handleAddCustomColumn}
+      />
+
       <span className="sr-only" aria-live="polite">
         Gradebook: students by assignments grade matrix.
       </span>
 
       <div ref={containerRef} className="w-full">
-        {students.length === 0 || orderedAssignments.length === 0 ? (
+        {visibleStudentRows.length === 0 || gridColumns.length === 0 ? (
           <div className="bg-surface-0 rounded-lg shadow p-8 text-center text-text-tertiary">
-            {students.length === 0 ? 'No students enrolled.' : 'No assignments yet.'}
+            {students.length === 0
+              ? 'No students enrolled.'
+              : orderedAssignments.length === 0
+              ? 'No assignments yet.'
+              : 'Nothing matches the current filters.'}
           </div>
         ) : (
           <GradebookGrid
-            students={studentRows}
-            assignments={orderedAssignments}
+            students={visibleStudentRows}
+            assignments={gridColumns}
             totals={totals}
             letterGrades={letterGrades}
             gradebook={gradebook}
@@ -1868,6 +2026,11 @@ const GradebookPage = () => {
             height={viewport.height}
             width={viewport.width}
             gridContainerRef={gridContainerRef}
+            anonymizedIds={anonymizedIds}
+            statusesById={statusesById}
+            customData={customData}
+            onCustomCommit={handleCustomCommit}
+            onHideCustomColumn={handleHideCustomColumn}
           />
         )}
       </div>
@@ -1883,7 +2046,7 @@ const GradebookPage = () => {
             Cell <strong>{colLabel(focusedCell.col)}{focusedCell.row + 1}</strong> of {numRows}×{numCols}
             {focusedAssignment && focusedStudent && (
               <span className="ml-2 text-text-tertiary">
-                — {focusedStudent.name} · {focusedAssignment.name}
+                — {focusedStudent.name} · {focusedAssignment.name || focusedAssignment.title}
               </span>
             )}
           </span>

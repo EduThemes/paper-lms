@@ -34,6 +34,9 @@ const InboxPage = React.lazy(() => import('./pages/InboxPage'));
 const NotificationPreferencesPage = React.lazy(() => import('./pages/NotificationPreferencesPage'));
 const NotificationsPage = React.lazy(() => import('./pages/NotificationsPage'));
 const SpeedGraderPage = React.lazy(() => import('./pages/SpeedGraderPage'));
+const ModerationPage = React.lazy(() => import('./pages/ModerationPage'));
+const IndividualGradebookPage = React.lazy(() => import('./pages/IndividualGradebookPage'));
+const CustomGradeStatusesPage = React.lazy(() => import('./pages/CustomGradeStatusesPage'));
 const LearningOutcomesPage = React.lazy(() => import('./pages/LearningOutcomesPage'));
 const GroupsPage = React.lazy(() => import('./pages/GroupsPage'));
 const BlueprintPage = React.lazy(() => import('./pages/BlueprintPage'));
@@ -194,6 +197,8 @@ const App = () => {
           <Route path="assignments/:assignmentId" element={<AssignmentPage />} />
           <Route path="assignments/:assignmentId/overrides" element={<AssignmentOverridesPage />} />
           <Route path="assignments/:assignmentId/speedgrader" element={<SpeedGraderPage />} />
+          <Route path="assignments/:assignmentId/moderate" element={<ModerationPage />} />
+          <Route path="gradebook/individual" element={<IndividualGradebookPage />} />
           <Route path="assignments/:assignmentId/submissions/:userId/docviewer" element={<DocViewerPage />} />
           <Route path="gradebook" element={<GradebookPage />} />
           <Route path="grades" element={<StudentGradesPage />} />
@@ -275,6 +280,14 @@ const App = () => {
           element={
             <ProtectedRoute>
               <SISImportPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/grade_statuses"
+          element={
+            <ProtectedRoute>
+              <CustomGradeStatusesPage />
             </ProtectedRoute>
           }
         />

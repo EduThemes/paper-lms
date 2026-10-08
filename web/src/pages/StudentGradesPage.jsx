@@ -440,7 +440,12 @@ const StudentGradesPage = () => {
         </div>
       )}
 
-      {/* Overall Grade Summary */}
+      {/* Overall Grade Summary (hidden when the course hides totals) */}
+      {course?.hide_final_grades ? (
+        <div className="bg-white rounded-lg shadow p-4 mb-6 text-sm text-gray-500">
+          Your instructor has hidden course totals.
+        </div>
+      ) : (
       <div className="bg-white rounded-lg shadow p-6 mb-6">
         <div className="flex items-center justify-between">
           <div>
@@ -463,6 +468,7 @@ const StudentGradesPage = () => {
           </div>
         </div>
       </div>
+      )}
 
       {/* Assignment Groups */}
       {grouped.map(group => (

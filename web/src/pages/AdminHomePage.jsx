@@ -14,6 +14,7 @@ const tiles = [
   { to: '/admin/ferpa',            icon: FileText,        label: 'FERPA',           desc: 'Privacy & data requests' },
   { to: '/admin/terms',            icon: GraduationCap,   label: 'Terms',           desc: 'Enrollment terms' },
   { to: '/admin/grading_periods',  icon: ClipboardCheck,  label: 'Grading Periods', desc: 'Term-level grading' },
+  { to: '/admin/grade_statuses',   icon: ClipboardCheck,  label: 'Grade Statuses',  desc: 'Custom submission statuses' },
   { to: '/admin/sis_import',       icon: Upload,          label: 'SIS Import',      desc: 'Roster sync' },
   { to: '/admin/developer_keys',   icon: KeyRound,        label: 'Developer Keys',  desc: 'OAuth & LTI clients' },
   { to: '/admin/auth_providers',   icon: Shield,          label: 'Auth Providers',  desc: 'SSO configuration' },
