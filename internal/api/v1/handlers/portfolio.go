@@ -937,7 +937,9 @@ func (h *PortfolioHandler) streamPortfolioFile(c *fiber.Ctx, portfolio *models.P
 	if err != nil {
 		return responses.InternalError(c, "Could not locate file")
 	}
-	defer reader.Close()
+	// No defer Close: fasthttp streams the body after the handler returns
+	// and closes the reader itself (io.Closer). Closing it here sent an
+	// empty/failed download from local storage.
 	c.Set("Content-Type", attachment.ContentType)
 	return c.SendStream(reader)
 }

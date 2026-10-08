@@ -184,7 +184,9 @@ func (h *QuizSubmissionHandler) DownloadAnswerFile(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.InternalError(c, "Could not locate file")
 	}
-	defer reader.Close()
+	// No defer Close: fasthttp streams the body after the handler returns
+	// and closes the reader itself (io.Closer). Closing it here sent an
+	// empty/failed download from local storage.
 	c.Set("Content-Type", "application/octet-stream")
 	return c.SendStream(reader)
 }
