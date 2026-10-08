@@ -1158,6 +1158,11 @@ export const api = {
     });
     return data;
   },
+  // Inbox recipient picker: users who share a course with the caller
+  // (GET /users is admin-only).
+  searchRecipients: async (searchTerm, perPage = 10) => {
+    return request(`/search/recipients?search=${encodeURIComponent(searchTerm)}&per_page=${perPage}`);
+  },
   getConversationMessages: async (conversationId, page = 1, perPage = 50) => {
     return request(`/conversations/${conversationId}/messages?page=${page}&per_page=${perPage}`);
   },
@@ -1547,6 +1552,10 @@ export const api = {
     const { data } = await request(`/conferences/${id}`, { method: 'DELETE' });
     return data;
   },
+  startConference: async (id) => {
+    const { data } = await request(`/conferences/${id}/start`, { method: 'POST' });
+    return data;
+  },
   joinConference: async (id) => {
     const { data } = await request(`/conferences/${id}/join`, { method: 'POST' });
     return data;
@@ -1860,6 +1869,12 @@ export const api = {
   },
   deleteCommunicationChannel: async (id) => {
     const { data } = await request(`/users/self/communication_channels/${id}`, { method: 'DELETE' });
+    return data;
+  },
+  confirmCommunicationChannel: async (id, code) => {
+    const { data } = await request(`/users/self/communication_channels/${id}/confirm`, {
+      method: 'POST', body: JSON.stringify({ code }),
+    });
     return data;
   },
 
@@ -2604,7 +2619,7 @@ export const api = {
   cancelAppointmentReservation: (id, slotId, reservationId) =>
     request(`/appointment_groups/${id}/appointments/${slotId}/reservations/${reservationId}`, { method: 'DELETE' }),
   listMyAppointmentReservations: () =>
-    request(`/users/self/appointments`).catch(() => ({ data: [] })),
+    request(`/users/self/appointments`),
 
   // ==========================================================================
   // P3 Features: Outcome Proficiency + Learning Mastery Gradebook

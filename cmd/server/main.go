@@ -843,6 +843,14 @@ func main() {
 	syllabusHandler := handlers.NewSyllabusHandler(courseService, assignmentService, assignmentGroupService, calendarService, gradingService, enrollmentService, submissionService)
 	// handlers
 	notificationDeliveryHandler := handlers.NewNotificationDeliveryHandler(notificationDeliveryService, communicationChannelRepo)
+	// Communications wiring: announcements and inbox messages notify
+	// their recipients; the inbox picker searches users who share a
+	// course; conferences resolve the per-tenant BigBlueButton server.
+	announcementService.SetNotifier(notificationDeliveryService)
+	conversationHandler.SetNotifier(notificationDeliveryService)
+	conversationHandler.SetRecipientSearch(postgres.NewRecipientSearchRepository(database))
+	conferenceService.SetSettingsLookup(settingsLookup)
+	discussionService.OnEntryCreated(service.DiscussionReplyNotificationCallback(discussionEntryRepo, discussionTopicRepo, notificationDeliveryService))
 	auditHandler := handlers.NewAuditHandler(auditService)
 	// handlers
 	customRoleHandler := handlers.NewCustomRoleHandler(customRoleService)
@@ -1149,6 +1157,7 @@ func main() {
 	// wiring is mounted UNCONDITIONALLY below so DISABLE_SCHEDULER does not
 	// silently disable in-flight request draining.
 	var sched *scheduler.Scheduler
+	var minuteSched *scheduler.Scheduler
 	if os.Getenv("DISABLE_SCHEDULER") != "1" {
 		sched = scheduler.NewScheduler(time.Hour)
 		// 13.7 — Postgres advisory-lock leader election. Multi-pod
@@ -1162,6 +1171,16 @@ func main() {
 		schedCtx, schedCancel := context.WithCancel(context.Background())
 		defer schedCancel()
 		sched.Start(schedCtx)
+
+		// Per-minute jobs: delayed announcements become visible (and
+		// notify) on time, and "immediately" notifications are sent
+		// without waiting for a digest window.
+		minuteSched = scheduler.NewScheduler(time.Minute)
+		minuteSched.SetLeaderLock(scheduler.NewPGLeaderLock(database))
+		publishJob, deliverJob := scheduler.NewMinuteJobs(announcementService, notificationDeliveryService)
+		minuteSched.Register("publishScheduledAnnouncements", scheduler.EveryTick(), publishJob)
+		minuteSched.Register("deliverImmediateNotifications", scheduler.EveryTick(), deliverJob)
+		minuteSched.Start(schedCtx)
 	}
 
 	// Graceful shutdown — wired even when the scheduler is disabled so
@@ -1174,6 +1193,9 @@ func main() {
 		slog.Info("shutdown signal received, draining…")
 		if sched != nil {
 			sched.Stop()
+		}
+		if minuteSched != nil {
+			minuteSched.Stop()
 		}
 		_ = app.ShutdownWithTimeout(30 * time.Second)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

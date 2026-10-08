@@ -6,6 +6,38 @@ import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
 import { Skeleton } from '@/components/ui/skeleton';
 
+const CONVERSATIONS_PER_PAGE = 20;
+const MESSAGES_PER_PAGE = 50;
+
+// Page number of a Link-header URL (e.g. rel="last" / rel="next").
+export const pageFromLink = (url) => {
+  if (!url) return null;
+  const m = String(url).match(/[?&]page=(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+};
+
+// Messages are returned oldest-first, so the newest replies live on the
+// LAST page. Load that page (plus the one before it when it is short) so
+// a long thread opens on its latest messages; earlier pages are fetched
+// on demand.
+export const loadLatestMessages = async (conversationId) => {
+  const first = await api.getConversationMessages(conversationId, 1, MESSAGES_PER_PAGE);
+  const lastPage = pageFromLink(first.pagination?.last) || 1;
+  if (lastPage <= 1) {
+    return { items: first.data || [], oldestPage: 1 };
+  }
+  const last = await api.getConversationMessages(conversationId, lastPage, MESSAGES_PER_PAGE);
+  let items = last.data || [];
+  let oldestPage = lastPage;
+  if (items.length < MESSAGES_PER_PAGE / 2 && lastPage > 1) {
+    const prevPage = lastPage - 1;
+    const prev = prevPage === 1 ? first : await api.getConversationMessages(conversationId, prevPage, MESSAGES_PER_PAGE);
+    items = [...(prev.data || []), ...items];
+    oldestPage = prevPage;
+  }
+  return { items, oldestPage };
+};
+
 const InboxPage = () => {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -21,6 +53,11 @@ const InboxPage = () => {
   const [newSubject, setNewSubject] = useState('');
   const [newBody, setNewBody] = useState('');
   const [creating, setCreating] = useState(false);
+  const [conversationsNextPage, setConversationsNextPage] = useState(null);
+  const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
+  const [oldestMessagesPage, setOldestMessagesPage] = useState(1);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const [searchError, setSearchError] = useState(null);
 
   // Recipient picker state
   const [selectedRecipients, setSelectedRecipients] = useState([]);
@@ -34,8 +71,9 @@ const InboxPage = () => {
 
   const fetchConversations = useCallback(async () => {
     try {
-      const { data } = await api.getConversations();
-      setConversations(data);
+      const { data, pagination } = await api.getConversations(1, CONVERSATIONS_PER_PAGE);
+      setConversations(data || []);
+      setConversationsNextPage(pageFromLink(pagination?.next));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -47,11 +85,29 @@ const InboxPage = () => {
     fetchConversations();
   }, [fetchConversations]);
 
+  const loadMoreConversations = async () => {
+    if (!conversationsNextPage) return;
+    setLoadingMoreConversations(true);
+    try {
+      const { data, pagination } = await api.getConversations(conversationsNextPage, CONVERSATIONS_PER_PAGE);
+      setConversations((prev) => {
+        const seen = new Set(prev.map((c) => c.id));
+        return [...prev, ...(data || []).filter((c) => !seen.has(c.id))];
+      });
+      setConversationsNextPage(pageFromLink(pagination?.next));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoadingMoreConversations(false);
+    }
+  };
+
   // Debounced user search
   useEffect(() => {
     if (recipientSearch.trim().length < 2) {
       setSearchResults([]);
       setShowDropdown(false);
+      setSearchError(null);
       return;
     }
 
@@ -59,16 +115,22 @@ const InboxPage = () => {
     searchTimerRef.current = setTimeout(async () => {
       setSearching(true);
       try {
-        const result = await api.searchUsers(recipientSearch.trim(), 1, 8);
+        // Scoped recipient search (people who share a course with the
+        // caller) — GET /users is admin-only and 403s for students and
+        // teachers.
+        const result = await api.searchRecipients(recipientSearch.trim(), 8);
         const users = Array.isArray(result) ? result : (result.data || []);
         // Filter out already-selected recipients and self
         const filtered = users.filter(
           (u) => u.id !== user?.id && !selectedRecipients.some((r) => r.id === u.id)
         );
+        setSearchError(null);
         setSearchResults(filtered);
         setShowDropdown(filtered.length > 0);
-      } catch {
+      } catch (err) {
         setSearchResults([]);
+        setShowDropdown(false);
+        setSearchError(err.message || 'Recipient search failed');
       } finally {
         setSearching(false);
       }
@@ -108,13 +170,32 @@ const InboxPage = () => {
     setMessagesLoading(true);
     setError(null);
     try {
-      const { data } = await api.getConversationMessages(conv.id);
-      setMessages(data);
+      const { items, oldestPage } = await loadLatestMessages(conv.id);
+      setMessages(items);
+      setOldestMessagesPage(oldestPage);
       await api.markConversationAsRead(conv.id);
     } catch (err) {
       setError(err.message);
     } finally {
       setMessagesLoading(false);
+    }
+  };
+
+  const loadEarlierMessages = async () => {
+    if (!selectedConv || oldestMessagesPage <= 1) return;
+    setLoadingEarlier(true);
+    try {
+      const page = oldestMessagesPage - 1;
+      const { data } = await api.getConversationMessages(selectedConv.id, page, MESSAGES_PER_PAGE);
+      setMessages((prev) => {
+        const seen = new Set(prev.map((m) => m.id));
+        return [...(data || []).filter((m) => !seen.has(m.id)), ...prev];
+      });
+      setOldestMessagesPage(page);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoadingEarlier(false);
     }
   };
 
@@ -157,10 +238,12 @@ const InboxPage = () => {
       await fetchConversations();
       setSelectedConv(conv);
       if (newBody.trim()) {
-        const { data } = await api.getConversationMessages(conv.id);
-        setMessages(data);
+        const { items, oldestPage } = await loadLatestMessages(conv.id);
+        setMessages(items);
+        setOldestMessagesPage(oldestPage);
       } else {
         setMessages([]);
+        setOldestMessagesPage(1);
       }
     } catch (err) {
       setError(err.message);
@@ -300,7 +383,7 @@ const InboxPage = () => {
                               </div>
                               <div className="min-w-0">
                                 <p className="font-medium text-text-primary truncate">{u.name}</p>
-                                <p className="text-xs text-text-tertiary truncate">{u.email}</p>
+                                {u.email && <p className="text-xs text-text-tertiary truncate">{u.email}</p>}
                               </div>
                             </button>
                           ))
@@ -310,7 +393,9 @@ const InboxPage = () => {
                   </div>
                 </div>
               </div>
-              {selectedRecipients.length === 0 && (
+              {searchError ? (
+                <p className="text-xs text-accent-danger mt-1" role="alert">{searchError}</p>
+              ) : selectedRecipients.length === 0 && (
                 <p className="text-xs text-text-tertiary mt-1">Type at least 2 characters to search</p>
               )}
             </div>
@@ -383,6 +468,18 @@ const InboxPage = () => {
                   </div>
                 </button>
               ))}
+              {conversationsNextPage && (
+                <div className="p-3 text-center">
+                  <button
+                    type="button"
+                    onClick={loadMoreConversations}
+                    disabled={loadingMoreConversations}
+                    className="text-sm text-brand-600 hover:text-brand-800 font-medium disabled:opacity-50"
+                  >
+                    {loadingMoreConversations ? 'Loading...' : 'Load more conversations'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -422,7 +519,20 @@ const InboxPage = () => {
                     No messages yet. Start the conversation!
                   </div>
                 ) : (
-                  messages.map((msg) => {
+                  <>
+                  {oldestMessagesPage > 1 && (
+                    <div className="text-center">
+                      <button
+                        type="button"
+                        onClick={loadEarlierMessages}
+                        disabled={loadingEarlier}
+                        className="text-sm text-brand-600 hover:text-brand-800 font-medium disabled:opacity-50"
+                      >
+                        {loadingEarlier ? 'Loading...' : 'Load earlier messages'}
+                      </button>
+                    </div>
+                  )}
+                  {messages.map((msg) => {
                     const isOwn = msg.user_id === user?.id;
                     return (
                       <div
@@ -452,7 +562,8 @@ const InboxPage = () => {
                         </div>
                       </div>
                     );
-                  })
+                  })}
+                  </>
                 )}
               </div>
 

@@ -509,6 +509,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Get("/conversations/:id/messages", r.ConversationHandler.ListMessages)
 	protected.Post("/conversations/:id/messages", r.ConversationHandler.CreateMessage)
 	protected.Put("/conversations/:id/mark_as_read", r.ConversationHandler.MarkAsRead)
+	protected.Get("/search/recipients", r.ConversationHandler.SearchRecipients) // inbox picker: users sharing a course with the caller
 
 	// Notifications (any authenticated user)
 	protected.Get("/notifications", r.NotificationHandler.ListNotifications)
@@ -604,6 +605,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Get("/conferences/:id", r.ConferenceHandler.GetConference)
 	protected.Put("/conferences/:id", r.ConferenceHandler.UpdateConference)
 	protected.Delete("/conferences/:id", r.ConferenceHandler.DeleteConference)
+	protected.Post("/conferences/:id/start", r.ConferenceHandler.StartConference)
 	protected.Post("/conferences/:id/join", r.ConferenceHandler.JoinConference)
 	protected.Post("/conferences/:id/end", r.ConferenceHandler.EndConference)
 	protected.Get("/conferences/:id/recordings", r.ConferenceHandler.GetRecordings)
@@ -676,7 +678,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Delete("/announcements/:id", r.AnnouncementHandler.DeleteAnnouncement)
 	protected.Post("/announcements/:id/read", r.AnnouncementHandler.MarkAsRead)
 	protected.Post("/announcements/:id/acknowledge", r.AnnouncementHandler.AcknowledgeAnnouncement)
-	protected.Get("/announcements/:id/read_receipts", instructor, r.AnnouncementHandler.GetReadReceipts)
+	protected.Get("/announcements/:id/read_receipts", r.AnnouncementHandler.GetReadReceipts) // authz in handler (no :course_id for course-role middleware)
 	protected.Get("/accounts/:account_id/announcements", r.AnnouncementHandler.ListAccountAnnouncements)
 	protected.Post("/accounts/:account_id/announcements", admin, r.AnnouncementHandler.CreateAccountAnnouncement)
 
@@ -697,6 +699,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Post("/admin/notification_deliveries/retry", admin, r.NotificationDeliveryHandler.RetryFailedDeliveries)
 	protected.Get("/users/self/communication_channels", r.NotificationDeliveryHandler.ListChannels)
 	protected.Post("/users/self/communication_channels", r.NotificationDeliveryHandler.CreateChannel)
+	protected.Post("/users/self/communication_channels/:id/confirm", r.NotificationDeliveryHandler.ConfirmChannel)
 	protected.Delete("/users/self/communication_channels/:id", r.NotificationDeliveryHandler.DeleteChannel)
 
 	// Audit Logs (course: instructor; account: admin)

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"net/url"
+	"strings"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -14,6 +16,29 @@ type CollaborationService struct {
 
 func NewCollaborationService(collabRepo repository.CollaborationRepository) *CollaborationService {
 	return &CollaborationService{collabRepo: collabRepo}
+}
+
+// ErrInvalidCollaborationURL is returned when a collaboration's document
+// URL is not an absolute http(s) URL.
+var ErrInvalidCollaborationURL = errors.New("url must be an absolute http(s) URL")
+
+// ValidateCollaborationURL accepts an empty URL or an absolute http(s)
+// URL. The URL is rendered as a link that teachers and students click, so
+// javascript:, data: and other schemes are refused (stored XSS).
+func ValidateCollaborationURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ErrInvalidCollaborationURL
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		return nil
+	}
+	return ErrInvalidCollaborationURL
 }
 
 func (s *CollaborationService) Create(ctx context.Context, collaboration *models.Collaboration) error {
@@ -28,6 +53,9 @@ func (s *CollaborationService) Create(ctx context.Context, collaboration *models
 	}
 	if collaboration.ContextType == "" || collaboration.ContextID == 0 {
 		return errors.New("context_type and context_id are required")
+	}
+	if err := ValidateCollaborationURL(collaboration.URL); err != nil {
+		return err
 	}
 	if collaboration.WorkflowState == "" {
 		collaboration.WorkflowState = "active"
@@ -48,6 +76,9 @@ func (s *CollaborationService) GetByID(ctx context.Context, id, accountID uint) 
 }
 
 func (s *CollaborationService) Update(ctx context.Context, collaboration *models.Collaboration) error {
+	if err := ValidateCollaborationURL(collaboration.URL); err != nil {
+		return err
+	}
 	_, err := s.collabRepo.FindByID(ctx, collaboration.ID, 0)
 	if err != nil {
 		return errors.New("collaboration not found")

@@ -549,8 +549,10 @@ func TestTenantIsolation_GetCalendarEvent(t *testing.T) {
 		enrollRepo := new(mocks.MockEnrollmentRepository)
 		userRepo := new(mocks.MockUserRepository)
 
+		// A personal (User-context) event is readable only by its owner,
+		// so the in-tenant row belongs to the caller.
 		row := &models.CalendarEvent{
-			ID: resourceID, ContextType: "User", ContextID: 1, Title: "E",
+			ID: resourceID, ContextType: "User", ContextID: callerFor(callerAccount), Title: "E",
 		}
 		expectAccountIDPassThrough(&calRepo.Mock, "FindByID", resourceID, ownerOf(resourceID), row)
 

@@ -8,6 +8,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // AppointmentGroupService implements Canvas-compatible Scheduler logic:
@@ -176,9 +177,13 @@ func (s *AppointmentGroupService) Reserve(ctx context.Context, groupID, slotID, 
 	var reservation models.AppointmentReservation
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Lock the group row so concurrent callers see a stable view.
+		// Lock the group row (SELECT ... FOR UPDATE) so concurrent
+		// reservations in this group serialize: under READ COMMITTED a
+		// plain SELECT lets two callers both count the last free seat and
+		// both insert. Holding the group lock until commit makes the
+		// capacity and per-user counts below authoritative.
 		var group models.AppointmentGroup
-		if err := tx.First(&group, groupID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&group, groupID).Error; err != nil {
 			return ErrAppointmentGroupGone
 		}
 		if group.WorkflowState == "deleted" {

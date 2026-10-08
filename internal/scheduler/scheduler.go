@@ -141,8 +141,11 @@ func (s *Scheduler) tick(ctx context.Context) {
 		if !job.Predicate(now) {
 			continue
 		}
-		// Coalesce: skip if we already ran this hour.
-		if last, ok := s.lastRun[job.Name]; ok && now.Sub(last) < s.interval {
+		// Coalesce: skip if we already ran within this tick window. Half
+		// an interval (not a full one) so ticker jitter — consecutive
+		// ticks landing a few microseconds under `interval` apart — does
+		// not skip every other run of an EveryTick job.
+		if last, ok := s.lastRun[job.Name]; ok && now.Sub(last) < s.interval/2 {
 			continue
 		}
 		s.lastRun[job.Name] = now
@@ -177,6 +180,13 @@ func DailyAt(hour int) PredicateFunc {
 	return func(now time.Time) bool {
 		return now.Hour() == hour
 	}
+}
+
+// EveryTick returns a predicate that fires on every scheduler tick. Pair
+// it with a short-interval scheduler (e.g. NewScheduler(time.Minute)) for
+// jobs that must run continuously, such as delayed announcement posting.
+func EveryTick() PredicateFunc {
+	return func(time.Time) bool { return true }
 }
 
 // WeeklyAt returns a predicate that fires on the given weekday at the given

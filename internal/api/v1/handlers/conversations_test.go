@@ -51,13 +51,15 @@ func setupConversationHandler(callerID, accountID uint) (
 // TestCreateConversation_HigherEdAllows — no COPPA gate applies, the
 // conversation is created (200/201).
 func TestCreateConversation_HigherEdAllows(t *testing.T) {
-	app, convRepo, partRepo, _, _, accountRepo, _ := setupConversationHandler(10, 1)
+	app, convRepo, partRepo, _, userRepo, accountRepo, _ := setupConversationHandler(10, 1)
 
 	accountRepo.On("FindByID", mock.Anything, uint(1)).Return(&models.Account{
 		ID:          1,
 		TenantMode:  models.GamificationAudience("higher_ed"),
 		CoppaStrict: false,
 	}, nil)
+	userRepo.On("FindByID", mock.Anything, uint(20), uint(1)).Return(&models.User{ID: 20, AccountID: 1}, nil)
+	userRepo.On("FindByID", mock.Anything, uint(30), uint(1)).Return(&models.User{ID: 30, AccountID: 1}, nil)
 	convRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.Conversation")).Return(nil)
 	partRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.ConversationParticipant")).Return(nil)
 
@@ -123,7 +125,8 @@ func TestCreateConversation_CoppaStrictRefuses(t *testing.T) {
 // TestCreateConversation_K5AllowsTeacherToStudent — k5 tenant, sender
 // is a teacher in course 5 where recipient 20 is enrolled = 201.
 func TestCreateConversation_K5AllowsTeacherToStudent(t *testing.T) {
-	app, convRepo, partRepo, _, _, accountRepo, enrollRepo := setupConversationHandler(10, 1)
+	app, convRepo, partRepo, _, userRepo, accountRepo, enrollRepo := setupConversationHandler(10, 1)
+	userRepo.On("FindByID", mock.Anything, uint(20), uint(1)).Return(&models.User{ID: 20, AccountID: 1}, nil)
 
 	accountRepo.On("FindByID", mock.Anything, uint(1)).Return(&models.Account{
 		ID:          1,
@@ -149,4 +152,29 @@ func TestCreateConversation_K5AllowsTeacherToStudent(t *testing.T) {
 	})
 	resp := testutil.MakeRequest(app, http.MethodPost, "/conversations", body)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+}
+
+// TestCreateConversation_OtherTenantRecipientIs404 — a recipient id that
+// is not a user of the caller's tenant is refused (404, no existence
+// hint) before anything is written: messages notify participants by
+// email, so an unchecked id would let anyone mail another school's users.
+func TestCreateConversation_OtherTenantRecipientIs404(t *testing.T) {
+	app, convRepo, _, _, userRepo, accountRepo, _ := setupConversationHandler(10, 1)
+
+	accountRepo.On("FindByID", mock.Anything, uint(1)).Return(&models.Account{
+		ID:         1,
+		TenantMode: models.GamificationAudience("higher_ed"),
+	}, nil)
+	userRepo.On("FindByID", mock.Anything, uint(20), uint(1)).Return(&models.User{ID: 20, AccountID: 1}, nil)
+	userRepo.On("FindByID", mock.Anything, uint(99), uint(1)).Return(nil, errFakeNotFound)
+
+	body := testutil.JSONBody(map[string]interface{}{
+		"conversation": map[string]interface{}{
+			"subject":    "hi",
+			"recipients": []uint{20, 99},
+		},
+	})
+	resp := testutil.MakeRequest(app, http.MethodPost, "/conversations", body)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	convRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
 }

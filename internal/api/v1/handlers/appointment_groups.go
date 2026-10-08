@@ -213,30 +213,56 @@ func (h *AppointmentGroupHandler) Update(c *fiber.Ctx) error {
 		return err
 	}
 
+	// Partial update: only fields present in the body change. Pointer
+	// fields distinguish "omitted" from "set to empty/zero", so a
+	// title-only PUT no longer wipes description and location.
 	var body struct {
-		AppointmentGroup appointmentGroupInput `json:"appointment_group"`
+		AppointmentGroup struct {
+			Title                         *string `json:"title"`
+			Description                   *string `json:"description"`
+			LocationName                  *string `json:"location_name"`
+			LocationAddress               *string `json:"location_address"`
+			MinAppointmentsPerParticipant *int    `json:"min_appointments_per_participant"`
+			MaxAppointmentsPerParticipant *int    `json:"max_appointments_per_participant"`
+			ParticipantsPerAppointment    *int    `json:"participants_per_appointment"`
+			WorkflowState                 *string `json:"workflow_state"`
+		} `json:"appointment_group"`
 	}
 	if err := c.BodyParser(&body); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
 	in := body.AppointmentGroup
-	if in.Title != "" {
-		g.Title = in.Title
+	if in.Title != nil {
+		if *in.Title == "" {
+			return responses.BadRequest(c, "title cannot be empty")
+		}
+		g.Title = *in.Title
 	}
-	g.Description = service.SanitizePlainText(in.Description)
-	g.LocationName = in.LocationName
-	g.LocationAddress = in.LocationAddress
-	if in.MinAppointmentsPerParticipant >= 0 {
-		g.MinAppointmentsPerParticipant = in.MinAppointmentsPerParticipant
+	if in.Description != nil {
+		g.Description = service.SanitizePlainText(*in.Description)
 	}
-	if in.MaxAppointmentsPerParticipant > 0 {
-		g.MaxAppointmentsPerParticipant = in.MaxAppointmentsPerParticipant
+	if in.LocationName != nil {
+		g.LocationName = *in.LocationName
 	}
-	if in.ParticipantsPerAppointment > 0 {
-		g.ParticipantsPerAppointment = in.ParticipantsPerAppointment
+	if in.LocationAddress != nil {
+		g.LocationAddress = *in.LocationAddress
 	}
-	if in.WorkflowState != "" {
-		g.WorkflowState = in.WorkflowState
+	if in.MinAppointmentsPerParticipant != nil && *in.MinAppointmentsPerParticipant >= 0 {
+		g.MinAppointmentsPerParticipant = *in.MinAppointmentsPerParticipant
+	}
+	if in.MaxAppointmentsPerParticipant != nil && *in.MaxAppointmentsPerParticipant > 0 {
+		g.MaxAppointmentsPerParticipant = *in.MaxAppointmentsPerParticipant
+	}
+	if in.ParticipantsPerAppointment != nil && *in.ParticipantsPerAppointment > 0 {
+		g.ParticipantsPerAppointment = *in.ParticipantsPerAppointment
+	}
+	if in.WorkflowState != nil && *in.WorkflowState != "" {
+		switch *in.WorkflowState {
+		case "active", "pending":
+			g.WorkflowState = *in.WorkflowState
+		default:
+			return responses.BadRequest(c, "workflow_state must be 'active' or 'pending'")
+		}
 	}
 	if err := h.svc.UpdateGroup(c.Context(), g); err != nil {
 		return responses.InternalError(c, "Could not update appointment group")
@@ -330,6 +356,25 @@ func (h *AppointmentGroupHandler) ListReservations(c *fiber.Ctx) error {
 		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_appointment_reservations", "appointment_slots", uint(slotID), c.IP(), c.Get("User-Agent"))
 	}
 
+	return c.JSON(out)
+}
+
+// ListMyReservations returns the caller's active reservations so the
+// scheduler UI can mark booked slots and cancel them.
+// GET /api/v1/users/self/appointments
+func (h *AppointmentGroupHandler) ListMyReservations(c *fiber.Ctx) error {
+	userID, err := getUserID(c)
+	if err != nil {
+		return err
+	}
+	items, err := h.svc.ListMyReservations(c.Context(), userID)
+	if err != nil {
+		return responses.InternalError(c, "Could not fetch reservations")
+	}
+	out := make([]fiber.Map, len(items))
+	for i, r := range items {
+		out[i] = reservationToJSON(&r)
+	}
 	return c.JSON(out)
 }
 
