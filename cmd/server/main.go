@@ -1055,6 +1055,8 @@ func main() {
 		SetupHandler:              setupHandler,
 		SuperAdminSettingsHandler: superAdminSettingsHandler,
 
+		RCEDraftKeyHandler: handlers.NewRCEDraftKeyHandler(cfg.JWTSecret),
+
 		FeatureFlagHandler:           featureFlagHandler,
 		CustomGradebookColumnHandler: customGradebookColumnHandler,
 		MasteryPathHandler:           masteryPathHandler,

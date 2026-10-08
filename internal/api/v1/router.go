@@ -149,6 +149,9 @@ type Router struct {
 	// routes; that helper carries the RequireSuperAdmin gate.
 	SuperAdminSettingsHandler *handlers.SuperAdminSettingsHandler
 
+	// Rich content editor: per-user autosave draft key (routes_rce_editor.go)
+	RCEDraftKeyHandler *handlers.RCEDraftKeyHandler
+
 	// Middleware
 	AuthMiddleware *middleware.AuthMiddleware
 	PermMiddleware *middleware.PermissionMiddleware
@@ -853,4 +856,5 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerQuizExtensionRoutes(protected, enrolled, instructor)
 	r.registerGamificationRoutes(protected, admin, instructor, selfOrAdmin)
 	r.registerSuperAdminRoutes(protected)
+	r.registerRCEEditorRoutes(protected)
 }
