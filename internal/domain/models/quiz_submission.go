@@ -19,4 +19,8 @@ type QuizSubmission struct {
 	WorkflowState     string     `json:"workflow_state" gorm:"not null;default:'untaken';index"` // untaken, pending_review, complete, settings_only
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
+	// ReadQuestions is a JSON array of question ids the student has moved
+	// past on a one-question-at-a-time + can't-go-back quiz (migration
+	// 000103). Answers to these questions are refused.
+	ReadQuestions string `json:"-" gorm:"column:read_questions;type:text"`
 }

@@ -104,6 +104,11 @@ func (h *QuizQuestionHandler) ListQuestions(c *fiber.Ctx) error {
 	if wrote {
 		return nil
 	}
+	// A quiz gated by an access code / IP filter only shows its questions
+	// inside an attempt (which enforces the gate).
+	if !quizCallerIsStaff(c) && quizHasTakeRestrictions(quiz) {
+		return c.JSON([]fiber.Map{})
+	}
 
 	params := middleware.GetPagination(c)
 
@@ -134,6 +139,9 @@ func (h *QuizQuestionHandler) GetQuestion(c *fiber.Ctx) error {
 	quiz, question, wrote := h.scopedQuizQuestion(c)
 	if wrote {
 		return nil
+	}
+	if !quizCallerIsStaff(c) && quizHasTakeRestrictions(quiz) {
+		return responses.NotFound(c, "quiz question")
 	}
 
 	stimuli := h.quizService.StimuliForQuestions(c.Context(), quiz.CourseID, []models.QuizQuestion{*question})

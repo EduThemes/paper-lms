@@ -24,4 +24,10 @@ type Quiz struct {
 	WorkflowState      string     `json:"workflow_state" gorm:"not null;default:'unpublished'"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
+	// Quiz-items lane (migration 000103): Canvas access code (sealed with
+	// secretbox — never serialized), IP filter (comma-separated IPs /
+	// CIDRs) and anonymous survey submissions.
+	AccessCodeEncrypted  []byte `json:"-" gorm:"column:access_code_encrypted"`
+	IPFilter             string `json:"ip_filter" gorm:"column:ip_filter;type:text"`
+	AnonymousSubmissions bool   `json:"anonymous_submissions" gorm:"column:anonymous_submissions;not null;default:false"`
 }

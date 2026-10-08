@@ -505,6 +505,9 @@ func (s *QuizService) AnswerQuestion(ctx context.Context, submissionID, question
 	if !questionBelongsToSubmission(submission, question, selected, hasSelected) {
 		return nil, ErrQuestionNotInSubmission
 	}
+	if err := s.ensureQuestionNotLocked(ctx, submission, questionID); err != nil {
+		return nil, err
+	}
 
 	// Attempt to find an existing answer for this question in this submission
 	existing, _ := s.answerRepo.FindBySubmissionAndQuestion(ctx, submissionID, questionID)
@@ -560,6 +563,7 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 	selected, hasSelected := selectedQuestionSet(submission)
 	groupCache := map[uint]*models.QuizQuestionGroup{}
 	seenQuestion := map[uint]bool{}
+	scored := make([]int, 0, len(answers))
 
 	for i := range answers {
 		question, qErr := s.questionRepo.FindByID(ctx, answers[i].QuestionID)
@@ -575,7 +579,7 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 		seenQuestion[question.ID] = true
 
 		pointsPossible := s.effectiveQuestionPoints(ctx, question, groupCache)
-		points, correct, gradable := s.autoGradeWithPoints(question, answers[i].Answer, pointsPossible)
+		points, correct, gradable := s.gradeAnswerForSubmission(submission.ID, question, answers[i].Answer, pointsPossible)
 
 		if gradable {
 			answers[i].Correct = &correct
@@ -593,7 +597,21 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 			zero := 0.0
 			answers[i].Points = &zero
 		}
+		scored = append(scored, i)
+	}
 
+	// Surveys have no right answers (quiz-items lane, G058).
+	if quiz, qErr := s.quizRepo.FindByID(ctx, submission.QuizID, 0); qErr == nil && QuizIsSurvey(quiz) {
+		surveyAnswers := make([]models.QuizSubmissionAnswer, len(scored))
+		for k, i := range scored {
+			surveyAnswers[k] = answers[i]
+		}
+		applySurveySemantics(quiz, surveyAnswers, &totalScore, &needsReview)
+		for k, i := range scored {
+			answers[i] = surveyAnswers[k]
+		}
+	}
+	for _, i := range scored {
 		_ = s.answerRepo.Update(ctx, &answers[i])
 	}
 

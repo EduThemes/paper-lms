@@ -20,7 +20,7 @@ func NewQuizHandler(quizRepo repository.QuizRepository) *QuizHandler {
 }
 
 func quizToJSON(q *models.Quiz) fiber.Map {
-	return fiber.Map{
+	m := fiber.Map{
 		"id":               q.ID,
 		"course_id":        q.CourseID,
 		"title":            q.Title,
@@ -37,6 +37,7 @@ func quizToJSON(q *models.Quiz) fiber.Map {
 		"created_at":       q.CreatedAt,
 		"updated_at":       q.UpdatedAt,
 	}
+	return addQuizDeliveryJSON(m, q)
 }
 
 func (h *QuizHandler) ListQuizzes(c *fiber.Ctx) error {
@@ -83,7 +84,7 @@ func (h *QuizHandler) GetQuiz(c *fiber.Ctx) error {
 		return responses.NotFound(c, "quiz")
 	}
 
-	return c.JSON(quizToJSON(quiz))
+	return c.JSON(quizToViewerJSON(c, quiz))
 }
 
 func (h *QuizHandler) CreateQuiz(c *fiber.Ctx) error {
@@ -141,12 +142,15 @@ func (h *QuizHandler) CreateQuiz(c *fiber.Ctx) error {
 	if quiz.AllowedAttempts == 0 {
 		quiz.AllowedAttempts = 1
 	}
+	if applyQuizDeliveryInput(c, quiz) {
+		return nil
+	}
 
 	if err := h.quizRepo.Create(c.Context(), quiz); err != nil {
 		return responses.InternalError(c, "Could not create quiz")
 	}
 
-	return c.Status(fiber.StatusCreated).JSON(quizToJSON(quiz))
+	return c.Status(fiber.StatusCreated).JSON(quizToViewerJSON(c, quiz))
 }
 
 func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
@@ -230,11 +234,15 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 		}
 	}
 
+	if applyQuizDeliveryInput(c, quiz) {
+		return nil
+	}
+
 	if err := h.quizRepo.Update(c.Context(), quiz); err != nil {
 		return responses.InternalError(c, "Could not update quiz")
 	}
 
-	return c.JSON(quizToJSON(quiz))
+	return c.JSON(quizToViewerJSON(c, quiz))
 }
 
 // applyOptionalTime sets *dst from a PATCH-style optional field: null

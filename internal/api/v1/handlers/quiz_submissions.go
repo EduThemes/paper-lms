@@ -124,7 +124,11 @@ func (h *QuizSubmissionHandler) StartSubmission(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if _, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID)); wrote {
+	quiz, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID))
+	if wrote {
+		return nil
+	}
+	if enforceQuizTakeRestrictions(c, quiz, true) {
 		return nil
 	}
 
@@ -217,7 +221,11 @@ func (h *QuizSubmissionHandler) AnswerQuestion(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if _, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID)); wrote {
+	quiz, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID))
+	if wrote {
+		return nil
+	}
+	if enforceQuizTakeRestrictions(c, quiz, false) {
 		return nil
 	}
 
@@ -258,6 +266,9 @@ func (h *QuizSubmissionHandler) AnswerQuestion(c *fiber.Ctx) error {
 		if errors.Is(err, service.ErrQuestionNotInSubmission) {
 			return responses.NotFound(c, "quiz question")
 		}
+		if errors.Is(err, service.ErrQuestionLocked) {
+			return responses.Forbidden(c, err.Error())
+		}
 		return responses.BadRequest(c, err.Error())
 	}
 
@@ -274,7 +285,11 @@ func (h *QuizSubmissionHandler) CompleteSubmission(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if _, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID)); wrote {
+	quiz, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID))
+	if wrote {
+		return nil
+	}
+	if enforceQuizTakeRestrictions(c, quiz, false) {
 		return nil
 	}
 
@@ -426,15 +441,17 @@ func (h *QuizSubmissionHandler) GetSubmissionQuestions(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not fetch submission questions")
 	}
 
-	showKey := quizCallerIsStaff(c) || answerKeyVisibleAfterAttempt(quiz, submission)
+	staff := quizCallerIsStaff(c)
+	showKey := staff || answerKeyVisibleAfterAttempt(quiz, submission)
 	stimuli := h.quizService.StimuliForQuestions(c.Context(), quiz.CourseID, questions)
+	read := service.ReadQuestionSet(submission)
 	result := make([]fiber.Map, 0, len(questions))
 	for i := range questions {
 		q := &questions[i]
 		if q.QuizID != submission.QuizID {
 			continue // never serve a row from another quiz
 		}
-		result = append(result, quizQuestionToViewerJSON(q, showKey, service.QuizShuffleSeed(submission.ID, q.ID), stimuli))
+		result = append(result, attemptQuestionJSON(quiz, submission, q, showKey, staff, stimuli, read))
 	}
 
 	return c.JSON(result)

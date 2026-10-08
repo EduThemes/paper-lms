@@ -914,6 +914,8 @@ func main() {
 	questionBankHandler := handlers.NewQuestionBankHandler(questionBankService)
 	quizQuestionGroupHandler := handlers.NewQuizQuestionGroupHandler(quizService)
 	quizStatisticsHandler := handlers.NewQuizStatisticsHandler(quizService)
+	quizStatisticsHandler.SetUserRepo(userRepo)
+	quizStatisticsHandler.SetAuditService(auditService)
 	setupHandler := handlers.NewSetupHandler(userService, accountRepo, userRepo, database, cfg.JWTSecret, cfg.Environment, cfg.SetupBootstrapToken)
 
 	// Super-Admin Settings Engine handler. settingsService is
