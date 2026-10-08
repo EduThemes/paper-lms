@@ -523,3 +523,58 @@ func round2(f float64) float64 {
 	return math.Round(f*100) / 100
 }
 
+
+// RecordAssignmentOutcomeResults upserts the learning-outcome results of a
+// graded, POSTED submission for every outcome aligned to its assignment.
+// Outcome results are student-visible (mastery views), so a grade still
+// hidden by a manual post policy records nothing; posting records them.
+// accountID scopes the alignment lookup (0 only for internal callers whose
+// ids come from a grade write, e.g. the OnGraded callback).
+func RecordAssignmentOutcomeResults(ctx context.Context, alignments repository.OutcomeAlignmentRepository, outcomes *LearningOutcomeService, assignment *models.Assignment, sub *models.Submission, accountID uint) {
+	if alignments == nil || outcomes == nil || assignment == nil || sub == nil ||
+		sub.Score == nil || sub.PostedAt == nil {
+		return
+	}
+	rows, err := alignments.ListByAssignmentID(ctx, assignment.ID, accountID)
+	if err != nil {
+		return
+	}
+	for _, alignment := range rows {
+		possible := 100.0
+		if assignment.PointsPossible != nil {
+			possible = *assignment.PointsPossible
+		}
+		result := &models.LearningOutcomeResult{
+			UserID:              sub.UserID,
+			LearningOutcomeID:   alignment.LearningOutcomeID,
+			ContextType:         "Course",
+			ContextID:           alignment.CourseID,
+			AssociatedAssetType: "Assignment",
+			AssociatedAssetID:   assignment.ID,
+			Score:               sub.Score,
+			Possible:            &possible,
+			Attempt:             sub.Attempt,
+		}
+		_ = outcomes.CreateResult(ctx, result)
+	}
+}
+
+// OutcomeResultsGradedCallback records outcome results for every visible
+// grade, whatever path wrote it (SpeedGrader, bulk grading, curve, CSV
+// import, LTI AGS) — register it with SubmissionService.OnGraded, which
+// fires only for posted grades and again when hidden grades are posted.
+func OutcomeResultsGradedCallback(submissions repository.SubmissionRepository, assignments repository.AssignmentRepository, alignments repository.OutcomeAlignmentRepository, outcomes *LearningOutcomeService) SubmissionGradedCallback {
+	return func(ctx context.Context, submissionID uint) {
+		// AUTH-INTERNAL: accountID=0 — the id comes from a grade write
+		// that was already tenant-checked, not from request input.
+		sub, err := submissions.FindByID(ctx, submissionID, 0)
+		if err != nil || sub == nil {
+			return
+		}
+		assignment, err := assignments.FindByID(ctx, sub.AssignmentID, 0)
+		if err != nil || assignment == nil {
+			return
+		}
+		RecordAssignmentOutcomeResults(ctx, alignments, outcomes, assignment, sub, 0)
+	}
+}

@@ -53,10 +53,15 @@ type SubmissionService struct {
 	onGradedCallbacks []SubmissionGradedCallback
 }
 
-// OnGraded registers a callback to fire after a successful grade write. The
-// callback runs in a fresh goroutine with a detached context.Background(), so
-// it MUST be self-contained (don't rely on the request's context.Cancel).
-// Multiple registrations stack; order is registration order.
+// OnGraded registers a callback to fire once a grade is visible to the
+// student: after a grade write on a posted submission (automatic post
+// policy, or an already-posted one), and when hidden grades are posted
+// (FirePosted). A grade still hidden by a manual post policy never fires —
+// mastery paths, gamification and outcome results would otherwise let the
+// student infer it before release. The callback runs in a fresh goroutine
+// with a detached context.Background(), so it MUST be self-contained
+// (don't rely on the request's context.Cancel). Multiple registrations
+// stack; order is registration order.
 func (s *SubmissionService) OnGraded(cb SubmissionGradedCallback) {
 	s.onGradedCallbacks = append(s.onGradedCallbacks, cb)
 }
@@ -146,6 +151,9 @@ func (s *SubmissionService) EffectiveDates(ctx context.Context, assignment *mode
 // context. Panics are recovered. Errors from callbacks (if any) are the
 // callback's responsibility to log — the signature returns no error.
 func (s *SubmissionService) fireOnGraded(submissionID uint) {
+	if submissionID == 0 {
+		return
+	}
 	for _, cb := range s.onGradedCallbacks {
 		go func(cb SubmissionGradedCallback) {
 			defer recoverFromPanic("submission OnGraded callback")
@@ -426,6 +434,23 @@ func (s *SubmissionService) PostGradesByAssignment(ctx context.Context, assignme
 	return s.submissionRepo.PostGradesByAssignment(ctx, assignmentID, postedAt)
 }
 
+// fireIfPosted fires the OnGraded callbacks for a graded submission the
+// student can see. Hidden (unposted) grades fire later, from FirePosted.
+func (s *SubmissionService) fireIfPosted(sub *models.Submission) {
+	if sub != nil && sub.PostedAt != nil {
+		s.fireOnGraded(sub.ID)
+	}
+}
+
+// FirePosted fires the OnGraded callbacks for submissions whose grades were
+// just released by posting (PostGrades), so everything that reacts to a
+// visible grade runs at release time.
+func (s *SubmissionService) FirePosted(submissionIDs ...uint) {
+	for _, id := range submissionIDs {
+		s.fireOnGraded(id)
+	}
+}
+
 // MarkPosted posts a single submission (sets posted_at) if it is not
 // already posted. Used when an instructor comments on a submission of an
 // automatically-posted assignment: Canvas posts the submission then.
@@ -553,9 +578,10 @@ func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, gra
 		s.gradeGroupMembers(ctx, assignment, userID, graderID, entered, now)
 	}
 
-	// Fire post-grade callbacks (mastery paths, etc.) asynchronously. Failures
-	// in callbacks must never block grading or surface as errors here.
-	s.fireOnGraded(submission.ID)
+	// Fire post-grade callbacks (mastery paths, etc.) asynchronously, but
+	// only once the grade is visible to the student (see OnGraded).
+	// Failures in callbacks must never block grading or surface here.
+	s.fireIfPosted(submission)
 
 	return submission, nil
 }
@@ -694,6 +720,7 @@ func (s *SubmissionService) gradeGroupMembers(ctx context.Context, assignment *m
 			s.applyGrade(ctx, assignment, existing, entered, graderID, gradedAt)
 			if err := s.submissionRepo.Update(ctx, existing); err == nil {
 				s.logGradeChange(ctx, assignment, existing, graderID, oldGrade, oldScore)
+				s.fireIfPosted(existing)
 			}
 		} else {
 			memberSubmission := &models.Submission{
@@ -703,6 +730,7 @@ func (s *SubmissionService) gradeGroupMembers(ctx context.Context, assignment *m
 			s.applyGrade(ctx, assignment, memberSubmission, entered, graderID, gradedAt)
 			if err := s.submissionRepo.Create(ctx, memberSubmission); err == nil {
 				s.logGradeChange(ctx, assignment, memberSubmission, graderID, nil, nil)
+				s.fireIfPosted(memberSubmission)
 			}
 		}
 	}

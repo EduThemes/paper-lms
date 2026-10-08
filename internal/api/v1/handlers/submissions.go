@@ -561,32 +561,7 @@ func (h *SubmissionHandler) notifyGradePosted(ctx context.Context, assignment *m
 // POSTED submission for every outcome aligned to the assignment. An
 // unposted grade must not surface through the outcome/mastery views.
 func (h *SubmissionHandler) recordOutcomeResults(ctx context.Context, assignment *models.Assignment, sub *models.Submission, accountID uint) {
-	if h.outcomeAlignmentRepo == nil || h.outcomeService == nil || assignment == nil || sub == nil ||
-		sub.Score == nil || sub.PostedAt == nil {
-		return
-	}
-	alignments, err := h.outcomeAlignmentRepo.ListByAssignmentID(ctx, assignment.ID, accountID)
-	if err != nil {
-		return
-	}
-	for _, alignment := range alignments {
-		possible := 100.0
-		if assignment.PointsPossible != nil {
-			possible = *assignment.PointsPossible
-		}
-		result := &models.LearningOutcomeResult{
-			UserID:              sub.UserID,
-			LearningOutcomeID:   alignment.LearningOutcomeID,
-			ContextType:         "Course",
-			ContextID:           alignment.CourseID,
-			AssociatedAssetType: "Assignment",
-			AssociatedAssetID:   assignment.ID,
-			Score:               sub.Score,
-			Possible:            &possible,
-			Attempt:             sub.Attempt,
-		}
-		_ = h.outcomeService.CreateResult(ctx, result)
-	}
+	service.RecordAssignmentOutcomeResults(ctx, h.outcomeAlignmentRepo, h.outcomeService, assignment, sub, accountID)
 }
 
 func (h *SubmissionHandler) UpdateSubmission(c *fiber.Ctx) error {
@@ -908,6 +883,9 @@ func (h *SubmissionHandler) BulkGrade(c *fiber.Ctx) error {
 			continue
 		}
 		h.notifyGradePosted(c.Context(), assignmentCache[entry.AssignmentID], sub)
+		// Curve, CSV import and bulk entry post at once on an automatic
+		// post policy, so they record outcome results like SpeedGrader.
+		h.recordOutcomeResults(c.Context(), assignmentCache[entry.AssignmentID], sub, callerAcct)
 		results = append(results, gradeResult{
 			AssignmentID: entry.AssignmentID,
 			UserID:       entry.UserID,
@@ -955,11 +933,16 @@ func (h *SubmissionHandler) PostGrades(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not post grades")
 	}
 
+	postedIDs := make([]uint, 0, len(newlyPosted))
 	for i := range newlyPosted {
 		newlyPosted[i].PostedAt = &now
 		h.notifyGradePosted(c.Context(), assignment, &newlyPosted[i])
 		h.recordOutcomeResults(c.Context(), assignment, &newlyPosted[i], callerAccountID(c))
+		postedIDs = append(postedIDs, newlyPosted[i].ID)
 	}
+	// Mastery paths, gamification, etc. react to a grade when the student
+	// can see it: for a manual post policy, that is now.
+	h.submissionService.FirePosted(postedIDs...)
 
 	return c.JSON(fiber.Map{"posted": true, "posted_at": now})
 }

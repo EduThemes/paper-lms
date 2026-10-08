@@ -622,6 +622,10 @@ func main() {
 	outcomeProficiencyService := service.NewOutcomeProficiencyService(outcomeProficiencyRepo)
 	masteryGradebookService := service.NewMasteryGradebookService(enrollmentRepo, outcomeRepo, outcomeResultRepo, userRepo, outcomeProficiencyService)
 
+	// Outcome results for every visible grade, whichever path wrote it
+	// (bulk grading, curve, CSV import, LTI AGS included).
+	submissionService.OnGraded(service.OutcomeResultsGradedCallback(submissionRepo, assignmentRepo, outcomeAlignmentRepo, learningOutcomeService))
+
 	// Wire mastery-paths evaluation to fire after every successful grade.
 	submissionService.OnGraded(func(ctx context.Context, subID uint) {
 		if err := masteryPathService.EvaluateForStudent(ctx, subID); err != nil {

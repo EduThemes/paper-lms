@@ -58,6 +58,7 @@ func TestGradedSubmissionEmitCallback_HappyPath(t *testing.T) {
 		UserID:        learner.ID,
 		Score:         &score,
 		GradedAt:      &gradedAt,
+		PostedAt:      &gradedAt, // a visible grade (automatic post policy)
 		WorkflowState: "graded",
 	}
 	if err := g.Create(&submission).Error; err != nil {
@@ -183,3 +184,40 @@ func TestGradedSubmissionEmitCallback_MissingSubmission_NoEventNoPanic(t *testin
 
 // buildEmitter + DB plumbing (freshDB + swapDatabase) live in testhelpers_test.go and are
 // shared across every wiring_test integration test.
+
+// F14/F22: a grade hidden by a manual post policy (posted_at NULL) emits
+// nothing; score-based rules would otherwise reveal it.
+func TestGradedSubmissionEmitCallback_HiddenGradeEmitsNothing(t *testing.T) {
+	g, cleanup := freshDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	account := models.Account{Name: "Hidden Tenant", WorkflowState: "active"}
+	if err := g.Create(&account).Error; err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	course := models.Course{AccountID: account.ID, Name: "Hidden grades", CourseCode: "HID-1", WorkflowState: "available"}
+	if err := g.Create(&course).Error; err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+	pointsPossible := 100.0
+	assignment := models.Assignment{CourseID: course.ID, Name: "Quiz 1", WorkflowState: "published", PointsPossible: &pointsPossible, PostPolicy: "manual"}
+	if err := g.Create(&assignment).Error; err != nil {
+		t.Fatalf("create assignment: %v", err)
+	}
+	learner := seedTestUser(t, g, account.ID, "hidden-grade-learner@example.test")
+	score := 45.0
+	submission := models.Submission{AssignmentID: assignment.ID, UserID: learner.ID, Score: &score, WorkflowState: "graded"}
+	if err := g.Create(&submission).Error; err != nil {
+		t.Fatalf("create submission: %v", err)
+	}
+	if err := gamification.SeedSystemCurrenciesForTenant(ctx, g, account.ID); err != nil {
+		t.Fatalf("seed currencies: %v", err)
+	}
+	cb := wiring.GradedSubmissionEmitCallback(buildEmitter(t, g), pgrepo.NewSubmissionRepository(g), pgrepo.NewAssignmentRepository(g), pgrepo.NewCourseRepository(g))
+	cb(ctx, submission.ID)
+	var n int64
+	g.Model(&models.GamificationEvent{}).Count(&n)
+	if n != 0 {
+		t.Fatalf("expected no gamification_events for a hidden grade, got %d", n)
+	}
+}

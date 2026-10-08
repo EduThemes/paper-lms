@@ -316,3 +316,55 @@ type emptyAnnouncements struct{}
 func (emptyAnnouncements) ListByCourseID(context.Context, uint, repository.PaginationParams) (*repository.PaginatedResult[models.Announcement], error) {
 	return &repository.PaginatedResult[models.Announcement]{}, nil
 }
+
+// F14/F22: OnGraded callbacks (mastery paths, gamification, outcome
+// results) see a grade only once the student can: a grade hidden by a
+// manual post policy does not fire; posting fires it (FirePosted); an
+// automatic post policy fires at grading time.
+func TestGradingParity_OnGradedFiresOnlyForVisibleGrades(t *testing.T) {
+	collect := func(svc *service.SubmissionService) chan uint {
+		ch := make(chan uint, 4)
+		svc.OnGraded(func(_ context.Context, id uint) { ch <- id })
+		return ch
+	}
+	waitFor := func(ch chan uint) (uint, bool) {
+		select {
+		case id := <-ch:
+			return id, true
+		case <-time.After(300 * time.Millisecond):
+			return 0, false
+		}
+	}
+
+	manual := &models.Assignment{ID: 30, CourseID: 1, PointsPossible: ptrFloat64(100), GradingType: "points", PostPolicy: "manual"}
+	h := newGradeHarness(manual)
+	h.latePolicyRepo.On("FindByCourseID", mock.Anything, uint(1)).Return(nil, errors.New("none")).Maybe()
+	h.submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(30), uint(20), uint(1)).
+		Return(&models.Submission{ID: 7, AssignmentID: 30, UserID: 20, WorkflowState: models.SubmissionSubmitted}, nil)
+	h.submissionRepo.On("Update", mock.Anything, mock.Anything).Return(nil)
+	ch := collect(h.svc)
+
+	got, err := h.svc.Grade(context.Background(), 30, 20, 99, 1, "45")
+	require.NoError(t, err)
+	assert.Nil(t, got.PostedAt, "manual post policy keeps the grade hidden")
+	_, fired := waitFor(ch)
+	assert.False(t, fired, "a hidden grade must not fire OnGraded")
+
+	h.svc.FirePosted(got.ID)
+	id, fired := waitFor(ch)
+	assert.True(t, fired, "posting fires OnGraded")
+	assert.Equal(t, uint(7), id)
+
+	auto := &models.Assignment{ID: 31, CourseID: 1, PointsPossible: ptrFloat64(100), GradingType: "points"}
+	h2 := newGradeHarness(auto)
+	h2.latePolicyRepo.On("FindByCourseID", mock.Anything, uint(1)).Return(nil, errors.New("none")).Maybe()
+	h2.submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(31), uint(20), uint(1)).
+		Return(&models.Submission{ID: 8, AssignmentID: 31, UserID: 20, WorkflowState: models.SubmissionSubmitted}, nil)
+	h2.submissionRepo.On("Update", mock.Anything, mock.Anything).Return(nil)
+	ch2 := collect(h2.svc)
+	_, err = h2.svc.Grade(context.Background(), 31, 20, 99, 1, "90")
+	require.NoError(t, err)
+	id, fired = waitFor(ch2)
+	assert.True(t, fired)
+	assert.Equal(t, uint(8), id)
+}

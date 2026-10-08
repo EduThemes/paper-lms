@@ -213,6 +213,11 @@ func (s *MasteryPathService) EvaluateForStudent(ctx context.Context, submissionI
 	if sub == nil || sub.Score == nil {
 		return nil // not yet graded — nothing to do
 	}
+	if sub.PostedAt == nil {
+		// Hidden by a manual post policy: acting on it would reveal the
+		// grade. Posting fires the evaluation again (FirePosted).
+		return nil
+	}
 
 	assignment, err := s.assignmentRepo.FindByID(ctx, sub.AssignmentID, 0)
 	if err != nil {
