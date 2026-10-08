@@ -6,6 +6,9 @@ package service_test
 // and still convert the legacy text column.
 
 import (
+	"os"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,7 +36,7 @@ func TestMigration000073_IdempotentOnBigintColumn(t *testing.T) {
 	latest := version()
 
 	// Roll back to 72: the column is text again.
-	require.NoError(t, db.MigrateDown(g, int(latest-72)))
+	require.NoError(t, db.MigrateDown(g, migrationsAbove(t, 72)))
 	require.Equal(t, uint(72), version())
 	assert.Equal(t, "text", dataType())
 
@@ -44,11 +47,31 @@ func TestMigration000073_IdempotentOnBigintColumn(t *testing.T) {
 	assert.Equal(t, "bigint", dataType())
 
 	// The legacy text column still converts, with an oversized number -> 0.
-	require.NoError(t, db.MigrateDown(g, int(latest-72)))
+	require.NoError(t, db.MigrateDown(g, migrationsAbove(t, 72)))
 	require.NoError(t, g.Exec(`INSERT INTO one_roster_sync_logs (connection_id, sync_type, status, errors) VALUES (1, 'full', 'failed', '123456789012345678901234')`).Error)
 	require.NoError(t, db.MigrateUp(g))
 	assert.Equal(t, "bigint", dataType())
 	var errs int64
 	require.NoError(t, g.Raw(`SELECT errors FROM one_roster_sync_logs LIMIT 1`).Scan(&errs).Error)
 	assert.Equal(t, int64(0), errs)
+}
+
+// migrationsAbove counts the up migrations numbered above v. Migration
+// numbers are not contiguous (lanes are assigned number blocks), so the
+// step count to roll back to v is not latest-v.
+func migrationsAbove(t *testing.T, v uint) int {
+	t.Helper()
+	entries, err := os.ReadDir("../db/migrations")
+	require.NoError(t, err)
+	n := 0
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".up.sql") || len(name) < 6 {
+			continue
+		}
+		if num, convErr := strconv.Atoi(name[:6]); convErr == nil && uint(num) > v {
+			n++
+		}
+	}
+	return n
 }
