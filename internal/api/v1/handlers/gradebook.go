@@ -25,6 +25,7 @@ func (h *GradebookHandler) GetGradebook(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch gradebook")
 	}
+	filterGradebookForSections(c, gradebook) // G107 section-limited graders
 
 	// 13.5 PII audit — bulk-read semantics. A gradebook fetch on a
 	// 200-student section would otherwise emit 200 audit rows per

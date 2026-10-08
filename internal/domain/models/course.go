@@ -19,6 +19,11 @@ type Course struct {
 	IsPublic          bool           `json:"is_public" gorm:"default:false"`
 	ApplyGroupWeights bool           `json:"apply_assignment_group_weights" gorm:"default:false"`
 	NavigationTabs    string         `json:"navigation_tabs" gorm:"type:text"`
+	// Date-based access settings (migration 000145; see
+	// EffectiveEnrollmentAccess).
+	RestrictEnrollmentsToCourseDates bool `json:"restrict_enrollments_to_course_dates" gorm:"not null;default:false"`
+	RestrictStudentFutureView        bool `json:"restrict_student_future_view" gorm:"not null;default:false"`
+	RestrictStudentPastView          bool `json:"restrict_student_past_view" gorm:"not null;default:false"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
 }

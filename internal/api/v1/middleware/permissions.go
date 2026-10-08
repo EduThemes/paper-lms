@@ -317,25 +317,29 @@ func (pm *PermissionMiddleware) courseGate(c *fiber.Ctx, roleSet map[string]bool
 		return c.Next()
 	}
 
-	enrollment, err := pm.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, courseID, callerAccount)
-	if err != nil || enrollment == nil {
-		return forbidden(c, "user is not enrolled in this course")
+	dec, denial := ResolveCourseEnrollment(c, pm.enrollmentRepo, userID, courseID, callerAccount, course, roleSet)
+	if denial != "" {
+		return forbidden(c, denial)
 	}
-
-	if enrollment.WorkflowState != "active" {
-		return forbidden(c, "enrollment is not active")
-	}
-
-	if roleSet != nil && !roleSet[enrollment.Type] {
-		return forbidden(c, "insufficient permissions for this action")
-	}
+	enrollment := dec.Enrollment
 
 	if course != nil && courseUnpublished(course) && learnerEnrollment(enrollment.Type) {
 		return forbidden(c, "this course has not been published yet")
 	}
 
-	c.Locals("enrollment_type", enrollment.Type)
-	c.Locals("enrollment_id", enrollment.ID)
+	if msg := readOnlyDenial(c, dec); msg != "" {
+		return forbidden(c, msg)
+	}
+
+	StoreCourseAccess(c, dec)
+	if dec.SectionLimited {
+		if denied, err := pm.sectionLimitedTargetDenied(c, dec, userID, courseID); err != nil || denied {
+			return notFound(c, "user")
+		}
+		if err := pm.storeVisibleUsers(c, dec, courseID); err != nil {
+			return forbidden(c, "could not resolve your section access")
+		}
+	}
 	return c.Next()
 }
 

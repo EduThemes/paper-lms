@@ -15,6 +15,16 @@ type Enrollment struct {
 	LastActivityAt   *time.Time         `json:"last_activity_at"`
 	AssociatedUserID *uint              `json:"associated_user_id" gorm:"index"` // For ObserverEnrollment linking
 
+	// Lifecycle + date-based access (migration 000143). StartAt/EndAt
+	// override section, course and term dates when BOTH are set (see
+	// EnrollmentDateRanges). CompletedAt is stamped on conclude.
+	StartAt     *time.Time `json:"start_at"`
+	EndAt       *time.Time `json:"end_at"`
+	CompletedAt *time.Time `json:"completed_at"`
+	// LimitPrivilegesToCourseSection restricts the enrollment to users in
+	// its own section(s): roster, gradebook and per-user routes.
+	LimitPrivilegesToCourseSection bool `json:"limit_privileges_to_course_section" gorm:"not null;default:false"`
+
 	// W3-B — per-enrollment leaderboard pseudonym.
 	// PseudonymPoolCode chooses the word vocabulary
 	// ("animals_v1" | "superheroes_v1" | "explorers_v1" | "first_name").

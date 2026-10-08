@@ -61,6 +61,10 @@ func courseToJSON(c *models.Course) fiber.Map {
 		"apply_assignment_group_weights":   c.ApplyGroupWeights,
 		"navigation_tabs":                  navTabs,
 		"created_at":                       c.CreatedAt,
+		// Date-based access settings (G106).
+		"restrict_enrollments_to_course_dates": c.RestrictEnrollmentsToCourseDates,
+		"restrict_student_future_view":         c.RestrictStudentFutureView,
+		"restrict_student_past_view":           c.RestrictStudentPastView,
 	}
 }
 
@@ -227,6 +231,10 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 			WorkflowState     *string          `json:"workflow_state"`
 			ApplyGroupWeights *bool            `json:"apply_assignment_group_weights"`
 			NavigationTabs    *json.RawMessage `json:"navigation_tabs"`
+			// Date-based access settings (G106).
+			RestrictEnrollmentsToCourseDates *bool `json:"restrict_enrollments_to_course_dates"`
+			RestrictStudentFutureView        *bool `json:"restrict_student_future_view"`
+			RestrictStudentPastView          *bool `json:"restrict_student_past_view"`
 		} `json:"course"`
 	}
 
@@ -282,6 +290,7 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 	if input.Course.NavigationTabs != nil {
 		course.NavigationTabs = string(*input.Course.NavigationTabs)
 	}
+	applyCourseDateAccessSettings(course, input.Course.RestrictEnrollmentsToCourseDates, input.Course.RestrictStudentFutureView, input.Course.RestrictStudentPastView)
 
 	if err := h.courseService.Update(c.Context(), course); err != nil {
 		return responses.InternalError(c, "Could not update course")
