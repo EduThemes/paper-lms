@@ -78,6 +78,7 @@ import PublicPageView from './pages/PublicPageView';
 import NotFoundPage from './pages/NotFoundPage';
 const CourseSettingsPage = React.lazy(() => import('./pages/CourseSettingsPage'));
 import ProtectedRoute from './components/ProtectedRoute';
+import { OAuthConsentGate, ResumePendingOAuthConsent } from './components/OAuthConsentResume';
 import SuperAdminGate from './components/SuperAdminGate';
 import { CourseUIProvider } from './contexts/CourseUIContext';
 import { useAuth } from './contexts/AuthContext';
@@ -155,7 +156,7 @@ const App = () => {
         {/* Wave 1.6 follow-up — anonymous (pending-password-reset
             JWT is the credential). Mirrors /mfa/verify in spirit. */}
         <Route path="/auth/password-set" element={<PasswordResetRequiredPage />} />
-        <Route path="/login/oauth2/confirm" element={<ProtectedRoute><OAuthConsentPage /></ProtectedRoute>} />
+        <Route path="/login/oauth2/confirm" element={<OAuthConsentGate><OAuthConsentPage /></OAuthConsentGate>} />
         <Route path="/users/self/passkeys" element={<ProtectedRoute><PasskeyListPage /></ProtectedRoute>} />
         <Route path="/users/self/passkeys/enroll" element={<ProtectedRoute><PasskeyEnrollPage /></ProtectedRoute>} />
         <Route path="/consent/verify/:token" element={<ParentalConsentPage />} />
@@ -165,7 +166,9 @@ const App = () => {
           path="/"
           element={
             <ProtectedRoute>
-              <DashboardPage />
+              <ResumePendingOAuthConsent>
+                <DashboardPage />
+              </ResumePendingOAuthConsent>
             </ProtectedRoute>
           }
         />
