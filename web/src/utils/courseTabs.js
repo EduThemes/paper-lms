@@ -5,13 +5,15 @@
 // server enforces the same rule on the list endpoints.
 
 // Index route (path under /courses/:id) -> tab id, for the tabs Canvas
-// gates. Groups live under the People tab, as in Canvas.
+// gates. Groups have their own tab here, and also sit under People as in
+// Canvas, so hiding either one closes the groups index (ALSO_HIDDEN_BY).
 const GATED_INDEX_ROUTES = {
   announcements: 'announcements',
   assignments: 'assignments',
+  discussions: 'discussions',
   modules: 'modules',
   people: 'people',
-  groups: 'people',
+  groups: 'groups',
   pages: 'pages',
   files: 'files',
   syllabus: 'syllabus',
@@ -33,10 +35,16 @@ export function courseTabForPath(pathname, courseId) {
   return GATED_INDEX_ROUTES[rest] ?? null;
 }
 
+// Tabs whose index is also closed when another tab is hidden.
+const ALSO_HIDDEN_BY = { groups: ['people'] };
+
 // isCourseTabHidden reads the course's navigation_tabs
 // ([{ id, hidden, position }]). No configuration hides nothing.
 export function isCourseTabHidden(navTabs, tabId) {
   if (!Array.isArray(navTabs) || !tabId) return false;
-  const tab = navTabs.find((t) => t && String(t.id) === tabId);
-  return Boolean(tab && tab.hidden === true);
+  const ids = [tabId, ...(ALSO_HIDDEN_BY[tabId] || [])];
+  return ids.some((id) => {
+    const tab = navTabs.find((t) => t && String(t.id) === id);
+    return Boolean(tab && tab.hidden === true);
+  });
 }
