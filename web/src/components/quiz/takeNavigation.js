@@ -20,6 +20,17 @@ export function firstUnlockedIndex(questions) {
   return Math.max(0, list.length - 1);
 }
 
+// replayableAnswers lists the [questionId, value] pairs of a locally saved
+// answer set that may be re-sent to the server: answers to questions the
+// student has already moved past (locked) are skipped, since the server
+// refuses them.
+export function replayableAnswers(restored, questions) {
+  const locked = new Set((Array.isArray(questions) ? questions : [])
+    .filter(q => q?.locked)
+    .map(q => String(q.id)));
+  return Object.entries(restored || {}).filter(([qid]) => !locked.has(String(qid)));
+}
+
 // isAccessCodeError recognises the server's "invalid access code" refusal.
 export function isAccessCodeError(err) {
   return err?.status === 403 && /access code/i.test(err?.message || '');

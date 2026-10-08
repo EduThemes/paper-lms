@@ -27,7 +27,7 @@ import ItemPlayer from '../components/quiz/itemTypes/ItemPlayer';
 import { normalizeQuestionType } from '../components/quiz/itemTypes/types';
 import { extractBlankIds } from '../components/quiz/itemTypes/MultipleDropdownEditor';
 import { quizItemsApi } from '../services/api_quiz_items';
-import { navigationPolicy, firstUnlockedIndex, isAccessCodeError } from '../components/quiz/takeNavigation';
+import { navigationPolicy, firstUnlockedIndex, isAccessCodeError, replayableAnswers } from '../components/quiz/takeNavigation';
 
 // Question types that are essentially answer-set-driven and use the legacy
 // inline render path. Newer types delegate to ItemPlayer.
@@ -322,7 +322,8 @@ const QuizTakePage = () => {
     setAnswers(restored);
     setRestorePrompt(null);
     announce(`Restored ${Object.keys(restored).length} answers`);
-    for (const [qid, val] of Object.entries(restored)) {
+    // Can't go back: locked questions are skipped (the server refuses them).
+    for (const [qid, val] of replayableAnswers(restored, questions)) {
       // Replay answers to server (sequential to avoid hammering the API)
       // eslint-disable-next-line no-await-in-loop
       await saveAnswerToServer(qid, val);

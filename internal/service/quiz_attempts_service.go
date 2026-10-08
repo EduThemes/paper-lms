@@ -443,6 +443,10 @@ func (s *QuizService) FileUploadQuestionForSubmission(ctx context.Context, submi
 		NormalizeQuizQuestionType(question.QuestionType) != "file_upload" {
 		return nil, ErrQuestionNotInSubmission
 	}
+	// Can't go back: a question the student moved past takes no new file.
+	if err := s.ensureQuestionNotLocked(ctx, submission, questionID); err != nil {
+		return nil, err
+	}
 	return question, nil
 }
 
@@ -603,7 +607,8 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 		scored = append(scored, i)
 	}
 
-	// Surveys have no right answers (quiz-items lane, G058).
+	// Surveys have no right answers (quiz-items lane, G058). accountID 0:
+	// the submission's own quiz (tenant-checked by the handler).
 	if quiz, qErr := s.quizRepo.FindByID(ctx, submission.QuizID, 0); qErr == nil && QuizIsSurvey(quiz) {
 		surveyAnswers := make([]models.QuizSubmissionAnswer, len(scored))
 		for k, i := range scored {

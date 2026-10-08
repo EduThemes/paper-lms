@@ -15,7 +15,7 @@ import FormulaEditor, { formulaProblems } from '../FormulaEditor';
 import ItemPlayer from '../ItemPlayer';
 import { ALL_TYPES, AUTO_GRADED_TYPES, defaultAnswersForType, MATCH_POOL } from '../types';
 import QuizDeliverySettings, { ipFilterProblems, deliveryPayload, deliveryFormFromQuiz } from '../../QuizDeliverySettings';
-import { navigationPolicy, firstUnlockedIndex, isAccessCodeError } from '../../takeNavigation';
+import { navigationPolicy, firstUnlockedIndex, isAccessCodeError, replayableAnswers } from '../../takeNavigation';
 import { parseStoredAnswer, REVIEW_INLINE_TYPES } from '../../reviewAnswers';
 
 function Harness({ Editor, initial, extraProps = {} }) {
@@ -228,6 +228,13 @@ describe('take-page navigation rules', () => {
     expect(firstUnlockedIndex([{ locked: true }, { locked: true }, {}])).toBe(2);
     expect(firstUnlockedIndex([{ locked: true }, { locked: true }])).toBe(1);
     expect(firstUnlockedIndex([])).toBe(0);
+  });
+
+  it('does not replay saved answers to locked questions', () => {
+    const questions = [{ id: 1, locked: true }, { id: 2 }, { id: 3 }];
+    expect(replayableAnswers({ 1: 'a', 2: 'b', 3: 'c' }, questions)).toEqual([['2', 'b'], ['3', 'c']]);
+    expect(replayableAnswers({ 1: 'a' }, [])).toEqual([['1', 'a']]);
+    expect(replayableAnswers(null, questions)).toEqual([]);
   });
 
   it('recognises an access-code refusal', () => {

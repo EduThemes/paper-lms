@@ -92,6 +92,8 @@ func (s *QuizService) MarkQuestionRead(ctx context.Context, submission *models.Q
 	if !questionBelongsToSubmission(submission, question, selected, hasSelected) {
 		return nil, ErrQuestionNotInSubmission
 	}
+	// accountID 0: the submission's own quiz; the handler already loaded
+	// this quiz scoped to the caller's tenant and course.
 	quiz, err := s.quizRepo.FindByID(ctx, submission.QuizID, 0)
 	if err != nil || quiz == nil {
 		return nil, errors.New("quiz not found")
@@ -140,6 +142,7 @@ func (s *QuizService) ensureQuestionNotLocked(ctx context.Context, submission *m
 	if !read[questionID] {
 		return nil
 	}
+	// accountID 0: the submission's own quiz (tenant-checked by the handler).
 	quiz, err := s.quizRepo.FindByID(ctx, submission.QuizID, 0)
 	if err != nil || quiz == nil {
 		return nil
