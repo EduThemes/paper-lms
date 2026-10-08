@@ -198,6 +198,7 @@ func (r *Router) Register(app *fiber.App) {
 	// (~333 of them) without per-route plumbing. MUST sit before any
 	// route declarations on this group.
 	protected.Use(middleware.AuditWrites(r.AuditService, "http.write"))
+	protected.Use(r.AnalyticsHandler.ParticipationRecorder()) // course analytics participations (G154)
 
 	// SECURITY (F-055): LTI 1.3 OIDC initiation and Launch endpoints
 	// must verify the caller IS the user being launched. The browser
@@ -853,4 +854,5 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerQuizExtensionRoutes(protected, enrolled, instructor)
 	r.registerGamificationRoutes(protected, admin, instructor, selfOrAdmin)
 	r.registerSuperAdminRoutes(protected)
+	r.registerLearnerOutcomesRoutes(protected, enrolled, instructor)
 }
