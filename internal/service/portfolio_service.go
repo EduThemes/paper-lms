@@ -180,8 +180,9 @@ func (s *PortfolioService) PublishPortfolio(ctx context.Context, id, accountID u
 
 	portfolio.WorkflowState = "published"
 	portfolio.IsPublic = true
-	if portfolio.PublicURL == "" {
-		portfolio.PublicURL = s.GeneratePublicURL(portfolio)
+	if portfolio.PublicURL == nil || *portfolio.PublicURL == "" {
+		u := s.GeneratePublicURL(portfolio)
+		portfolio.PublicURL = &u
 	}
 
 	if err := s.portfolioRepo.Update(ctx, portfolio); err != nil {
@@ -279,7 +280,10 @@ func (s *PortfolioService) DuplicatePortfolio(ctx context.Context, id, accountID
 	dup.Slug = generateSlug(dup.Title)
 	dup.WorkflowState = models.PortfolioDraft
 	dup.IsPublic = false
-	dup.PublicURL = ""
+	dup.PublicURL = nil
+	// The copy is private and gets its own sharing link, if any (the
+	// token is unique; copying it would also share the copy).
+	dup.ShareToken = nil
 	dup.CustomDomain = ""
 	dup.ViewCount = 0
 	dup.LastExportedAt = nil

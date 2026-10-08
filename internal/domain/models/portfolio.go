@@ -25,7 +25,11 @@ type Portfolio struct {
 	LinkedInURL    string     `json:"linkedin_url"`
 	WebsiteURL     string     `json:"website_url"`
 	IsPublic       bool       `json:"is_public" gorm:"default:false"`
-	PublicURL      string     `json:"public_url" gorm:"uniqueIndex"`
+	// PublicURL is set when the portfolio is first published. *string so an
+	// unpublished portfolio stores NULL: the UNIQUE index treats NULLs as
+	// distinct, while '' collided and blocked a user's second portfolio
+	// (migration 000170).
+	PublicURL *string `json:"public_url" gorm:"uniqueIndex"`
 	CustomDomain   string     `json:"custom_domain"`
 	WorkflowState  string     `json:"workflow_state" gorm:"not null;default:'draft'"` // draft, published, archived
 	ViewCount      int64      `json:"view_count" gorm:"default:0"`
