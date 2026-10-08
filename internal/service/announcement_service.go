@@ -115,7 +115,7 @@ func (s *AnnouncementService) CreateAnnouncement(ctx context.Context, announceme
 		return err
 	}
 	if announcement.WorkflowState == AnnouncementStatePublished {
-		s.notifyPublished(ctx, announcement)
+		s.notifyPublishedAsync(announcement)
 	}
 	return nil
 }
@@ -136,9 +136,25 @@ func (s *AnnouncementService) UpdateAnnouncement(ctx context.Context, announceme
 		return err
 	}
 	if announcement.WorkflowState == AnnouncementStatePublished && previousState != AnnouncementStatePublished {
-		s.notifyPublished(ctx, announcement)
+		s.notifyPublishedAsync(announcement)
 	}
 	return nil
+}
+
+// notifyPublishedAsync runs the audience fan-out off the request path.
+// It queues several writes per course member, so a large course would
+// otherwise hold the teacher's POST open for seconds (and invite a
+// duplicate-posting retry). It works on a copy with a detached context,
+// like the discussion OnEntryCreated callbacks; panics are recovered.
+func (s *AnnouncementService) notifyPublishedAsync(a *models.Announcement) {
+	if s.notifier == nil || a.CourseID == nil || s.enrollmentRepo == nil {
+		return
+	}
+	snapshot := *a
+	go func() {
+		defer recoverFromPanic("announcement notifyPublished")
+		s.notifyPublished(context.Background(), &snapshot)
+	}()
 }
 
 // DeleteAnnouncement soft-deletes an announcement.

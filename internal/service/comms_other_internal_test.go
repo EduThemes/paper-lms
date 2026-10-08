@@ -280,6 +280,63 @@ func TestAnnouncementNotifyPublished_TargetsAudience(t *testing.T) {
 	}
 }
 
+// createOnlyAnnouncementRepo implements Create; any other call panics.
+type createOnlyAnnouncementRepo struct {
+	repoPostgres.AnnouncementRepository
+}
+
+func (createOnlyAnnouncementRepo) Create(_ context.Context, a *models.Announcement) error {
+	a.ID = 99
+	return nil
+}
+
+// blockingNotifier blocks every QueueNotification until release is closed.
+type blockingNotifier struct {
+	release chan struct{}
+	calls   chan uint
+}
+
+func (b *blockingNotifier) QueueNotification(_ context.Context, userID uint, _, _, _, _ string, _ uint) error {
+	<-b.release
+	b.calls <- userID
+	return nil
+}
+
+// Publishing must not wait for the per-member fan-out: CreateAnnouncement
+// returns while notifications are still being queued, and they still
+// arrive afterwards.
+func TestCreateAnnouncement_NotifiesOffTheRequestPath(t *testing.T) {
+	enrollRepo := new(mocks.MockEnrollmentRepository)
+	enrollRepo.On("ListByCourseID", mock.Anything, uint(5), uint(0), mock.Anything).Return(&repository.PaginatedResult[models.Enrollment]{
+		Items:      []models.Enrollment{{UserID: 50, CourseID: 5, Type: "StudentEnrollment", WorkflowState: "active"}},
+		TotalCount: 1,
+	}, nil)
+	n := &blockingNotifier{release: make(chan struct{}), calls: make(chan uint, 4)}
+	svc := NewAnnouncementService(createOnlyAnnouncementRepo{}, nil, enrollRepo)
+	svc.SetNotifier(n)
+	cid := uint(5)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.CreateAnnouncement(context.Background(), &models.Announcement{CourseID: &cid, UserID: 40, Title: "Quiz moved", Message: "m"})
+	}()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		close(n.release)
+		t.Fatal("CreateAnnouncement blocked on the notification fan-out")
+	}
+
+	close(n.release)
+	select {
+	case uid := <-n.calls:
+		assert.Equal(t, uint(50), uid)
+	case <-time.After(3 * time.Second):
+		t.Fatal("the student was never notified")
+	}
+}
+
 func TestAnnouncementViewer_TeacherSeesEverything(t *testing.T) {
 	enrollRepo := new(mocks.MockEnrollmentRepository)
 	enrollRepo.On("ListByUserID", mock.Anything, uint(40), uint(0)).Return([]models.Enrollment{{UserID: 40, CourseID: 5, Type: "TeacherEnrollment", WorkflowState: "active"}}, nil)
