@@ -145,10 +145,13 @@ func (r *ContentMigrationRunner) execute(ctx context.Context, m *models.ContentM
 		res, err := r.copier.Copy(ctx, *m.SourceCourseID, m.CourseID, m.UserID, settings, progress)
 		out := &models.MigrationResults{}
 		if res != nil {
-			out.Counts = res.Counts
 			out.Warnings = res.Warnings
-			if res.Shifted > 0 {
-				out.Counts["dates_shifted"] = res.Shifted
+			// A failed copy was rolled back: its counts would mislead.
+			if err == nil {
+				out.Counts = res.Counts
+				if res.Shifted > 0 {
+					out.Counts["dates_shifted"] = res.Shifted
+				}
 			}
 		}
 		return out, err

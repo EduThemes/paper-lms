@@ -57,6 +57,11 @@ type BlueprintSyncResults struct {
 // TriggerSync creates a migration record and performs actual content sync from the
 // blueprint template course to all associated child courses.
 func (s *BlueprintService) TriggerSync(ctx context.Context, templateID, userID uint, comment string) (*models.BlueprintMigration, error) {
+	return s.TriggerSyncWithOptions(ctx, templateID, userID, comment, BlueprintSyncOptions{})
+}
+
+// TriggerSyncWithOptions is TriggerSync with the per-sync choices.
+func (s *BlueprintService) TriggerSyncWithOptions(ctx context.Context, templateID, userID uint, comment string, opts BlueprintSyncOptions) (*models.BlueprintMigration, error) {
 	if templateID == 0 {
 		return nil, errors.New("template_id is required")
 	}
@@ -82,6 +87,9 @@ func (s *BlueprintService) TriggerSync(ctx context.Context, templateID, userID u
 		Comment:             comment,
 		ExportSettings:      "{}",
 	}
+	if opts.CopySettings {
+		migration.ExportSettings = `{"copy_settings":true}`
+	}
 	if err := s.migRepo.Create(ctx, migration); err != nil {
 		return nil, err
 	}
@@ -104,15 +112,16 @@ func (s *BlueprintService) TriggerSync(ctx context.Context, templateID, userID u
 			continue
 		}
 		sc := &syncCtx{
-			templateID: templateID,
-			source:     sourceCourseID,
-			child:      sub.ChildCourseID,
-			lastSync:   lastSync,
-			defaults:   defaults,
-			locks:      locks,
-			idMap:      make(map[string]uint),
-			slugMap:    make(map[string]string),
-			results:    totals,
+			templateID:   templateID,
+			source:       sourceCourseID,
+			child:        sub.ChildCourseID,
+			lastSync:     lastSync,
+			defaults:     defaults,
+			locks:        locks,
+			idMap:        make(map[string]uint),
+			slugMap:      make(map[string]string),
+			results:      totals,
+			copySettings: opts.CopySettings,
 		}
 		if s.tagRepo != nil {
 			sc.priorTags, _ = s.tagRepo.ListByChildCourse(ctx, templateID, sub.ChildCourseID)
@@ -137,7 +146,7 @@ func (s *BlueprintService) TriggerSync(ctx context.Context, templateID, userID u
 	} else {
 		migration.WorkflowState = "completed"
 	}
-	if b, err := json.Marshal(map[string]interface{}{"results": totals}); err == nil {
+	if b, err := json.Marshal(map[string]interface{}{"results": totals, "copy_settings": opts.CopySettings}); err == nil {
 		migration.ExportSettings = string(b)
 	}
 	if err := s.migRepo.Update(ctx, migration); err != nil {
@@ -192,8 +201,11 @@ type syncCtx struct {
 	pushed  []pushedCopy
 	results *BlueprintSyncResults
 	// groupsSynced is true once assignment groups have been mapped, so
-	// assignment copies take their group from idMap.
+	// assignment copies take their group from idMap; liveGroups holds the
+	// blueprint's current group ids for the group deletion pass.
 	groupsSynced bool
+	liveGroups   map[uint]bool
+	copySettings bool
 }
 
 type pushedCopy struct {
@@ -313,11 +325,20 @@ func (s *BlueprintService) syncCourseContent(ctx context.Context, sourceCourseID
 	if err := s.syncFiles(ctx, sourceCourseID, sc); err != nil {
 		return fmt.Errorf("sync files: %w", err)
 	}
+	if err := s.syncRubrics(ctx, sourceCourseID, sc); err != nil {
+		return fmt.Errorf("sync rubrics: %w", err)
+	}
 	if err := s.syncModules(ctx, sourceCourseID, sc); err != nil {
 		return fmt.Errorf("sync modules: %w", err)
 	}
 	if err := s.syncAssignments(ctx, sourceCourseID, sc); err != nil {
 		return fmt.Errorf("sync assignments: %w", err)
+	}
+	if err := s.syncAssignmentGroupDeletions(ctx, sc); err != nil {
+		return fmt.Errorf("sync assignment group deletions: %w", err)
+	}
+	if err := s.syncRubricAssociations(ctx, sourceCourseID, sc); err != nil {
+		return fmt.Errorf("sync rubric associations: %w", err)
 	}
 	if err := s.syncPages(ctx, sourceCourseID, sc); err != nil {
 		return fmt.Errorf("sync pages: %w", err)
@@ -334,6 +355,9 @@ func (s *BlueprintService) syncCourseContent(ctx context.Context, sourceCourseID
 	}
 	if err := s.syncSyllabus(ctx, sourceCourseID, sc); err != nil {
 		return fmt.Errorf("sync syllabus: %w", err)
+	}
+	if err := s.syncSettings(ctx, sourceCourseID, sc); err != nil {
+		return fmt.Errorf("sync settings: %w", err)
 	}
 	if err := s.rewritePushedLinks(ctx, sc); err != nil {
 		return fmt.Errorf("rewrite links: %w", err)
@@ -442,11 +466,39 @@ func (s *BlueprintService) syncAssignmentGroups(ctx context.Context, sourceCours
 		}
 	}
 	sc.groupsSynced = true
-	return s.syncDeletions(ctx, sc, "AssignmentGroup", live,
+	sc.liveGroups = live
+	return nil
+}
+
+// syncAssignmentGroupDeletions runs after the assignments are synced (so
+// copies have moved to their new groups): a deleted blueprint group's
+// copy goes unless child assignments still sit in it.
+func (s *BlueprintService) syncAssignmentGroupDeletions(ctx context.Context, sc *syncCtx) error {
+	if s.groupRepo == nil || !sc.groupsSynced {
+		return nil
+	}
+	childGroups, err := s.groupRepo.ListByCourseID(ctx, sc.child, bigPage)
+	if err != nil {
+		return err
+	}
+	byID := make(map[uint]*models.AssignmentGroup, len(childGroups.Items))
+	for i := range childGroups.Items {
+		byID[childGroups.Items[i].ID] = &childGroups.Items[i]
+	}
+	inUse := map[uint]bool{}
+	if as, err := s.assignRepo.ListByCourseID(ctx, sc.child, bigPage); err == nil {
+		for _, a := range as.Items {
+			if a.AssignmentGroupID != nil {
+				inUse[*a.AssignmentGroupID] = true
+			}
+		}
+	}
+	return s.syncDeletions(ctx, sc, "AssignmentGroup", sc.liveGroups,
 		func(id uint) (time.Time, bool) {
-			if g, ok := byID[id]; ok {
+			if g, ok := byID[id]; ok && !inUse[id] {
 				return g.UpdatedAt, true
 			}
+			// Gone already, or still holding assignments: keep it.
 			return time.Time{}, false
 		},
 		func(id uint) error { return s.groupRepo.Delete(ctx, id) })

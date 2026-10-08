@@ -534,6 +534,7 @@ func newLockingBlueprintService(f *laneFixture) *service.BlueprintService {
 	svc := newLaneBlueprintService(f.g)
 	svc.SetLockRepo(postgres.NewBlueprintContentLockRepository(f.g))
 	svc.SetSyncDeps(postgres.NewAssignmentGroupRepository(f.g), postgres.NewAttachmentRepository(f.g), f.files)
+	svc.SetRubricDeps(postgres.NewRubricRepository(f.g), postgres.NewRubricAssociationRepository(f.g))
 	return svc
 }
 
@@ -567,6 +568,28 @@ func TestBlueprintSync_PropagatesDeletionsGroupsFilesAndLinks(t *testing.T) {
 	assert.Contains(t, childPages.Items[0].Body, fmt.Sprintf("/courses/%d/assignments/%d", child.ID, childAs.Items[0].ID))
 	assert.Contains(t, childPages.Items[0].Body, fmt.Sprintf("/api/v1/files/%d/download", childFiles.Items[0].ID))
 
+	// The rubric came along and grades the assignment copy.
+	ra, err := postgres.NewRubricAssociationRepository(f.g).FindByAssociation(ctx, childAs.Items[0].ID, "Assignment")
+	require.NoError(t, err)
+	childRubric, err := postgres.NewRubricRepository(f.g).FindByID(ctx, ra.RubricID, 1)
+	require.NoError(t, err)
+	assert.Equal(t, child.ID, childRubric.ContextID)
+	assert.Equal(t, "Lab rubric", childRubric.Title)
+
+	// Course settings only travel when the sync asks for them.
+	src.course.DefaultView = "syllabus"
+	require.NoError(t, postgres.NewCourseRepository(f.g).Update(ctx, src.course))
+	_, err = svc.TriggerSync(ctx, tmpl.ID, f.userID, "no settings")
+	require.NoError(t, err)
+	gotChild, err := postgres.NewCourseRepository(f.g).FindByID(ctx, child.ID, 1)
+	require.NoError(t, err)
+	assert.NotEqual(t, "syllabus", gotChild.DefaultView)
+	_, err = svc.TriggerSyncWithOptions(ctx, tmpl.ID, f.userID, "with settings", service.BlueprintSyncOptions{CopySettings: true})
+	require.NoError(t, err)
+	gotChild, err = postgres.NewCourseRepository(f.g).FindByID(ctx, child.ID, 1)
+	require.NoError(t, err)
+	assert.Equal(t, "syllabus", gotChild.DefaultView)
+
 	// Nothing pending right after a sync (the link rewrite is not a
 	// "local edit").
 	changes, err := svc.GetUnsyncedChanges(ctx, tmpl.ID)
@@ -586,6 +609,7 @@ func TestBlueprintSync_PropagatesDeletionsGroupsFilesAndLinks(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 	require.NoError(t, assignRepo.Delete(ctx, src.essay.ID))
 	require.NoError(t, discRepo.Delete(ctx, src.discussion.ID))
+	require.NoError(t, postgres.NewAssignmentGroupRepository(f.g).Delete(ctx, src.group.ID))
 
 	changes, err = svc.GetUnsyncedChanges(ctx, tmpl.ID)
 	require.NoError(t, err)
@@ -604,6 +628,11 @@ func TestBlueprintSync_PropagatesDeletionsGroupsFilesAndLinks(t *testing.T) {
 	childAs, err = assignRepo.ListByCourseID(ctx, child.ID, lanePage)
 	require.NoError(t, err)
 	assert.Empty(t, childAs.Items, "an unchanged copy follows the blueprint deletion")
+	childGroups, err := postgres.NewAssignmentGroupRepository(f.g).ListByCourseID(ctx, child.ID, lanePage)
+	require.NoError(t, err)
+	for _, cg := range childGroups.Items {
+		assert.NotEqual(t, "Labs", cg.Name, "the emptied group copy follows its deletion")
+	}
 	childDs, err = discRepo.ListByCourseID(ctx, child.ID, 0, lanePage)
 	require.NoError(t, err)
 	require.Len(t, childDs.Items, 1, "a locally edited, unlocked copy is kept")

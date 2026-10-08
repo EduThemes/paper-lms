@@ -47,6 +47,9 @@ type BlueprintService struct {
 	groupRepo      repository.AssignmentGroupRepository
 	attachmentRepo repository.AttachmentRepository
 	files          *FileService
+	// Optional (SetRubricDeps): rubric + rubric association sync.
+	rubricRepo      repository.RubricRepository
+	rubricAssocRepo repository.RubricAssociationRepository
 }
 
 // SetDeps wires the optional association-authorization and sync

@@ -77,6 +77,7 @@ func wireContentMigrationLane(
 
 	blueprints.SetLockRepo(postgres.NewBlueprintContentLockRepository(database))
 	blueprints.SetSyncDeps(groups, attachments, fileService)
+	blueprints.SetRubricDeps(rubrics, rubricAssocs)
 	commons.SetFileDeps(postgres.NewQuizQuestionGroupRepository(database), attachments, fileService)
 
 	return contentMigrationLane{

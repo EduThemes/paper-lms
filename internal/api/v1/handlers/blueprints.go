@@ -5,11 +5,11 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/gofiber/fiber/v2"
 )
 
 type BlueprintHandler struct {
@@ -280,6 +280,8 @@ func (h *BlueprintHandler) CreateMigration(c *fiber.Ctx) error {
 	var input struct {
 		Comment          string `json:"comment"`
 		SendNotification bool   `json:"send_notification"`
+		// Canvas: "Include Course Settings".
+		CopySettings bool `json:"copy_settings"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
@@ -288,7 +290,8 @@ func (h *BlueprintHandler) CreateMigration(c *fiber.Ctx) error {
 
 	userID, _ := c.Locals("user_id").(uint)
 
-	migration, err := h.blueprintService.TriggerSync(c.Context(), template.ID, userID, input.Comment)
+	migration, err := h.blueprintService.TriggerSyncWithOptions(c.Context(), template.ID, userID, input.Comment,
+		service.BlueprintSyncOptions{CopySettings: input.CopySettings})
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
