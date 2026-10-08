@@ -1,104 +1,256 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useParams, Link, Navigate } from 'react-router-dom';
-import {
-  ArrowLeft,
-  BarChart3,
-  Users,
-  FileText,
-  Activity,
-  Clock,
-  Eye,
-  CheckSquare,
-  TrendingUp,
-  TrendingDown,
-  Minus,
-} from 'lucide-react';
-import { api } from '../services/api';
-import { useAuth } from '../contexts/AuthContext';
+import { useQuery } from '@tanstack/react-query';
+import { ArrowLeft, BarChart3, Users, FileText, Activity, Mail } from 'lucide-react';
 import useIsTeacher from '../hooks/useIsTeacher';
+import { useCourse } from '../services/apiQueries';
+import { analyticsApi } from '../services/api_learner_outcomes';
+import { groupByWeek, fillDays, formatDuration, TARDINESS_LABELS } from '../utils/courseAnalytics';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import ActivityChart from '../components/analytics/ActivityChart';
+import MessageStudentsModal from '../components/analytics/MessageStudentsModal';
 
 const TAB_ACTIVITY = 'activity';
 const TAB_ASSIGNMENTS = 'assignments';
 const TAB_STUDENTS = 'students';
 
+const Spinner = ({ label }) => (
+  <div className="flex items-center justify-center py-12 gap-2 text-text-tertiary" role="status">
+    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+    {label}
+  </div>
+);
+
+const ErrorNote = ({ query }) => (
+  <div className="rounded-md bg-accent-danger/10 border border-accent-danger/30 px-4 py-3 text-sm text-accent-danger flex items-center justify-between">
+    <span>{query.error?.message || 'Could not load analytics.'}</span>
+    <button type="button" onClick={() => query.refetch()} className="underline">Try again</button>
+  </div>
+);
+
+const Stat = ({ label, value }) => (
+  <div className="bg-surface-0 rounded-lg shadow p-4">
+    <p className="text-xs font-medium text-text-tertiary uppercase">{label}</p>
+    <p className="text-2xl font-bold text-text-primary">{value}</p>
+  </div>
+);
+
+const pct = (v, pp) => (pp ? Math.max(0, Math.min(100, (v / pp) * 100)) : 0);
+
+function ActivityTab({ courseId }) {
+  const [granularity, setGranularity] = useState('week');
+  const activity = useQuery({ queryKey: ['analytics', courseId, 'activity'], queryFn: () => analyticsApi.courseActivity(courseId) });
+  const categories = useQuery({ queryKey: ['analytics', courseId, 'categories'], queryFn: () => analyticsApi.courseCategories(courseId) });
+
+  if (activity.isLoading) return <Spinner label="Loading activity…" />;
+  if (activity.isError) return <ErrorNote query={activity} />;
+  const days = activity.data || [];
+  if (days.length === 0) {
+    return (
+      <div className="bg-surface-0 rounded-lg shadow p-8 text-center">
+        <Activity className="w-12 h-12 text-text-disabled mx-auto mb-3" aria-hidden="true" />
+        <p className="text-text-tertiary">No student activity recorded yet.</p>
+        <p className="text-text-disabled text-sm mt-1">Page views and participations appear here as students use the course.</p>
+      </div>
+    );
+  }
+  const totalViews = days.reduce((s, d) => s + (d.views || 0), 0);
+  const totalParts = days.reduce((s, d) => s + (d.participations || 0), 0);
+  const rows = granularity === 'week'
+    ? groupByWeek(days).map((w) => ({ label: w.week_start, views: w.views, participations: w.participations }))
+    : fillDays(days).map((d) => ({ label: d.date, views: d.views, participations: d.participations }));
+  const cats = categories.data || [];
+  const maxCat = Math.max(1, ...cats.map((c) => (c.views || 0) + (c.participations || 0)));
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Stat label="Page views" value={totalViews} />
+        <Stat label="Participations" value={totalParts} />
+        <Stat label="Active days" value={days.length} />
+      </div>
+      <div className="bg-surface-0 rounded-lg shadow p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-text-primary">{granularity === 'week' ? 'Weekly online activity' : 'Daily online activity'}</h3>
+          <div className="inline-flex rounded border border-border-strong overflow-hidden text-sm" role="group" aria-label="Group activity by">
+            {['week', 'day'].map((g) => (
+              <button key={g} type="button" aria-pressed={granularity === g} onClick={() => setGranularity(g)}
+                className={`px-3 py-1 ${granularity === g ? 'bg-brand-600 text-white' : 'bg-surface-0 text-text-secondary hover:bg-surface-1'}`}>
+                {g === 'week' ? 'By week' : 'By day'}
+              </button>
+            ))}
+          </div>
+        </div>
+        <ActivityChart rows={rows} title="Course activity" />
+      </div>
+      {cats.length > 0 && (
+        <div className="bg-surface-0 rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold text-text-primary mb-4">Activity by content</h3>
+          <ul className="space-y-2">
+            {cats.map((c) => (
+              <li key={c.category} className="flex items-center gap-3">
+                <span className="w-32 text-sm text-text-secondary capitalize">{c.category.replace('_', ' ')}</span>
+                <div className="flex-1 bg-surface-2 rounded-full h-4 overflow-hidden" aria-hidden="true">
+                  <div className="bg-indigo-500 h-full" style={{ width: `${(((c.views || 0) + (c.participations || 0)) / maxCat) * 100}%` }} />
+                </div>
+                <span className="w-40 text-right text-xs text-text-tertiary">{c.views} views · {c.participations} participations</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AssignmentsTab({ query }) {
+  if (query.isLoading) return <Spinner label="Loading assignments…" />;
+  if (query.isError) return <ErrorNote query={query} />;
+  const stats = query.data || [];
+  if (stats.length === 0) {
+    return (
+      <div className="bg-surface-0 rounded-lg shadow p-8 text-center">
+        <FileText className="w-12 h-12 text-text-disabled mx-auto mb-3" aria-hidden="true" />
+        <p className="text-text-tertiary">No published assignments yet.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="bg-surface-0 rounded-lg shadow overflow-x-auto">
+      <table className="min-w-full text-sm">
+        <thead className="bg-surface-1 text-xs uppercase text-text-secondary">
+          <tr>
+            <th scope="col" className="px-4 py-2 text-left">Assignment</th>
+            <th scope="col" className="px-4 py-2 text-left">Score distribution</th>
+            <th scope="col" className="px-4 py-2 text-right">On time</th>
+            <th scope="col" className="px-4 py-2 text-right">Late</th>
+            <th scope="col" className="px-4 py-2 text-right">Missing</th>
+          </tr>
+        </thead>
+        <tbody>
+          {stats.map((s) => {
+            const pp = s.points_possible || 0;
+            const t = s.tardiness || {};
+            return (
+              <tr key={s.assignment_id} className="border-t border-border-subtle">
+                <td className="px-4 py-3">
+                  <div className="font-medium text-text-primary">{s.title}</div>
+                  <div className="text-xs text-text-tertiary">{pp} pts{s.due_at ? ` · due ${new Date(s.due_at).toLocaleDateString()}` : ''}</div>
+                </td>
+                <td className="px-4 py-3 min-w-[220px]">
+                  {s.median == null ? (
+                    <span className="text-xs text-text-disabled">No posted scores</span>
+                  ) : (
+                    <div>
+                      <div className="relative h-4 bg-surface-2 rounded" aria-hidden="true">
+                        <div className="absolute top-1.5 h-1 bg-text-disabled" style={{ left: `${pct(s.min_score, pp)}%`, width: `${pct(s.max_score, pp) - pct(s.min_score, pp)}%` }} />
+                        <div className="absolute top-0 h-4 bg-indigo-300 rounded-sm" style={{ left: `${pct(s.first_quartile, pp)}%`, width: `${Math.max(pct(s.third_quartile, pp) - pct(s.first_quartile, pp), 0.5)}%` }} />
+                        <div className="absolute top-0 h-4 w-0.5 bg-indigo-800" style={{ left: `${pct(s.median, pp)}%` }} />
+                      </div>
+                      <div className="text-xs text-text-tertiary mt-1">
+                        min {s.min_score} · median {s.median} · max {s.max_score} · avg {s.avg_score}
+                      </div>
+                    </div>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-right">{t.on_time ?? 0}</td>
+                <td className="px-4 py-3 text-right">{t.late ?? 0}</td>
+                <td className="px-4 py-3 text-right">{t.missing ?? 0}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function StudentsTab({ courseId, query, onMessage }) {
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState({});
+  const students = useMemo(() => query.data || [], [query.data]);
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return q ? students.filter((s) => (s.name || '').toLowerCase().includes(q)) : students;
+  }, [students, search]);
+
+  if (query.isLoading) return <Spinner label="Loading students…" />;
+  if (query.isError) return <ErrorNote query={query} />;
+  if (students.length === 0) {
+    return (
+      <div className="bg-surface-0 rounded-lg shadow p-8 text-center">
+        <Users className="w-12 h-12 text-text-disabled mx-auto mb-3" aria-hidden="true" />
+        <p className="text-text-tertiary">No students enrolled.</p>
+      </div>
+    );
+  }
+  const selectedIds = Object.keys(selected).filter((k) => selected[k]);
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <input type="search" placeholder="Search students…" aria-label="Search students" value={search} onChange={(e) => setSearch(e.target.value)}
+          className="w-full max-w-xs rounded border border-border-strong px-3 py-1.5 text-sm" />
+        <button type="button" disabled={selectedIds.length === 0} onClick={() => onMessage(selectedIds)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border border-border-strong hover:bg-surface-1 disabled:opacity-50">
+          <Mail className="w-4 h-4" aria-hidden="true" /> Message selected ({selectedIds.length})
+        </button>
+      </div>
+      <div className="bg-surface-0 rounded-lg shadow overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="bg-surface-1 text-xs uppercase text-text-secondary">
+            <tr>
+              <th scope="col" className="px-3 py-2"><span className="sr-only">Select</span></th>
+              <th scope="col" className="px-3 py-2 text-left">Student</th>
+              <th scope="col" className="px-3 py-2 text-right">Page views</th>
+              <th scope="col" className="px-3 py-2 text-right">Participations</th>
+              <th scope="col" className="px-3 py-2 text-right">Time</th>
+              <th scope="col" className="px-3 py-2 text-left">Last activity</th>
+              <th scope="col" className="px-3 py-2 text-left">Submissions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((s) => {
+              const t = s.tardiness_breakdown || {};
+              return (
+                <tr key={s.id} className="border-t border-border-subtle hover:bg-surface-1">
+                  <td className="px-3 py-2 text-center">
+                    <input type="checkbox" aria-label={`Select ${s.name}`} checked={!!selected[s.id]} onChange={() => setSelected((p) => ({ ...p, [s.id]: !p[s.id] }))} />
+                  </td>
+                  <td className="px-3 py-2">
+                    <Link to={`/courses/${courseId}/analytics/users/${s.id}`} className="text-brand-600 hover:underline font-medium">{s.name || `Student ${s.id}`}</Link>
+                  </td>
+                  <td className="px-3 py-2 text-right">{s.page_views}</td>
+                  <td className="px-3 py-2 text-right">{s.participations}</td>
+                  <td className="px-3 py-2 text-right">{formatDuration(s.interaction_seconds)}</td>
+                  <td className="px-3 py-2 text-text-secondary">{s.last_activity_at ? new Date(s.last_activity_at).toLocaleString() : 'Never'}</td>
+                  <td className="px-3 py-2">
+                    <span className="text-xs text-text-secondary">
+                      {TARDINESS_LABELS.on_time} {t.on_time || 0} · {TARDINESS_LABELS.late} {t.late || 0} · <span className={t.missing ? 'text-accent-danger font-medium' : ''}>{TARDINESS_LABELS.missing} {t.missing || 0}</span>
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 const AnalyticsPage = () => {
   const { courseId } = useParams();
-  const { user } = useAuth();
   const isTeacher = useIsTeacher(courseId);
-  const [course, setCourse] = useState(null);
   const [activeTab, setActiveTab] = useState(TAB_ACTIVITY);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [messaging, setMessaging] = useState(null); // null | { ids?: string[] }
+  const enabled = isTeacher === true;
+  const course = useCourse(courseId, { enabled });
+  const assignments = useQuery({ queryKey: ['analytics', courseId, 'assignments'], queryFn: () => analyticsApi.courseAssignments(courseId), enabled });
+  const students = useQuery({ queryKey: ['analytics', courseId, 'students'], queryFn: () => analyticsApi.studentSummaries(courseId), enabled });
 
-  // Activity data
-  const [activityData, setActivityData] = useState([]);
-  const [activityLoading, setActivityLoading] = useState(false);
-
-  // Assignment stats
-  const [assignmentStats, setAssignmentStats] = useState([]);
-  const [assignmentLoading, setAssignmentLoading] = useState(false);
-
-  // Student summaries
-  const [studentSummaries, setStudentSummaries] = useState([]);
-  const [studentLoading, setStudentLoading] = useState(false);
-
-  useEffect(() => {
-    const fetchCourse = async () => {
-      try {
-        const courseData = await api.getCourse(courseId);
-        setCourse(courseData);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchCourse();
-  }, [courseId]);
-
-  const fetchActivity = useCallback(async () => {
-    setActivityLoading(true);
-    try {
-      const result = await api.request(`/courses/${courseId}/analytics/activity`);
-      setActivityData(result.data || []);
-    } catch (err) {
-      setActivityData([]);
-    } finally {
-      setActivityLoading(false);
-    }
-  }, [courseId]);
-
-  const fetchAssignments = useCallback(async () => {
-    setAssignmentLoading(true);
-    try {
-      const result = await api.request(`/courses/${courseId}/analytics/assignments`);
-      setAssignmentStats(result.data || []);
-    } catch (err) {
-      setAssignmentStats([]);
-    } finally {
-      setAssignmentLoading(false);
-    }
-  }, [courseId]);
-
-  const fetchStudents = useCallback(async () => {
-    setStudentLoading(true);
-    try {
-      const result = await api.request(`/courses/${courseId}/analytics/student_summaries?per_page=100`);
-      setStudentSummaries(result.data || []);
-    } catch (err) {
-      setStudentSummaries([]);
-    } finally {
-      setStudentLoading(false);
-    }
-  }, [courseId]);
-
-  useEffect(() => {
-    if (activeTab === TAB_ACTIVITY) fetchActivity();
-    if (activeTab === TAB_ASSIGNMENTS) fetchAssignments();
-    if (activeTab === TAB_STUDENTS) fetchStudents();
-  }, [activeTab, fetchActivity, fetchAssignments, fetchStudents]);
+  if (isTeacher === false) return <Navigate to={`/courses/${courseId}`} replace />;
+  if (isTeacher === null) return <Layout><Spinner label="Loading…" /></Layout>;
 
   const tabs = [
     { id: TAB_ACTIVITY, label: 'Activity', icon: Activity },
@@ -106,78 +258,39 @@ const AnalyticsPage = () => {
     { id: TAB_STUDENTS, label: 'Students', icon: Users },
   ];
 
-  // Find max value for bar chart scaling
-  const maxActivityViews = Math.max(...activityData.map((d) => d.views || 0), 1);
-  const maxAssignmentScore = Math.max(
-    ...assignmentStats.map((s) => {
-      const pp = s.points_possible || 0;
-      const mx = s.max_score || 0;
-      return Math.max(pp, mx);
-    }),
-    1
-  );
-
-  if (isTeacher === false) return <Navigate to={`/courses/${courseId}`} replace />;
-  if (isTeacher === null) return <Layout><div className="flex items-center justify-center py-12 gap-2 text-text-tertiary">
-  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-  Loading...
-</div></Layout>;
-
-  if (loading) {
-    return (
-      <Layout>
-        <div className="flex items-center justify-center py-12 gap-2 text-text-tertiary">
-  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-  Loading analytics...
-</div>
-      </Layout>
-    );
-  }
-
-  if (error) {
-    return (
-      <Layout>
-        <div className="text-center py-12">
-          <p className="text-accent-danger mb-3">{error}</p>
-          <button onClick={() => window.location.reload()} className="text-brand-600 hover:text-brand-800 text-sm font-medium">Try Again</button>
-        </div>
-      </Layout>
-    );
-  }
-
   return (
     <Layout>
       <CourseNav />
       <div className="mb-6">
         <Link to={`/courses/${courseId}`} className="text-brand-600 hover:underline text-sm flex items-center space-x-1">
-          <ArrowLeft className="w-3.5 h-3.5" />
+          <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
           <span>Back to Course</span>
         </Link>
-        <div className="flex items-center space-x-3 mt-2">
-          <BarChart3 className="w-7 h-7 text-indigo-600" />
-          <div>
-            <h2 className="text-2xl font-bold text-text-primary">Course Analytics</h2>
-            {course && <p className="text-text-tertiary text-sm">{course.name}</p>}
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-2">
+          <div className="flex items-center space-x-3">
+            <BarChart3 className="w-7 h-7 text-indigo-600" aria-hidden="true" />
+            <div>
+              <h2 className="text-2xl font-bold text-text-primary">Course Analytics</h2>
+              {course.data && <p className="text-text-tertiary text-sm">{course.data.name}</p>}
+            </div>
           </div>
+          <button type="button" onClick={() => setMessaging({})} disabled={!students.data?.length}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+            <Mail className="w-4 h-4" aria-hidden="true" /> Message students who…
+          </button>
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="border-b border-border-default mb-6">
-        <nav className="flex space-x-6">
+        <nav className="flex space-x-6" role="tablist" aria-label="Analytics sections">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+              <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center space-x-2 py-3 px-1 border-b-2 text-sm font-medium transition-colors ${
-                  activeTab === tab.id
-                    ? 'border-indigo-600 text-indigo-600'
-                    : 'border-transparent text-text-tertiary hover:text-text-secondary hover:border-border-strong'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
+                  activeTab === tab.id ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-text-tertiary hover:text-text-secondary hover:border-border-strong'
+                }`}>
+                <Icon className="w-4 h-4" aria-hidden="true" />
                 <span>{tab.label}</span>
               </button>
             );
@@ -185,333 +298,17 @@ const AnalyticsPage = () => {
         </nav>
       </div>
 
-      {/* Activity Tab */}
-      {activeTab === TAB_ACTIVITY && (
-        <div>
-          {activityLoading ? (
-            <div className="flex items-center justify-center py-12 gap-2 text-text-tertiary">
-  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-  Loading activity data...
-</div>
-          ) : activityData.length === 0 ? (
-            <div className="bg-surface-0 rounded-lg shadow p-8 text-center">
-              <Activity className="w-12 h-12 text-text-disabled mx-auto mb-3" />
-              <p className="text-text-tertiary">No activity data recorded yet.</p>
-              <p className="text-text-disabled text-sm mt-1">Page views will appear here as students interact with the course.</p>
-            </div>
-          ) : (
-            <div className="bg-surface-0 rounded-lg shadow p-6">
-              <h3 className="text-lg font-semibold text-text-primary mb-4 flex items-center space-x-2">
-                <Eye className="w-5 h-5 text-indigo-500" />
-                <span>Page Views by Date</span>
-              </h3>
+      {activeTab === TAB_ACTIVITY && <ActivityTab courseId={courseId} />}
+      {activeTab === TAB_ASSIGNMENTS && <AssignmentsTab query={assignments} />}
+      {activeTab === TAB_STUDENTS && <StudentsTab courseId={courseId} query={students} onMessage={(ids) => setMessaging({ ids })} />}
 
-              {/* Summary Stats */}
-              <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className="bg-indigo-50 rounded-lg p-4">
-                  <p className="text-xs font-medium text-indigo-600 uppercase">Total Views</p>
-                  <p className="text-2xl font-bold text-indigo-900">
-                    {activityData.reduce((sum, d) => sum + (d.views || 0), 0)}
-                  </p>
-                </div>
-                <div className="bg-accent-success/10 rounded-lg p-4">
-                  <p className="text-xs font-medium text-accent-success uppercase">Active Days</p>
-                  <p className="text-2xl font-bold text-accent-success">{activityData.length}</p>
-                </div>
-                <div className="bg-purple-50 rounded-lg p-4">
-                  <p className="text-xs font-medium text-purple-600 uppercase">Avg Views/Day</p>
-                  <p className="text-2xl font-bold text-purple-900">
-                    {activityData.length > 0
-                      ? Math.round(
-                          activityData.reduce((sum, d) => sum + (d.views || 0), 0) / activityData.length
-                        )
-                      : 0}
-                  </p>
-                </div>
-              </div>
-
-              {/* Bar Chart */}
-              <div className="space-y-2">
-                {activityData.map((day, idx) => {
-                  const widthPct = ((day.views || 0) / maxActivityViews) * 100;
-                  return (
-                    <div key={idx} className="flex items-center space-x-3">
-                      <span className="text-xs text-text-tertiary w-24 text-right flex-shrink-0">
-                        {day.date}
-                      </span>
-                      <div className="flex-1 bg-surface-2 rounded-full h-6 relative overflow-hidden">
-                        <div
-                          className="bg-indigo-500 h-full rounded-full transition-all duration-300"
-                          style={{ width: `${Math.max(widthPct, 1)}%` }}
-                        />
-                      </div>
-                      <span className="text-sm font-medium text-text-secondary w-12 text-right flex-shrink-0">
-                        {day.views}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Assignments Tab */}
-      {activeTab === TAB_ASSIGNMENTS && (
-        <div>
-          {assignmentLoading ? (
-            <div className="flex items-center justify-center py-12 gap-2 text-text-tertiary">
-  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-  Loading assignment data...
-</div>
-          ) : assignmentStats.length === 0 ? (
-            <div className="bg-surface-0 rounded-lg shadow p-8 text-center">
-              <FileText className="w-12 h-12 text-text-disabled mx-auto mb-3" />
-              <p className="text-text-tertiary">No assignment data available yet.</p>
-              <p className="text-text-disabled text-sm mt-1">Statistics will appear once assignments are created and graded.</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {/* Summary Row */}
-              <div className="grid grid-cols-4 gap-4">
-                <div className="bg-surface-0 rounded-lg shadow p-4">
-                  <p className="text-xs font-medium text-text-tertiary uppercase">Assignments</p>
-                  <p className="text-2xl font-bold text-text-primary">{assignmentStats.length}</p>
-                </div>
-                <div className="bg-surface-0 rounded-lg shadow p-4">
-                  <p className="text-xs font-medium text-text-tertiary uppercase">Total Submissions</p>
-                  <p className="text-2xl font-bold text-text-primary">
-                    {assignmentStats.reduce((sum, s) => sum + (s.submission_count || 0), 0)}
-                  </p>
-                </div>
-                <div className="bg-surface-0 rounded-lg shadow p-4">
-                  <p className="text-xs font-medium text-text-tertiary uppercase">Avg Score (all)</p>
-                  <p className="text-2xl font-bold text-text-primary">
-                    {(() => {
-                      const scored = assignmentStats.filter((s) => s.avg_score !== null && s.avg_score !== undefined);
-                      if (scored.length === 0) return '-';
-                      const avg = scored.reduce((sum, s) => sum + s.avg_score, 0) / scored.length;
-                      return avg.toFixed(1);
-                    })()}
-                  </p>
-                </div>
-                <div className="bg-surface-0 rounded-lg shadow p-4">
-                  <p className="text-xs font-medium text-text-tertiary uppercase">Highest Avg</p>
-                  <p className="text-2xl font-bold text-accent-success">
-                    {(() => {
-                      const scored = assignmentStats.filter((s) => s.avg_score !== null && s.avg_score !== undefined);
-                      if (scored.length === 0) return '-';
-                      return Math.max(...scored.map((s) => s.avg_score)).toFixed(1);
-                    })()}
-                  </p>
-                </div>
-              </div>
-
-              {/* Per-assignment bars */}
-              <div className="bg-surface-0 rounded-lg shadow p-6">
-                <h3 className="text-lg font-semibold text-text-primary mb-4">Score Distribution by Assignment</h3>
-                <div className="space-y-4">
-                  {assignmentStats.map((stat) => {
-                    const pp = stat.points_possible || 0;
-                    const minPct = stat.min_score != null ? (stat.min_score / Math.max(pp, 1)) * 100 : 0;
-                    const maxPct = stat.max_score != null ? (stat.max_score / Math.max(pp, 1)) * 100 : 0;
-                    const avgPct = stat.avg_score != null ? (stat.avg_score / Math.max(pp, 1)) * 100 : 0;
-
-                    return (
-                      <div key={stat.assignment_id} className="border-b border-border-subtle pb-4 last:border-0 last:pb-0">
-                        <div className="flex items-center justify-between mb-2">
-                          <div>
-                            <p className="text-sm font-medium text-text-primary">{stat.title}</p>
-                            <p className="text-xs text-text-disabled">
-                              {pp} pts possible | {stat.submission_count || 0} submissions
-                            </p>
-                          </div>
-                          <div className="flex items-center space-x-4 text-xs">
-                            {stat.min_score != null && (
-                              <span className="flex items-center space-x-1 text-accent-danger">
-                                <TrendingDown className="w-3 h-3" />
-                                <span>Min: {stat.min_score}</span>
-                              </span>
-                            )}
-                            {stat.avg_score != null && (
-                              <span className="flex items-center space-x-1 text-brand-600">
-                                <Minus className="w-3 h-3" />
-                                <span>Avg: {stat.avg_score}</span>
-                              </span>
-                            )}
-                            {stat.max_score != null && (
-                              <span className="flex items-center space-x-1 text-accent-success">
-                                <TrendingUp className="w-3 h-3" />
-                                <span>Max: {stat.max_score}</span>
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Stacked bar showing min/avg/max */}
-                        <div className="relative bg-surface-2 rounded-full h-5 overflow-hidden">
-                          {stat.max_score != null && (
-                            <div
-                              className="absolute top-0 left-0 h-full bg-accent-success/30 rounded-full"
-                              style={{ width: `${Math.min(maxPct, 100)}%` }}
-                            />
-                          )}
-                          {stat.avg_score != null && (
-                            <div
-                              className="absolute top-0 left-0 h-full bg-brand-500 rounded-full"
-                              style={{ width: `${Math.min(avgPct, 100)}%` }}
-                            />
-                          )}
-                          {stat.min_score != null && (
-                            <div
-                              className="absolute top-0 left-0 h-full bg-accent-danger rounded-full"
-                              style={{ width: `${Math.min(minPct, 100)}%` }}
-                            />
-                          )}
-                        </div>
-
-                        {/* Scale labels */}
-                        <div className="flex justify-between mt-1">
-                          <span className="text-xs text-text-disabled">0</span>
-                          <span className="text-xs text-text-disabled">{pp}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Legend */}
-                <div className="flex items-center space-x-6 mt-4 pt-4 border-t border-border-subtle">
-                  <div className="flex items-center space-x-2 text-xs text-text-tertiary">
-                    <div className="w-3 h-3 rounded bg-accent-danger" />
-                    <span>Min Score</span>
-                  </div>
-                  <div className="flex items-center space-x-2 text-xs text-text-tertiary">
-                    <div className="w-3 h-3 rounded bg-brand-500" />
-                    <span>Avg Score</span>
-                  </div>
-                  <div className="flex items-center space-x-2 text-xs text-text-tertiary">
-                    <div className="w-3 h-3 rounded bg-accent-success/30" />
-                    <span>Max Score</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Students Tab */}
-      {activeTab === TAB_STUDENTS && (
-        <div>
-          {studentLoading ? (
-            <div className="flex items-center justify-center py-12 gap-2 text-text-tertiary">
-  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-  Loading student data...
-</div>
-          ) : studentSummaries.length === 0 ? (
-            <div className="bg-surface-0 rounded-lg shadow p-8 text-center">
-              <Users className="w-12 h-12 text-text-disabled mx-auto mb-3" />
-              <p className="text-text-tertiary">No student data available yet.</p>
-              <p className="text-text-disabled text-sm mt-1">Enroll students to see their analytics summaries.</p>
-            </div>
-          ) : (
-            <div className="bg-surface-0 rounded-lg shadow overflow-hidden">
-              <div className="px-6 py-4 border-b bg-surface-1">
-                <h3 className="text-lg font-semibold text-text-primary">Student Summaries</h3>
-                <p className="text-sm text-text-tertiary mt-1">{studentSummaries.length} {studentSummaries.length === 1 ? 'student' : 'students'}</p>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="min-w-full border-collapse">
-                  <thead>
-                    <tr className="bg-surface-1">
-                      <th className="px-6 py-3 text-left text-xs font-medium text-text-tertiary uppercase tracking-wider border-b">
-                        Student
-                      </th>
-                      <th className="px-6 py-3 text-center text-xs font-medium text-text-tertiary uppercase tracking-wider border-b">
-                        Page Views
-                      </th>
-                      <th className="px-6 py-3 text-center text-xs font-medium text-text-tertiary uppercase tracking-wider border-b">
-                        Time on Site
-                      </th>
-                      <th className="px-6 py-3 text-center text-xs font-medium text-text-tertiary uppercase tracking-wider border-b">
-                        Submissions
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-text-tertiary uppercase tracking-wider border-b">
-                        Engagement
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border-default">
-                    {studentSummaries.map((student) => {
-                      const maxViews = Math.max(...studentSummaries.map((s) => s.page_views || 0), 1);
-                      const viewsPct = ((student.page_views || 0) / maxViews) * 100;
-                      const hours = Math.floor((student.interaction_seconds || 0) / 3600);
-                      const minutes = Math.floor(((student.interaction_seconds || 0) % 3600) / 60);
-
-                      return (
-                        <tr key={student.id} className="hover:bg-surface-1">
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex items-center">
-                              <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-semibold text-sm flex-shrink-0">
-                                {(student.name || '?').charAt(0).toUpperCase()}
-                              </div>
-                              <div className="ml-3">
-                                <p className="text-sm font-medium text-text-primary">
-                                  {student.name || `User ${student.id}`}
-                                </p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-center whitespace-nowrap">
-                            <div className="flex items-center justify-center space-x-2">
-                              <Eye className="w-3.5 h-3.5 text-text-disabled" />
-                              <span className="text-sm font-medium text-text-primary">
-                                {student.page_views || 0}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-center whitespace-nowrap">
-                            <div className="flex items-center justify-center space-x-2">
-                              <Clock className="w-3.5 h-3.5 text-text-disabled" />
-                              <span className="text-sm text-text-secondary">
-                                {hours > 0 ? `${hours}h ` : ''}{minutes}m
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-center whitespace-nowrap">
-                            <div className="flex items-center justify-center space-x-2">
-                              <CheckSquare className="w-3.5 h-3.5 text-text-disabled" />
-                              <span className="text-sm font-medium text-text-primary">
-                                {student.submissions || 0}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="w-full bg-surface-2 rounded-full h-3 max-w-[200px]">
-                              <div
-                                className={`h-full rounded-full transition-all duration-300 ${
-                                  viewsPct > 66
-                                    ? 'bg-accent-success'
-                                    : viewsPct > 33
-                                    ? 'bg-accent-warning'
-                                    : 'bg-accent-danger'
-                                }`}
-                                style={{ width: `${Math.max(viewsPct, 2)}%` }}
-                              />
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
+      {messaging && (
+        <MessageStudentsModal
+          students={students.data || []}
+          assignments={assignments.data || []}
+          initialStudentIds={messaging.ids}
+          onClose={() => setMessaging(null)}
+        />
       )}
     </Layout>
   );
