@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   AUTOSAVE_PREFIX, readRceDraft, writeRceDraft, scheduleRceDraftWrite, clearRceDraft, clearAllRceDrafts,
-  setRceDraftKeyProvider,
+  setRceDraftKeyProvider, setRceDraftUser,
 } from '../rceDrafts';
 
 vi.mock('../../../services/api_rce_editor', () => ({
@@ -120,6 +120,69 @@ describe('rce drafts (B103, G012)', () => {
     await vi.waitFor(async () => {
       expect((await readRceDraft('page-1-new-body'))?.html).toBe('<p>typed</p>');
     });
+  });
+
+  // The key provider stands in for the server: it answers for whoever holds
+  // the session right now. Only the auth context's identity change
+  // (setRceDraftUser) may drop the cached key, as in the real app.
+  function sessionProvider() {
+    let current = userA;
+    const provider = vi.fn(() => current());
+    provider.switchTo = (next) => { current = next; };
+    return provider;
+  }
+
+  it('a different user signing in on the same tab does not reuse the previous key', async () => {
+    const provider = sessionProvider();
+    setRceDraftKeyProvider(provider);
+    setRceDraftUser(7);
+    await writeRceDraft('page-1-new-body', '<p>user A draft</p>');
+
+    // A's session expires (no logout), then user B signs in.
+    provider.switchTo(userB);
+    setRceDraftUser(8);
+    expect(await readRceDraft('page-1-new-body')).toBeNull();
+    await writeRceDraft('page-1-new-body', '<p>user B draft</p>');
+    expect(store.keys().sort()).toEqual([
+      `${AUTOSAVE_PREFIX}u7.page-1-new-body`,
+      `${AUTOSAVE_PREFIX}u8.page-1-new-body`,
+    ]);
+
+    // A signs back in and gets their own draft, not B's.
+    provider.switchTo(userA);
+    setRceDraftUser(7);
+    expect((await readRceDraft('page-1-new-body'))?.html).toBe('<p>user A draft</p>');
+  });
+
+  it('the same user signing back in keeps the cached key', async () => {
+    const provider = sessionProvider();
+    setRceDraftKeyProvider(provider);
+    setRceDraftUser(7);
+    await writeRceDraft('a', '<p>x</p>');
+    setRceDraftUser(7);
+    expect((await readRceDraft('a'))?.html).toBe('<p>x</p>');
+    expect(provider).toHaveBeenCalledTimes(1);
+  });
+
+  it("a pending write from the previous user is not saved as the new user's draft", async () => {
+    const provider = sessionProvider();
+    setRceDraftKeyProvider(provider);
+    setRceDraftUser(7);
+    vi.useFakeTimers();
+    scheduleRceDraftWrite('page-1-new-body', '<p>typed by A</p>', 2000);
+    provider.switchTo(userB);
+    setRceDraftUser(8);
+    vi.advanceTimersByTime(5000);
+    vi.useRealTimers();
+    await settle();
+    expect(store.keys()).toEqual([]);
+  });
+
+  it('a key returned for someone other than the signed-in user is not used', async () => {
+    setRceDraftUser(8);
+    setRceDraftKeyProvider(userA); // stale response for user 7
+    await writeRceDraft('a', '<p>x</p>');
+    expect(store.keys()).toEqual([]);
   });
 
   it('clearAllRceDrafts removes only editor drafts and forgets the key (logout)', async () => {

@@ -2,7 +2,7 @@ import React, { createContext, useState, useContext, useEffect } from 'react';
 import i18n from 'i18next';
 import { api } from '../services/api';
 import { setCurrentAccountId } from '../services/currentAccount';
-import { clearAllRceDrafts } from '../components/rce/rceDrafts';
+import { clearAllRceDrafts, setRceDraftUser } from '../components/rce/rceDrafts';
 import { applyUserLocale } from '../utils/localePreference';
 
 const AuthContext = createContext(null);
@@ -33,6 +33,9 @@ export const AuthProvider = ({ children }) => {
   const setUser = (next) => {
     const value = typeof next === 'function' ? next(user) : next;
     setCurrentAccountId(value?.account_id);
+    // Editor drafts are encrypted per user; a different user (or a
+    // masquerade identity) must not reuse the previous user's cached key.
+    setRceDraftUser(value?.id);
     setUserState(value);
   };
 

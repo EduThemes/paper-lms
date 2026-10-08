@@ -37,6 +37,12 @@ let epoch = 0;
 
 let keyProvider = fetchRceDraftKey;
 let cipherPromise = null;
+// The signed-in user as last reported by the auth context (setRceDraftUser).
+// The cipher is cached, so without this a different user signing in on the
+// same tab (session expired, then someone else logs in; masquerade start or
+// end) kept the previous user's key and namespace: their drafts were offered
+// to the new user and the new user's typing was stored as theirs.
+let currentUserId = null;
 
 function storage() {
   try {
@@ -105,6 +111,9 @@ export function getDraftCipher() {
       if (!s) return null;
       const res = await keyProvider();
       if (!res?.key || !res?.user_id) return null;
+      // A key for someone other than the signed-in user (a lookup that
+      // raced an identity change) is never used.
+      if (currentUserId != null && String(res.user_id) !== currentUserId) return null;
       const key = await s.importKey('raw', fromBase64(res.key), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
       return { userId: String(res.user_id), key };
     })().catch(() => null);
@@ -113,6 +122,26 @@ export function getDraftCipher() {
     p.then((c) => { if (!c && cipherPromise === p) cipherPromise = null; });
   }
   return cipherPromise;
+}
+
+/**
+ * Tell the draft store who is signed in (AuthContext calls this whenever
+ * its user changes). When the identity changes to a different user, the
+ * cached key is dropped and pending writes, which hold the previous user's
+ * typing, are cancelled; stored drafts are kept so each user can still
+ * restore their own. Signing out (null) changes nothing here: an expired
+ * session keeps the drafts so the same author can sign back in and restore,
+ * and logout clears everything through clearAllRceDrafts().
+ */
+export function setRceDraftUser(userId) {
+  if (userId == null || userId === '') return;
+  const next = String(userId);
+  if (currentUserId !== null && currentUserId !== next) {
+    for (const key of Array.from(pendingWrites.keys())) cancelRceDraftWrite(key);
+    epoch += 1;
+    cipherPromise = null;
+  }
+  currentUserId = next;
 }
 
 /** Test hook: replace the key source and drop any cached key. */
@@ -200,5 +229,6 @@ export function clearAllRceDrafts() {
   for (const key of Array.from(pendingWrites.keys())) cancelRceDraftWrite(key);
   epoch += 1;
   cipherPromise = null;
+  currentUserId = null;
   removeKeys(storageKeys());
 }
