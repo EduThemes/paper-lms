@@ -856,6 +856,9 @@ func main() {
 	latePolicyHandler := handlers.NewLatePolicyHandler(latePolicyService)
 	// handlers
 	calendarEventHandler := handlers.NewCalendarEventHandler(calendarService, authz)
+	calendarAggregateService := service.NewCalendarAggregateService(database)
+	calendarEventHandler.SetAggregator(calendarAggregateService)
+	calendarHandler := handlers.NewCalendarHandler(calendarAggregateService, service.NewCalendarFeedService(database, auth.Encrypt, auth.Decrypt), authz)
 	conversationHandler := handlers.NewConversationHandler(conversationService, userService, accountRepo, enrollmentRepo, auditService)
 	notificationHandler := handlers.NewNotificationHandler(notificationService)
 	// handlers
@@ -928,6 +931,7 @@ func main() {
 	customGradebookColumnHandler := handlers.NewCustomGradebookColumnHandler(customGradebookColumnService, auditService)
 	masteryPathHandler := handlers.NewMasteryPathHandler(masteryPathService)
 	appointmentGroupHandler := handlers.NewAppointmentGroupHandler(appointmentGroupService, authz, auditService)
+	appointmentGroupHandler.SetMessenger(conversationService)
 	outcomeProficiencyHandler := handlers.NewOutcomeProficiencyHandler(outcomeProficiencyService, masteryGradebookService)
 	pairingCodeHandler := handlers.NewPairingCodeHandler(pairingCodeService)
 	// Wave 1 handlers
@@ -1003,6 +1007,7 @@ func main() {
 		LatePolicyHandler:         latePolicyHandler,
 
 		CalendarEventHandler: calendarEventHandler,
+		CalendarHandler:      calendarHandler,
 		ConversationHandler:  conversationHandler,
 		NotificationHandler:  notificationHandler,
 

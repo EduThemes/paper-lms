@@ -132,6 +132,8 @@ func AllModels() []interface{} {
 		&AppointmentGroup{},
 		&AppointmentSlot{},
 		&AppointmentReservation{},
+		&AppointmentGroupContext{},
+		&CalendarFeedToken{},
 		&OutcomeProficiency{},
 		&OutcomeProficiencyRating{},
 		&PairingCode{},

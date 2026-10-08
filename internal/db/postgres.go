@@ -214,6 +214,8 @@ func allAutoMigrateModels() []interface{} {
 		&models.AppointmentGroup{},
 		&models.AppointmentSlot{},
 		&models.AppointmentReservation{},
+		&models.AppointmentGroupContext{},
+		&models.CalendarFeedToken{},
 		// P3 Features: Outcome Proficiency
 		&models.OutcomeProficiency{},
 		&models.OutcomeProficiencyRating{},
