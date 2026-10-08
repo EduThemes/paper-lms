@@ -105,15 +105,21 @@ func (r DateRange) contains(now time.Time) bool {
 	return true
 }
 
-func termRange(term *EnrollmentTerm, enrollmentType string) (DateRange, bool) {
+// termRange is the term's participation window. A course with no term
+// (or a deleted one) is in Canvas's default term, which has no dates: an
+// open window. That matters for staff, who keep the term window next to
+// restricted section / course dates — without it a teacher who restricts
+// participation to future course dates would lock themselves out of the
+// course they are preparing.
+func termRange(term *EnrollmentTerm, enrollmentType string) DateRange {
 	if term == nil || term.WorkflowState == "deleted" {
-		return DateRange{}, false
+		return DateRange{}
 	}
 	r := DateRange{Start: term.StartAt, End: term.EndAt}
 	if IsStaffEnrollmentType(enrollmentType) {
 		r.Start = nil // staff can prepare a course before its term starts
 	}
-	return r, true
+	return r
 }
 
 // EnrollmentDateRanges returns the participation windows for an
@@ -126,20 +132,16 @@ func EnrollmentDateRanges(e *Enrollment, section *CourseSection, course *Course,
 		out = append(out, DateRange{Start: e.StartAt, End: e.EndAt})
 	case section != nil && section.RestrictEnrollmentsToSectionDates:
 		out = append(out, DateRange{Start: section.StartAt, End: section.EndAt})
-		if tr, ok := termRange(term, e.Type); ok && staff {
-			out = append(out, tr)
+		if staff {
+			out = append(out, termRange(term, e.Type))
 		}
 	case course != nil && course.RestrictEnrollmentsToCourseDates:
 		out = append(out, DateRange{Start: course.StartAt, End: course.EndAt})
-		if tr, ok := termRange(term, e.Type); ok && staff {
-			out = append(out, tr)
+		if staff {
+			out = append(out, termRange(term, e.Type))
 		}
 	default:
-		if tr, ok := termRange(term, e.Type); ok {
-			out = append(out, tr)
-		} else {
-			out = append(out, DateRange{})
-		}
+		out = append(out, termRange(term, e.Type))
 	}
 	return out
 }

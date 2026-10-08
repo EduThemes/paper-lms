@@ -65,14 +65,27 @@ func TestEffectiveEnrollmentState_StaffIgnoreTermStart(t *testing.T) {
 	if got := EffectiveEnrollmentState(teacher, nil, course, term, accessNow); got != EffectiveActive {
 		t.Fatalf("a teacher can prepare a course before its term starts; got %s", got)
 	}
-	// A teacher held back by restricted course dates is inactive (not
-	// pending), unless the term window still covers today.
+	// Staff keep the term window alongside restricted course dates. A
+	// course with no term is in the dateless default term, so a teacher
+	// who restricts participation to future course dates keeps preparing
+	// the course (Canvas) instead of locking themselves out.
 	restricted := &Course{WorkflowState: CourseAvailable, StartAt: at(5), EndAt: at(50), RestrictEnrollmentsToCourseDates: true}
-	if got := EffectiveEnrollmentState(teacher, nil, restricted, nil, accessNow); got != EffectiveInactive {
-		t.Fatalf("staff before restricted course dates: got %s, want inactive", got)
+	if got := EffectiveEnrollmentState(teacher, nil, restricted, nil, accessNow); got != EffectiveActive {
+		t.Fatalf("staff before restricted course dates in the default term: got %s, want active", got)
 	}
 	if got := EffectiveEnrollmentState(teacher, nil, restricted, term, accessNow); got != EffectiveActive {
 		t.Fatalf("staff keep the term window alongside course dates: got %s", got)
+	}
+	// ...while a student in the same course is pending until it starts.
+	learner := &Enrollment{Type: StudentEnrollmentType, WorkflowState: EnrollmentActive}
+	if got := EffectiveEnrollmentState(learner, nil, restricted, nil, accessNow); got != EffectivePendingActive {
+		t.Fatalf("student before restricted course dates: got %s, want pending_active", got)
+	}
+	// Staff held back by their own enrollment dates are inactive (not
+	// pending): they get no access before the window opens.
+	ownDates := &Enrollment{Type: TeacherEnrollmentType, WorkflowState: EnrollmentActive, StartAt: at(5), EndAt: at(50)}
+	if got := EffectiveEnrollmentState(ownDates, nil, course, nil, accessNow); got != EffectiveInactive {
+		t.Fatalf("staff before their own enrollment dates: got %s, want inactive", got)
 	}
 	// Term ended: staff are concluded too.
 	ended := &EnrollmentTerm{StartAt: at(-100), EndAt: at(-1)}
