@@ -615,6 +615,17 @@ func main() {
 		moduleRepo,
 		discussionTopicRepo,
 	)
+	// Content-lane parity wiring: Commons deep copy (quiz questions,
+	// module items), blueprint association authz + sync identity map,
+	// pacing course ties / overrides / start dates, module-item content
+	// validation.
+	commonsService.SetContentDeps(quizQuestionRepo, moduleItemRepo)
+	blueprintService.SetDeps(courseRepo, enrollmentRepo, postgres.NewBlueprintContentTagRepository(database))
+	coursePaceService.SetDeps(service.CoursePaceDeps{
+		ModuleRepo: moduleRepo, OverrideRepo: assignmentOverrideRepo, OverrideStudentRepo: assignmentOverrideStudentRepo,
+		CourseRepo: courseRepo, EnrollmentRepo: enrollmentRepo, SectionRepo: sectionRepo,
+	})
+	moduleService.SetContentRepos(assignmentRepo, quizRepo, discussionTopicRepo, pageRepo)
 	// Wave 5: AI Assist resolves `ai.anthropic.api_key` per-request
 	// via the Settings Engine (shared settingsLookup closure declared
 	// up by notificationDeliveryService).
