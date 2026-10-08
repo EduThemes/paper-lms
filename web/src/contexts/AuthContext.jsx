@@ -1,9 +1,11 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
 import i18n from 'i18next';
 import { api } from '../services/api';
 import { setCurrentAccountId } from '../services/currentAccount';
 import { clearAllRceDrafts } from '../components/rce/rceDrafts';
 import { applyUserLocale } from '../utils/localePreference';
+import { setUserTimeZone } from '../lib/userTimeZone';
+import { rememberReturnTo, markSessionExpired } from '../utils/returnTo';
 
 const AuthContext = createContext(null);
 
@@ -27,12 +29,16 @@ const applyAccountDefaultLocale = (data) => {
 export const AuthProvider = ({ children }) => {
   const [user, setUserState] = useState(null);
   const [loading, setLoading] = useState(true);
+  const userRef = useRef(null);
 
   // Keep the API client's tenant id in step with the signed-in user, set
   // synchronously so admin pages that fetch on mount already use it.
   const setUser = (next) => {
     const value = typeof next === 'function' ? next(user) : next;
     setCurrentAccountId(value?.account_id);
+    // G157: show and enter dates in the profile time zone.
+    setUserTimeZone(value?.time_zone);
+    userRef.current = value;
     setUserState(value);
   };
 
@@ -58,6 +64,13 @@ export const AuthProvider = ({ children }) => {
   // Listen for 401 responses from the API client to auto-logout
   useEffect(() => {
     const handleSessionExpired = () => {
+      // G160: come back to this page after signing in again, and tell the
+      // user why they were signed out. Only when a session existed — a 401
+      // from the initial /users/self probe is not an expiry.
+      if (userRef.current && typeof window !== 'undefined') {
+        rememberReturnTo(window.location);
+        markSessionExpired();
+      }
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       setUser(null);
