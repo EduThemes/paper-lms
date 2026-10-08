@@ -330,12 +330,24 @@ func (s *QuizService) StartSubmission(ctx context.Context, quizID, userID uint, 
 
 	now := time.Now()
 
-	// F-048: unlock_at / lock_at windows.
-	if quiz.UnlockAt != nil && now.Before(*quiz.UnlockAt) {
-		return nil, errors.New("quiz is not yet available")
+	// G046 / G047: the student's own dates (section / student overrides on
+	// the linked assignment, plus accommodations) and moderation settings.
+	ext := models.QuizExtension{QuizID: quizID, UserID: userID}
+	unlockAt, lockAt := quiz.UnlockAt, quiz.LockAt
+	if s.lifecycle != nil {
+		ext = s.quizExtensionFor(ctx, quizID, userID)
+		_, unlockAt, lockAt = s.EffectiveQuizDates(ctx, quiz, userID)
 	}
-	if quiz.LockAt != nil && now.After(*quiz.LockAt) {
-		return nil, errors.New("quiz is locked and no longer accepts submissions")
+
+	// F-048: unlock_at / lock_at windows. A manual unlock (Moderate quiz)
+	// lets the student in outside the window.
+	if !ext.ManuallyUnlocked {
+		if unlockAt != nil && now.Before(*unlockAt) {
+			return nil, errors.New("quiz is not yet available")
+		}
+		if lockAt != nil && now.After(*lockAt) {
+			return nil, errors.New("quiz is locked and no longer accepts submissions")
+		}
 	}
 
 	// Check for an existing in-progress submission
@@ -351,8 +363,9 @@ func (s *QuizService) StartSubmission(ctx context.Context, quizID, userID uint, 
 		attempt = existing.Attempt + 1
 	}
 
-	// Enforce attempt limits
-	if quiz.AllowedAttempts > 0 && attempt > quiz.AllowedAttempts {
+	// Enforce attempt limits (allowed_attempts plus any extra attempts
+	// granted through Moderate quiz).
+	if allowed := AttemptsAllowedFor(quiz, ext); allowed > 0 && attempt > allowed {
 		return nil, errors.New("maximum number of attempts reached")
 	}
 
@@ -387,8 +400,16 @@ func (s *QuizService) StartSubmission(ctx context.Context, quizID, userID uint, 
 	}
 
 	if effectiveTimeLimit != nil && *effectiveTimeLimit > 0 {
-		endAt := now.Add(time.Duration(*effectiveTimeLimit) * time.Minute)
+		endAt := now.Add(time.Duration(*effectiveTimeLimit+ext.ExtraTime) * time.Minute)
 		submission.EndAt = &endAt
+	}
+
+	// G048: an attempt never runs past the student's lock date (Canvas
+	// build_submission_end_at) unless the quiz was manually unlocked for
+	// them; the overdue job submits it at end_at.
+	if lockAt != nil && !ext.ManuallyUnlocked && (submission.EndAt == nil || lockAt.Before(*submission.EndAt)) {
+		capped := *lockAt
+		submission.EndAt = &capped
 	}
 
 	// Generate personalized question set if question groups exist
@@ -415,6 +436,9 @@ func (s *QuizService) StartSubmission(ctx context.Context, quizID, userID uint, 
 		return nil, err
 	}
 
+	s.recordQuizEvent(ctx, submission, models.QuizEventSessionStarted, map[string]interface{}{
+		"end_at": submission.EndAt,
+	})
 	return submission, nil
 }
 
@@ -516,6 +540,7 @@ func (s *QuizService) AnswerQuestion(ctx context.Context, submissionID, question
 		if err := s.answerRepo.Update(ctx, existing); err != nil {
 			return nil, err
 		}
+		s.recordAnswerEvent(ctx, submission, questionID, answer)
 		return existing, nil
 	}
 
@@ -530,7 +555,35 @@ func (s *QuizService) AnswerQuestion(ctx context.Context, submissionID, question
 		return nil, err
 	}
 
+	s.recordAnswerEvent(ctx, submission, questionID, answer)
 	return newAnswer, nil
+}
+
+// maxLoggedAnswerBytes bounds the answer text copied into the event log
+// (essays can be long; the stored answer row keeps the full text).
+const maxLoggedAnswerBytes = 1024
+
+// recordAnswerEvent logs a saved answer (G057). The server records it, so
+// the log of answer changes does not depend on the client.
+func (s *QuizService) recordAnswerEvent(ctx context.Context, sub *models.QuizSubmission, questionID uint, answer string) {
+	if s.lifecycle == nil {
+		return
+	}
+	logged := answer
+	truncated := false
+	if len(logged) > maxLoggedAnswerBytes {
+		logged = logged[:maxLoggedAnswerBytes]
+		truncated = true
+	}
+	eventType := models.QuizEventQuestionAnswered
+	if answer == "" {
+		eventType = models.QuizEventQuestionUnanswered
+	}
+	s.recordQuizEvent(ctx, sub, eventType, map[string]interface{}{
+		"question_id": questionID,
+		"answer":      logged,
+		"truncated":   truncated,
+	})
 }
 
 // CompleteSubmission finalizes a quiz submission, triggers auto-grading, and calculates the score.
@@ -547,6 +600,31 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 	if submission.WorkflowState != "untaken" {
 		return nil, errors.New("quiz submission is not in progress")
 	}
+
+	// F-050: cap FinishedAt at submission.EndAt + 5-minute grace when
+	// the student delayed the explicit /complete call past their
+	// time-limit. The pre-fix path stamped FinishedAt = time.Now()
+	// unconditionally, which inflated TimeSpent and the gradebook
+	// "submitted at" column on a delayed POST. (F-046 already blocks
+	// new ANSWERS past EndAt — this only tightens the recorded
+	// timestamps.)
+	now := time.Now()
+	finishAt := now
+	if submission.EndAt != nil && now.After(*submission.EndAt) {
+		finishAt = submission.EndAt.Add(5 * time.Minute)
+		if now.Before(finishAt) {
+			// Still inside grace window — use the actual now.
+			finishAt = now
+		}
+	}
+	return s.finalizeAttempt(ctx, submission, finishAt, models.QuizEventSubmitted)
+}
+
+// finalizeAttempt grades an in-progress attempt and turns it in, finished
+// at finishAt. Shared by the student's /complete and the overdue
+// auto-submit job (G048), so both grade identically.
+func (s *QuizService) finalizeAttempt(ctx context.Context, submission *models.QuizSubmission, finishAt time.Time, eventType string) (*models.QuizSubmission, error) {
+	submissionID := submission.ID
 
 	// Get all answers for this submission
 	answers, err := s.answerRepo.ListBySubmissionID(ctx, submissionID)
@@ -597,22 +675,25 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 		_ = s.answerRepo.Update(ctx, &answers[i])
 	}
 
-	// F-050: cap FinishedAt at submission.EndAt + 5-minute grace when
-	// the student delayed the explicit /complete call past their
-	// time-limit. The pre-fix path stamped FinishedAt = time.Now()
-	// unconditionally, which inflated TimeSpent and the gradebook
-	// "submitted at" column on a delayed POST. (F-046 already blocks
-	// new ANSWERS past EndAt — this only tightens the recorded
-	// timestamps.)
-	now := time.Now()
-	finishAt := now
-	if submission.EndAt != nil && now.After(*submission.EndAt) {
-		finishAt = submission.EndAt.Add(5 * time.Minute)
-		if now.Before(finishAt) {
-			// Still inside grace window — use the actual now.
-			finishAt = now
+	// The quiz is needed for the lifecycle steps (graded-survey scoring,
+	// kept score, gradebook). Loaded only when the lifecycle is wired.
+	var quiz *models.Quiz
+	if s.lifecycle != nil {
+		if q, qErr := s.quizRepo.FindByID(ctx, submission.QuizID, 0); qErr == nil {
+			quiz = q
 		}
 	}
+	// Canvas: a graded survey always earns its full points.
+	if quiz != nil && quiz.QuizType == models.QuizTypeGradedSurvey && quiz.PointsPossible != nil {
+		totalScore = *quiz.PointsPossible
+	}
+	// Canvas never holds a survey attempt for review: its essay answers
+	// are responses, not work to grade (else a graded survey would sit in
+	// the gradebook as "needs grading" for good).
+	if quiz.IsSurvey() {
+		needsReview = false
+	}
+
 	submission.FinishedAt = &finishAt
 	submission.Score = &totalScore
 	submission.KeptScore = &totalScore
@@ -643,6 +724,16 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 		}
 	} else if err := s.submissionRepo.Update(ctx, submission); err != nil {
 		return nil, err
+	}
+
+	s.recordQuizEvent(ctx, submission, eventType, map[string]interface{}{
+		"score":          totalScore,
+		"workflow_state": submission.WorkflowState,
+	})
+	// G041 / G044: apply the scoring policy across attempts and push the
+	// kept score to the quiz's gradebook assignment.
+	if quiz != nil {
+		s.refreshKeptScore(ctx, quiz, submission.UserID, 0)
 	}
 
 	// Fire post-completion callbacks (gamification, notifications, etc.)

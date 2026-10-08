@@ -13,10 +13,19 @@ import (
 
 type QuizHandler struct {
 	quizRepo repository.QuizRepository
+	// quizService (optional) keeps the quiz's gradebook assignment in sync
+	// (G041 / G046). Without it the quiz is saved on its own.
+	quizService *service.QuizService
 }
 
 func NewQuizHandler(quizRepo repository.QuizRepository) *QuizHandler {
 	return &QuizHandler{quizRepo: quizRepo}
+}
+
+// SetQuizService wires the quiz lifecycle (assignment sync).
+func (h *QuizHandler) SetQuizService(svc *service.QuizService) *QuizHandler {
+	h.quizService = svc
+	return h
 }
 
 func quizToJSON(q *models.Quiz) fiber.Map {
@@ -36,7 +45,34 @@ func quizToJSON(q *models.Quiz) fiber.Map {
 		"workflow_state":   q.WorkflowState,
 		"created_at":       q.CreatedAt,
 		"updated_at":       q.UpdatedAt,
+		// Quiz lifecycle (G041 / G043 / G044).
+		"assignment_id":                     q.AssignmentID,
+		"scoring_policy":                    scoringPolicyOrDefault(q.ScoringPolicy),
+		"show_correct_answers":              q.ShowCorrectAnswers,
+		"show_correct_answers_at":           q.ShowCorrectAnswersAt,
+		"hide_correct_answers_at":           q.HideCorrectAnswersAt,
+		"show_correct_answers_last_attempt": q.ShowCorrectAnswersLastAttempt,
+		"hide_results":                      q.HideResults,
+		"one_time_results":                  q.OneTimeResults,
 	}
+}
+
+func scoringPolicyOrDefault(p string) string {
+	if p == "" {
+		return models.QuizScoringKeepHighest
+	}
+	return p
+}
+
+// quizToViewerJSON adds the gradebook assignment's group for staff.
+func (h *QuizHandler) quizToViewerJSON(c *fiber.Ctx, q *models.Quiz) fiber.Map {
+	m := quizToJSON(q)
+	if h.quizService != nil && quizCallerIsStaff(c) {
+		if a := h.quizService.LinkedAssignment(c.Context(), q); a != nil {
+			m["assignment_group_id"] = a.AssignmentGroupID
+		}
+	}
+	return m
 }
 
 func (h *QuizHandler) ListQuizzes(c *fiber.Ctx) error {
@@ -83,7 +119,7 @@ func (h *QuizHandler) GetQuiz(c *fiber.Ctx) error {
 		return responses.NotFound(c, "quiz")
 	}
 
-	return c.JSON(quizToJSON(quiz))
+	return c.JSON(h.quizToViewerJSON(c, quiz))
 }
 
 func (h *QuizHandler) CreateQuiz(c *fiber.Ctx) error {
@@ -104,6 +140,7 @@ func (h *QuizHandler) CreateQuiz(c *fiber.Ctx) error {
 			LockAt          *time.Time `json:"lock_at"`
 			PointsPossible  *float64   `json:"points_possible"`
 			Published       bool       `json:"published"`
+			quizLifecycleInput
 		} `json:"quiz"`
 	}
 
@@ -113,6 +150,9 @@ func (h *QuizHandler) CreateQuiz(c *fiber.Ctx) error {
 
 	if input.Quiz.Title == "" {
 		return responses.BadRequest(c, "Quiz title is required")
+	}
+	if input.Quiz.QuizType != "" && !validQuizTypes[input.Quiz.QuizType] {
+		return responses.BadRequest(c, "Invalid quiz_type")
 	}
 
 	state := "unpublished"
@@ -141,12 +181,33 @@ func (h *QuizHandler) CreateQuiz(c *fiber.Ctx) error {
 	if quiz.AllowedAttempts == 0 {
 		quiz.AllowedAttempts = 1
 	}
+	quiz.ShowCorrectAnswers = true // Canvas default
+	if msg := input.Quiz.quizLifecycleInput.apply(quiz); msg != "" {
+		return responses.BadRequest(c, msg)
+	}
+	opts, wrote := h.assignmentOptions(c, input.Quiz.AssignmentGroupID, uint(courseID))
+	if wrote {
+		return nil
+	}
 
+	showAnswers := quiz.ShowCorrectAnswers
 	if err := h.quizRepo.Create(c.Context(), quiz); err != nil {
 		return responses.InternalError(c, "Could not create quiz")
 	}
+	// GORM omits a false bool whose column has DEFAULT true on INSERT
+	// (and reads the default back); persist an explicit "don't show
+	// correct answers" with a Save.
+	if !showAnswers {
+		quiz.ShowCorrectAnswers = false
+		if err := h.quizRepo.Update(c.Context(), quiz); err != nil {
+			return responses.InternalError(c, "Could not create quiz")
+		}
+	}
+	if !h.syncAssignment(c, quiz, opts) {
+		return responses.InternalError(c, "Could not create the quiz's gradebook assignment")
+	}
 
-	return c.Status(fiber.StatusCreated).JSON(quizToJSON(quiz))
+	return c.Status(fiber.StatusCreated).JSON(h.quizToViewerJSON(c, quiz))
 }
 
 func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
@@ -188,6 +249,7 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 			LockAt          optionalField[time.Time] `json:"lock_at"`
 			PointsPossible  *float64                 `json:"points_possible"`
 			Published       *bool                    `json:"published"`
+			quizLifecycleInput
 		} `json:"quiz"`
 	}
 
@@ -202,6 +264,9 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 		quiz.Description = service.SanitizeHTML(*input.Quiz.Description)
 	}
 	if input.Quiz.QuizType != nil {
+		if !validQuizTypes[*input.Quiz.QuizType] {
+			return responses.BadRequest(c, "Invalid quiz_type")
+		}
 		quiz.QuizType = *input.Quiz.QuizType
 	}
 	if input.Quiz.TimeLimit.Set {
@@ -230,11 +295,23 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 		}
 	}
 
+	// Applied after the dates so the window checks see the new values.
+	if msg := input.Quiz.quizLifecycleInput.apply(quiz); msg != "" {
+		return responses.BadRequest(c, msg)
+	}
+	opts, wrote := h.assignmentOptions(c, input.Quiz.AssignmentGroupID, uint(courseID))
+	if wrote {
+		return nil
+	}
+
 	if err := h.quizRepo.Update(c.Context(), quiz); err != nil {
 		return responses.InternalError(c, "Could not update quiz")
 	}
+	if !h.syncAssignment(c, quiz, opts) {
+		return responses.InternalError(c, "Could not update the quiz's gradebook assignment")
+	}
 
-	return c.JSON(quizToJSON(quiz))
+	return c.JSON(h.quizToViewerJSON(c, quiz))
 }
 
 // applyOptionalTime sets *dst from a PATCH-style optional field: null
@@ -273,6 +350,9 @@ func (h *QuizHandler) DeleteQuiz(c *fiber.Ctx) error {
 	if err := h.quizRepo.Delete(c.Context(), uint(id)); err != nil {
 		return responses.InternalError(c, "Could not delete quiz")
 	}
+	// The quiz's gradebook assignment goes with it.
+	quiz.WorkflowState = "deleted"
+	_ = h.syncAssignment(c, quiz, nil)
 
 	return c.JSON(fiber.Map{"delete": true})
 }

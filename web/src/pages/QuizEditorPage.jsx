@@ -22,6 +22,8 @@ import OrderingEditor from '../components/quiz/itemTypes/OrderingEditor';
 import CategorizationEditor from '../components/quiz/itemTypes/CategorizationEditor';
 import HotSpotEditor from '../components/quiz/itemTypes/HotSpotEditor';
 import TextOnlyEditor from '../components/quiz/itemTypes/TextOnlyEditor';
+import QuizLifecycleSettings from '../components/quiz/QuizLifecycleSettings';
+import { quizSettingsFromQuiz, quizSettingsPayload, validateQuizSettings } from '../components/quiz/quizLifecycle';
 
 const emptyAnswer = () => ({
   id: `a${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -398,7 +400,7 @@ const QuizEditorPage = () => {
   const [stimuli, setStimuli] = useState([]);
   const [showGroupForm, setShowGroupForm] = useState(false);
   const [editingGroup, setEditingGroup] = useState(null);
-  const [groupForm, setGroupForm] = useState({ name: '', pick_count: 1, question_bank_id: '' });
+  const [groupForm, setGroupForm] = useState({ name: '', pick_count: 1, question_bank_id: '', points_per_item: '' });
 
   useUnsavedChanges(isDirty);
   const { issues: crossCourseIssues, checkAndSave, dismiss: dismissCrossCourse, confirm: confirmCrossCourse } = useCrossCourseCheck(courseId);
@@ -407,6 +409,7 @@ const QuizEditorPage = () => {
   const [quizForm, setQuizForm] = useState({
     title: '', description: '', quiz_type: 'assignment',
     time_limit: '', allowed_attempts: 1, points_possible: 0, published: false,
+    ...quizSettingsFromQuiz({}),
   });
 
   useEffect(() => {
@@ -431,6 +434,7 @@ const QuizEditorPage = () => {
           allowed_attempts: qd.allowed_attempts || 1,
           points_possible: qd.points_possible ?? 0,
           published: qd.published || false,
+          ...quizSettingsFromQuiz(qd),
         });
         const qr = questionResult.value;
         // Per-attempt copies of bank-group draws are not authored questions.
@@ -450,6 +454,11 @@ const QuizEditorPage = () => {
   }, [courseId, quizId]);
 
   const doSaveQuiz = async () => {
+    const settingsErrors = validateQuizSettings(quizForm);
+    if (settingsErrors.length) {
+      setMessage('Error: ' + settingsErrors.join(' '));
+      return;
+    }
     setSaving(true);
     setMessage('');
     try {
@@ -461,6 +470,7 @@ const QuizEditorPage = () => {
         allowed_attempts: Number(quizForm.allowed_attempts) || 1,
         points_possible: totalPoints,
         published: quizForm.published,
+        ...quizSettingsPayload(quizForm),
       };
       const updated = await api.updateQuiz(courseId, quizId, payload);
       clearRceDraft(`quiz-${courseId}-${quizId || 'new'}-description`);
@@ -546,7 +556,7 @@ const QuizEditorPage = () => {
 
   // --- Question Group Management ---
   const resetGroupForm = () => {
-    setGroupForm({ name: '', pick_count: 1, question_bank_id: '' });
+    setGroupForm({ name: '', pick_count: 1, question_bank_id: '', points_per_item: '' });
     setEditingGroup(null);
     setShowGroupForm(false);
   };
@@ -560,6 +570,9 @@ const QuizEditorPage = () => {
       const payload = {
         name: groupForm.name.trim(),
         pick_count: Number(groupForm.pick_count) || 1,
+        // G045: points each picked question is worth (empty = the
+        // question's own points; 1 for a bank-linked group).
+        points_per_item: groupForm.points_per_item === '' ? null : Number(groupForm.points_per_item),
       };
       if (groupForm.question_bank_id) {
         payload.question_bank_id = Number(groupForm.question_bank_id);
@@ -586,6 +599,7 @@ const QuizEditorPage = () => {
     setGroupForm({
       name: group.name || '',
       pick_count: group.pick_count ?? 1,
+      points_per_item: group.points_per_item ?? '',
       question_bank_id: group.question_bank_id || '',
     });
     setEditingGroup(group);
@@ -722,6 +736,13 @@ const QuizEditorPage = () => {
               </div>
             </div>
           </div>
+          <QuizLifecycleSettings
+            courseId={courseId}
+            quiz={quiz}
+            quizType={quizForm.quiz_type}
+            value={quizForm}
+            onChange={(patch) => { setQuizForm(f => ({ ...f, ...patch })); setIsDirty(true); }}
+          />
           <div className="flex items-center gap-4">
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -797,6 +818,7 @@ const QuizEditorPage = () => {
                   <div className="space-y-1 text-xs text-text-secondary">
                     <div>
                       Pick <span className="font-semibold text-purple-700">{group.pick_count}</span> question{group.pick_count !== 1 ? 's' : ''} randomly
+                      {group.points_per_item != null && <> · {group.points_per_item} pts each</>}
                     </div>
                     <div>
                       {groupQuestions.length} question{groupQuestions.length !== 1 ? 's' : ''} in group
@@ -825,7 +847,7 @@ const QuizEditorPage = () => {
             <h4 className="font-medium text-sm text-text-primary mb-3">
               {editingGroup ? 'Edit Question Group' : 'New Question Group'}
             </h4>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <div>
                 <label className="block text-xs font-medium text-text-secondary mb-1">Group Name *</label>
                 <input
@@ -847,6 +869,19 @@ const QuizEditorPage = () => {
                   className="w-full border border-border-strong rounded px-3 py-2 text-sm"
                 />
                 <p className="text-xs text-text-disabled mt-0.5">Questions picked per student</p>
+              </div>
+              <div>
+                <label htmlFor="group-points-per-item" className="block text-xs font-medium text-text-secondary mb-1">Points per question</label>
+                <input
+                  id="group-points-per-item"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={groupForm.points_per_item}
+                  onChange={(e) => setGroupForm(f => ({ ...f, points_per_item: e.target.value }))}
+                  className="w-full border border-border-strong rounded px-3 py-2 text-sm"
+                  placeholder={groupForm.question_bank_id ? '1' : 'Question points'}
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-text-secondary mb-1">Question Bank (optional)</label>

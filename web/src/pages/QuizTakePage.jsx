@@ -26,6 +26,9 @@ import ShortcutsDialog from '../components/quiz/ShortcutsDialog';
 import ItemPlayer from '../components/quiz/itemTypes/ItemPlayer';
 import { normalizeQuestionType } from '../components/quiz/itemTypes/types';
 import { extractBlankIds } from '../components/quiz/itemTypes/MultipleDropdownEditor';
+import useQuizEventLog from '../components/quiz/useQuizEventLog';
+import { quizEngineApi } from '../services/api_quiz_engine';
+import { effectiveAllowedAttempts, studentDateLines } from '../components/quiz/quizLifecycle';
 
 // Question types that are essentially answer-set-driven and use the legacy
 // inline render path. Newer types delegate to ItemPlayer.
@@ -60,6 +63,9 @@ const QuizTakePage = () => {
   const [started, setStarted] = useState(false);
   const [previousAttempts, setPreviousAttempts] = useState(0);
   const [lastSubmission, setLastSubmission] = useState(null);
+  // G046 / G047: the student's own limits and dates (extra attempts,
+  // extra time, section / student overrides).
+  const [attemptStatus, setAttemptStatus] = useState(null);
 
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle');
   const [lastSavedAt, setLastSavedAt] = useState(null);
@@ -73,12 +79,22 @@ const QuizTakePage = () => {
   const savedTimeoutRef = useRef(null);
   const submissionRef = useRef(null);
   useEffect(() => { submissionRef.current = submission; }, [submission]);
+  // G057: report focus / blur / question views to the attempt log.
+  useQuizEventLog({
+    courseId, quizId, submissionId: submission?.id,
+    active: started && !completed, questionId: questions[currentIdx]?.id,
+  });
 
   useEffect(() => {
     const init = async () => {
       try {
         const quizData = await api.getQuiz(courseId, quizId);
         setQuiz(quizData);
+        let status = null;
+        try {
+          status = await quizEngineApi.getQuizAttemptStatus(courseId, quizId);
+          setAttemptStatus(status);
+        } catch { /* fall back to the quiz settings */ }
         try {
           // Students get their own attempts back from this endpoint.
           const subResult = await api.getQuizSubmissions(courseId, quizId);
@@ -102,7 +118,9 @@ const QuizTakePage = () => {
               setStarted(true);
               checkLocalBackup(latest);
             } else {
-              const allowed = quizData.allowed_attempts || -1;
+              // G047: the student's limit includes extra attempts granted
+              // through Moderate quiz.
+              const allowed = effectiveAllowedAttempts(quizData, status);
               if (allowed !== -1 && finished >= allowed) {
                 setCompleted(true);
                 setSubmission(latest);
@@ -439,7 +457,7 @@ const QuizTakePage = () => {
   }
 
   if (!started) {
-    const allowedAttempts = quiz?.allowed_attempts || -1;
+    const allowedAttempts = effectiveAllowedAttempts(quiz, attemptStatus);
     const attemptsRemaining = allowedAttempts === -1 ? 'Unlimited' : Math.max(0, allowedAttempts - previousAttempts);
     const canStart = allowedAttempts === -1 || previousAttempts < allowedAttempts;
     return wrap(
@@ -460,6 +478,11 @@ const QuizTakePage = () => {
             {quiz?.description && (
               <RichContentViewer content={quiz.description} className="mb-6" />
             )}
+            {studentDateLines(attemptStatus).length > 0 && (
+              <ul className="mb-4 text-sm text-text-secondary space-y-0.5" data-testid="quiz-student-dates">
+                {studentDateLines(attemptStatus).map((line) => <li key={line}>{line}</li>)}
+              </ul>
+            )}
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div className="bg-surface-1 rounded-lg p-4">
                 <div className="text-xs text-text-tertiary uppercase tracking-wide font-medium">Points</div>
@@ -469,6 +492,7 @@ const QuizTakePage = () => {
                 <div className="text-xs text-text-tertiary uppercase tracking-wide font-medium">Time Limit</div>
                 <div className="text-lg font-semibold text-text-primary mt-1">
                   {quiz?.time_limit ? `${quiz.time_limit} minutes` : 'None'}
+                  {quiz?.time_limit && attemptStatus?.extra_time > 0 ? ` + ${attemptStatus.extra_time} extra` : ''}
                 </div>
               </div>
               <div className="bg-surface-1 rounded-lg p-4">

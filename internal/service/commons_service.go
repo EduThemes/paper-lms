@@ -401,6 +401,9 @@ func (im *commonsImporter) quiz(ctx context.Context, raw json.RawMessage) error 
 	oldID := q.ID
 	q.ID = 0
 	q.CourseID = im.target
+	// The source quiz's gradebook assignment belongs to the source course;
+	// the copy gets its own (quiz lifecycle link job / first save).
+	q.AssignmentID = nil
 	if err := im.s.quizRepo.Create(ctx, &q); err != nil {
 		return err
 	}

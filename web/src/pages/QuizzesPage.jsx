@@ -12,6 +12,7 @@ import { clearRceDraft } from '../components/rce/rceDrafts';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { dateTimeLocalToISO } from '../utils/datetimeLocal';
 
 const QuizzesPage = () => {
   const { courseId } = useParams();
@@ -22,7 +23,7 @@ const QuizzesPage = () => {
   const [error, setError] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [newQuiz, setNewQuiz] = useState({ title: '', description: '', quiz_type: 'assignment', points_possible: 0, time_limit: '' });
+  const [newQuiz, setNewQuiz] = useState({ title: '', description: '', quiz_type: 'assignment', points_possible: 0, time_limit: '', due_at: '' });
   const [mySubmissions, setMySubmissions] = useState({}); // quizId -> submission
   const { issues: crossCourseIssues, checkAndSave, dismiss: dismissCrossCourse, confirm: confirmCrossCourse } = useCrossCourseCheck(courseId);
 
@@ -82,11 +83,13 @@ const QuizzesPage = () => {
         quiz_type: newQuiz.quiz_type,
         points_possible: Number(newQuiz.points_possible),
         time_limit: newQuiz.time_limit ? Number(newQuiz.time_limit) : null,
+        // G046: due date at creation (availability and overrides live in the editor).
+        due_at: dateTimeLocalToISO(newQuiz.due_at) || null,
         published: false,
       });
       clearRceDraft(`quiz-${courseId}-new-description`);
       setQuizzes((prev) => [...prev, created]);
-      setNewQuiz({ title: '', description: '', quiz_type: 'assignment', points_possible: 0, time_limit: '' });
+      setNewQuiz({ title: '', description: '', quiz_type: 'assignment', points_possible: 0, time_limit: '', due_at: '' });
       setShowCreate(false);
     } catch (err) {
       setError(err.message);
@@ -213,6 +216,16 @@ const QuizzesPage = () => {
                 onChange={(e) => setNewQuiz({ ...newQuiz, time_limit: e.target.value })}
                 className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
                 placeholder="No limit"
+              />
+            </div>
+            <div>
+              <label htmlFor="quiz-due-at-new" className="block text-sm font-medium text-text-secondary mb-1">Due</label>
+              <input
+                id="quiz-due-at-new"
+                type="datetime-local"
+                value={newQuiz.due_at}
+                onChange={(e) => setNewQuiz({ ...newQuiz, due_at: e.target.value })}
+                className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
               />
             </div>
           </div>

@@ -99,11 +99,19 @@ func (s *PlannerService) GetPlannerItems(ctx context.Context, userID uint, start
 
 	// 3. For each course, gather assignments, quizzes, and calendar events.
 	for _, courseID := range courseIDs {
+		// Quizzes are read first: a graded quiz's online_quiz assignment
+		// is listed once, as the quiz.
+		quizResult, quizErr := s.quizRepo.ListByCourseID(ctx, courseID, bigPage)
+		var quizAssignments map[uint]bool
+		if quizErr == nil {
+			quizAssignments = QuizLinkedAssignmentIDs(quizResult.Items)
+		}
+
 		// Assignments
 		assignmentResult, err := s.assignmentRepo.ListByCourseID(ctx, courseID, bigPage)
 		if err == nil {
 			for _, a := range assignmentResult.Items {
-				if a.WorkflowState == "deleted" || !a.Published {
+				if a.WorkflowState == "deleted" || !a.Published || quizAssignments[a.ID] {
 					continue
 				}
 				if a.DueAt == nil || !inDateRange(a.DueAt, startDate, endDate) {
@@ -124,8 +132,7 @@ func (s *PlannerService) GetPlannerItems(ctx context.Context, userID uint, start
 		}
 
 		// Quizzes
-		quizResult, err := s.quizRepo.ListByCourseID(ctx, courseID, bigPage)
-		if err == nil {
+		if quizErr == nil {
 			for _, q := range quizResult.Items {
 				if q.WorkflowState == "deleted" || !q.Published {
 					continue

@@ -15,6 +15,7 @@ import { SubmissionBody } from '../components/SafeHTML';
 import RichContentEditor from '../components/RichContentEditor';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
+import AssignmentQuizBanner, { isQuizAssignment } from '../components/quiz/AssignmentQuizBanner';
 
 function toLocalDatetimeValue(date) {
   const y = date.getFullYear();
@@ -373,6 +374,7 @@ const AssignmentPage = () => {
           ← Back to Course
         </Link>
       </div>
+      {isQuizAssignment(assignment) && <AssignmentQuizBanner courseId={courseId} assignment={assignment} isTeacher={isTeacher} />}
 
       {/* Assignment Header / Edit Form */}
       {editing ? (
@@ -763,6 +765,8 @@ const AssignmentPage = () => {
               ? assignment.submission_types
               : String(assignment.submission_types || '').split(',').map(t => t.trim());
             const isOnPaperOrNone = types.every(t => t === 'on_paper' || t === 'none' || t === '');
+            // A quiz is submitted by taking it (see the banner above).
+            if (types.includes('online_quiz')) return null;
             if (isOnPaperOrNone) {
               return (
                 <div className="bg-surface-0 rounded-lg shadow p-6 text-center text-text-tertiary">

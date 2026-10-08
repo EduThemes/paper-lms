@@ -593,13 +593,21 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 	for _, courseID := range courseIDs {
 		course := courseByID[courseID]
 
+		// Quizzes are read first: a graded quiz's online_quiz assignment
+		// is listed under upcoming once, as the quiz.
+		quizzes, _ := s.quizRepo.ListByCourseID(ctx, courseID, listParams)
+		var quizAssignments map[uint]bool
+		if quizzes != nil {
+			quizAssignments = QuizLinkedAssignmentIDs(quizzes.Items)
+		}
+
 		// Per-course assignments (used for upcoming + grade calculation).
 		assignments, _ := s.assignmentRepo.ListByCourseID(ctx, courseID, repository.PaginationParams{Page: 1, PerPage: 1000})
 		assignmentByID := map[uint]models.Assignment{}
 		if assignments != nil {
 			for _, a := range assignments.Items {
 				assignmentByID[a.ID] = a
-				if a.WorkflowState == "deleted" || !a.Published {
+				if a.WorkflowState == "deleted" || !a.Published || quizAssignments[a.ID] {
 					continue
 				}
 				if a.DueAt != nil && a.DueAt.After(now) && a.DueAt.Before(weekFromNow) {
@@ -616,7 +624,6 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 		}
 
 		// Quizzes — also count toward "due this week".
-		quizzes, _ := s.quizRepo.ListByCourseID(ctx, courseID, listParams)
 		if quizzes != nil {
 			for _, q := range quizzes.Items {
 				if q.WorkflowState == "deleted" || !q.Published {
