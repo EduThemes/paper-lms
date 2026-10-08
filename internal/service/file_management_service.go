@@ -4,25 +4,16 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
-	"strconv"
 
 	"github.com/google/uuid"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 )
-
-// DefaultCourseStorageQuotaMB is Canvas's default course quota.
-const DefaultCourseStorageQuotaMB int64 = 500
-
-// ErrStorageQuotaExceeded is returned when an upload would take a context
-// over its storage quota.
-var ErrStorageQuotaExceeded = errors.New("storage quota exceeded")
 
 // SetTreeRepository enables the file-tree features (folder-scoped and
 // learner-filtered listings, moves, quota usage).
@@ -128,39 +119,8 @@ func (s *FileService) ContextUsage(ctx context.Context, contextType string, cont
 	return s.tree.ContextUsage(ctx, contextType, contextID)
 }
 
-// CourseStorageQuota returns a course's quota in bytes: its own
-// storage_quota, else quotas.default_course_storage_mb for its tenant,
-// else Canvas's 500 MB.
-func CourseStorageQuota(ctx context.Context, course *models.Course, lookup SettingsLookupFunc) int64 {
-	if course != nil && course.StorageQuota != nil && *course.StorageQuota > 0 {
-		return *course.StorageQuota
-	}
-	mb := DefaultCourseStorageQuotaMB
-	if lookup != nil {
-		if raw, err := lookup(ctx, "quotas.default_course_storage_mb"); err == nil && raw != "" {
-			if n, convErr := strconv.ParseInt(raw, 10, 64); convErr == nil && n > 0 {
-				mb = n
-			}
-		}
-	}
-	return mb * 1024 * 1024
-}
-
-// CheckQuota returns ErrStorageQuotaExceeded when adding addBytes (and
-// dropping freeBytes, for a replacement) would exceed quota.
-func (s *FileService) CheckQuota(ctx context.Context, contextType string, contextID uint, quota, addBytes, freeBytes int64) error {
-	if quota <= 0 || s.tree == nil {
-		return nil
-	}
-	used, err := s.tree.ContextUsage(ctx, contextType, contextID)
-	if err != nil {
-		return err
-	}
-	if used-freeBytes+addBytes > quota {
-		return ErrStorageQuotaExceeded
-	}
-	return nil
-}
+// Storage quotas (course G072, account-wide G120) live in one place,
+// the storage_quotas table: see StorageQuotaService.
 
 // ReplaceContent swaps the stored bytes of an existing attachment for a
 // new upload (G071 "replace"). The attachment keeps its id, so every

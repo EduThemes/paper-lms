@@ -93,6 +93,9 @@ type PermissionMiddleware struct {
 	courseRepo     repository.CourseRepository
 	// studentViewCheck (optional) identifies Student View sessions.
 	studentViewCheck StudentViewCheck
+	// permResolver enforces custom-role permission sets (G102); see
+	// course_permissions.go. nil = enrollment-type gating only.
+	permResolver CoursePermissionResolver
 }
 
 // NewPermissionMiddleware creates a new permission middleware. courseRepo is
@@ -337,10 +340,26 @@ func (pm *PermissionMiddleware) courseGate(c *fiber.Ctx, roleSet map[string]bool
 	}
 
 	dec, denial := ResolveCourseEnrollment(c, pm.enrollmentRepo, userID, courseID, callerAccount, course, roleSet)
+	if denial != "" && dec.RoleMismatch && pm.permResolver != nil {
+		// A staff-based custom role may be granted a route its base type
+		// would not pass (G102): resolve the usable enrollment without the
+		// type filter and let the role's permission set decide.
+		if alt, altDenial := ResolveCourseEnrollment(c, pm.enrollmentRepo, userID, courseID, callerAccount, course, nil); altDenial == "" {
+			if allowed, decided := pm.customRoleDecision(c, alt.Enrollment, course, roleSet); decided && allowed {
+				dec, denial = alt, ""
+			}
+		}
+	}
 	if denial != "" {
 		return forbidden(c, denial)
 	}
 	enrollment := dec.Enrollment
+
+	if allowed, decided := pm.customRoleDecision(c, enrollment, course, roleSet); decided && !allowed {
+		// The enrollment carries a custom role and the route maps onto a
+		// permission: the role's permission set decides (G102).
+		return forbidden(c, "insufficient permissions for this action")
+	}
 
 	if course != nil && courseUnpublished(course) && learnerEnrollment(enrollment.Type) && !pm.inStudentView(c, userID, courseID) {
 		return forbidden(c, "this course has not been published yet")

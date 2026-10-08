@@ -74,8 +74,9 @@ func newFilesLaneFixture(t *testing.T) *filesLaneFixture {
 	fileSvc := service.NewFileService(postgres.NewFolderRepository(g), postgres.NewAttachmentRepository(g), t.TempDir()).
 		SetTreeRepository(postgres.NewCourseFilesRepository(g))
 	fh := handlers.NewFileHandler(fileSvc, enrollRepo, nil, nil).SetAuthorizer(authz).
-		SetQuota(courseRepo, func(context.Context, string) (string, error) { return "", nil })
-	ch := handlers.NewCourseHandler(service.NewCourseService(courseRepo, enrollRepo, nil), service.NewEnrollmentService(enrollRepo)).SetUserRepo(users)
+		SetQuota(service.NewStorageQuotaService(g))
+	ch := handlers.NewCourseHandler(service.NewCourseService(courseRepo, enrollRepo, nil), service.NewEnrollmentService(enrollRepo)).SetUserRepo(users).
+		SetStorageQuotas(service.NewStorageQuotaService(g))
 	return &filesLaneFixture{g: g, files: fh, folders: handlers.NewFolderHandler(fileSvc, authz), courses: ch}
 }
 

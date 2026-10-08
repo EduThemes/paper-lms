@@ -1,31 +1,54 @@
 package service
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"path"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
-	"github.com/EduThemes/paper-lms/internal/auth/initialpassword"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"gorm.io/gorm"
 )
 
+// SISImportService imports Canvas-format SIS CSVs (G111). A batch is one
+// upload: a single CSV or a zip of CSVs. The files are stored with the
+// batch and processed off the request path in Canvas's dependency order
+// (change_sis_id, accounts, terms, users, logins, courses, sections,
+// enrollments, admins, group_categories, groups, group_memberships,
+// user_observers). Every row is confined to the batch's account.
 type SISImportService struct {
 	batchRepo      repository.SISBatchRepository
 	errorRepo      repository.SISBatchErrorRepository
 	userRepo       repository.UserRepository
-	courseRepo      repository.CourseRepository
+	courseRepo     repository.CourseRepository
 	sectionRepo    repository.SectionRepository
 	enrollmentRepo repository.EnrollmentRepository
 	db             *gorm.DB
 	// sectionService (SetSectionService) applies xlists.csv rows.
 	sectionService *SectionService
+
+	// observers links observer → student for user_observers.csv. Wired
+	// via SetObserverLinker; without it those rows are refused.
+	observers SISObserverLinker
+	// async processes a batch in a goroutine (production); tests run it
+	// inline.
+	async bool
+}
+
+// SISObserverLinker pairs and unpairs observers (*ObserverService).
+type SISObserverLinker interface {
+	LinkObserverToStudent(ctx context.Context, observerUserID, studentUserID uint) error
+	UnlinkObserver(ctx context.Context, observerUserID, studentUserID uint) error
 }
 
 func NewSISImportService(
@@ -41,11 +64,23 @@ func NewSISImportService(
 		batchRepo:      batchRepo,
 		errorRepo:      errorRepo,
 		userRepo:       userRepo,
-		courseRepo:      courseRepo,
+		courseRepo:     courseRepo,
 		sectionRepo:    sectionRepo,
 		enrollmentRepo: enrollmentRepo,
 		db:             db,
 	}
+}
+
+// SetObserverLinker wires user_observers.csv support.
+func (s *SISImportService) SetObserverLinker(l SISObserverLinker) *SISImportService {
+	s.observers = l
+	return s
+}
+
+// SetAsync makes StartImport process batches in the background.
+func (s *SISImportService) SetAsync(async bool) *SISImportService {
+	s.async = async
+	return s
 }
 
 func (s *SISImportService) CreateBatch(ctx context.Context, accountID uint) (*models.SISBatch, error) {
@@ -91,9 +126,271 @@ func (s *SISImportService) GetBatchErrors(ctx context.Context, batchID, accountI
 	return s.errorRepo.ListByBatchID(ctx, batchID)
 }
 
-// ProcessImport runs one CSV against the batch. Every row is scoped to
-// the batch's account: users are created in it, SIS-ID lookups only
-// match rows in it, and courses can never be placed in another tenant.
+// ListBatchFiles returns the files of a batch of accountID (without their
+// content).
+func (s *SISImportService) ListBatchFiles(ctx context.Context, batchID, accountID uint) ([]models.SISBatchFile, error) {
+	if _, err := s.GetBatch(ctx, batchID, accountID); err != nil {
+		return nil, err
+	}
+	var files []models.SISBatchFile
+	err := s.db.WithContext(ctx).Omit("content").Where("sis_batch_id = ?", batchID).Order("id").Find(&files).Error
+	return files, err
+}
+
+// ---------------------------------------------------------------------------
+// Import types and detection
+// ---------------------------------------------------------------------------
+
+// sisImportOrder is Canvas's processing order: a row may only reference
+// objects from its own file or one earlier in the list.
+var sisImportOrder = []string{
+	"change_sis_id", "accounts", "terms", "users", "logins", "courses",
+	"sections", "xlists", "enrollments", "admins", "group_categories",
+	"groups", "group_memberships", "user_observers",
+}
+
+// sisTypeSignatures identifies a CSV by its header (Canvas detects the
+// importer from the columns). Checked in order; every listed column must
+// be present.
+var sisTypeSignatures = []struct {
+	importType string
+	columns    []string
+}{
+	{"change_sis_id", []string{"old_id", "new_id", "type"}},
+	{"user_observers", []string{"observer_id", "student_id"}},
+	{"group_memberships", []string{"group_id", "user_id"}},
+	{"groups", []string{"group_id", "name"}},
+	{"group_categories", []string{"group_category_id", "category_name"}},
+	{"xlists", []string{"xlist_course_id", "section_id"}},
+	{"enrollments", []string{"course_id", "user_id", "role"}},
+	{"enrollments", []string{"section_id", "user_id", "role"}},
+	{"admins", []string{"user_id", "account_id", "role"}},
+	{"sections", []string{"section_id", "course_id", "name"}},
+	{"courses", []string{"course_id", "short_name", "long_name"}},
+	{"terms", []string{"term_id", "name"}},
+	{"logins", []string{"user_id", "login_id", "existing_user_id"}},
+	{"logins", []string{"user_id", "login_id", "existing_paper_user_id"}},
+	{"logins", []string{"user_id", "login_id", "existing_canvas_user_id"}},
+	{"users", []string{"user_id", "login_id"}},
+	{"users", []string{"user_id", "first_name"}},
+	{"users", []string{"user_id", "full_name"}},
+	{"accounts", []string{"account_id", "parent_account_id", "name"}},
+}
+
+// DetectSISImportType returns the import type of a CSV header, or "".
+func DetectSISImportType(header []string) string {
+	cols := map[string]bool{}
+	for _, h := range header {
+		cols[strings.TrimSpace(strings.ToLower(strings.TrimPrefix(h, "\ufeff")))] = true
+	}
+	for _, sig := range sisTypeSignatures {
+		ok := true
+		for _, c := range sig.columns {
+			if !cols[c] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return sig.importType
+		}
+	}
+	return ""
+}
+
+func validSISImportType(t string) bool {
+	for _, k := range sisImportOrder {
+		if k == t {
+			return true
+		}
+	}
+	return false
+}
+
+// ---------------------------------------------------------------------------
+// Starting an import
+// ---------------------------------------------------------------------------
+
+// SISUpload is one uploaded file (a CSV or a zip of CSVs).
+type SISUpload struct {
+	FileName string
+	Data     []byte
+	// ImportType forces the type of a single CSV (legacy import_type
+	// form field); "" = detect from the header.
+	ImportType string
+}
+
+// SISImportOptions are Canvas's sis_imports options.
+type SISImportOptions struct {
+	BatchMode                bool
+	BatchModeTermID          *uint
+	DiffingDataSetIdentifier string
+	ChangeThreshold          *int
+}
+
+// Limits on what one upload may expand to.
+const (
+	sisMaxFiles          = 100
+	sisMaxUncompressedMB = 200
+)
+
+// Errors surfaced to handlers.
+var (
+	ErrSISNoFiles         = errors.New("no CSV files found in the upload")
+	ErrSISUnknownCSV      = errors.New("could not tell which SIS import a CSV is from its header")
+	ErrSISTooLarge        = errors.New("the upload expands past the import size limit")
+	ErrSISBatchModeTerm   = errors.New("batch mode requires batch_mode_term_id naming a term of this account")
+	ErrSISChangeThreshold = errors.New("change_threshold must be between 1 and 100")
+)
+
+// expandUpload turns uploads into stored batch files: CSVs are kept, zips
+// are unpacked (CSV entries only), and each CSV's type is detected.
+func expandUpload(uploads []SISUpload) ([]models.SISBatchFile, error) {
+	var out []models.SISBatchFile
+	var total int64
+	addCSV := func(name string, data []byte, forced string) error {
+		total += int64(len(data))
+		if total > sisMaxUncompressedMB*1024*1024 {
+			return ErrSISTooLarge
+		}
+		t := forced
+		if t == "" {
+			r := csv.NewReader(bytes.NewReader(data))
+			header, err := r.Read()
+			if err != nil {
+				return fmt.Errorf("%s: %w", name, ErrSISUnknownCSV)
+			}
+			t = DetectSISImportType(header)
+		}
+		if !validSISImportType(t) {
+			return fmt.Errorf("%s: %w", name, ErrSISUnknownCSV)
+		}
+		out = append(out, models.SISBatchFile{FileName: name, ImportType: t, Content: data})
+		if len(out) > sisMaxFiles {
+			return ErrSISTooLarge
+		}
+		return nil
+	}
+	for _, u := range uploads {
+		isZip := strings.HasSuffix(strings.ToLower(u.FileName), ".zip") || bytes.HasPrefix(u.Data, []byte("PK\x03\x04"))
+		if !isZip {
+			if err := addCSV(path.Base(u.FileName), u.Data, u.ImportType); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		zr, err := zip.NewReader(bytes.NewReader(u.Data), int64(len(u.Data)))
+		if err != nil {
+			return nil, fmt.Errorf("%s: not a valid zip file", u.FileName)
+		}
+		for _, f := range zr.File {
+			if f.FileInfo().IsDir() || !strings.HasSuffix(strings.ToLower(f.Name), ".csv") ||
+				strings.HasPrefix(path.Base(f.Name), ".") || strings.Contains(f.Name, "__MACOSX") {
+				continue
+			}
+			if f.UncompressedSize64 > sisMaxUncompressedMB*1024*1024 {
+				return nil, ErrSISTooLarge
+			}
+			rc, err := f.Open()
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", f.Name, err)
+			}
+			data, err := io.ReadAll(io.LimitReader(rc, sisMaxUncompressedMB*1024*1024+1))
+			_ = rc.Close()
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", f.Name, err)
+			}
+			if err := addCSV(path.Base(f.Name), data, ""); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil, ErrSISNoFiles
+	}
+	return out, nil
+}
+
+// StartImport validates and stores an upload as a new batch of accountID
+// and processes it (in the background when async is on).
+func (s *SISImportService) StartImport(ctx context.Context, accountID, userID uint, opts SISImportOptions, uploads []SISUpload) (*models.SISBatch, error) {
+	files, err := expandUpload(uploads)
+	if err != nil {
+		return nil, err
+	}
+	if opts.ChangeThreshold != nil && (*opts.ChangeThreshold < 1 || *opts.ChangeThreshold > 100) {
+		return nil, ErrSISChangeThreshold
+	}
+	if opts.BatchMode {
+		if opts.BatchModeTermID == nil {
+			return nil, ErrSISBatchModeTerm
+		}
+		var n int64
+		s.db.WithContext(ctx).Model(&models.EnrollmentTerm{}).
+			Where("id = ? AND account_id = ?", *opts.BatchModeTermID, accountID).Count(&n)
+		if n == 0 {
+			return nil, ErrSISBatchModeTerm
+		}
+	}
+	batch := &models.SISBatch{
+		AccountID:       accountID,
+		UserID:          userID,
+		WorkflowState:   "created",
+		BatchMode:       opts.BatchMode,
+		BatchModeTermID: opts.BatchModeTermID,
+		ChangeThreshold: opts.ChangeThreshold,
+	}
+	if id := strings.TrimSpace(opts.DiffingDataSetIdentifier); id != "" {
+		batch.DiffingDataSetIdentifier = &id
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(batch).Error; err != nil {
+			return err
+		}
+		for i := range files {
+			files[i].SISBatchID = batch.ID
+			if err := tx.Create(&files[i]).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if s.async {
+		id := batch.ID
+		go func() {
+			defer recoverFromPanic("sis import")
+			_ = s.RunBatch(context.Background(), id)
+		}()
+		return batch, nil
+	}
+	if err := s.RunBatch(ctx, batch.ID); err != nil {
+		return nil, err
+	}
+	return s.GetBatch(ctx, batch.ID, accountID)
+}
+
+// ResumePendingBatches processes batches left in "created" (e.g. the
+// server restarted before their goroutine ran). Called by the scheduler.
+func (s *SISImportService) ResumePendingBatches(ctx context.Context) error {
+	var ids []uint
+	cutoff := time.Now().Add(-2 * time.Minute)
+	if err := s.db.WithContext(ctx).Model(&models.SISBatch{}).
+		Where("workflow_state = ? AND created_at < ? AND id IN (SELECT sis_batch_id FROM sis_batch_files)", "created", cutoff).
+		Order("id").Limit(20).Pluck("id", &ids).Error; err != nil {
+		return err
+	}
+	for _, id := range ids {
+		_ = s.RunBatch(ctx, id)
+	}
+	return nil
+}
+
+// ProcessImport runs one CSV of a known type against an existing batch,
+// synchronously (the original single-file entry point, kept for internal
+// callers and tests).
 func (s *SISImportService) ProcessImport(ctx context.Context, batchID uint, csvType string, reader io.Reader) error {
 	batch, err := s.batchRepo.FindByID(ctx, batchID)
 	if err != nil {
@@ -102,659 +399,179 @@ func (s *SISImportService) ProcessImport(ctx context.Context, batchID uint, csvT
 	if batch.AccountID == 0 {
 		return errors.New("sis batch has no account")
 	}
-	accountID := batch.AccountID
+	if !validSISImportType(csvType) {
+		return fmt.Errorf("unknown import type: %s", csvType)
+	}
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return err
+	}
+	return s.runFiles(ctx, batch, []models.SISBatchFile{{FileName: csvType + ".csv", ImportType: csvType, Content: data}})
+}
 
-	// Update to importing state
+// RunBatch processes a stored batch.
+func (s *SISImportService) RunBatch(ctx context.Context, batchID uint) error {
+	batch, err := s.batchRepo.FindByID(ctx, batchID)
+	if err != nil || batch == nil {
+		return ErrSISBatchNotFound
+	}
+	if batch.WorkflowState != "created" {
+		return nil // already picked up
+	}
+	// Claim the batch so a concurrent resume can't run it twice.
+	res := s.db.WithContext(ctx).Model(&models.SISBatch{}).
+		Where("id = ? AND workflow_state = ?", batchID, "created").
+		Update("workflow_state", "importing")
+	if res.Error != nil || res.RowsAffected == 0 {
+		return res.Error
+	}
 	batch.WorkflowState = "importing"
+	var files []models.SISBatchFile
+	if err := s.db.WithContext(ctx).Where("sis_batch_id = ?", batchID).Order("id").Find(&files).Error; err != nil {
+		return err
+	}
+	return s.runFiles(ctx, batch, files)
+}
+
+// runFiles processes files against batch in dependency order and records
+// the outcome on the batch.
+func (s *SISImportService) runFiles(ctx context.Context, batch *models.SISBatch, files []models.SISBatchFile) error {
+	now := time.Now()
+	batch.WorkflowState = "importing"
+	batch.StartedAt = &now
+	_ = s.batchRepo.Update(ctx, batch)
+
+	run := newSISRun(ctx, s, batch)
+
+	sort.SliceStable(files, func(i, j int) bool {
+		return sisOrderIndex(files[i].ImportType) < sisOrderIndex(files[j].ImportType)
+	})
+
+	// Parse every file up front so the progress bar has a total.
+	parsed := make([]*sisParsedFile, 0, len(files))
+	for _, f := range files {
+		pf, err := parseSISFile(f)
+		if err != nil {
+			run.fail(0, f.FileName, err.Error())
+			continue
+		}
+		parsed = append(parsed, pf)
+	}
+
+	// Diffing: apply only what changed since the previous batch with the
+	// same data set identifier.
+	if batch.DiffingDataSetIdentifier != nil {
+		if err := run.applyDiffing(parsed); err != nil {
+			return s.finish(ctx, run, err)
+		}
+	}
+	for _, pf := range parsed {
+		batch.TotalRows += len(pf.rows)
+	}
+
+	for _, pf := range parsed {
+		run.importFile(pf)
+	}
+
+	var runErr error
+	if batch.BatchMode && batch.BatchModeTermID != nil {
+		runErr = run.applyBatchMode()
+	}
+	return s.finish(ctx, run, runErr)
+}
+
+// finish records the final state of a run.
+func (s *SISImportService) finish(ctx context.Context, run *sisRun, runErr error) error {
+	batch := run.batch
+	ended := time.Now()
+	batch.EndedAt = &ended
+	batch.Progress = 100
+	batch.ProcessedRows = run.processed
+	counts, _ := json.Marshal(map[string]interface{}{"counts": run.counts, "files": run.fileNames})
+	batch.Data = string(counts)
+	switch {
+	case errors.Is(runErr, errSISAborted):
+		batch.WorkflowState = "aborted"
+	case runErr != nil:
+		batch.WorkflowState = "failed"
+	case run.errors > 0:
+		batch.WorkflowState = "imported_with_messages"
+	default:
+		batch.WorkflowState = "imported"
+	}
+	// The stored CSVs outlive the run (diffing baseline, file listing):
+	// drop the plaintext passwords users.csv / logins.csv carried.
+	s.scrubBatchPasswords(ctx, batch.ID)
 	if err := s.batchRepo.Update(ctx, batch); err != nil {
 		return err
 	}
-
-	csvReader := csv.NewReader(reader)
-
-	var processErr error
-	switch csvType {
-	case "users":
-		processErr = s.processUsersCSV(ctx, batchID, accountID, csvReader)
-	case "courses":
-		processErr = s.processCoursesCSV(ctx, batchID, accountID, csvReader)
-	case "sections":
-		processErr = s.processSectionsCSV(ctx, batchID, accountID, csvReader)
-	case "enrollments":
-		processErr = s.processEnrollmentsCSV(ctx, batchID, accountID, csvReader)
-	case "xlists":
-		processErr = s.processXlistsCSV(ctx, batchID, accountID, csvReader)
-	default:
-		processErr = fmt.Errorf("unknown import type: %s", csvType)
+	if errors.Is(runErr, errSISAborted) {
+		return nil
 	}
-
-	// Reload batch to get updated row counts
-	batch, _ = s.batchRepo.FindByID(ctx, batchID)
-
-	if processErr != nil {
-		batch.WorkflowState = "failed"
-		batch.Progress = 100
-		s.batchRepo.Update(ctx, batch)
-		return processErr
-	}
-
-	// Check if there were any errors recorded
-	errors, _ := s.errorRepo.ListByBatchID(ctx, batchID)
-	if len(errors) > 0 {
-		batch.WorkflowState = "imported_with_messages"
-	} else {
-		batch.WorkflowState = "imported"
-	}
-	batch.Progress = 100
-	s.batchRepo.Update(ctx, batch)
-
-	return nil
+	return runErr
 }
 
-func (s *SISImportService) processUsersCSV(ctx context.Context, batchID, accountID uint, reader *csv.Reader) error {
-	// Read header row
+func sisOrderIndex(t string) int {
+	for i, k := range sisImportOrder {
+		if k == t {
+			return i
+		}
+	}
+	return len(sisImportOrder)
+}
+
+// sisParsedFile is a CSV parsed into rows keyed by lower-cased column.
+type sisParsedFile struct {
+	name       string
+	importType string
+	header     []string
+	rows       []sisRow
+}
+
+type sisRow struct {
+	line   int // 1-based CSV line (header = 1)
+	values map[string]string
+}
+
+func (r sisRow) get(col string) string { return strings.TrimSpace(r.values[col]) }
+
+func parseSISFile(f models.SISBatchFile) (*sisParsedFile, error) {
+	reader := csv.NewReader(bytes.NewReader(f.Content))
+	reader.FieldsPerRecord = -1
 	header, err := reader.Read()
 	if err != nil {
-		return fmt.Errorf("failed to read CSV header: %w", err)
+		return nil, fmt.Errorf("failed to read CSV header: %v", err)
 	}
-
-	colIndex := buildColumnIndex(header)
-
-	batch, _ := s.batchRepo.FindByID(ctx, batchID)
-	rowNum := 1
-
+	cols := make([]string, len(header))
+	for i, h := range header {
+		cols[i] = strings.TrimSpace(strings.ToLower(strings.TrimPrefix(h, "\ufeff")))
+	}
+	pf := &sisParsedFile{name: f.FileName, importType: f.ImportType, header: cols}
+	line := 1
 	for {
-		record, err := reader.Read()
+		rec, err := reader.Read()
 		if err == io.EOF {
 			break
 		}
+		line++
 		if err != nil {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to read row: %v", err), "users.csv")
-			rowNum++
+			pf.rows = append(pf.rows, sisRow{line: line, values: map[string]string{"__error": err.Error()}})
 			continue
 		}
-
-		rowNum++
-		batch.TotalRows = rowNum - 1
-
-		sisUserID := getColumn(record, colIndex, "user_id")
-		loginID := getColumn(record, colIndex, "login_id")
-		password := getColumn(record, colIndex, "password")
-		firstName := getColumn(record, colIndex, "first_name")
-		lastName := getColumn(record, colIndex, "last_name")
-		email := getColumn(record, colIndex, "email")
-		status := getColumn(record, colIndex, "status")
-
-		if sisUserID == "" {
-			s.recordError(ctx, batchID, rowNum, "user_id is required", "users.csv")
-			continue
-		}
-
-		if status == "deleted" {
-			batch.ProcessedRows++
-			continue
-		}
-
-		// Try to find existing user by SIS user ID — in this tenant only.
-		existingUser, findErr := s.findUserBySISID(ctx, sisUserID, accountID)
-		if findErr != nil && findErr != gorm.ErrRecordNotFound {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("error looking up user: %v", findErr), "users.csv")
-			continue
-		}
-
-		if existingUser != nil {
-			// Update existing user
-			if name := strings.TrimSpace(firstName + " " + lastName); name != "" {
-				existingUser.Name = name
-			}
-			if loginID != "" {
-				existingUser.LoginID = loginID
-			}
-			if email != "" {
-				existingUser.Email = email
-			}
-			if firstName != "" && lastName != "" {
-				existingUser.SortableName = lastName + ", " + firstName
-				existingUser.ShortName = firstName
-			}
-			if err := s.userRepo.Update(ctx, existingUser); err != nil {
-				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to update user: %v", err), "users.csv")
-				continue
-			}
-		} else {
-			// Create new user
-			name := strings.TrimSpace(firstName + " " + lastName)
-			sortableName := name
-			if firstName != "" && lastName != "" {
-				sortableName = lastName + ", " + firstName
-			}
-
-			// SIS user IDs are globally unique (idx_users_sis_user_id);
-			// a collision with another tenant's user must not be
-			// resolved by touching that user. Refuse the row instead.
-			if s.sisIDTaken(ctx, "users", "sis_user_id", sisUserID) {
-				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("user_id '%s' is already in use", sisUserID), "users.csv")
-				continue
-			}
-
-			user := &models.User{
-				AccountID:    accountID,
-				Name:         name,
-				SortableName: sortableName,
-				ShortName:    firstName,
-				LoginID:      loginID,
-				Email:        email,
-				SISUserID:    &sisUserID,
-			}
-
-			if password != "" {
-				if err := user.HashPassword(password); err != nil {
-					s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to hash password: %v", err), "users.csv")
-					continue
-				}
-			} else {
-				// No password supplied in the CSV — generate a
-				// cryptographically random initial password. The plaintext
-				// is irrecoverable; the user MUST go through the
-				// password-reset flow (or use SSO) before they can log in.
-				// Prior code stored bcrypt("changeme") for every such row,
-				// which is the canonical default-credential vulnerability.
-				initialPW, pwErr := initialpassword.GenerateInitialPassword()
-				if pwErr != nil {
-					s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to generate initial password: %v", pwErr), "users.csv")
-					continue
-				}
-				if err := user.HashPassword(initialPW); err != nil {
-					s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to hash default password: %v", err), "users.csv")
-					continue
-				}
-				// Wave 1.6 follow-up: the random initial password
-				// is irrecoverable, so flag the row so the
-				// LoginPipeline gates session minting and forces a
-				// real password before the user gets any session.
-				// Only set when the CSV did not supply a password —
-				// an admin who explicitly typed a password in the
-				// import file is expected to communicate it out-of-
-				// band and is not subject to the gate.
-				user.RequiresPasswordReset = true
-			}
-
-			if err := s.userRepo.Create(ctx, user); err != nil {
-				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to create user: %v", err), "users.csv")
-				continue
+		vals := make(map[string]string, len(cols))
+		for i, c := range cols {
+			if i < len(rec) {
+				vals[c] = rec[i]
 			}
 		}
-
-		batch.ProcessedRows++
-		if batch.TotalRows > 0 {
-			batch.Progress = (batch.ProcessedRows * 100) / batch.TotalRows
-		}
-		s.batchRepo.Update(ctx, batch)
+		pf.rows = append(pf.rows, sisRow{line: line, values: vals})
 	}
-
-	batch.TotalRows = rowNum - 1
-	s.batchRepo.Update(ctx, batch)
-	return nil
+	return pf, nil
 }
 
-func (s *SISImportService) processCoursesCSV(ctx context.Context, batchID, accountID uint, reader *csv.Reader) error {
-	header, err := reader.Read()
-	if err != nil {
-		return fmt.Errorf("failed to read CSV header: %w", err)
-	}
-
-	colIndex := buildColumnIndex(header)
-
-	batch, _ := s.batchRepo.FindByID(ctx, batchID)
-	rowNum := 1
-
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to read row: %v", err), "courses.csv")
-			rowNum++
-			continue
-		}
-
-		rowNum++
-		batch.TotalRows = rowNum - 1
-
-		sisCourseID := getColumn(record, colIndex, "course_id")
-		shortName := getColumn(record, colIndex, "short_name")
-		longName := getColumn(record, colIndex, "long_name")
-		accountIDStr := getColumn(record, colIndex, "account_id")
-		status := getColumn(record, colIndex, "status")
-
-		if sisCourseID == "" {
-			s.recordError(ctx, batchID, rowNum, "course_id is required", "courses.csv")
-			continue
-		}
-
-		// Map status to workflow state
-		workflowState := models.CourseAvailable
-		if status == "active" {
-			workflowState = models.CourseAvailable
-		} else if status == "deleted" {
-			workflowState = models.CourseDeleted
-		}
-
-		// Courses always land in the batch's account. Canvas's
-		// courses.csv account_id names a (sub-)account by SIS id; Paper
-		// tenants are single-level, so the column is accepted only when
-		// it names the batch's own account (by sis_account_id or numeric
-		// id). Anything else is refused — a CSV must never be able to
-		// place a course in another tenant.
-		if accountIDStr != "" && !s.accountRefMatches(ctx, accountIDStr, accountID) {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("account_id '%s' does not match the importing account", accountIDStr), "courses.csv")
-			continue
-		}
-
-		// Try to find existing course by SIS course ID (this tenant only)
-		existingCourse, findErr := s.findCourseBySISID(ctx, sisCourseID, accountID)
-		if findErr != nil && findErr != gorm.ErrRecordNotFound {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("error looking up course: %v", findErr), "courses.csv")
-			continue
-		}
-
-		if existingCourse != nil {
-			// Update existing course
-			if longName != "" {
-				existingCourse.Name = longName
-			}
-			if shortName != "" {
-				existingCourse.CourseCode = shortName
-			}
-			existingCourse.WorkflowState = workflowState
-			if err := s.courseRepo.Update(ctx, existingCourse); err != nil {
-				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to update course: %v", err), "courses.csv")
-				continue
-			}
-		} else {
-			if s.sisIDTaken(ctx, "courses", "sis_course_id", sisCourseID) {
-				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("course_id '%s' is already in use", sisCourseID), "courses.csv")
-				continue
-			}
-			course := &models.Course{
-				Name:          longName,
-				CourseCode:    shortName,
-				SISCourseID:   &sisCourseID,
-				AccountID:     accountID,
-				WorkflowState: workflowState,
-			}
-			if err := s.courseRepo.Create(ctx, course); err != nil {
-				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to create course: %v", err), "courses.csv")
-				continue
-			}
-		}
-
-		batch.ProcessedRows++
-		if batch.TotalRows > 0 {
-			batch.Progress = (batch.ProcessedRows * 100) / batch.TotalRows
-		}
-		s.batchRepo.Update(ctx, batch)
-	}
-
-	batch.TotalRows = rowNum - 1
-	s.batchRepo.Update(ctx, batch)
-	return nil
-}
-
-func (s *SISImportService) processSectionsCSV(ctx context.Context, batchID, accountID uint, reader *csv.Reader) error {
-	header, err := reader.Read()
-	if err != nil {
-		return fmt.Errorf("failed to read CSV header: %w", err)
-	}
-
-	colIndex := buildColumnIndex(header)
-
-	batch, _ := s.batchRepo.FindByID(ctx, batchID)
-	rowNum := 1
-
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to read row: %v", err), "sections.csv")
-			rowNum++
-			continue
-		}
-
-		rowNum++
-		batch.TotalRows = rowNum - 1
-
-		sisSectionID := getColumn(record, colIndex, "section_id")
-		sisCourseID := getColumn(record, colIndex, "course_id")
-		name := getColumn(record, colIndex, "name")
-		status := getColumn(record, colIndex, "status")
-
-		if sisSectionID == "" {
-			s.recordError(ctx, batchID, rowNum, "section_id is required", "sections.csv")
-			continue
-		}
-
-		if sisCourseID == "" {
-			s.recordError(ctx, batchID, rowNum, "course_id is required", "sections.csv")
-			continue
-		}
-
-		// Look up course by SIS course ID (this tenant only)
-		course, findErr := s.findCourseBySISID(ctx, sisCourseID, accountID)
-		if findErr != nil {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("course with sis_course_id '%s' not found", sisCourseID), "sections.csv")
-			continue
-		}
-
-		workflowState := "active"
-		if status == "deleted" {
-			workflowState = "deleted"
-		}
-
-		// Try to find existing section by SIS section ID (this tenant only)
-		existingSection, findErr := s.findSectionBySISID(ctx, sisSectionID, accountID)
-		if findErr != nil && findErr != gorm.ErrRecordNotFound {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("error looking up section: %v", findErr), "sections.csv")
-			continue
-		}
-
-		startAt, endAt, dateErr := sisDates(record, colIndex)
-		if dateErr != nil {
-			s.recordError(ctx, batchID, rowNum, dateErr.Error(), "sections.csv")
-			continue
-		}
-
-		if existingSection != nil {
-			// Update existing section
-			if name != "" {
-				existingSection.Name = name
-			}
-			if existingSection.NonxlistCourseID != nil {
-				// Cross-listed (xlists.csv / UI): the SIS course is the
-				// home course; the section stays where it was cross-listed.
-				existingSection.NonxlistCourseID = &course.ID
-				if existingSection.CourseID == course.ID {
-					existingSection.NonxlistCourseID = nil
-				}
-			} else {
-				existingSection.CourseID = course.ID
-			}
-			existingSection.WorkflowState = workflowState
-			applySISSectionDates(existingSection, startAt, endAt)
-			if err := s.db.WithContext(ctx).Save(existingSection).Error; err != nil {
-				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to update section: %v", err), "sections.csv")
-				continue
-			}
-		} else {
-			if s.sisIDTaken(ctx, "course_sections", "sis_section_id", sisSectionID) {
-				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("section_id '%s' is already in use", sisSectionID), "sections.csv")
-				continue
-			}
-			section := &models.CourseSection{
-				CourseID:      course.ID,
-				Name:          name,
-				SISSectionID:  &sisSectionID,
-				WorkflowState: workflowState,
-			}
-			applySISSectionDates(section, startAt, endAt)
-			if err := s.sectionRepo.Create(ctx, section); err != nil {
-				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to create section: %v", err), "sections.csv")
-				continue
-			}
-		}
-
-		batch.ProcessedRows++
-		if batch.TotalRows > 0 {
-			batch.Progress = (batch.ProcessedRows * 100) / batch.TotalRows
-		}
-		s.batchRepo.Update(ctx, batch)
-	}
-
-	batch.TotalRows = rowNum - 1
-	s.batchRepo.Update(ctx, batch)
-	return nil
-}
-
-func (s *SISImportService) processEnrollmentsCSV(ctx context.Context, batchID, accountID uint, reader *csv.Reader) error {
-	header, err := reader.Read()
-	if err != nil {
-		return fmt.Errorf("failed to read CSV header: %w", err)
-	}
-
-	colIndex := buildColumnIndex(header)
-
-	batch, _ := s.batchRepo.FindByID(ctx, batchID)
-	rowNum := 1
-
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to read row: %v", err), "enrollments.csv")
-			rowNum++
-			continue
-		}
-
-		rowNum++
-		batch.TotalRows = rowNum - 1
-
-		sisCourseID := getColumn(record, colIndex, "course_id")
-		sisUserID := getColumn(record, colIndex, "user_id")
-		role := getColumn(record, colIndex, "role")
-		sisSectionID := getColumn(record, colIndex, "section_id")
-		status := getColumn(record, colIndex, "status")
-		sisAssociatedUserID := getColumn(record, colIndex, "associated_user_id")
-
-		if sisCourseID == "" {
-			s.recordError(ctx, batchID, rowNum, "course_id is required", "enrollments.csv")
-			continue
-		}
-		if sisUserID == "" {
-			s.recordError(ctx, batchID, rowNum, "user_id is required", "enrollments.csv")
-			continue
-		}
-
-		// Look up course by SIS course ID (this tenant only)
-		course, findErr := s.findCourseBySISID(ctx, sisCourseID, accountID)
-		if findErr != nil {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("course with sis_course_id '%s' not found", sisCourseID), "enrollments.csv")
-			continue
-		}
-
-		// Look up user by SIS user ID (this tenant only)
-		user, findErr := s.findUserBySISID(ctx, sisUserID, accountID)
-		if findErr != nil {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("user with sis_user_id '%s' not found", sisUserID), "enrollments.csv")
-			continue
-		}
-
-		// Determine workflow state from status
-		var workflowState models.EnrollmentWorkflow
-		switch strings.ToLower(status) {
-		case "", "active":
-			workflowState = models.EnrollmentActive
-		case "deleted":
-			workflowState = models.EnrollmentDeleted
-		case "inactive":
-			workflowState = models.EnrollmentInactive
-		case "completed", "concluded":
-			workflowState = models.EnrollmentCompleted
-		default:
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("invalid status '%s' (expected active, deleted, inactive or completed)", status), "enrollments.csv")
-			continue
-		}
-
-		// Map role to enrollment type. Unknown roles are refused rather
-		// than stored verbatim: a Type outside the five base types fails
-		// every course-role check while still passing "is enrolled".
-		enrollmentType, roleName, ok := s.mapSISEnrollmentRole(ctx, role, accountID)
-		if !ok {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("invalid role '%s' (expected student, teacher, ta, observer, designer or a custom role name)", role), "enrollments.csv")
-			continue
-		}
-
-		startAt, endAt, dateErr := sisDates(record, colIndex)
-		if dateErr != nil {
-			s.recordError(ctx, batchID, rowNum, dateErr.Error(), "enrollments.csv")
-			continue
-		}
-		limitSection := strings.EqualFold(getColumn(record, colIndex, "limit_section_privileges"), "true")
-
-		enrollment := &models.Enrollment{
-			UserID:                         user.ID,
-			CourseID:                       course.ID,
-			Type:                           enrollmentType,
-			Role:                           roleName,
-			WorkflowState:                  workflowState,
-			StartAt:                        startAt,
-			EndAt:                          endAt,
-			LimitPrivilegesToCourseSection: limitSection,
-		}
-
-		// Optionally look up section by SIS section ID. The section must
-		// belong to the enrollment's course — or have been cross-listed
-		// out of it (G108), in which case the enrollment lives in the
-		// course the section now belongs to, as in Canvas. Without this
-		// every nightly enrollments.csv row for a cross-listed section
-		// failed.
-		if sisSectionID != "" {
-			section, sectionErr := s.findSectionBySISID(ctx, sisSectionID, accountID)
-			crosslistedOut := sectionErr == nil && section.NonxlistCourseID != nil && *section.NonxlistCourseID == course.ID
-			if sectionErr != nil || (section.CourseID != course.ID && !crosslistedOut) {
-				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("section with sis_section_id '%s' not found in course '%s'", sisSectionID, sisCourseID), "enrollments.csv")
-				continue
-			}
-			enrollment.CourseSectionID = &section.ID
-			enrollment.CourseID = section.CourseID
-		}
-
-		// Observers may name the observed student (Canvas's
-		// associated_user_id column, a SIS user id).
-		if sisAssociatedUserID != "" && enrollmentType == "ObserverEnrollment" {
-			observee, obsErr := s.findUserBySISID(ctx, sisAssociatedUserID, accountID)
-			if obsErr != nil {
-				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("associated user with sis_user_id '%s' not found", sisAssociatedUserID), "enrollments.csv")
-				continue
-			}
-			enrollment.AssociatedUserID = &observee.ID
-		}
-
-		// Deduplicate on re-import. Canvas identifies an SIS enrollment
-		// by (user, course, type, associated user) in ANY state, so an
-		// inactive/completed/deleted row is updated in place rather
-		// than inserted again on every nightly run.
-		existingEnrollment, lookupErr := s.findSISEnrollment(ctx, enrollment)
-		if lookupErr != nil && lookupErr != gorm.ErrRecordNotFound {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("error looking up enrollment: %v", lookupErr), "enrollments.csv")
-			continue
-		}
-		if existingEnrollment != nil {
-			existingEnrollment.WorkflowState = workflowState
-			existingEnrollment.Role = roleName
-			if enrollment.CourseSectionID != nil {
-				existingEnrollment.CourseSectionID = enrollment.CourseSectionID
-			}
-			if _, ok := colIndex["start_date"]; ok {
-				existingEnrollment.StartAt = startAt
-			}
-			if _, ok := colIndex["end_date"]; ok {
-				existingEnrollment.EndAt = endAt
-			}
-			if _, ok := colIndex["limit_section_privileges"]; ok {
-				existingEnrollment.LimitPrivilegesToCourseSection = limitSection
-			}
-			if err := s.enrollmentRepo.Update(ctx, existingEnrollment); err != nil {
-				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to update enrollment: %v", err), "enrollments.csv")
-				continue
-			}
-		} else {
-			if err := s.enrollmentRepo.Create(ctx, enrollment); err != nil {
-				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to create enrollment: %v", err), "enrollments.csv")
-				continue
-			}
-		}
-
-		batch.ProcessedRows++
-		if batch.TotalRows > 0 {
-			batch.Progress = (batch.ProcessedRows * 100) / batch.TotalRows
-		}
-		s.batchRepo.Update(ctx, batch)
-	}
-
-	batch.TotalRows = rowNum - 1
-	s.batchRepo.Update(ctx, batch)
-	return nil
-}
-
-// sisBaseRoleTypes maps the Canvas enrollments.csv base role keywords
-// (and the full type names) onto Paper's enrollment Type.
-var sisBaseRoleTypes = map[string]string{
-	"student":            "StudentEnrollment",
-	"teacher":            "TeacherEnrollment",
-	"ta":                 "TaEnrollment",
-	"observer":           "ObserverEnrollment",
-	"designer":           "DesignerEnrollment",
-	"studentenrollment":  "StudentEnrollment",
-	"teacherenrollment":  "TeacherEnrollment",
-	"taenrollment":       "TaEnrollment",
-	"observerenrollment": "ObserverEnrollment",
-	"designerenrollment": "DesignerEnrollment",
-}
-
-// mapSISEnrollmentRole resolves an enrollments.csv role value into
-// (Type, Role). Base roles match case-insensitively; anything else must
-// name an active custom role in the tenant whose base type is a course
-// role, in which case Type is the base type and Role keeps the custom
-// role's name (Canvas semantics). ok=false means the value is invalid.
-func (s *SISImportService) mapSISEnrollmentRole(ctx context.Context, role string, accountID uint) (string, string, bool) {
-	key := strings.ToLower(strings.TrimSpace(role))
-	if key == "" {
-		return "", "", false
-	}
-	if t, ok := sisBaseRoleTypes[key]; ok {
-		return t, t, true
-	}
-	if s.db == nil {
-		return "", "", false
-	}
-	var custom models.CustomRole
-	err := s.db.WithContext(ctx).
-		Where("account_id = ? AND LOWER(name) = ? AND workflow_state = ?", accountID, key, "active").
-		First(&custom).Error
-	if err != nil {
-		return "", "", false
-	}
-	t, ok := sisBaseRoleTypes[strings.ToLower(custom.BaseRoleType)]
-	if !ok {
-		// e.g. an "admin"-based custom role is not a course enrollment.
-		return "", "", false
-	}
-	return t, custom.Name, true
-}
-
-// findSISEnrollment returns the enrollment an enrollments.csv row
-// refers to, in any workflow state, preferring a non-deleted row.
-func (s *SISImportService) findSISEnrollment(ctx context.Context, e *models.Enrollment) (*models.Enrollment, error) {
-	q := s.db.WithContext(ctx).
-		Where("user_id = ? AND course_id = ? AND type = ?", e.UserID, e.CourseID, e.Type)
-	if e.AssociatedUserID != nil {
-		q = q.Where("associated_user_id = ?", *e.AssociatedUserID)
-	} else {
-		q = q.Where("associated_user_id IS NULL")
-	}
-	var existing models.Enrollment
-	if err := q.Order("(workflow_state = 'deleted') ASC, id ASC").First(&existing).Error; err != nil {
-		return nil, err
-	}
-	return &existing, nil
-}
-
+// ---------------------------------------------------------------------------
 // Export methods
+// ---------------------------------------------------------------------------
 
 func (s *SISImportService) ExportUsersCSV(ctx context.Context, accountID uint) ([]byte, error) {
 	var users []models.User
@@ -766,7 +583,7 @@ func (s *SISImportService) ExportUsersCSV(ctx context.Context, accountID uint) (
 	writer := csv.NewWriter(&buf)
 
 	// Write header
-	writer.Write([]string{"user_id", "login_id", "first_name", "last_name", "email", "status"})
+	_ = writer.Write([]string{"user_id", "login_id", "first_name", "last_name", "email", "status"})
 
 	for _, u := range users {
 		sisID := ""
@@ -775,6 +592,10 @@ func (s *SISImportService) ExportUsersCSV(ctx context.Context, accountID uint) (
 		}
 
 		firstName, lastName := splitName(u.Name)
+		status := "active"
+		if u.Suspended {
+			status = "suspended"
+		}
 
 		_ = writeCSVRow(writer, []string{
 			sisID,
@@ -782,7 +603,7 @@ func (s *SISImportService) ExportUsersCSV(ctx context.Context, accountID uint) (
 			firstName,
 			lastName,
 			u.Email,
-			"active",
+			status,
 		})
 	}
 
@@ -803,7 +624,7 @@ func (s *SISImportService) ExportCoursesCSV(ctx context.Context, accountID uint)
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 
-	writer.Write([]string{"course_id", "short_name", "long_name", "account_id", "status"})
+	_ = writer.Write([]string{"course_id", "short_name", "long_name", "account_id", "status"})
 
 	for _, c := range courses {
 		sisID := ""
@@ -811,17 +632,12 @@ func (s *SISImportService) ExportCoursesCSV(ctx context.Context, accountID uint)
 			sisID = *c.SISCourseID
 		}
 
-		status := "active"
-		if c.WorkflowState == "deleted" {
-			status = "deleted"
-		}
-
 		_ = writeCSVRow(writer, []string{
 			sisID,
 			c.CourseCode,
 			c.Name,
 			strconv.FormatUint(uint64(c.AccountID), 10),
-			status,
+			sisCourseStatus(string(c.WorkflowState)),
 		})
 	}
 
@@ -854,7 +670,7 @@ func (s *SISImportService) ExportSectionsCSV(ctx context.Context, accountID uint
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 
-	writer.Write([]string{"section_id", "course_id", "name", "status"})
+	_ = writer.Write([]string{"section_id", "course_id", "name", "status"})
 
 	for _, sec := range sections {
 		sisSectionID := ""
@@ -926,7 +742,7 @@ func (s *SISImportService) ExportEnrollmentsCSV(ctx context.Context, accountID u
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 
-	writer.Write([]string{"course_id", "user_id", "role", "section_id", "status"})
+	_ = writer.Write([]string{"course_id", "user_id", "role", "section_id", "status"})
 
 	for _, e := range enrollments {
 		sisCourseID := courseMap[e.CourseID]
@@ -937,14 +753,17 @@ func (s *SISImportService) ExportEnrollmentsCSV(ctx context.Context, accountID u
 			sisSectionID = sectionMap[*e.CourseSectionID]
 		}
 
-		status := string(e.WorkflowState)
+		role := sisRoleForType[e.Type]
+		if e.RoleID != nil && e.Role != "" && e.Role != e.Type {
+			role = e.Role
+		}
 
 		_ = writeCSVRow(writer, []string{
 			sisCourseID,
 			sisUserID,
-			e.Role,
+			role,
 			sisSectionID,
-			status,
+			sisEnrollmentStatus(string(e.WorkflowState)),
 		})
 	}
 
@@ -956,7 +775,9 @@ func (s *SISImportService) ExportEnrollmentsCSV(ctx context.Context, accountID u
 	return buf.Bytes(), nil
 }
 
-// Helper methods for SIS ID lookups
+// ---------------------------------------------------------------------------
+// Tenant-scoped SIS-id lookups
+// ---------------------------------------------------------------------------
 
 // Every SIS-ID lookup is tenant-scoped: a CSV uploaded by one tenant
 // must never resolve (and then overwrite) another tenant's row.
@@ -985,6 +806,14 @@ func (s *SISImportService) findSectionBySISID(ctx context.Context, sisID string,
 		return nil, err
 	}
 	return &section, nil
+}
+
+func (s *SISImportService) findTermBySISID(ctx context.Context, sisID string, accountID uint) (*models.EnrollmentTerm, error) {
+	var term models.EnrollmentTerm
+	if err := s.db.WithContext(ctx).Where("sis_term_id = ? AND account_id = ?", sisID, accountID).First(&term).Error; err != nil {
+		return nil, err
+	}
+	return &term, nil
 }
 
 // sisIDTaken reports whether a SIS id is already used anywhere (the
@@ -1022,25 +851,10 @@ func (s *SISImportService) recordError(ctx context.Context, batchID uint, row in
 		Message:    message,
 		File:       file,
 	}
-	s.errorRepo.Create(ctx, batchError)
+	_ = s.errorRepo.Create(ctx, batchError)
 }
 
 // Utility functions
-
-func buildColumnIndex(header []string) map[string]int {
-	index := make(map[string]int)
-	for i, col := range header {
-		index[strings.TrimSpace(strings.ToLower(col))] = i
-	}
-	return index
-}
-
-func getColumn(record []string, colIndex map[string]int, name string) string {
-	if idx, ok := colIndex[name]; ok && idx < len(record) {
-		return strings.TrimSpace(record[idx])
-	}
-	return ""
-}
 
 func splitName(name string) (string, string) {
 	parts := strings.SplitN(strings.TrimSpace(name), " ", 2)
@@ -1048,4 +862,18 @@ func splitName(name string) (string, string) {
 		return parts[0], parts[1]
 	}
 	return name, ""
+}
+
+// parseSISDate accepts ISO 8601 timestamps and plain dates.
+func parseSISDate(v string) (*time.Time, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil, nil
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02 15:04:05", "2006-01-02T15:04Z07:00", "2006-01-02"} {
+		if t, err := time.Parse(layout, v); err == nil {
+			return &t, nil
+		}
+	}
+	return nil, fmt.Errorf("invalid date %q (use ISO 8601)", v)
 }

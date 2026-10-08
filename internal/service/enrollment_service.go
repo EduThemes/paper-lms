@@ -31,6 +31,9 @@ type EnrollmentService struct {
 	// observee) uniqueness (G110) and sends invitation notifications
 	// (G122).
 	lifecycle *EnrollmentLifecycleService
+	// roleResolver validates a custom role given to an enrollment (G102,
+	// enrollment_custom_role.go). Wired via SetRoleResolver.
+	roleResolver EnrollmentRoleResolver
 
 	// onCreatedCallbacks fire (in goroutines) after a successful Create.
 	// Registered via OnCreated; never invoked in tests unless explicitly
@@ -132,7 +135,9 @@ func (s *EnrollmentService) Create(ctx context.Context, enrollment *models.Enrol
 	if err != nil {
 		return err
 	}
-	enrollment.Role = enrollment.Type
+	if err := s.applyCustomRole(ctx, enrollment); err != nil {
+		return err
+	}
 	if enrollment.WorkflowState == "" {
 		enrollment.WorkflowState = "active"
 	}

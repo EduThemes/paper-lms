@@ -19,11 +19,10 @@ import (
 	"github.com/EduThemes/paper-lms/internal/settingsctx"
 )
 
-// SetQuota wires course storage quotas (G072): courseRepo loads the
-// course's own storage_quota, lookup resolves the tenant default.
-func (h *FileHandler) SetQuota(courseRepo repository.CourseRepository, lookup service.SettingsLookupFunc) *FileHandler {
-	h.courseRepo = courseRepo
-	h.settingsLookup = lookup
+// SetQuota wires course storage quotas (G072): the course's own quota
+// or the account default, both in storage_quotas (G120).
+func (h *FileHandler) SetQuota(quotas CourseStorageQuotas) *FileHandler {
+	h.quotas = quotas
 	return h
 }
 
@@ -132,27 +131,23 @@ func (h *FileHandler) courseTreeQuery(c *fiber.Ctx, courseID uint, raw string, l
 	return q, false, nil
 }
 
-// courseQuota returns the course's quota in bytes (0 = not enforced,
-// when quotas aren't wired).
-func (h *FileHandler) courseQuota(c *fiber.Ctx, ctx context.Context, courseID uint) int64 {
-	if h.courseRepo == nil || !h.fileService.HasTree() {
+// quotaScope is the tenant a quota lookup is confined to (0 for a
+// super_admin, whose role crosses tenants by design).
+func quotaScope(c *fiber.Ctx) uint {
+	if isSuper, _ := c.Locals("is_super_admin").(bool); isSuper {
 		return 0
 	}
-	course, err := h.courseRepo.FindByID(c.Context(), courseID, callerAccountID(c))
-	if err != nil || course == nil {
-		return 0
-	}
-	return service.CourseStorageQuota(ctx, course, h.settingsLookup)
+	return callerAccountID(c)
 }
 
 // enforceCourseQuota writes a 400 when adding addBytes (and freeing
-// freeBytes) would exceed the course quota. Returns wrote=true then.
+// freeBytes, for a replacement) would exceed the course quota. Returns
+// wrote=true then.
 func (h *FileHandler) enforceCourseQuota(c *fiber.Ctx, ctx context.Context, courseID uint, addBytes, freeBytes int64) (bool, error) {
-	quota := h.courseQuota(c, ctx, courseID)
-	if quota <= 0 {
+	if h.quotas == nil {
 		return false, nil
 	}
-	err := h.fileService.CheckQuota(c.Context(), "Course", courseID, quota, addBytes, freeBytes)
+	err := h.quotas.CheckQuota(ctx, "Course", courseID, addBytes-freeBytes)
 	if errors.Is(err, service.ErrStorageQuotaExceeded) {
 		return true, responses.BadRequest(c, "Course storage quota exceeded")
 	}
@@ -169,12 +164,20 @@ func (h *FileHandler) GetCourseQuota(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid course ID")
 	}
-	ctx := settingsctx.WithAccountID(c.Context(), callerAccountID(c))
-	used, err := h.fileService.ContextUsage(c.Context(), "Course", uint(courseID))
-	if err != nil {
-		return responses.InternalError(c, "Could not compute storage usage")
+	if h.quotas == nil {
+		used, err := h.fileService.ContextUsage(c.Context(), "Course", uint(courseID))
+		if err != nil {
+			return responses.InternalError(c, "Could not compute storage usage")
+		}
+		return c.JSON(fiber.Map{"quota": 0, "quota_used": used})
 	}
-	return c.JSON(fiber.Map{"quota": h.courseQuota(c, ctx, uint(courseID)), "quota_used": used})
+	info, err := h.quotas.Info(c.Context(), "Course", uint(courseID), quotaScope(c))
+	if err != nil {
+		return responses.NotFound(c, "course")
+	}
+	// Canvas files/quota: {quota, quota_used} in bytes, plus quota_mb and
+	// whether the course has its own quota.
+	return c.JSON(info)
 }
 
 // loadCourseFile loads a live attachment of the course (tenant-scoped,

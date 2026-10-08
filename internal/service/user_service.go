@@ -25,6 +25,21 @@ var dummyPasswordHash, _ = bcrypt.GenerateFromPassword([]byte("timing-oracle-def
 
 type UserService struct {
 	repo repository.UserRepository
+	// extraLogins resolves additional local logins (G115). Optional.
+	extraLogins LocalLoginAuthenticator
+}
+
+// LocalLoginAuthenticator verifies a password against an additional
+// local login (*UserLoginService). found reports whether such a login
+// exists (and so whether a bcrypt comparison already ran).
+type LocalLoginAuthenticator interface {
+	AuthenticateLocal(ctx context.Context, name, password string) (user *models.User, found bool, err error)
+}
+
+// SetExtraLogins enables sign-in with additional local logins (G115).
+func (s *UserService) SetExtraLogins(a LocalLoginAuthenticator) *UserService {
+	s.extraLogins = a
+	return s
 }
 
 func NewUserService(repo repository.UserRepository) *UserService {
@@ -89,6 +104,17 @@ func (s *UserService) Register(ctx context.Context, name, email, password string
 
 func (s *UserService) Authenticate(ctx context.Context, loginID, password string) (*models.User, error) {
 	user, err := s.repo.FindByLoginID(ctx, loginID)
+	// hashed: a bcrypt comparison already ran on this request.
+	hashed := false
+	if err != nil && s.extraLogins != nil {
+		// An additional local login (G115) carries its own password, or
+		// uses the user's; either way the password is verified there.
+		u, found, lerr := s.extraLogins.AuthenticateLocal(ctx, loginID, password)
+		if found && lerr == nil {
+			return u, nil
+		}
+		hashed = found
+	}
 	if err != nil {
 		// Fallback to email lookup
 		user, err = s.repo.FindByEmail(ctx, loginID)
@@ -97,7 +123,12 @@ func (s *UserService) Authenticate(ctx context.Context, loginID, password string
 		// User-miss: run a dummy bcrypt compare so this path costs the
 		// same as the wrong-password path below. Without it the absence
 		// of a bcrypt op (~tens of ms) is a username-enumeration oracle.
-		_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
+		// Skipped when an additional login's compare already ran, so a
+		// wrong password on an existing login costs the same single op
+		// as an unknown name.
+		if !hashed {
+			_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
+		}
 		return nil, errors.New("invalid credentials")
 	}
 

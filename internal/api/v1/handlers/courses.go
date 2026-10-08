@@ -22,6 +22,9 @@ type CourseHandler struct {
 	// unpublishGuard (optional, G077) refuses unpublishing a course with
 	// graded student work; see SetUnpublishGuard.
 	unpublishGuard UnpublishGuard
+	// quotas (optional, G072/G120) backs storage_quota_mb; see
+	// SetStorageQuotas.
+	quotas CourseStorageQuotas
 }
 
 // SetUserRepo wires the user repository used for the admin check on
@@ -63,7 +66,6 @@ func courseToJSON(c *models.Course) fiber.Map {
 		"ui_mode":                          c.UIMode,
 		"apply_assignment_group_weights":   c.ApplyGroupWeights,
 		"navigation_tabs":                  navTabs,
-		"storage_quota_mb":                 storageQuotaMB(c),
 		"created_at":                       c.CreatedAt,
 		// Date-based access settings (G106).
 		"restrict_enrollments_to_course_dates": c.RestrictEnrollmentsToCourseDates,
@@ -147,7 +149,7 @@ func (h *CourseHandler) GetCourse(c *fiber.Ctx) error {
 		return responses.NotFound(c, "course")
 	}
 
-	return c.JSON(courseToJSON(course))
+	return c.JSON(h.courseJSONWithQuota(c, course.ID, courseToJSON(course)))
 }
 
 type createCourseRequest struct {
@@ -301,7 +303,7 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 	if len(input.Course.StorageQuotaMB) > 0 {
 		// G072: only admins set a course's storage quota (Canvas
 		// manage_storage_quotas); null resets it to the account default.
-		if wrote, qerr := applyStorageQuotaMB(c, h.userRepo, course, input.Course.StorageQuotaMB); wrote {
+		if wrote, qerr := applyStorageQuotaMB(c, h.userRepo, h.quotas, course.ID, input.Course.StorageQuotaMB); wrote {
 			return qerr
 		}
 	}
@@ -311,7 +313,7 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not update course")
 	}
 
-	return c.JSON(courseToJSON(course))
+	return c.JSON(h.courseJSONWithQuota(c, course.ID, courseToJSON(course)))
 }
 
 func (h *CourseHandler) DeleteCourse(c *fiber.Ctx) error {

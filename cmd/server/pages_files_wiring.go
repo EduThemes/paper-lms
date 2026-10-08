@@ -35,9 +35,14 @@ func wirePagesFiles(d pagesFilesDeps) *v1.PagesFilesRoutes {
 	revisionService := service.NewWikiPageRevisionService(revisionRepo, d.pageRepo)
 	d.pageHandler.SetRevisionService(revisionService)
 
-	// File tree, visibility and quotas (G070-G072).
+	// File tree, visibility and quotas (G070-G072). Course quotas share
+	// the storage_quotas table with the account-level quota admin (G120).
 	d.fileService.SetTreeRepository(postgres.NewCourseFilesRepository(d.database))
-	d.fileHandler.SetQuota(d.courseRepo, d.settingsLookup)
+	quotas := service.NewStorageQuotaService(d.database)
+	d.fileHandler.SetQuota(quotas)
+	if d.courseHandler != nil {
+		d.courseHandler.SetStorageQuotas(quotas)
+	}
 
 	// Student View (G076). The course gates let a Student View session
 	// into an unpublished course.

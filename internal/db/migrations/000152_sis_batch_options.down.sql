@@ -1,0 +1,14 @@
+DROP INDEX IF EXISTS idx_group_categories_sis_source_id;
+DROP INDEX IF EXISTS idx_groups_sis_source_id;
+ALTER TABLE group_categories DROP COLUMN IF EXISTS sis_source_id;
+ALTER TABLE groups DROP COLUMN IF EXISTS sis_source_id;
+DROP TABLE IF EXISTS sis_batch_files;
+DROP INDEX IF EXISTS idx_sis_batches_diffing_data_set_identifier;
+ALTER TABLE sis_batches DROP COLUMN IF EXISTS ended_at;
+ALTER TABLE sis_batches DROP COLUMN IF EXISTS started_at;
+ALTER TABLE sis_batches DROP COLUMN IF EXISTS change_threshold;
+ALTER TABLE sis_batches DROP COLUMN IF EXISTS diffed_against_batch_id;
+ALTER TABLE sis_batches DROP COLUMN IF EXISTS diffing_data_set_identifier;
+ALTER TABLE sis_batches DROP COLUMN IF EXISTS batch_mode_term_id;
+ALTER TABLE sis_batches DROP COLUMN IF EXISTS batch_mode;
+ALTER TABLE sis_batches DROP COLUMN IF EXISTS user_id;

@@ -3,6 +3,8 @@ import { Search, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { useCreateEnrollment } from '../../hooks/useAdminEnrollments';
 import { ROLE_LABELS, assignableRoles } from '../../utils/enrollmentLifecycle';
+import { adminAccountsApi } from '../../services/api_admin_accounts';
+import { parseRoleChoice, roleChoiceValue } from '../../utils/adminAccounts';
 
 const fieldClass = 'border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500';
 
@@ -25,6 +27,20 @@ export default function AddPeopleForm({ courseId, caller, sections = [], enrolle
   const [invite, setInvite] = useState(false);
   const [limit, setLimit] = useState(false);
   const [error, setError] = useState(null);
+  // The account's custom course roles (G102), each on top of a base type
+  // the caller may assign. The select value is "Type" or "Type|roleId".
+  const [customRoles, setCustomRoles] = useState([]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!courseId) return undefined;
+    Promise.resolve()
+      .then(() => adminAccountsApi.getAssignableRoles(courseId))
+      .then((list) => { if (alive) setCustomRoles(Array.isArray(list) ? list.filter((r) => r.enrollment_type) : []); })
+      .catch(() => { if (alive) setCustomRoles([]); });
+    return () => { alive = false; };
+  }, [courseId]);
+  const customChoices = customRoles.filter((r) => roles.includes(r.enrollment_type));
 
   const create = useCreateEnrollment(courseId, {
     onSuccess: () => {
@@ -65,7 +81,7 @@ export default function AddPeopleForm({ courseId, caller, sections = [], enrolle
     setError(null);
     create.mutate({
       user_id: selectedUser.id,
-      type,
+      ...parseRoleChoice(type), // type, plus role_id for a custom role (G102)
       enrollment_state: invite ? 'invited' : 'active',
       ...(sectionId ? { course_section_id: Number(sectionId) } : {}),
       ...(limit ? { limit_privileges_to_course_section: true } : {}),
@@ -130,6 +146,13 @@ export default function AddPeopleForm({ courseId, caller, sections = [], enrolle
           <label htmlFor="add-person-role" className="block text-sm font-medium text-text-secondary mb-1">Role</label>
           <select id="add-person-role" value={type} onChange={(e) => setType(e.target.value)} className={fieldClass}>
             {roles.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+            {customChoices.length > 0 && (
+              <optgroup label="Custom roles">
+                {customChoices.map((r) => (
+                  <option key={r.id} value={roleChoiceValue(r.enrollment_type, r.id)}>{r.label || r.name}</option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </div>
         {sections.length > 0 && (

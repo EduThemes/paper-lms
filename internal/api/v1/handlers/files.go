@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,10 +29,9 @@ type FileHandler struct {
 	// authz supplies the DB-backed admin role and the course gate used by
 	// canReadContextFiles. Nil means no admin bypass.
 	authz *ResourceAuthorizer
-	// courseRepo + settingsLookup back course storage quotas (G072); see
-	// SetQuota. Nil leaves quotas unenforced.
-	courseRepo     repository.CourseRepository
-	settingsLookup service.SettingsLookupFunc
+	// quotas backs course storage quotas (G072 / G120); see SetQuota.
+	// Nil leaves quotas unenforced here.
+	quotas CourseStorageQuotas
 }
 
 // SetAuthorizer wires the DB-backed role / course checks.
@@ -229,6 +229,9 @@ func (h *FileHandler) UploadCourseFile(c *fiber.Ctx) error {
 	}
 
 	if err := h.fileService.UploadFile(uploadCtx, attachment, file); err != nil {
+		if errors.Is(err, service.ErrStorageQuotaExceeded) {
+			return responses.BadRequest(c, "Course storage quota exceeded")
+		}
 		return responses.InternalError(c, "Could not upload file")
 	}
 

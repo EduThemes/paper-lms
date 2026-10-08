@@ -1,10 +1,7 @@
 package service
 
 import (
-	"context"
-	"encoding/csv"
-	"fmt"
-	"io"
+	"errors"
 	"strings"
 	"time"
 
@@ -12,7 +9,7 @@ import (
 )
 
 // SIS support for cross-listing and enrollment / section dates
-// (admin-enrollments lane, G106 / G108).
+// (admin-enrollments lane, G106 / G108), on the batch runner (G111).
 //
 // xlists.csv (Canvas format): xlist_course_id, section_id, status
 //   - status "active" cross-lists the section into the course;
@@ -28,30 +25,18 @@ func (s *SISImportService) SetSectionService(sections *SectionService) *SISImpor
 	return s
 }
 
-// sisDates parses the optional start_date / end_date columns.
-func sisDates(record []string, colIndex map[string]int) (*time.Time, *time.Time, error) {
-	parse := func(col string) (*time.Time, error) {
-		raw := getColumn(record, colIndex, col)
-		if raw == "" {
-			return nil, nil
-		}
-		for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02"} {
-			if t, err := time.Parse(layout, raw); err == nil {
-				return &t, nil
-			}
-		}
-		return nil, fmt.Errorf("invalid %s '%s' (expected ISO 8601)", col, raw)
-	}
-	start, err := parse("start_date")
+// sisRowDates parses a row's optional start_date / end_date columns.
+func sisRowDates(row sisRow) (*time.Time, *time.Time, error) {
+	start, err := parseSISDate(row.get("start_date"))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, rowErr("invalid start_date: %v", err)
 	}
-	end, err := parse("end_date")
+	end, err := parseSISDate(row.get("end_date"))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, rowErr("invalid end_date: %v", err)
 	}
 	if start != nil && end != nil && end.Before(*start) {
-		return nil, nil, fmt.Errorf("end_date must be after start_date")
+		return nil, nil, errors.New("end_date must be after start_date")
 	}
 	return start, end, nil
 }
@@ -68,65 +53,31 @@ func applySISSectionDates(section *models.CourseSection, start, end *time.Time) 
 	section.RestrictEnrollmentsToSectionDates = true
 }
 
-func (s *SISImportService) processXlistsCSV(ctx context.Context, batchID, accountID uint, reader *csv.Reader) error {
-	if s.sectionService == nil {
-		return fmt.Errorf("cross-listing is not configured")
+// importXlist applies one xlists.csv row. Both lookups are confined to
+// the batch's account.
+func (r *sisRun) importXlist(row sisRow) error {
+	if r.s.sectionService == nil {
+		return errors.New("cross-listing is not configured")
 	}
-	header, err := reader.Read()
+	sisCourseID := row.get("xlist_course_id")
+	sisSectionID := row.get("section_id")
+	status := strings.ToLower(row.get("status"))
+	if sisCourseID == "" || sisSectionID == "" {
+		return rowErr("xlist_course_id and section_id are required")
+	}
+	if status != "active" && status != "deleted" {
+		return rowErr("invalid status '%s' (expected active or deleted)", status)
+	}
+	course, err := r.s.findCourseBySISID(r.ctx, sisCourseID, r.accountID)
 	if err != nil {
-		return fmt.Errorf("failed to read CSV header: %w", err)
+		return rowErr("course with sis_course_id '%s' not found", sisCourseID)
 	}
-	colIndex := buildColumnIndex(header)
-
-	batch, _ := s.batchRepo.FindByID(ctx, batchID)
-	rowNum := 1
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to read row: %v", err), "xlists.csv")
-			rowNum++
-			continue
-		}
-		rowNum++
-		batch.TotalRows = rowNum - 1
-
-		sisCourseID := getColumn(record, colIndex, "xlist_course_id")
-		sisSectionID := getColumn(record, colIndex, "section_id")
-		status := strings.ToLower(getColumn(record, colIndex, "status"))
-		if sisCourseID == "" || sisSectionID == "" {
-			s.recordError(ctx, batchID, rowNum, "xlist_course_id and section_id are required", "xlists.csv")
-			continue
-		}
-		if status != "active" && status != "deleted" {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("invalid status '%s' (expected active or deleted)", status), "xlists.csv")
-			continue
-		}
-		// Both lookups are confined to the batch's account.
-		course, findErr := s.findCourseBySISID(ctx, sisCourseID, accountID)
-		if findErr != nil {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("course with sis_course_id '%s' not found", sisCourseID), "xlists.csv")
-			continue
-		}
-		section, findErr := s.findSectionBySISID(ctx, sisSectionID, accountID)
-		if findErr != nil {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("section with sis_section_id '%s' not found", sisSectionID), "xlists.csv")
-			continue
-		}
-		if err := s.sectionService.CrosslistBySIS(ctx, section, course, status == "active"); err != nil {
-			s.recordError(ctx, batchID, rowNum, fmt.Sprintf("could not cross-list section '%s': %v", sisSectionID, err), "xlists.csv")
-			continue
-		}
-
-		batch.ProcessedRows++
-		if batch.TotalRows > 0 {
-			batch.Progress = (batch.ProcessedRows * 100) / batch.TotalRows
-		}
-		s.batchRepo.Update(ctx, batch)
+	section, err := r.s.findSectionBySISID(r.ctx, sisSectionID, r.accountID)
+	if err != nil {
+		return rowErr("section with sis_section_id '%s' not found", sisSectionID)
 	}
-	batch.TotalRows = rowNum - 1
-	s.batchRepo.Update(ctx, batch)
+	if err := r.s.sectionService.CrosslistBySIS(r.ctx, section, course, status == "active"); err != nil {
+		return rowErr("could not cross-list section '%s': %v", sisSectionID, err)
+	}
 	return nil
 }

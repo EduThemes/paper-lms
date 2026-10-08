@@ -264,7 +264,7 @@ function PeopleView({ courseId, caller, enrollments, sections, statusFilter, set
                       <td className="px-4 py-3 text-sm text-text-secondary">{enrollment.user?.login_id || '-'}</td>
                       <td className="px-4 py-3">
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_COLORS[enrollment.type] || 'bg-surface-2 text-text-primary'}`}>
-                          {ROLE_LABELS[enrollment.type] || enrollment.type}
+                          {enrollment.role_id && enrollment.role ? enrollment.role : (ROLE_LABELS[enrollment.type] || enrollment.type)}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-text-secondary">

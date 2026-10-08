@@ -1144,6 +1144,7 @@ func main() {
 		// the same settingsLookup closure as SMTP / AI Assist / OIDC.
 		SettingsLookup: settingsLookup,
 	}
+	router.AdminAccountsHandler = wireAdminAccounts(adminAccountsWiring{DB: database, PermMiddleware: permMiddleware, CustomRoleService: customRoleService, EnrollmentService: enrollmentService, UserService: userService, LoginPipeline: loginPipeline, ObserverService: observerService, GradingService: gradingService, FileService: fileService, SISImportService: sisImportService, AuditService: auditService, CourseRepo: courseRepo})
 
 	// Modules lane: progression engine + content gate (wire_modules.go).
 	router.ModuleProgressionHandler = wireModulesLane(database, modulesLaneDeps{
@@ -1292,6 +1293,7 @@ func main() {
 		minuteSched.Register("processContentMigrations", scheduler.EveryTick(), contentLane.migrationSweep)
 		minuteSched.Register("processContentExports", scheduler.EveryTick(), contentLane.exportSweep)
 		minuteSched.Register("releaseDelayedDiscussions", scheduler.EveryTick(), discussionParityService.ReleaseDelayedTopicsJob)
+		minuteSched.Register("sisResumePending", scheduler.EveryTick(), sisResumeJob(sisImportService))
 		minuteSched.Start(schedCtx)
 	}
 

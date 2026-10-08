@@ -355,13 +355,6 @@ var Catalog = []Definition{
 		EnvFallback: "MAX_UPLOAD_SIZE_MB",
 		Default:     "5120",
 	},
-	{
-		Key: "quotas.default_course_storage_mb", Group: "Quotas & limits", Label: "Default course storage quota (MB)",
-		Description: "Total size of the files a course may hold, unless an admin sets a quota on the course itself (Canvas default: 500 MB). Uploads that would go over it are refused.",
-		ValueType:   TypeInt,
-		Scopes:      []ScopeType{ScopeInstance, ScopeAccount},
-		Default:     "500",
-	},
 }
 
 // Find returns the catalog entry for the given key, or (zero, false)

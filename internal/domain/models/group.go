@@ -15,7 +15,9 @@ type Group struct {
 	WorkflowState   string `json:"workflow_state" gorm:"not null;default:'available'"`
 	// LeaderID is the group leader (a member of the group), set by an
 	// instructor or automatically per the group set's auto_leader (G100).
-	LeaderID  *uint     `json:"leader_id" gorm:"column:leader_id;index"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	LeaderID *uint `json:"leader_id" gorm:"column:leader_id;index"`
+	// SISSourceID is the groups.csv group_id (G111, migration 000152).
+	SISSourceID *string   `json:"sis_source_id" gorm:"column:sis_source_id;index"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }

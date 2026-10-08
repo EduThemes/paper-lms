@@ -164,6 +164,8 @@ type Router struct {
 
 	// Pages, files and course shell (routes_pages_files.go).
 	PagesFiles *PagesFilesRoutes
+	// AdminAccountsHandler — account administration lane (routes_admin_accounts.go).
+	AdminAccountsHandler *handlers.AdminAccountsHandler
 
 	// Middleware
 	AuthMiddleware *middleware.AuthMiddleware
@@ -884,4 +886,5 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerModuleRoutes(protected, enrolled, instructor)
 	r.registerGroupsConferencesRoutes(protected, enrolled)
 	r.registerAdminEnrollmentRoutes(protected, instructor)
+	r.registerAdminAccountsRoutes(protected, admin, enrolled, instructor)
 }

@@ -26,9 +26,4 @@ type Course struct {
 	RestrictStudentPastView          bool `json:"restrict_student_past_view" gorm:"not null;default:false"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
-
-	// StorageQuota is the course's file-storage cap in bytes (Canvas
-	// courses.storage_quota). NULL = the account default
-	// (quotas.default_course_storage_mb). Migration 000115.
-	StorageQuota *int64 `json:"storage_quota"`
 }

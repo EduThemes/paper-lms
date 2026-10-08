@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Upload, Download, AlertCircle, CheckCircle, Clock, RefreshCw, X, ChevronDown, FileText } from 'lucide-react';
+import { Upload, Download, AlertCircle, CheckCircle, Clock, RefreshCw, X, FileText } from 'lucide-react';
 import Layout from '../components/Layout';
-import { getCSRFToken } from '../services/api';
+import { api } from '../services/api';
+import { adminAccountsApi } from '../services/api_admin_accounts';
+import { extractTerms, sisBatchRunning } from '../utils/adminAccounts';
 import useAccountId from '../hooks/useAccountId';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
@@ -16,7 +18,6 @@ const apiFetch = (url, options = {}) => fetch(url, {
 const SISImportPage = () => {
   const ACCOUNT_ID = useAccountId();
   const [activeTab, setActiveTab] = useState('import');
-  const [importType, setImportType] = useState('users');
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [batches, setBatches] = useState([]);
@@ -44,10 +45,34 @@ const SISImportPage = () => {
     if (ACCOUNT_ID) fetchBatches();
   }, [ACCOUNT_ID, fetchBatches]);
 
+  // G111: imports run in the background; poll while any batch is working.
+  const anyRunning = batches.some(sisBatchRunning);
+  useEffect(() => {
+    if (!ACCOUNT_ID || !anyRunning) return undefined;
+    const t = setInterval(fetchBatches, 2000);
+    return () => clearInterval(t);
+  }, [ACCOUNT_ID, anyRunning, fetchBatches]);
+
+  // G111 options: batch mode (with its term), diffing, change threshold.
+  const [options, setOptions] = useState({ batchMode: false, batchModeTermId: '', diffingDataSetIdentifier: '', changeThreshold: '' });
+  const [terms, setTerms] = useState([]);
+  useEffect(() => {
+    if (!ACCOUNT_ID || typeof api.getEnrollmentTerms !== 'function') return undefined;
+    let alive = true;
+    Promise.resolve(api.getEnrollmentTerms(ACCOUNT_ID, 1, 100))
+      .then((res) => { if (alive) setTerms(extractTerms(res)); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [ACCOUNT_ID]);
+
   const handleUpload = async (e) => {
     e.preventDefault();
     if (!file) {
-      setError('Please select a CSV file to upload');
+      setError('Please select a CSV or zip file to upload');
+      return;
+    }
+    if (options.batchMode && !options.batchModeTermId) {
+      setError('Batch mode needs a term');
       return;
     }
 
@@ -56,24 +81,8 @@ const SISImportPage = () => {
     setSuccess(null);
 
     try {
-      const formData = new FormData();
-      formData.append('import_type', importType);
-      formData.append('attachment', file);
-
-      const response = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/sis_imports`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'X-CSRF-Token': getCSRFToken() },
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.errors?.[0]?.message || 'Upload failed');
-      }
-
-      const data = await response.json();
-      setSuccess(`SIS import completed. Status: ${data.workflow_state}. Processed ${data.processed_rows} of ${data.total_rows} rows.`);
+      const data = await adminAccountsApi.startSISImport(file, options, ACCOUNT_ID);
+      setSuccess(`SIS import #${data.id} started. It runs in the background; the history below updates as it finishes.`);
       setFile(null);
       // Reset file input
       const fileInput = document.getElementById('csv-file-input');
@@ -157,6 +166,13 @@ const SISImportPage = () => {
             Importing
           </span>
         );
+      case 'aborted':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-accent-danger/20 text-accent-danger">
+            <AlertCircle className="w-3 h-3" />
+            Aborted (change threshold)
+          </span>
+        );
       case 'failed':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-accent-danger/20 text-accent-danger">
@@ -185,7 +201,7 @@ const SISImportPage = () => {
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-text-primary">SIS Import / Export</h2>
         <p className="text-text-secondary mt-1">
-          Import and export data using CSV files for users, courses, sections, and enrollments.
+          Import Canvas-format SIS CSVs (one file or a zip) and export users, courses, sections and enrollments.
         </p>
       </div>
 
@@ -250,43 +266,71 @@ const SISImportPage = () => {
             <form onSubmit={handleUpload} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-text-secondary mb-1">
-                    Import Type
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={importType}
-                      onChange={(e) => setImportType(e.target.value)}
-                      className="w-full appearance-none rounded-md border border-border-strong bg-surface-0 px-3 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                    >
-                      <option value="users">Users</option>
-                      <option value="courses">Courses</option>
-                      <option value="sections">Sections</option>
-                      <option value="enrollments">Enrollments</option>
-                    </select>
-                    <ChevronDown className="absolute right-2.5 top-2.5 w-4 h-4 text-text-disabled pointer-events-none" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-text-secondary mb-1">
-                    CSV File
+                  <label htmlFor="csv-file-input" className="block text-sm font-medium text-text-secondary mb-1">
+                    CSV or zip file
                   </label>
                   <input
                     id="csv-file-input"
                     type="file"
-                    accept=".csv"
+                    accept=".csv,.zip"
                     onChange={(e) => setFile(e.target.files[0] || null)}
                     className="w-full rounded-md border border-border-strong px-3 py-1.5 text-sm file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100"
                   />
                 </div>
+                <div>
+                  <label htmlFor="sis-diffing-id" className="block text-sm font-medium text-text-secondary mb-1">
+                    Diffing data set identifier (optional)
+                  </label>
+                  <input
+                    id="sis-diffing-id"
+                    value={options.diffingDataSetIdentifier}
+                    onChange={(e) => setOptions({ ...options, diffingDataSetIdentifier: e.target.value })}
+                    placeholder="e.g. nightly-feed"
+                    className="w-full rounded-md border border-border-strong bg-surface-0 px-3 py-2 text-sm"
+                  />
+                  <p className="text-xs text-text-tertiary mt-1">Only rows that changed since the last import with this identifier are applied; rows that disappeared are deleted.</p>
+                </div>
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-medium text-text-secondary mb-1">
+                    <input
+                      type="checkbox"
+                      checked={options.batchMode}
+                      onChange={(e) => setOptions({ ...options, batchMode: e.target.checked })}
+                    />
+                    Batch mode
+                  </label>
+                  <select
+                    aria-label="Batch mode term"
+                    disabled={!options.batchMode}
+                    value={options.batchModeTermId}
+                    onChange={(e) => setOptions({ ...options, batchModeTermId: e.target.value })}
+                    className="w-full rounded-md border border-border-strong bg-surface-0 px-3 py-2 text-sm disabled:opacity-50"
+                  >
+                    <option value="">Choose a term…</option>
+                    {terms.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                  <p className="text-xs text-text-tertiary mt-1">SIS courses, sections and enrollments of the term that this import doesn't mention are deleted.</p>
+                </div>
+                <div>
+                  <label htmlFor="sis-threshold" className="block text-sm font-medium text-text-secondary mb-1">
+                    Change threshold % (optional)
+                  </label>
+                  <input
+                    id="sis-threshold"
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={options.changeThreshold}
+                    onChange={(e) => setOptions({ ...options, changeThreshold: e.target.value })}
+                    className="w-40 rounded-md border border-border-strong bg-surface-0 px-3 py-2 text-sm"
+                  />
+                  <p className="text-xs text-text-tertiary mt-1">Abort if batch mode or diffing would delete more than this share.</p>
+                </div>
               </div>
 
               <div className="bg-surface-1 rounded-md p-3 text-xs text-text-secondary">
-                <p className="font-medium mb-1">Expected CSV columns:</p>
-                {importType === 'users' && <p>user_id, login_id, password, first_name, last_name, email, status</p>}
-                {importType === 'courses' && <p>course_id, short_name, long_name, account_id, term_id, status</p>}
-                {importType === 'sections' && <p>section_id, course_id, name, status</p>}
-                {importType === 'enrollments' && <p>course_id, user_id, role, section_id, status</p>}
+                <p className="font-medium mb-1">Each CSV is recognised from its header row. Supported files (Canvas format):</p>
+                <p>users, logins, terms, courses, sections, enrollments, admins, user_observers, group_categories, groups, group_memberships, change_sis_id, accounts (this account only). Put several in a .zip to import them together.</p>
               </div>
 
               <div className="flex items-center gap-3">

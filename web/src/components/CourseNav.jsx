@@ -5,6 +5,8 @@ import { useCourseUI } from '../contexts/CourseUIContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useClickOutside } from '../hooks/useClickOutside';
 import useCourseStaffRole from '../hooks/useCourseStaffRole';
+import useCoursePermissionMap from '../hooks/useCoursePermissionMap';
+import { customRoleTabDecision } from '../utils/adminAccounts';
 
 // Complete map of tab id -> path/label for all available tabs
 const TAB_REGISTRY = {
@@ -89,6 +91,7 @@ const CourseNav = () => {
   // roster rows for the caller, so teacher tabs vanished in any course
   // where the teacher's enrollment was not among the first ten.
   const staffRole = useCourseStaffRole(courseId);
+  const customRole = useCoursePermissionMap(courseId, staffRole?.staff === true && !['admin', 'super_admin'].includes(user?.role));
 
   // Close the "More" dropdown on outside click / Escape. Hook must sit above
   // the conditional `return null` paths below to keep hook order stable.
@@ -103,6 +106,9 @@ const CourseNav = () => {
   const isTeacher = Boolean(user) && staffRole?.staff === true;
   const isCourseTeacher = Boolean(user) && staffRole?.teacher === true;
   const tabAllowed = (id) => {
+    // G102: a staff member's custom role decides its permission-gated tabs.
+    const custom = isTeacher ? customRoleTabDecision(id, customRole) : null;
+    if (custom !== null) return custom;
     if (!isTeacher && TEACHER_ONLY_TAB_IDS.has(id)) return false;
     if (!isCourseTeacher && TEACHER_EXCLUSIVE_TAB_IDS.has(id)) return false;
     return true;
