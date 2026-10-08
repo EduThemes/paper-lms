@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"html"
 	"net/url"
 	"regexp"
 	"strings"
@@ -42,7 +43,13 @@ var (
 	// Canvas attaches the original LaTeX in plain form on every equation
 	// image as data-equation-content. When present, prefer it over decoding
 	// the URL — fewer escaping round-trips, fewer ways to break.
-	reEquationDataContent = regexp.MustCompile(`(?is)\bdata-equation-content=["']([^"']+)["']`)
+	//
+	// The double- and single-quoted forms are captured separately so an
+	// apostrophe inside a double-quoted value (f'(x)) or a double quote inside
+	// a single-quoted one does not truncate the LaTeX (B104). The captured
+	// value is still attribute-encoded (&amp;, &#39;, ...) and must be
+	// HTML-unescaped before use.
+	reEquationDataContent = regexp.MustCompile(`(?is)\bdata-equation-content=(?:"([^"]*)"|'([^']*)')`)
 
 	// Escapes a LaTeX string for safe embedding in HTML text content.
 	// Math may legitimately contain & < > but we don't want them to break
@@ -59,11 +66,11 @@ var (
 // — `\(...\)` is the standard MathJax inline-math delimiter and KaTeX's
 // auto-render extension also handles it. The class hook lets the editor
 // preserve the markup on round-trips.
-func rewriteEquationImages(html string) string {
-	if html == "" {
-		return html
+func rewriteEquationImages(body string) string {
+	if body == "" {
+		return body
 	}
-	return reImgTag.ReplaceAllStringFunc(html, func(tag string) string {
+	return reImgTag.ReplaceAllStringFunc(body, func(tag string) string {
 		// Skip non-equation images entirely.
 		srcMatch := reEquationSrc.FindStringSubmatch(tag)
 		if len(srcMatch) < 2 {
@@ -73,8 +80,11 @@ func rewriteEquationImages(html string) string {
 		// Prefer the canvas-supplied data-equation-content (raw LaTeX) when
 		// available; fall back to double-decoding the URL.
 		var latex string
-		if dc := reEquationDataContent.FindStringSubmatch(tag); len(dc) >= 2 {
-			latex = dc[1]
+		if dc := reEquationDataContent.FindStringSubmatch(tag); len(dc) >= 3 && dc[1]+dc[2] != "" {
+			// Exactly one of the two alternation groups matched. Decode the
+			// attribute encoding so htmlMathEscaper below doesn't produce
+			// &amp;amp; (which KaTeX would receive as a literal "&amp;").
+			latex = html.UnescapeString(dc[1] + dc[2])
 		} else {
 			first, err := url.QueryUnescape(srcMatch[1])
 			if err != nil {
