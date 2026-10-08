@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/EduThemes/paper-lms/internal/api/v1/handlers"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository/postgres"
 	"github.com/EduThemes/paper-lms/internal/service"
@@ -76,6 +77,36 @@ func TestGradingUI_AnonymousRubricAssessment(t *testing.T) {
 	// Another tenant's teacher gets 404.
 	code, _ = guDo(t, e.app(guOutsider, 2, "TeacherEnrollment", false), http.MethodGet, path, nil)
 	assert.Equal(t, http.StatusNotFound, code)
+
+	// The rubric-assessment API hides the student while anonymized.
+	rubricSvc := service.NewRubricService(postgres.NewRubricRepository(e.g), postgres.NewRubricAssociationRepository(e.g), postgres.NewRubricAssessmentRepository(e.g))
+	raH := handlers.NewRubricAssessmentHandler(rubricSvc)
+	raH.SetAnonymityCheck(func(ctx context.Context, courseID, assignmentID, accountID uint) bool {
+		asg, err := postgres.NewAssignmentRepository(e.g).FindByID(ctx, assignmentID, accountID)
+		if err != nil || asg.CourseID != courseID {
+			return false
+		}
+		return e.gu.AnonymizeStudents(ctx, asg, []uint{guStudentA, guStudentB, guStudentC})
+	})
+	_, assoc, err := rubricSvc.GetRubricForAssignment(ctx, a.ID, 1)
+	require.NoError(t, err)
+	listApp := e.teacher()
+	listApp.Get("/courses/:course_id/rubric_associations/:association_id/rubric_assessments", raH.ListAssessments)
+	listPath := fmt.Sprintf("/courses/%d/rubric_associations/%d/rubric_assessments", guCourse, assoc.ID)
+	code, body = guDo(t, listApp, http.MethodGet, listPath, nil)
+	require.Equal(t, http.StatusOK, code, body)
+	assert.Contains(t, body, `"user_id":null`)
+	assert.NotContains(t, body, fmt.Sprintf(`"user_id":%d`, guStudentA))
+
+	// Once every grade is posted, anonymity lifts.
+	for _, s := range []uint{guStudentA, guStudentB, guStudentC} {
+		_, err := e.subSvc.Grade(ctx, a.ID, s, guTeacher, 1, "5")
+		require.NoError(t, err)
+	}
+	code, _ = guDo(t, e.teacher(), http.MethodPost, fmt.Sprintf("/courses/%d/assignments/%d/post_grades", guCourse, a.ID), nil)
+	require.Equal(t, http.StatusOK, code)
+	_, body = guDo(t, listApp, http.MethodGet, listPath, nil)
+	assert.Contains(t, body, fmt.Sprintf(`"user_id":%d`, guStudentA))
 }
 
 // G035: an assignment omitted from the final grade still holds its

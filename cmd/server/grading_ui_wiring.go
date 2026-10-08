@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+
 	"github.com/EduThemes/paper-lms/internal/api/v1/handlers"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/repository/postgres"
@@ -26,11 +28,12 @@ type gradingUIDeps struct {
 	fileService       *service.FileService
 	rubricService     *service.RubricService
 
-	submissionHandler  *handlers.SubmissionHandler
-	speedGraderHandler *handlers.SpeedGraderHandler
-	gradebookHandler   *handlers.GradebookHandler
-	assignmentHandler  *handlers.AssignmentHandler
-	peerReviewHandler  *handlers.PeerReviewHandler
+	submissionHandler       *handlers.SubmissionHandler
+	speedGraderHandler      *handlers.SpeedGraderHandler
+	gradebookHandler        *handlers.GradebookHandler
+	assignmentHandler       *handlers.AssignmentHandler
+	peerReviewHandler       *handlers.PeerReviewHandler
+	rubricAssessmentHandler *handlers.RubricAssessmentHandler
 }
 
 // wireGradingUI builds the GradingUIService / handler and attaches the
@@ -47,6 +50,23 @@ func wireGradingUI(database *gorm.DB, d gradingUIDeps) *handlers.GradingUIHandle
 	d.gradebookHandler.SetGradingUIService(svc)
 	d.assignmentHandler.SetGradingUIDeps(d.enrollmentRepo, d.attachmentRepo)
 	d.peerReviewHandler.SetUserRepository(d.userRepo)
+	if d.rubricAssessmentHandler != nil {
+		d.rubricAssessmentHandler.SetAnonymityCheck(func(ctx context.Context, courseID, assignmentID, accountID uint) bool {
+			a, err := d.assignmentRepo.FindByID(ctx, assignmentID, accountID)
+			if err != nil || a == nil || a.CourseID != courseID || !a.AnonymousGrading {
+				return false
+			}
+			students, err := d.submissionService.CourseStudents(ctx, courseID, accountID)
+			if err != nil {
+				return true // fail closed: keep the student hidden
+			}
+			ids := make([]uint, 0, len(students))
+			for _, s := range students {
+				ids = append(ids, s.UserID)
+			}
+			return svc.AnonymizeStudents(ctx, a, ids)
+		})
+	}
 
 	h := handlers.NewGradingUIHandler(svc, d.submissionHandler, d.userRepo, d.peerReviewService, d.fileService)
 	h.SetRubricService(d.rubricService)

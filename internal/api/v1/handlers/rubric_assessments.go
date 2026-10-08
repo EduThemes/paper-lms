@@ -16,6 +16,10 @@ type RubricAssessmentHandler struct {
 	// the post state of the assessed submission.
 	submissionService *service.SubmissionService
 	observerService   *service.ObserverService
+
+	// anonymityCheck (optional, SetAnonymityCheck) hides user ids while
+	// an assignment anonymizes students.
+	anonymityCheck AnonymityCheck
 }
 
 // SetVisibilityDeps wires the services used to decide which assessments a
@@ -175,7 +179,16 @@ func (h *RubricAssessmentHandler) GetAssessment(c *fiber.Ctx) error {
 		return nil
 	}
 
-	return c.JSON(rubricAssessmentToJSON(assessment))
+	j := rubricAssessmentToJSON(assessment)
+	if callerIsCourseStaff(c) {
+		if assoc, err := h.rubricService.GetAssociation(c.Context(), assessment.RubricAssociationID); err == nil {
+			courseID, _ := c.ParamsInt("course_id")
+			if h.anonymizedAssociation(c, assoc, uint(courseID)) {
+				j = maskAssessmentStudent(j)
+			}
+		}
+	}
+	return c.JSON(j)
 }
 
 func (h *RubricAssessmentHandler) UpdateAssessment(c *fiber.Ctx) error {
@@ -261,9 +274,13 @@ func (h *RubricAssessmentHandler) ListAssessments(c *fiber.Ctx) error {
 
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
 
+	anonymize := h.anonymizedAssociation(c, assoc, uint(courseID))
 	assessments := make([]fiber.Map, len(result.Items))
 	for i, a := range result.Items {
 		assessments[i] = rubricAssessmentToJSON(&a)
+		if anonymize {
+			assessments[i] = maskAssessmentStudent(assessments[i])
+		}
 	}
 
 	return c.JSON(assessments)
