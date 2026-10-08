@@ -196,7 +196,7 @@ func (h *CalendarEventHandler) CreateEvent(c *fiber.Ctx) error {
 		ContextType:     contextType,
 		ContextID:       contextID,
 		Title:           input.CalendarEvent.Title,
-		Description:     service.SanitizePlainText(input.CalendarEvent.Description),
+		Description:     service.SanitizeHTML(input.CalendarEvent.Description), // rich content (RCE), G010
 		StartAt:         input.CalendarEvent.StartAt,
 		EndAt:           input.CalendarEvent.EndAt,
 		LocationName:    input.CalendarEvent.LocationName,
@@ -252,7 +252,7 @@ func (h *CalendarEventHandler) UpdateEvent(c *fiber.Ctx) error {
 		event.Title = *input.CalendarEvent.Title
 	}
 	if input.CalendarEvent.Description != nil {
-		event.Description = service.SanitizePlainText(*input.CalendarEvent.Description)
+		event.Description = service.SanitizeHTML(*input.CalendarEvent.Description)
 	}
 	if input.CalendarEvent.StartAt != nil {
 		event.StartAt = *input.CalendarEvent.StartAt

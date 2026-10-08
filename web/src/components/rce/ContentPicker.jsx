@@ -9,17 +9,33 @@ import { Button } from '../ui/button';
 /**
  * @typedef {Object} ContentPickerProps
  * @property {(string|number)} courseId
- * @property {(href: string, label: string) => void} onInsert
+ * @property {(href: string, label: string, opts?: {embed?: 'image'|'video'|'audio'}) => void} onInsert
  * @property {() => void} onClose
  */
 
 const TYPES = [
   { key: 'pages', label: 'Pages' },
   { key: 'assignments', label: 'Assignments' },
+  { key: 'discussions', label: 'Discussions' },
+  { key: 'announcements', label: 'Announcements' },
   { key: 'modules', label: 'Modules' },
   { key: 'quizzes', label: 'Quizzes' },
   { key: 'files', label: 'Files' },
 ];
+
+/**
+ * How a course file can be embedded rather than linked (G011): images as
+ * an <img>, audio/video as a player. Other files (PDF, Office, ...) are
+ * links; the download route serves them as attachments by policy.
+ */
+export function fileEmbedKind(file) {
+  const type = String(file?.content_type || '').toLowerCase();
+  const name = String(file?.filename || file?.display_name || '').toLowerCase();
+  if (/^image\/(png|jpe?g|gif|webp|avif)$/.test(type)) return 'image';
+  if (type.startsWith('video/') || /\.(mp4|m4v|webm|ogv|mov)$/.test(name)) return 'video';
+  if (type.startsWith('audio/') || /\.(mp3|m4a|wav|ogg|oga|aac)$/.test(name)) return 'audio';
+  return null;
+}
 
 const PICKER_PER_PAGE = 100;
 const PICKER_MAX_PAGES = 20;
@@ -61,8 +77,25 @@ export async function loadType(type, courseId) {
         href: `/courses/${courseId}/assignments/${a.id}`,
       }));
     }
+    case 'discussions': {
+      const r = await fetchAllPages((page, per) => api.getDiscussionTopics(courseId, page, per));
+      return r.map((d) => ({
+        id: d.id, label: d.title || `Discussion ${d.id}`,
+        href: `/courses/${courseId}/discussions/${d.id}`,
+      }));
+    }
+    case 'announcements': {
+      const r = await fetchAllPages((page, per) => api.getCourseAnnouncements(courseId, page, per));
+      // The announcements page gives every announcement an
+      // id="announcement-N" anchor and scrolls to the URL hash.
+      return r.map((a) => ({
+        id: a.id, label: a.title || `Announcement ${a.id}`,
+        href: `/courses/${courseId}/announcements#announcement-${a.id}`,
+      }));
+    }
     case 'modules': {
       const r = await fetchAllPages((page, per) => api.getModules(courseId, page, per, false));
+      // ModulesPage renders id="module-N" on each module and scrolls to it.
       return r.map((m) => ({
         id: m.id, label: m.name || `Module ${m.id}`,
         href: `/courses/${courseId}/modules#module-${m.id}`,
@@ -83,6 +116,7 @@ export async function loadType(type, courseId) {
       return r.map((f) => ({
         id: f.id, label: f.display_name || f.filename || `File ${f.id}`,
         href: api.getFileDownloadUrl(f.id),
+        embed: fileEmbedKind(f),
       }));
     }
     default:
@@ -124,7 +158,7 @@ export default function ContentPicker({ courseId, onInsert, onClose }) {
         <DialogHeader>
           <DialogTitle>Insert course content link</DialogTitle>
           <DialogDescription>
-            Pick a page, assignment, module, quiz or file to insert as a link.
+            Pick course content to link. Selected text becomes the link; images, audio and video files can also be embedded.
           </DialogDescription>
         </DialogHeader>
 
@@ -163,15 +197,28 @@ export default function ContentPicker({ courseId, onInsert, onClose }) {
             <div className="p-3 text-sm text-muted-foreground">No items.</div>
           )}
           {!loading && !error && filtered.map((it) => (
-            <button
-              key={it.id}
-              role="option"
-              type="button"
-              onClick={() => onInsert(it.href, it.label)}
-              className="block w-full px-3 py-2 text-left text-sm hover:bg-accent focus:bg-accent focus:outline-none"
-            >
-              {it.label}
-            </button>
+            <div key={it.id} className="flex items-center gap-1 pr-2 hover:bg-accent">
+              <button
+                role="option"
+                aria-selected="false"
+                type="button"
+                onClick={() => onInsert(it.href, it.label)}
+                className="block min-w-0 flex-1 truncate px-3 py-2 text-left text-sm focus:bg-accent focus:outline-none"
+              >
+                {it.label}
+              </button>
+              {it.embed && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  aria-label={`Embed ${it.label}`}
+                  onClick={() => onInsert(it.href, it.label, { embed: it.embed })}
+                >
+                  {it.embed === 'image' ? 'Embed image' : 'Embed player'}
+                </Button>
+              )}
+            </div>
           ))}
         </div>
       </DialogContent>

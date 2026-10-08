@@ -122,7 +122,7 @@ async function fetchApi(path, { parse = 'json', ...options } = {}) {
 
 // Thin shims that preserve the existing call sites' shapes. Each is a
 // one-liner that forwards to `fetchApi` with the right `parse` mode.
-function request(path, options = {}) {
+export function request(path, options = {}) {
   return fetchApi(path, { ...options, parse: 'json' });
 }
 

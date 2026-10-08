@@ -67,7 +67,7 @@ func (s *CalendarService) ExportAsICalendar(ctx context.Context, contextType str
 		buf.WriteString(fmt.Sprintf("SUMMARY:%s\r\n", escapeICalText(e.Title)))
 
 		if e.Description != "" {
-			buf.WriteString(fmt.Sprintf("DESCRIPTION:%s\r\n", escapeICalText(e.Description)))
+			buf.WriteString(fmt.Sprintf("DESCRIPTION:%s\r\n", escapeICalText(RichTextToPlain(e.Description))))
 		}
 
 		if e.AllDay {

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { FileText, Megaphone } from 'lucide-react';
 import { api } from '../../services/api';
-import { sanitizeHTML } from '../RichContentViewer';
+import SafeHTML from '../SafeHTML';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
 
@@ -42,10 +42,8 @@ export function CourseFrontPageView({ courseId }) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div
-          className="prose max-w-none text-text-primary"
-          dangerouslySetInnerHTML={{ __html: sanitizeHTML(state.page.body || '') }}
-        />
+        {/* SafeHTML: sanitized, with equations and media captions (G007). */}
+        <SafeHTML className="prose max-w-none text-text-primary" html={state.page.body || ''} />
       </CardContent>
     </Card>
   );
@@ -83,10 +81,7 @@ export function CourseAnnouncementsView({ courseId }) {
               <li key={a.id} className="py-3">
                 <p className="font-medium text-text-primary">{a.title}</p>
                 {a.message && (
-                  <div
-                    className="prose max-w-none text-sm text-text-secondary mt-1"
-                    dangerouslySetInnerHTML={{ __html: sanitizeHTML(a.message) }}
-                  />
+                  <SafeHTML className="prose max-w-none text-sm text-text-secondary mt-1" html={a.message} />
                 )}
               </li>
             ))}

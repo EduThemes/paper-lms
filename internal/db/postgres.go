@@ -108,6 +108,8 @@ func allAutoMigrateModels() []interface{} {
 		&models.DiscussionEntryRating{},
 		&models.Folder{},
 		&models.Attachment{},
+		&models.MediaObject{},
+		&models.MediaTrack{},
 		&models.SISBatch{},
 		&models.SISBatchError{},
 		// Quiz Engine, Rubrics, Grading Periods, Overrides

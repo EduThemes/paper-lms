@@ -203,9 +203,9 @@ func (h *QuizQuestionHandler) CreateQuestion(c *fiber.Ctx) error {
 		QuestionText:        service.SanitizeHTML(input.Question.QuestionText),
 		PointsPossible:      input.Question.PointsPossible,
 		Answers:             input.Question.Answers,
-		CorrectComments:     input.Question.CorrectComments,
-		IncorrectComments:   input.Question.IncorrectComments,
-		NeutralComments:     input.Question.NeutralComments,
+		CorrectComments:     service.SanitizeHTML(input.Question.CorrectComments),
+		IncorrectComments:   service.SanitizeHTML(input.Question.IncorrectComments),
+		NeutralComments:     service.SanitizeHTML(input.Question.NeutralComments),
 	}
 	if input.Question.StimulusID != nil && *input.Question.StimulusID != 0 {
 		question.StimulusID = input.Question.StimulusID
@@ -277,13 +277,13 @@ func (h *QuizQuestionHandler) UpdateQuestion(c *fiber.Ctx) error {
 		question.Answers = *input.Question.Answers
 	}
 	if input.Question.CorrectComments != nil {
-		question.CorrectComments = *input.Question.CorrectComments
+		question.CorrectComments = service.SanitizeHTML(*input.Question.CorrectComments)
 	}
 	if input.Question.IncorrectComments != nil {
-		question.IncorrectComments = *input.Question.IncorrectComments
+		question.IncorrectComments = service.SanitizeHTML(*input.Question.IncorrectComments)
 	}
 	if input.Question.NeutralComments != nil {
-		question.NeutralComments = *input.Question.NeutralComments
+		question.NeutralComments = service.SanitizeHTML(*input.Question.NeutralComments)
 	}
 	if input.Question.QuizQuestionGroupID.Set {
 		if newGroup == nil || *newGroup == 0 {

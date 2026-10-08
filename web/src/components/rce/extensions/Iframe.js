@@ -1,5 +1,5 @@
 import { Node, mergeAttributes } from '@tiptap/react';
-import { TRUSTED_IFRAME_SRC } from '../../RichContentViewer';
+import { TRUSTED_IFRAME_SRC, IFRAME_ALLOW_RE, DEFAULT_IFRAME_ALLOW } from '../../../utils/iframePolicy';
 
 /**
  * Block-level media embed node for RichContentEditorV2.
@@ -27,6 +27,17 @@ export const Iframe = Node.create({
       width: { default: null },
       height: { default: null },
       frameborder: { default: '0' },
+      // Permissions the embed asks for (YouTube, Desmos, ...), limited to
+      // the features the server sanitizer keeps (G001).
+      allow: {
+        default: DEFAULT_IFRAME_ALLOW,
+        parseHTML: (el) => {
+          const v = el.getAttribute('allow');
+          return v && IFRAME_ALLOW_RE.test(v) ? v : null;
+        },
+        renderHTML: (attrs) => (attrs.allow && IFRAME_ALLOW_RE.test(attrs.allow) ? { allow: attrs.allow } : {}),
+      },
+      loading: { default: 'lazy' },
       allowfullscreen: {
         default: true,
         parseHTML: (el) => el.hasAttribute('allowfullscreen'),

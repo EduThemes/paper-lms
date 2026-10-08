@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import {
   Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code,
   Heading1, Heading2, Heading3, ChevronDown,
@@ -6,12 +6,14 @@ import {
   Quote, Code2, Minus,
   Link as LinkIcon, Image as ImageIcon, Table as TableIcon,
   AlignLeft, AlignCenter, AlignRight, AlignJustify,
-  Undo, Redo, Sigma, Film, FolderSearch,
+  Undo, Redo, Sigma, Film, FolderSearch, Clapperboard,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import ContentPicker from './ContentPicker';
 import MathInputDialog from './MathInputDialog';
 import EmbedMediaDialog from './EmbedMediaDialog';
+import MediaUploadDialog from './MediaUploadDialog';
+import { MATH_EDIT_EVENT } from './extensions/MathInline';
 
 /**
  * @typedef {Object} RCEToolbarProps
@@ -50,7 +52,25 @@ export default function RCEToolbar({ editor, courseId }) {
   const [showPicker, setShowPicker] = useState(false);
   const [showMath, setShowMath] = useState(false);
   const [showEmbed, setShowEmbed] = useState(false);
+  const [showMedia, setShowMedia] = useState(false);
+  // Equation being edited: { pos, latex } when an existing equation was
+  // clicked (extensions/MathInline.js), null when inserting a new one.
+  const [mathEdit, setMathEdit] = useState(null);
   const toolbarRef = useRef(null);
+
+  // Clicking an equation node bubbles MATH_EDIT_EVENT up from the editor
+  // DOM. Listen on this editor's wrapper (the toolbar's parent) rather than
+  // editor.view, which throws until the editor view is mounted.
+  useEffect(() => {
+    const wrapper = toolbarRef.current?.parentElement;
+    if (!wrapper) return undefined;
+    const onEdit = (e) => {
+      setMathEdit(e.detail || null);
+      setShowMath(true);
+    };
+    wrapper.addEventListener(MATH_EDIT_EVENT, onEdit);
+    return () => wrapper.removeEventListener(MATH_EDIT_EVENT, onEdit);
+  }, [editor]);
 
   /** Arrow-key navigation across toolbar buttons (a11y). */
   const onKeyDown = useCallback((e) => {
@@ -96,14 +116,30 @@ export default function RCEToolbar({ editor, courseId }) {
     editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
   }, [editor]);
 
+  const closeMath = useCallback(() => {
+    setShowMath(false);
+    setMathEdit(null);
+  }, []);
+
   const insertMath = useCallback((latex) => {
     if (!latex) return;
-    // Insert as a text node, never as an HTML string: building
-    // `\(${latex}\)` into markup let "<" / "&" in the LaTeX (x<y, matrix
-    // column separators) be parsed as tags/entities and corrupt the equation
-    // (B101). The viewers render \( \) text with KaTeX.
-    editor.chain().focus().insertContent({ type: 'text', text: `\\(${latex}\\)` }).run();
-    setShowMath(false);
+    // An equation node (G007), never an HTML string: building markup from
+    // the LaTeX let "<" / "&" (x<y, matrix column separators) be parsed as
+    // tags/entities and corrupt the equation (B101).
+    const chain = editor.chain().focus();
+    if (mathEdit && typeof mathEdit.pos === 'number') {
+      chain.updateMath(mathEdit.pos, latex).run();
+    } else if (editor.schema.nodes.mathInline) {
+      chain.insertMath(latex).run();
+    } else {
+      chain.insertContent({ type: 'text', text: `\\(${latex}\\)` }).run();
+    }
+    closeMath();
+  }, [editor, mathEdit, closeMath]);
+
+  const insertMedia = useCallback((attrs) => {
+    if (!attrs?.src) return;
+    editor.chain().focus().setMedia(attrs).run();
   }, [editor]);
 
   const insertEmbed = useCallback((attrs) => {
@@ -112,15 +148,25 @@ export default function RCEToolbar({ editor, courseId }) {
     setShowEmbed(false);
   }, [editor]);
 
-  const insertContentLink = useCallback((href, label) => {
+  const insertContentLink = useCallback((href, label, opts = {}) => {
     if (!href) return;
-    // Text node + link mark: the label is a title and must not be parsed as
-    // HTML ("Grades <Unit 2>" used to lose "<Unit 2>") (B106).
-    editor.chain().focus().insertContent({
-      type: 'text',
-      text: label || href,
-      marks: [{ type: 'link', attrs: { href } }],
-    }).run();
+    const chain = editor.chain().focus();
+    if (opts.embed === 'image') {
+      chain.setImage({ src: href, alt: label || '' }).run();
+    } else if (opts.embed === 'video' || opts.embed === 'audio') {
+      chain.setMedia({ src: href, mediaType: opts.embed, title: label || '' }).run();
+    } else if (!editor.state.selection.empty) {
+      // Link the selected text rather than replacing it (G011).
+      chain.setLink({ href }).run();
+    } else {
+      // Text node + link mark: the label is a title and must not be parsed
+      // as HTML ("Grades <Unit 2>" used to lose "<Unit 2>") (B106).
+      chain.insertContent({
+        type: 'text',
+        text: label || href,
+        marks: [{ type: 'link', attrs: { href } }],
+      }).run();
+    }
     setShowPicker(false);
   }, [editor]);
 
@@ -184,8 +230,9 @@ export default function RCEToolbar({ editor, courseId }) {
         <ToolbarBtn label="Insert link" active={editor.isActive('link')} onClick={insertLink}><LinkIcon /></ToolbarBtn>
         <ToolbarBtn label="Insert image" onClick={insertImage}><ImageIcon /></ToolbarBtn>
         <ToolbarBtn label="Insert table" onClick={insertTable}><TableIcon /></ToolbarBtn>
-        <ToolbarBtn label="Insert math equation" onClick={() => setShowMath(true)}><Sigma /></ToolbarBtn>
+        <ToolbarBtn label="Insert math equation" onClick={() => { setMathEdit(null); setShowMath(true); }}><Sigma /></ToolbarBtn>
         <ToolbarBtn label="Embed media" onClick={() => setShowEmbed(true)}><Film /></ToolbarBtn>
+        <ToolbarBtn label="Upload or record audio/video" onClick={() => setShowMedia(true)}><Clapperboard /></ToolbarBtn>
         {courseId != null && (
           <ToolbarBtn label="Course content picker" onClick={() => setShowPicker(true)}><FolderSearch /></ToolbarBtn>
         )}
@@ -212,8 +259,11 @@ export default function RCEToolbar({ editor, courseId }) {
           onClose={() => setShowPicker(false)}
         />
       )}
-      <MathInputDialog open={showMath} onClose={() => setShowMath(false)} onInsert={insertMath} />
+      <MathInputDialog open={showMath} onClose={closeMath} onInsert={insertMath} initialLatex={mathEdit?.latex || ''} />
       <EmbedMediaDialog open={showEmbed} onClose={() => setShowEmbed(false)} onInsert={insertEmbed} />
+      {showMedia && (
+        <MediaUploadDialog open={showMedia} onClose={() => setShowMedia(false)} onInsert={insertMedia} courseId={courseId} />
+      )}
     </>
   );
 }

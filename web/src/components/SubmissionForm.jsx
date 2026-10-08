@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { Send, Clock, CheckCircle, Upload, Link as LinkIcon, FileText, Download, Paperclip } from 'lucide-react';
 import { SubmissionBody } from './SafeHTML';
-import { plainTextToHtml } from '../utils/html';
+import RichContentEditorV2 from './rce/RichContentEditorV2';
+import { clearRceDraft } from './rce/rceDrafts';
+import { hasRichContent } from '../utils/richContent';
 
 const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, submissionTypes = ['online_text_entry'] }) => {
   const types = Array.isArray(submissionTypes)
@@ -15,6 +17,10 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
 
   const [activeTab, setActiveTab] = useState(submittableTypes[0] || 'text');
   const [body, setBody] = useState('');
+  // Draft key for the text-entry editor (per assignment and browser).
+  const draftKey = `submission-${courseId}-${assignmentId}`;
+  // Bumped after a submit so the editor remounts empty.
+  const [editorKey, setEditorKey] = useState(0);
   const [url, setUrl] = useState('');
   const [file, setFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -28,12 +34,13 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
     setSuccess(false);
     try {
       if (activeTab === 'text') {
-        if (!body.trim()) return;
-        // The body is stored and rendered as HTML (as in Canvas). Convert the
-        // typed text to escaped paragraphs so line breaks survive and text
-        // such as "x<y and y>z" is not parsed as a tag (B003).
-        await onSubmit({ submission_type: 'online_text_entry', body: plainTextToHtml(body) });
+        if (!hasRichContent(body)) return;
+        // The body is rich content (HTML from the editor, as in Canvas); the
+        // server sanitizes it at submit time.
+        await onSubmit({ submission_type: 'online_text_entry', body });
+        clearRceDraft(draftKey);
         setBody('');
+        setEditorKey((k) => k + 1);
       } else if (activeTab === 'url') {
         if (!url.trim()) return;
         await onSubmit({ submission_type: 'online_url', url });
@@ -53,7 +60,7 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
   };
 
   const isValid = () => {
-    if (activeTab === 'text') return body.trim().length > 0;
+    if (activeTab === 'text') return hasRichContent(body);
     if (activeTab === 'url') return url.trim().length > 0;
     if (activeTab === 'file') return file !== null;
     return false;
@@ -173,13 +180,17 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
         </label>
 
         {activeTab === 'text' && (
-          <textarea
+          // Rich content editor, as in Canvas (G010): formatting, equations,
+          // links, images and recorded audio/video. No AI Assist for student
+          // work.
+          <RichContentEditorV2
+            key={editorKey}
             value={body}
-            onChange={(e) => setBody(e.target.value)}
-            rows={6}
-            className="w-full border border-border-strong rounded-lg p-3 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-y"
+            onChange={setBody}
             placeholder="Enter your submission text here..."
-            disabled={submitting}
+            courseId={courseId}
+            autoSaveKey={draftKey}
+            aiAssist={false}
           />
         )}
 

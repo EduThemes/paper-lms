@@ -841,6 +841,8 @@ func main() {
 	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo, courseRepo)
 	fileHandler.SetAuthorizer(authz)
 	folderHandler := handlers.NewFolderHandler(fileService, authz)
+	// Rich-content media uploads / recordings / captions (G002).
+	mediaObjectHandler := handlers.NewMediaObjectHandler(service.NewMediaService(fileService, postgres.NewMediaObjectRepository(database), postgres.NewMediaTrackRepository(database)), authz)
 	sectionHandler = handlers.NewSectionHandler(sectionRepo, authz)
 	sisImportHandler := handlers.NewSISImportHandler(sisImportService)
 	// handlers
@@ -1067,6 +1069,7 @@ func main() {
 		SmartSearchHandler:          smartSearchHandler,
 		CommonsHandler:              commonsHandler,
 		AIAssistHandler:             aiAssistHandler,
+		MediaObjectHandler:          mediaObjectHandler,
 
 		QuizItemBankHandler:         quizItemBankHandler,
 		QuizStimulusHandler:         quizStimulusHandler,

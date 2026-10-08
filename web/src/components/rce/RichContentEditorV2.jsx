@@ -23,6 +23,8 @@ import { useClickOutside } from '../../hooks/useClickOutside';
 import RCEToolbar from './RCEToolbar';
 import RestoreAutosaveModal from './RestoreAutosaveModal';
 import Iframe from './extensions/Iframe';
+import Media from './extensions/Media';
+import MathInline from './extensions/MathInline';
 import { readRceDraft, scheduleRceDraftWrite, cancelRceDraftWrite, clearRceDraft } from './rceDrafts';
 import { normalizeHTML, plainTextToHtml } from '../../utils/html';
 
@@ -36,6 +38,8 @@ import { normalizeHTML, plainTextToHtml } from '../../utils/html';
  *   Scope it to the record (course + entity id) and call clearRceDraft(key)
  *   from ./rceDrafts after a successful save.
  * @property {string=} className - Pass-through wrapper class
+ * @property {boolean=} aiAssist - Show the AI Assist menu (default true; off
+ *   for student work such as text-entry submissions)
  */
 
 const AUTOSAVE_DEBOUNCE_MS = 2000;
@@ -59,6 +63,7 @@ export default function RichContentEditorV2({
   courseId,
   autoSaveKey,
   className,
+  aiAssist = true,
 }) {
   const [restorePrompt, setRestorePrompt] = useState(null); // { html, savedAt }
   // Last HTML passed to onChange, so the value-sync effect can tell our own
@@ -98,6 +103,8 @@ export default function RichContentEditorV2({
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
     Highlight.configure({ multicolor: true }),
     Iframe,
+    Media,
+    MathInline,
   ], [placeholder]);
 
   const editor = useEditor({
@@ -250,7 +257,7 @@ export default function RichContentEditorV2({
       <RCEToolbar editor={editor} courseId={courseId} />
 
       {/* AI Assist dropdown — proxies to /api/v1/ai_assist/:action (Anthropic Messages API). */}
-      <div className="flex items-center gap-2 border-b border-input bg-muted/20 px-2 py-1">
+      {aiAssist && <div className="flex items-center gap-2 border-b border-input bg-muted/20 px-2 py-1">
         <div className="relative" ref={aiMenuRef}>
           <button
             type="button"
@@ -294,7 +301,7 @@ export default function RichContentEditorV2({
             <button type="button" onClick={() => setAiError(null)} className="underline">dismiss</button>
           </div>
         )}
-      </div>
+      </div>}
 
       <BubbleMenu editor={editor} className="flex gap-1 rounded-md border bg-popover p-1 shadow-md">
         <button type="button" aria-label="Bold" onClick={() => editor.chain().focus().toggleBold().run()} className={`px-2 py-1 text-xs rounded hover:bg-accent ${editor.isActive('bold') ? 'bg-accent' : ''}`}><b>B</b></button>

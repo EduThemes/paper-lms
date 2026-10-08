@@ -37,6 +37,7 @@ import { useAuth } from '../contexts/AuthContext';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import useScrollToHash from '../hooks/useScrollToHash';
 import ModuleSettingsModal from '../components/ModuleSettingsModal';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
@@ -129,7 +130,7 @@ const SortableModule = ({ module, children, isTeacher, disabled }) => {
     zIndex: isDragging ? 50 : 'auto',
   };
   return (
-    <div ref={setNodeRef} style={style}>
+    <div ref={setNodeRef} style={style} id={`module-${module.id}`}>
       {children({ dragHandleProps: isTeacher ? { ...attributes, ...listeners } : {} })}
     </div>
   );
@@ -492,6 +493,8 @@ const ModulesPage = () => {
   useAuth();
   const [modules, setModules] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Editor links to #module-N land on the module (G011).
+  useScrollToHash(!loading);
   const [error, setError] = useState(null);
   const [expandedModules, setExpandedModules] = useState({});
   const [showCreateModule, setShowCreateModule] = useState(false);
