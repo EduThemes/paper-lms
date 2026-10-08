@@ -46,7 +46,10 @@ func (r *discussionTopicRepo) ListByCourseID(ctx context.Context, courseID, acco
 	var topics []models.DiscussionTopic
 	var count int64
 
-	query := r.db.WithContext(ctx).Model(&models.DiscussionTopic{}).Where("course_id = ? AND workflow_state != ?", courseID, "deleted")
+	// A group discussion's per-group child topics are internal copies of
+	// their root; course lists (index, modules, copy, export) show only
+	// the root.
+	query := r.db.WithContext(ctx).Model(&models.DiscussionTopic{}).Where("course_id = ? AND workflow_state != ? AND root_topic_id IS NULL", courseID, "deleted")
 	if accountID != 0 {
 		query = query.Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID)
 	}
@@ -75,7 +78,7 @@ func (r *discussionTopicRepo) ListStudentVisibleByCourseID(ctx context.Context, 
 	var count int64
 
 	query := r.db.WithContext(ctx).Model(&models.DiscussionTopic{}).
-		Where("course_id = ? AND workflow_state NOT IN ?", courseID, []string{"deleted", "unpublished"}).
+		Where("course_id = ? AND workflow_state NOT IN ? AND root_topic_id IS NULL", courseID, []string{"deleted", "unpublished"}).
 		Where("(workflow_state <> ? OR delayed_post_at IS NOT NULL)", "post_delayed").
 		Where("(delayed_post_at IS NULL OR delayed_post_at <= ?)", now)
 	if accountID != 0 {

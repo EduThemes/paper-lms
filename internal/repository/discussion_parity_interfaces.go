@@ -91,6 +91,9 @@ type DiscussionParityRepository interface {
 	// enrollment in the course.
 	IsActiveStudent(ctx context.Context, courseID, userID uint) (bool, error)
 	CourseStaffIDs(ctx context.Context, courseID uint) ([]uint, error)
+	// ObservedStudentIDs lists the students an observer observes in the
+	// course (active ObserverEnrollment rows).
+	ObservedStudentIDs(ctx context.Context, courseID, observerID uint) ([]uint, error)
 	// ListActiveCourseUserIDs lists every user with an active enrollment.
 	ListActiveCourseUserIDs(ctx context.Context, courseID uint) ([]uint, error)
 	// SearchCourseUsers lists active members of the course whose name

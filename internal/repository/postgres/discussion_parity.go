@@ -388,6 +388,15 @@ func (r *discussionParityRepo) CourseStaffIDs(ctx context.Context, courseID uint
 	return ids, err
 }
 
+func (r *discussionParityRepo) ObservedStudentIDs(ctx context.Context, courseID, observerID uint) ([]uint, error) {
+	var ids []uint
+	err := r.db.WithContext(ctx).Model(&models.Enrollment{}).
+		Where("course_id = ? AND user_id = ? AND type = ? AND workflow_state = ? AND associated_user_id IS NOT NULL",
+			courseID, observerID, "ObserverEnrollment", "active").
+		Distinct().Pluck("associated_user_id", &ids).Error
+	return ids, err
+}
+
 func (r *discussionParityRepo) SearchCourseUsers(ctx context.Context, courseID uint, search string, limit int) ([]repository.DiscussionUserBrief, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20

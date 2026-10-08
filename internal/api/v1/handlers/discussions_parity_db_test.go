@@ -27,6 +27,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/api/v1/handlers"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/repository/postgres"
 	"github.com/EduThemes/paper-lms/internal/service"
 	"github.com/EduThemes/paper-lms/internal/storage"
@@ -318,8 +319,20 @@ func TestDiscussionParity_AvailabilityRules(t *testing.T) {
 	status, _ = env.req(t, env.alice, http.MethodGet, env.topicsPath(fmt.Sprintf("/%d/entries", idOf(gated))), nil)
 	assert.Equal(t, http.StatusForbidden, status)
 
+	// An observer of Alice sees posts once Alice has posted (Canvas).
+	parent := &models.User{Name: "Pat Parent", LoginID: "pat@example.test", Email: "pat@example.test", PasswordHash: "x", Role: "user"}
+	require.NoError(t, postgres.NewUserRepository(env.g).Create(context.Background(), parent))
+	aliceID := env.alice.ID
+	require.NoError(t, env.g.Create(&models.Enrollment{UserID: parent.ID, CourseID: env.course.ID, Type: "ObserverEnrollment",
+		Role: "ObserverEnrollment", WorkflowState: models.EnrollmentActive, AssociatedUserID: &aliceID}).Error)
+	env.roles[parent.ID] = "ObserverEnrollment"
+	_, view = env.viewV2(t, parent, idOf(gated))
+	assert.Equal(t, true, view["topic"].(map[string]any)["initial_post_required"])
+
 	status, _ = env.post(t, env.alice, idOf(gated), map[string]any{"message": "<p>I am Alice</p>"})
 	require.Equal(t, http.StatusCreated, status)
+	_, view = env.viewV2(t, parent, idOf(gated))
+	assert.Len(t, view["entries"], 2, "the observer follows the observed student")
 	_, view = env.viewV2(t, env.alice, idOf(gated))
 	assert.Equal(t, false, view["topic"].(map[string]any)["initial_post_required"])
 	assert.Len(t, view["entries"], 2)
@@ -480,6 +493,14 @@ func TestDiscussionParity_GroupDiscussion(t *testing.T) {
 			assert.EqualValues(t, 0, tp["discussion_subentry_count"], "Bob's group has no posts")
 		}
 	}
+
+	// Course-wide topic lists (modules, copy, export, planner) only see
+	// the root, never the per-group copies.
+	all, err := postgres.NewDiscussionTopicRepository(env.g).ListByCourseID(context.Background(), env.course.ID, 1,
+		repository.PaginationParams{Page: 1, PerPage: 50})
+	require.NoError(t, err)
+	require.Len(t, all.Items, 1)
+	assert.Equal(t, rootID, all.Items[0].ID)
 
 	// The group set can't change once someone has posted.
 	status, _ = env.req(t, env.teacher, http.MethodPut, env.topicsPath(fmt.Sprintf("/%d", rootID)),

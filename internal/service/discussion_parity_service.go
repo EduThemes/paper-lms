@@ -202,7 +202,21 @@ func (s *DiscussionParityService) InitialPostRequired(ctx context.Context, topic
 	if err != nil {
 		return true
 	}
-	return !posted
+	if posted {
+		return false
+	}
+	// Canvas: an observer sees the posts once a student they observe has
+	// posted.
+	observed, err := s.parity.ObservedStudentIDs(ctx, topic.CourseID, userID)
+	if err != nil {
+		return true
+	}
+	for _, sid := range observed {
+		if ok, err := s.parity.UserHasPosted(ctx, topic.ID, sid); err == nil && ok {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidateSections checks a section-specific topic's sections before it
