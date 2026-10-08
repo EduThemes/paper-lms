@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -529,12 +530,31 @@ func (h *ModuleItemHandler) LaunchParams(c *fiber.Ctx) error {
 			}
 		}
 	}
-	launch, err := h.moduleService.ExternalToolLaunch(c.Context(), item, uint(courseID), callerAccountID(c))
+	if item.ContentID == nil {
+		return responses.NotFound(c, "external tool")
+	}
+	tool, err := h.moduleService.ExternalToolForCourse(c.Context(), *item.ContentID, uint(courseID), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "external tool")
 	}
 	if learner {
 		_ = h.progression.RecordContentView(c.Context(), callerUserID(c), []uint{item.ID})
 	}
-	return c.JSON(launch)
+	// launch_path is the course tool launch page (LTI lane, G131): it
+	// launches through the item's resource link with a platform-signed
+	// hint, and handles LTI 1.1 tools too. The legacy LTI 1.3 login
+	// parameters stay for API clients that post /lti/oidc/login directly.
+	out := fiber.Map{
+		"tool_id":        tool.ID,
+		"tool_name":      tool.Name,
+		"module_item_id": item.ID,
+		"new_tab":        item.NewTab,
+		"launch_path":    fmt.Sprintf("/courses/%d/external_tools/%d?module_item_id=%d", courseID, tool.ID, item.ID),
+	}
+	if launch, lerr := h.moduleService.ExternalToolLaunch(c.Context(), item, uint(courseID), callerAccountID(c)); lerr == nil {
+		out["client_id"] = launch.ClientID
+		out["target_link_uri"] = launch.TargetLinkURI
+		out["lti_message_hint"] = launch.LTIMessageHint
+	}
+	return c.JSON(out)
 }

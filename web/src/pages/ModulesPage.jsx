@@ -48,6 +48,8 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import useScrollToHash from '../hooks/useScrollToHash';
 import ModuleSettingsModal from '../components/ModuleSettingsModal';
+import ModuleExternalToolFields from '../components/lti/ModuleExternalToolFields';
+import { ltiApi } from '../services/api_lti';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -75,6 +77,7 @@ const ITEM_ICONS = {
   Quiz: HelpCircle,
   Discussion: MessageSquare,
   ExternalUrl: ExternalLink,
+  ContextExternalTool: Wrench,
   SubHeader: Minus,
   File: Paperclip,
   Announcement: Megaphone,
@@ -719,7 +722,7 @@ const ModulesPage = () => {
   // B042: Assignment/Quiz/Discussion/Page items link to course content.
   // Load the existing content of the selected type for the picker.
   useEffect(() => {
-    if (addingItemTo === null || !itemNeedsContent(newItem.type)) {
+    if (addingItemTo === null || !itemNeedsContent(newItem.type) || newItem.type === 'ExternalTool') {
       setContentOptions([]);
       return undefined;
     }
@@ -732,17 +735,38 @@ const ModulesPage = () => {
     return () => { cancelled = true; };
   }, [addingItemTo, newItem.type, courseId]);
 
-  const canSubmitNewItem = !canCreateContent(newItem.type) && itemNeedsContent(newItem.type)
-    ? !!newItem.content_id && newItem.content_id !== NEW_CONTENT
-    : itemNeedsContent(newItem.type)
-      ? (newItem.content_id && newItem.content_id !== NEW_CONTENT) || !!newItem.title.trim()
-      : !!newItem.title.trim();
+  // External Tool items are built by ModuleExternalToolFields (LTI lane,
+  // G131): a tool is required, the title defaults to the tool's name.
+  let canSubmitNewItem;
+  if (newItem.type === 'ExternalTool') {
+    canSubmitNewItem = !!newItem.tool_id;
+  } else if (!canCreateContent(newItem.type) && itemNeedsContent(newItem.type)) {
+    canSubmitNewItem = !!newItem.content_id && newItem.content_id !== NEW_CONTENT;
+  } else if (itemNeedsContent(newItem.type)) {
+    canSubmitNewItem = (newItem.content_id && newItem.content_id !== NEW_CONTENT) || !!newItem.title.trim();
+  } else {
+    canSubmitNewItem = !!newItem.title.trim();
+  }
 
   const handleAddItem = async (e, moduleId) => {
     e.preventDefault();
     if (!canSubmitNewItem) return;
     setCreating(true);
     try {
+      if (newItem.type === 'ExternalTool') {
+        // G131: LTI tool items go through the LTI endpoint (resource link).
+        await ltiApi.createModuleToolItem(courseId, moduleId, {
+          tool_id: Number(newItem.tool_id),
+          title: newItem.title,
+          url: newItem.external_url,
+          new_tab: newItem.new_tab,
+          position: (modules.find(m => m.id === moduleId)?.items?.length || 0) + 1,
+        });
+        setAddingItemTo(null);
+        setNewItem({ title: '', type: 'SubHeader', external_url: '', new_tab: false, content_id: '' });
+        await fetchModules();
+        return;
+      }
       const itemPayload = await buildModuleItemPayload(api, courseId, {
         title: newItem.title,
         type: newItem.type,
@@ -1226,7 +1250,7 @@ const ModulesPage = () => {
                                       autoFocus
                                     />
                                   </div>
-                                  {itemNeedsContent(newItem.type) && (
+                                  {itemNeedsContent(newItem.type) && newItem.type !== 'ExternalTool' && (
                                     <select
                                       value={newItem.content_id}
                                       onChange={(e) => setNewItem({ ...newItem, content_id: e.target.value })}
@@ -1246,7 +1270,7 @@ const ModulesPage = () => {
                                       ))}
                                     </select>
                                   )}
-                                  {(newItem.type === 'ExternalUrl' || newItem.type === 'ExternalTool') && (
+                                  {newItem.type === 'ExternalUrl' && (
                                     <div className="flex items-center gap-3">
                                       <input
                                         type="url"
@@ -1266,6 +1290,18 @@ const ModulesPage = () => {
                                         New tab
                                       </label>
                                     </div>
+                                  )}
+                                  {newItem.type === 'ExternalTool' && (
+                                    <ModuleExternalToolFields
+                                      courseId={courseId}
+                                      moduleId={module.id}
+                                      value={newItem}
+                                      onChange={setNewItem}
+                                      onDeepLinked={() => {
+                                        setAddingItemTo(null);
+                                        fetchModules();
+                                      }}
+                                    />
                                   )}
                                   <div className="flex items-center gap-2 justify-end">
                                     <Button

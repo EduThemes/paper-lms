@@ -17,6 +17,8 @@ const AccessTokensPage = React.lazy(() => import('./pages/AccessTokensPage'));
 const DeveloperKeysPage = React.lazy(() => import('./pages/DeveloperKeysPage'));
 const OAuthConsentPage = React.lazy(() => import('./pages/OAuthConsentPage'));
 const ExternalToolsPage = React.lazy(() => import('./pages/ExternalToolsPage'));
+const ExternalToolLaunchPage = React.lazy(() => import('./pages/ExternalToolLaunchPage'));
+const LtiRegistrationsPage = React.lazy(() => import('./pages/LtiRegistrationsPage'));
 const DiscussionsPage = React.lazy(() => import('./pages/DiscussionsPage'));
 const DiscussionTopicPage = React.lazy(() => import('./pages/DiscussionTopicPageV2'));
 const FilesPage = React.lazy(() => import('./pages/FilesPage'));
@@ -233,6 +235,8 @@ const App = () => {
           <Route path="discussions/:topicId" element={<DiscussionTopicPage />} />
           <Route path="files" element={<FilesPage />} />
           <Route path="external_tools" element={<ExternalToolsPage />} />
+          <Route path="external_tools/:toolId" element={<ExternalToolLaunchPage />} />
+          <Route path="external_tools/:toolId/launch/:placement" element={<ExternalToolLaunchPage />} />
           <Route path="rubrics" element={<RubricsPage />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="announcements" element={<AnnouncementsPage />} />
@@ -285,6 +289,14 @@ const App = () => {
           element={
             <ProtectedRoute>
               <DeveloperKeysPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/lti"
+          element={
+            <ProtectedRoute>
+              <LtiRegistrationsPage />
             </ProtectedRoute>
           }
         />

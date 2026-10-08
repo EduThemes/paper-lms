@@ -90,8 +90,18 @@ export function buildToolLaunchForm(launch, { newTab = false, doc = document } =
   return form;
 }
 
-export async function launchModuleTool(courseId, moduleId, item) {
+// Launching an External Tool item: the module launch endpoint checks the
+// student's progression (a locked item can't be launched) and records the
+// view, then the course tool launch page (LTI lane, G131) launches through
+// the item's resource link. The legacy login-form post remains for a
+// server without launch_path.
+export async function launchModuleTool(courseId, moduleId, item, { win = window } = {}) {
   const launch = await getModuleItemLaunch(courseId, moduleId, item.id);
+  if (launch?.launch_path) {
+    if (item.new_tab) win.open(launch.launch_path, '_blank', 'noopener');
+    else win.location.assign(launch.launch_path);
+    return;
+  }
   const form = buildToolLaunchForm(launch, { newTab: !!item.new_tab });
   document.body.appendChild(form);
   form.submit();

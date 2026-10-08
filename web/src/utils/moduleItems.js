@@ -44,15 +44,19 @@ export function getModuleItemLink(item, courseId) {
       return id ? `/courses/${courseId}/discussions/${id}` : null;
     case 'ExternalUrl':
       return item.url || null;
+    case 'ExternalTool':
+      // Launched by launchModuleTool (progression check, then the course
+      // tool launch page), not a plain link.
+      return null;
+    case 'ContextExternalTool':
+      // LTI tool item (G131): launched by the course tool page.
+      return id && item.id ? `/courses/${courseId}/external_tools/${id}?module_item_id=${item.id}` : null;
     case 'File':
     case 'Attachment':
       // Imported files: the download endpoint enforces enrollment.
       return id ? `${API_BASE}/files/${id}/download` : null;
     case 'Announcement':
       return `/courses/${courseId}/announcements`;
-    case 'ExternalTool':
-      // Launched through an LTI form post (launchModuleTool), not a link.
-      return null;
     default:
       return null;
   }

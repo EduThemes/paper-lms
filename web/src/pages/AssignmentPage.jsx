@@ -17,6 +17,7 @@ import RichContentEditor from '../components/RichContentEditor';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import AssignmentQuizBanner, { isQuizAssignment } from '../components/quiz/AssignmentQuizBanner';
+import AssignmentExternalToolPanel, { assignmentUsesExternalTool } from '../components/lti/AssignmentExternalToolPanel';
 
 function toLocalDatetimeValue(date) {
   const y = date.getFullYear();
@@ -620,6 +621,10 @@ const AssignmentPage = () => {
         </div>
       )}
 
+      {assignment && (
+        <AssignmentExternalToolPanel courseId={courseId} assignment={assignment} isTeacher={Boolean(isTeacher)} onChanged={() => window.location.reload()} />
+      )}
+
       {/* Section Date Overrides (teacher only) */}
       {isTeacher && overrides.length > 0 && (
         <div className="bg-surface-0 rounded-lg shadow p-4 mb-6">
@@ -769,6 +774,8 @@ const AssignmentPage = () => {
             const isOnPaperOrNone = types.every(t => t === 'on_paper' || t === 'none' || t === '');
             // A quiz is submitted by taking it (see the banner above).
             if (types.includes('online_quiz')) return null;
+            // External tool assignments are submitted inside the tool (above).
+            if (assignmentUsesExternalTool(assignment)) return null;
             if (isOnPaperOrNone) {
               return (
                 <div className="bg-surface-0 rounded-lg shadow p-6 text-center text-text-tertiary">

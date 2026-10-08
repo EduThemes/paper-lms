@@ -14,6 +14,7 @@ import MathInputDialog from './MathInputDialog';
 import EmbedMediaDialog from './EmbedMediaDialog';
 import MediaUploadDialog from './MediaUploadDialog';
 import { MATH_EDIT_EVENT } from './extensions/MathInline';
+import LtiEditorAppsButton from '../lti/LtiEditorAppsButton';
 
 /**
  * @typedef {Object} RCEToolbarProps
@@ -236,6 +237,7 @@ export default function RCEToolbar({ editor, courseId }) {
         {courseId != null && (
           <ToolbarBtn label="Course content picker" onClick={() => setShowPicker(true)}><FolderSearch /></ToolbarBtn>
         )}
+        {courseId != null && <LtiEditorAppsButton editor={editor} courseId={courseId} />}
 
         <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
 
