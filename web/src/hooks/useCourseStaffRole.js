@@ -8,6 +8,10 @@ const ADMIN_ROLES = new Set(['admin', 'super_admin']);
 const isActive = (e) => (e.enrollment_state ?? 'active') === 'active';
 const hasType = (e, type) => e.type === type || e.role === type;
 
+// setRole keeps the previous object when nothing changed, so a re-run of
+// the effect (a new user object with the same id/role) does not re-render.
+const sameRole = (prev, next) => prev && prev.staff === next.staff && prev.teacher === next.teacher;
+
 /**
  * The caller's staff standing in a course, from
  * GET /courses/:id/enrollments/self (B072).
@@ -23,11 +27,14 @@ const hasType = (e, type) => e.type === type || e.role === type;
  */
 export default function useCourseStaffRole(courseId) {
   const { user } = useAuth();
-  const [role, setRole] = useState(null);
+  const [role, setRoleState] = useState(null);
+  const setRole = (next) => setRoleState((prev) => (sameRole(prev, next) ? prev : next));
+  const userId = user?.id;
+  const userRole = user?.role;
 
   useEffect(() => {
-    if (!courseId || !user) return undefined;
-    if (ADMIN_ROLES.has(user.role)) {
+    if (!courseId || !userId) return undefined;
+    if (ADMIN_ROLES.has(userRole)) {
       setRole({ staff: true, teacher: true });
       return undefined;
     }
@@ -46,7 +53,8 @@ export default function useCourseStaffRole(courseId) {
         if (!cancelled) setRole({ staff: false, teacher: false });
       });
     return () => { cancelled = true; };
-  }, [courseId, user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseId, userId, userRole]);
 
   return role;
 }
