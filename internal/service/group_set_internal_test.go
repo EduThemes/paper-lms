@@ -54,7 +54,7 @@ func TestPlanBySection_KeepsEachGroupToOneSection(t *testing.T) {
 		{ID: 10, SectionIDs: []uint{100}}, {ID: 11, SectionIDs: []uint{100}}, {ID: 12, SectionIDs: []uint{100}}, {ID: 13, SectionIDs: []uint{100}},
 		{ID: 20, SectionIDs: []uint{200}}, {ID: 21, SectionIDs: []uint{200}},
 	}
-	plan, err := planBySection(groups, map[uint]int64{}, sts)
+	plan, err := planBySection(groups, map[uint]int64{}, nil, sts)
 	require.NoError(t, err)
 	section := map[uint]uint{10: 100, 11: 100, 12: 100, 13: 100, 20: 200, 21: 200}
 	placed := 0
@@ -70,12 +70,23 @@ func TestPlanBySection_KeepsEachGroupToOneSection(t *testing.T) {
 
 func TestPlanBySection_Preconditions(t *testing.T) {
 	two := 2
-	_, err := planBySection([]models.Group{{ID: 1}}, map[uint]int64{1: 1}, students(10))
+	_, err := planBySection([]models.Group{{ID: 1}}, map[uint]int64{1: 1}, nil, students(10))
 	assert.ErrorIs(t, err, ErrGroupsNotEmptyBySection)
-	_, err = planBySection([]models.Group{{ID: 1, MaxMembership: &two}}, map[uint]int64{}, students(10))
+	_, err = planBySection([]models.Group{{ID: 1, MaxMembership: &two}}, map[uint]int64{}, nil, students(10))
 	assert.ErrorIs(t, err, ErrGroupsLimitedBySection)
-	_, err = planBySection([]models.Group{{ID: 1}}, map[uint]int64{}, []GroupSetStudent{{ID: 10, SectionIDs: []uint{1}}, {ID: 11, SectionIDs: []uint{2}}})
+	// The set's group_limit is a size limit too: the by-section plan does
+	// not stop at a capacity, so it would overfill the groups.
+	_, err = planBySection([]models.Group{{ID: 1}}, map[uint]int64{}, &models.GroupCategory{GroupLimit: &two}, students(10, 11, 12))
+	assert.ErrorIs(t, err, ErrGroupsLimitedBySection)
+	_, err = planBySection([]models.Group{{ID: 1}}, map[uint]int64{}, nil, []GroupSetStudent{{ID: 10, SectionIDs: []uint{1}}, {ID: 11, SectionIDs: []uint{2}}})
 	assert.ErrorIs(t, err, ErrTooFewGroupsBySection)
+}
+
+func TestCheckAutoAssign_RefusesStudentOrganizedSets(t *testing.T) {
+	cid := uint(5)
+	assert.NoError(t, CheckAutoAssign(&models.GroupCategory{CourseID: &cid}))
+	assert.ErrorIs(t, CheckAutoAssign(&models.GroupCategory{CourseID: &cid, Role: "student_organized"}), ErrAutoAssignStudentGroups)
+	assert.ErrorIs(t, CheckAutoAssign(&models.GroupCategory{}), ErrGroupSetNotInCourse)
 }
 
 func TestGroupBaseName(t *testing.T) {

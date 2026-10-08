@@ -35,6 +35,7 @@ var (
 	ErrGroupsLimitedBySection  = errors.New("groups cannot have size limits to assign students by section")
 	ErrTooFewGroupsBySection   = errors.New("there must be at least as many groups as sections to assign students by section")
 	ErrGroupSetNotInCourse     = errors.New("this tool is only available for course group sets")
+	ErrAutoAssignStudentGroups = errors.New("students organize their own groups in this group set, so it cannot be auto-assigned")
 	ErrImportEmpty             = errors.New("the CSV file is empty")
 	ErrImportColumns           = errors.New("the CSV needs a user column (canvas_user_id, user_id, login_id or email) and a group column (canvas_group_id or group_name)")
 	ErrImportTooLarge          = fmt.Errorf("the CSV has more than %d rows", maxGroupImportRows)
@@ -338,7 +339,7 @@ func (s *GroupService) GroupCountForSize(ctx context.Context, category *models.G
 // go in it; as in Canvas, the groups must be empty and unlimited, and
 // there must be at least one group per section.
 func (s *GroupService) AssignUnassigned(ctx context.Context, category *models.GroupCategory, accountID uint, bySection bool) ([]models.GroupMembership, error) {
-	if _, err := categoryCourseID(category); err != nil {
+	if err := CheckAutoAssign(category); err != nil {
 		return nil, err
 	}
 	groups, err := s.activeGroups(ctx, category.ID)
@@ -366,7 +367,7 @@ func (s *GroupService) AssignUnassigned(ctx context.Context, category *models.Gr
 
 	var plan map[uint][]uint // group id → users to add
 	if bySection {
-		plan, err = planBySection(groups, counts, unassigned)
+		plan, err = planBySection(groups, counts, category, unassigned)
 	} else {
 		plan = planEvenly(groups, counts, category, unassigned)
 	}
@@ -391,6 +392,20 @@ func (s *GroupService) AssignUnassigned(ctx context.Context, category *models.Gr
 		s.syncLeadership(ctx, g, category)
 	}
 	return created, nil
+}
+
+// CheckAutoAssign reports whether the set's unassigned students can be
+// assigned automatically. A student-organized set allows several groups
+// per student, so every student counts as unassigned there: assigning
+// them would re-add students to groups they are already in.
+func CheckAutoAssign(category *models.GroupCategory) error {
+	if _, err := categoryCourseID(category); err != nil {
+		return err
+	}
+	if allowsMultipleMemberships(category) {
+		return ErrAutoAssignStudentGroups
+	}
+	return nil
 }
 
 // planEvenly gives each student (in random order) to the group with the
@@ -429,13 +444,16 @@ func planEvenly(groups []models.Group, counts map[uint]int64, category *models.G
 // planBySection allots groups to sections in proportion to each section's
 // student count (every section gets at least one), then spreads each
 // section's students evenly over its groups. A student in several
-// sections is placed by their first section.
-func planBySection(groups []models.Group, counts map[uint]int64, students []GroupSetStudent) (map[uint][]uint, error) {
-	for _, g := range groups {
+// sections is placed by their first section. The groups must be
+// unlimited: neither a group max_membership nor the set's group_limit,
+// since the plan does not stop at a capacity.
+func planBySection(groups []models.Group, counts map[uint]int64, category *models.GroupCategory, students []GroupSetStudent) (map[uint][]uint, error) {
+	for i := range groups {
+		g := &groups[i]
 		if counts[g.ID] > 0 {
 			return nil, ErrGroupsNotEmptyBySection
 		}
-		if g.MaxMembership != nil && *g.MaxMembership > 0 {
+		if groupCapacity(g, category) > 0 {
 			return nil, ErrGroupsLimitedBySection
 		}
 	}

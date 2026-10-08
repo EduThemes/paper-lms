@@ -52,7 +52,8 @@ func groupSetError(c *fiber.Ctx, err error) error {
 		errors.Is(err, service.ErrImportEmpty),
 		errors.Is(err, service.ErrImportColumns),
 		errors.Is(err, service.ErrImportTooLarge),
-		errors.Is(err, service.ErrGroupSetNotInCourse):
+		errors.Is(err, service.ErrGroupSetNotInCourse),
+		errors.Is(err, service.ErrAutoAssignStudentGroups):
 		return responses.BadRequest(c, err.Error())
 	default:
 		return responses.InternalError(c, "Could not update the group set")
@@ -160,6 +161,12 @@ func (h *GroupHandler) createAndFillGroups(c *fiber.Ctx, category *models.GroupC
 		count = n
 		assign = true
 	}
+	// Refuse an assignment that can't run before any group is created.
+	if assign {
+		if err := service.CheckAutoAssign(category); err != nil {
+			return nil, 0, true, groupSetError(c, err)
+		}
+	}
 	groups, err := h.groupService.CreateGroupsInSet(c.Context(), category, count)
 	if err != nil {
 		return nil, 0, true, groupSetError(c, err)
@@ -235,6 +242,11 @@ func (h *GroupHandler) ExportGroupCategoryCSV(c *fiber.Ctx) error {
 	var buf bytes.Buffer
 	if err := h.groupService.ExportGroupsCSV(c.Context(), category, callerAccountID(c), &buf); err != nil {
 		return groupSetError(c, err)
+	}
+	// FERPA audit: the export carries the same roster PII (login ids,
+	// emails, SIS ids) as the roster read.
+	if callerID, _ := c.Locals("user_id").(uint); callerID != 0 && h.auditService != nil {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "export", "bulk_group_set_roster", "group_categories", category.ID, c.IP(), c.Get("User-Agent"))
 	}
 	name := unsafeFilenameChars.ReplaceAllString(category.Name, "_")
 	if name == "" {

@@ -35,10 +35,14 @@ const (
 
 // groupSetApp mounts every group route the lane touches.
 func groupSetApp(f *followupFixture, userID, accountID uint) *fiber.App {
+	return groupSetAppWithAudit(f, userID, accountID, nil)
+}
+
+func groupSetAppWithAudit(f *followupFixture, userID, accountID uint, audit *service.AuditService) *fiber.App {
 	g := f.g
 	svc := service.NewGroupService(postgres.NewGroupCategoryRepository(g), postgres.NewGroupRepository(g), postgres.NewGroupMembershipRepository(g), postgres.NewEnrollmentRepository(g))
 	svc.SetUserRepository(postgres.NewUserRepository(g))
-	h := handlers.NewGroupHandler(svc, f.authz, nil)
+	h := handlers.NewGroupHandler(svc, f.authz, audit)
 	app := testutil.SetupTestApp()
 	app.Use(callerStub(userID, accountID))
 	app.Post("/courses/:course_id/group_categories", h.CreateGroupCategory)
@@ -181,6 +185,46 @@ func TestGroupSet_AssignWithNoGroupsIsABadRequest(t *testing.T) {
 	cat := emptySet(t, f, "", "")
 	resp := testutil.MakeRequest(groupSetApp(f, fxTeacherA, 1), http.MethodPost, fmt.Sprintf("/group_categories/%d/assign_unassigned_members", cat.ID), nil)
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// A student-organized set lets a student sit in several groups, so every
+// student counts as unassigned there; auto-assign would re-add students
+// to groups they are already in. It is refused before anything changes.
+func TestGroupSet_AutoAssignRefusesStudentOrganizedSet(t *testing.T) {
+	f := newFollowupFixture(t)
+	cat := emptySet(t, f, "", "")
+	require.NoError(t, f.g.Model(cat).Update("role", "student_organized").Error)
+	grp := &models.Group{GroupCategoryID: cat.ID, Name: "Study buddies", ContextType: "Course", ContextID: fxCourseA}
+	require.NoError(t, f.g.Create(grp).Error)
+	require.NoError(t, f.g.Create(&models.GroupMembership{GroupID: grp.ID, UserID: fxStudent, WorkflowState: "accepted"}).Error)
+	teacher := groupSetApp(f, fxTeacherA, 1)
+
+	resp := testutil.MakeRequest(teacher, http.MethodPost, fmt.Sprintf("/group_categories/%d/assign_unassigned_members", cat.ID), nil)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	resp = testutil.MakeRequest(teacher, http.MethodPost, fmt.Sprintf("/group_categories/%d/create_groups", cat.ID),
+		testutil.JSONBody(map[string]any{"count": 2, "assign_unassigned_members": true}))
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	var n int64
+	require.NoError(t, f.g.Model(&models.Group{}).Where("group_category_id = ?", cat.ID).Count(&n).Error)
+	assert.EqualValues(t, 1, n, "no groups were created for a refused assignment")
+}
+
+// The CSV export carries roster PII, so it is FERPA-audited like the
+// roster read.
+func TestGroupSet_ExportIsFERPAAudited(t *testing.T) {
+	f := newFollowupFixture(t)
+	cat := emptySet(t, f, "", "")
+	sink := newPIISink()
+	teacher := groupSetAppWithAudit(f, fxTeacherA, 1, service.NewAuditService(nil, nil, sink))
+	resp := testutil.MakeRequest(teacher, http.MethodGet, fmt.Sprintf("/group_categories/%d/export", cat.ID), nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	entries := sink.snapshot()
+	require.Len(t, entries, 1)
+	assert.Equal(t, fxTeacherA, entries[0].AccessorID)
+	assert.Equal(t, "export", entries[0].AccessType)
+	assert.Equal(t, "group_categories", entries[0].Resource)
+	assert.Equal(t, cat.ID, entries[0].ResourceID)
 }
 
 func TestGroupLeader_SetClearAndLeaderMayRename(t *testing.T) {
@@ -370,4 +414,21 @@ func TestConferences_TenantScopedReadsAndExternalLinkLifecycle(t *testing.T) {
 	var providers map[string]any
 	decodeJSON(t, resp, &providers)
 	assert.Len(t, providers["providers"], 2)
+
+	// A group conference in the same tenant is now found by the tenant
+	// subquery, but it has no role gate (group spaces are deferred): it is
+	// default-denied instead of open to every user of the tenant.
+	cid := fxCourseA
+	cat := &models.GroupCategory{CourseID: &cid, Name: "Labs", WorkflowState: "active"}
+	require.NoError(t, f.g.Create(cat).Error)
+	grp := &models.Group{GroupCategoryID: cat.ID, Name: "Lab 1", ContextType: "Course", ContextID: fxCourseA, WorkflowState: "available"}
+	require.NoError(t, f.g.Create(grp).Error)
+	groupConf := &models.Conference{ContextType: "Group", ContextID: grp.ID, ConferenceType: "Zoom", Title: "Lab sync",
+		UserID: fxTeacherA, JoinURL: "https://meet.example.com/lab-1", WorkflowState: "active", Recordings: "[]", Settings: "{}"}
+	require.NoError(t, f.g.Create(groupConf).Error)
+	_, err = postgres.NewConferenceRepository(f.g).FindByID(context.Background(), groupConf.ID, 1)
+	require.NoError(t, err, "the tenant subquery resolves group conferences")
+	assert.Equal(t, http.StatusNotFound, testutil.MakeRequest(student, http.MethodGet, fmt.Sprintf("/conferences/%d", groupConf.ID), nil).StatusCode)
+	assert.Equal(t, http.StatusNotFound, testutil.MakeRequest(student, http.MethodPost, fmt.Sprintf("/conferences/%d/start", groupConf.ID), nil).StatusCode)
+	assert.Equal(t, http.StatusNotFound, testutil.MakeRequest(student, http.MethodPost, fmt.Sprintf("/conferences/%d/join", groupConf.ID), nil).StatusCode)
 }
