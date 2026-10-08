@@ -316,6 +316,13 @@ export default function RichContentEditorV2({
     // pressed in the editor itself.
     if (!wrapperRef.current?.contains(e.target)) return;
     const mod = e.metaKey || e.ctrlKey;
+    if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+      // The editor usually sits inside the page's <form>; Enter in one of
+      // its own fields (find/replace, accessibility fix) must not submit
+      // (save) the page. Those fields act on their own buttons.
+      e.preventDefault();
+      return;
+    }
     if (e.altKey && !mod && (e.key === '0' || e.code === 'Digit0')) {
       e.preventDefault(); setShortcutsOpen(true);
     } else if (e.altKey && e.key === 'F10') {
@@ -333,6 +340,12 @@ export default function RichContentEditorV2({
       setFullscreen(false);
     }
   }, [sourceMode, fullscreen, findOpen, openLink]);
+
+  // The link and table-caption forms render in portals, but React still
+  // bubbles their submit event through the component tree, into the page's
+  // own <form onSubmit> around the editor: inserting a link saved the page.
+  // Editor forms handle their own submit; stop it here.
+  const stopSubmit = useCallback((e) => { e.stopPropagation(); }, []);
 
   // ----- AI Assist ---------------------------------------------------------
   // Close the AI dropdown on outside click / Escape. The hook attaches
@@ -411,6 +424,7 @@ export default function RichContentEditorV2({
     <div
       ref={wrapperRef}
       onKeyDown={onKeyDown}
+      onSubmit={stopSubmit}
       className={[
         'rce-v2 rounded-md border border-input bg-background',
         fullscreen ? 'fixed inset-0 z-50 flex flex-col rounded-none' : '',

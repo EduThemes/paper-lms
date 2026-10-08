@@ -142,6 +142,52 @@ describe('RichContentEditorV2 status bar (G005, G016)', () => {
   });
 });
 
+describe('RichContentEditorV2 inside a page form', () => {
+  // Most edit pages wrap the editor in their own <form>. The editor's
+  // dialogs and inline bars must never submit (save) that form.
+  function mountInForm(initial, onPageSubmit) {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    function FormHarness() {
+      const [value, setValue] = useState(initial);
+      latest = value;
+      return (
+        <form onSubmit={(e) => { e.preventDefault(); onPageSubmit(); }}>
+          <RichContentEditorV2 value={value} onChange={setValue} />
+          <button type="submit">Save page</button>
+        </form>
+      );
+    }
+    act(() => { root.render(<FormHarness />); });
+    return container.querySelector('.ProseMirror').editor;
+  }
+
+  it('inserting a link from the link dialog does not save the page', async () => {
+    const onPageSubmit = vi.fn();
+    const editor = mountInForm('<p>Read this</p>', onPageSubmit);
+    act(() => { editor.commands.setTextSelection({ from: 1, to: 5 }); });
+    click(byLabel('Insert link (Ctrl+K)'));
+    const url = document.getElementById('rce-link-url');
+    expect(url).not.toBeNull();
+    typeInto(url, 'https://example.com/reading');
+    const form = url.closest('form');
+    await act(async () => { form.requestSubmit(); });
+    expect(editor.getHTML()).toContain('href="https://example.com/reading"');
+    expect(onPageSubmit).not.toHaveBeenCalled();
+  });
+
+  it('Enter in an inline editor field does not submit the page form', () => {
+    const onPageSubmit = vi.fn();
+    mountInForm('<p>cat</p>', onPageSubmit);
+    click(byLabel('Find and replace (Ctrl+F)'));
+    const replace = byLabel('Replace with');
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    act(() => { replace.dispatchEvent(ev); });
+    expect(ev.defaultPrevented).toBe(true);
+  });
+});
+
 describe('RichContentEditorV2 pasted images (G006)', () => {
   it('uploads a pasted screenshot to the course files and inserts it', async () => {
     uploadCourseFileWithProgress.mockResolvedValue({ id: 42 });
