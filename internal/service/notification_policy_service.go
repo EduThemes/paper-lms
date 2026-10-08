@@ -96,12 +96,22 @@ type PolicyGrid struct {
 
 // PolicyChannels lists the user's grid columns: the account email first,
 // then every active communication channel.
+//
+// A channel whose address repeats the account email (or an earlier
+// deliverable channel) is left out: deliveryTargets folds such duplicates
+// into the first target, so a column for one would hold settings that no
+// delivery ever reads.
 func (s *NotificationDeliveryService) PolicyChannels(ctx context.Context, userID uint) []PolicyChannel {
 	var out []PolicyChannel
+	seen := map[string]bool{}
+	key := func(channelType, address string) string {
+		return channelType + ":" + strings.ToLower(strings.TrimSpace(address))
+	}
 	if s.userRepo != nil {
 		// Self lookup: userID is the authenticated caller.
 		if u, err := s.userRepo.FindByID(ctx, userID, 0); err == nil && u != nil && strings.TrimSpace(u.Email) != "" {
 			out = append(out, PolicyChannel{ID: models.PrimaryEmailChannelID, ChannelType: "email", Address: u.Email, Primary: true, Confirmed: true, Deliverable: true})
+			seen[key("email", u.Email)] = true
 		}
 	}
 	if s.channelRepo != nil {
@@ -110,9 +120,17 @@ func (s *NotificationDeliveryService) PolicyChannels(ctx context.Context, userID
 				if ch.WorkflowState != "active" {
 					continue
 				}
+				k := key(ch.ChannelType, ch.Address)
+				if seen[k] {
+					continue
+				}
+				deliverable := ch.Confirmed && s.IsDeliverableChannelType(ch.ChannelType)
+				if deliverable {
+					seen[k] = true
+				}
 				out = append(out, PolicyChannel{
 					ID: ch.ID, ChannelType: ch.ChannelType, Address: ch.Address, Confirmed: ch.Confirmed,
-					Deliverable: ch.Confirmed && s.IsDeliverableChannelType(ch.ChannelType),
+					Deliverable: deliverable,
 				})
 			}
 		}

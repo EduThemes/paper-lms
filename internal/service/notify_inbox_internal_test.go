@@ -172,6 +172,35 @@ func TestEffectivePolicies_GridAndExplicitFlags(t *testing.T) {
 	assert.False(t, cell(0, "conversation_message").Explicit)
 }
 
+// A confirmed channel that repeats the account email gets no column of its
+// own: deliveryTargets folds it into the account email, so a setting on it
+// would never apply. Its id is refused like any unknown channel.
+func TestPolicyChannels_DuplicateOfAccountEmailHasNoColumn(t *testing.T) {
+	channels := []models.CommunicationChannel{
+		{ID: 3, UserID: 50, ChannelType: "email", Address: " Jane.Doe@example.com ", Confirmed: true, WorkflowState: "active"},
+		{ID: 4, UserID: 50, ChannelType: "email", Address: "other@example.com", Confirmed: true, WorkflowState: "active"},
+		{ID: 5, UserID: 50, ChannelType: "email", Address: "OTHER@example.com", Confirmed: true, WorkflowState: "active"},
+	}
+	svc, deliveries, _ := newDeliveryFixture(t, nil, channels)
+	svc.SetPolicyStore(&fakePolicyStore{})
+	ctx := context.Background()
+
+	var ids []uint
+	for _, ch := range svc.PolicyChannels(ctx, 50) {
+		ids = append(ids, ch.ID)
+	}
+	assert.Equal(t, []uint{0, 4}, ids, "only channels that receive their own deliveries are columns")
+	assert.ErrorIs(t, svc.SetPolicy(ctx, 50, 3, "grading", "never"), ErrUnknownPolicyChannel)
+
+	// Every column maps to exactly one delivery target.
+	require.NoError(t, svc.QueueNotification(ctx, 50, "submission_grade", "Graded", "body", "Assignment", 1))
+	var addrs []string
+	for _, d := range deliveries.created {
+		addrs = append(addrs, d.Address)
+	}
+	assert.Equal(t, []string{"jane.doe@example.com", "other@example.com"}, addrs)
+}
+
 func TestSetPolicy_Validation(t *testing.T) {
 	channels := []models.CommunicationChannel{{ID: 3, UserID: 50, ChannelType: "email", Address: "verified@example.com", Confirmed: true, WorkflowState: "active"}}
 	svc, _, _ := newDeliveryFixture(t, nil, channels)
