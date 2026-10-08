@@ -140,3 +140,81 @@ export function defaultAnswersForType(type) {
 }
 
 export { makeId };
+
+// Legacy / Canvas spellings older imports persisted → Paper's unified types.
+const TYPE_ALIASES = {
+  multiple_answers: 'multiple_answer',
+  multiple_answers_question: 'multiple_answer',
+  multiple_dropdowns: 'multiple_dropdown',
+  multiple_dropdowns_question: 'multiple_dropdown',
+  multiple_choice_question: 'multiple_choice',
+  true_false_question: 'true_false',
+  short_answer_question: 'short_answer',
+  essay_question: 'essay',
+  matching_question: 'matching',
+  fill_in_multiple_blanks_question: 'fill_in_multiple_blanks',
+  file_upload_question: 'file_upload',
+  text_only_question: 'text_only',
+  calculated_question: 'formula',
+};
+
+export function normalizeQuestionType(type) {
+  return TYPE_ALIASES[type] || type;
+}
+
+// Matching answers hold left→right pairs plus (for Canvas imports) the
+// right-hand option pool flagged with blank_id "_match_options_".
+export const MATCH_POOL = '_match_options_';
+
+export function matchingParts(answers) {
+  const list = Array.isArray(answers) ? answers : [];
+  const pairs = [];
+  const pool = [];
+  const seen = new Set();
+  for (const a of list) {
+    if (!a) continue;
+    if (a.blank_id === MATCH_POOL) {
+      if (a.id != null && !seen.has(a.id)) {
+        seen.add(a.id);
+        pool.push({ id: a.id, text: a.text });
+      }
+      continue;
+    }
+    pairs.push({ key: a.left || a.id, label: a.text || a.left || a.id });
+    const right = a.right_id || a.match_id;
+    if (right && a.right && !seen.has(right)) {
+      seen.add(right);
+      pool.push({ id: right, text: a.right });
+    }
+  }
+  return { pairs, pool };
+}
+
+// Total points a student can earn (Canvas semantics): every ungrouped
+// question counts once; a question group contributes pick_count × the
+// per-question points (the group's points_per_item, else the average of its
+// questions' points). Per-attempt bank-draw copies (question_bank_entry_id)
+// are not authored questions and never count directly.
+export function computeQuizPointsPossible(questions = [], groups = []) {
+  const pts = (q) => (q.points_possible ?? 1);
+  const authored = questions.filter(q => q.question_bank_entry_id == null);
+  const groupIds = new Set(groups.map(g => g.id));
+  let total = 0;
+  for (const q of authored) {
+    const gid = q.quiz_question_group_id;
+    if (!gid || !groupIds.has(gid)) total += pts(q);
+  }
+  for (const g of groups) {
+    const members = authored.filter(q => q.quiz_question_group_id === g.id);
+    const fromBank = Boolean(g.question_bank_id);
+    const available = fromBank ? Infinity : members.length;
+    const pick = Math.min(Number(g.pick_count) || 1, available);
+    if (pick <= 0) continue;
+    let per;
+    if (g.points_per_item != null) per = Number(g.points_per_item);
+    else if (members.length > 0) per = members.reduce((s, q) => s + pts(q), 0) / members.length;
+    else per = 1;
+    total += pick * per;
+  }
+  return Math.round(total * 100) / 100;
+}

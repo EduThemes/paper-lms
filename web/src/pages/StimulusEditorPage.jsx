@@ -48,7 +48,7 @@ const StimulusEditorPage = () => {
           const s = await api.getStimulus(courseId, stimulusId);
           setForm({ title: s.title || '', content: s.content || '' });
           try {
-            const qs = await api.getStimulusQuestions(stimulusId);
+            const qs = await api.getStimulusQuestions(courseId, stimulusId);
             setLinkedQuestions(qs || []);
           } catch {
             setLinkedQuestions([]);

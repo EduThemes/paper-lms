@@ -4,7 +4,7 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, v
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Upload, AlertCircle } from 'lucide-react';
 import { sanitizeHTML } from '../../RichContentViewer';
-import { parseAnswers } from './types';
+import { parseAnswers, normalizeQuestionType, matchingParts } from './types';
 import { extractBlankIds } from './MultipleDropdownEditor';
 
 /**
@@ -79,12 +79,40 @@ const renderInlineTextWithBlanks = (htmlOrText, blankIds, value, onChange, optio
   );
 };
 
+const renderInlineTextInputs = (htmlOrText, blankIds, value, onChange, readOnly) => {
+  const plain = String(htmlOrText || '').replace(/<[^>]*>/g, ' ');
+  const segments = plain.split(/(\[[a-zA-Z][\w-]*\])/);
+  const v = value || {};
+  return (
+    <span className="leading-loose">
+      {segments.map((seg, i) => {
+        const m = seg.match(/^\[([a-zA-Z][\w-]*)\]$/);
+        if (m && blankIds.includes(m[1])) {
+          const bid = m[1];
+          return (
+            <input
+              key={`b-${bid}-${i}`}
+              type="text"
+              disabled={readOnly}
+              value={v[bid] || ''}
+              onChange={(e) => onChange({ ...v, [bid]: e.target.value })}
+              className="mx-1 inline-block w-36 border border-border-strong rounded px-2 py-1 text-sm bg-surface-0 text-text-primary"
+              aria-label={`Blank ${bid}`}
+            />
+          );
+        }
+        return <span key={`t-${i}`}>{seg}</span>;
+      })}
+    </span>
+  );
+};
+
 const ItemPlayer = ({ question, value, onChange, readOnly = false, onFileUpload }) => {
   const qid = question.id;
   const labelId = `q-${qid}-label`;
   const answers = useMemo(() => parseAnswers(question.answers, []), [question.answers]);
 
-  switch (question.question_type) {
+  switch (normalizeQuestionType(question.question_type)) {
     case 'multiple_choice':
     case 'true_false':
       return (
@@ -169,6 +197,38 @@ const ItemPlayer = ({ question, value, onChange, readOnly = false, onFileUpload 
       );
     }
 
+    case 'fill_in_multiple_blanks': {
+      // Blank ids come from the [token]s in the question text; the redacted
+      // answers list ({blank_id}) is a fallback for text without tokens.
+      let blankIds = extractBlankIds(question.question_text);
+      const fromAnswers = (Array.isArray(answers) ? answers : []).map(a => a?.blank_id).filter(Boolean);
+      if (blankIds.length === 0) blankIds = [...new Set(fromAnswers)];
+      const hasTokens = extractBlankIds(question.question_text).length > 0;
+      const v = value || {};
+      return (
+        <div className="max-w-prose text-sm text-text-primary">
+          {hasTokens ? (
+            renderInlineTextInputs(question.question_text, blankIds, value, onChange, readOnly)
+          ) : (
+            <div className="space-y-2">
+              {blankIds.map(bid => (
+                <label key={bid} className="flex items-center gap-2">
+                  <span className="text-xs text-text-tertiary w-24">{bid}</span>
+                  <input type="text" disabled={readOnly} value={v[bid] || ''}
+                    onChange={(e) => onChange({ ...v, [bid]: e.target.value })}
+                    className="border border-border-strong rounded px-2 py-1 text-sm bg-surface-0 text-text-primary"
+                    aria-label={`Blank ${bid}`} />
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    case 'matching':
+      return <MatchingPlayer answers={answers} value={value} onChange={onChange} readOnly={readOnly} labelId={labelId} />;
+
     case 'fill_in_the_blank':
       return (
         <input type="text"
@@ -226,6 +286,44 @@ const ItemPlayer = ({ question, value, onChange, readOnly = false, onFileUpload 
         </div>
       );
   }
+};
+
+// Matching: one <select> of right-hand options per left item. The value is
+// the grader's shape: [{left, right_id}, …] with one entry per left item.
+const MatchingPlayer = ({ answers, value, onChange, readOnly, labelId }) => {
+  const { pairs, pool } = matchingParts(answers);
+  const current = Array.isArray(value) ? value : [];
+  const chosen = Object.fromEntries(current.map(p => [p.left, p.right_id]));
+
+  const setMatch = (key, rightId) => {
+    if (readOnly) return;
+    const next = pairs
+      .map(p => ({ left: p.key, right_id: p.key === key ? rightId : chosen[p.key] }))
+      .filter(p => p.right_id);
+    onChange(next);
+  };
+
+  return (
+    <div className="max-w-prose" aria-labelledby={labelId}>
+      <ul className="space-y-2">
+        {pairs.map(p => (
+          <li key={p.key} className="flex items-center gap-3 border border-border-default rounded p-2 bg-surface-0">
+            <span className="flex-1 text-sm text-text-primary">{p.label}</span>
+            <select
+              disabled={readOnly}
+              value={chosen[p.key] || ''}
+              onChange={(e) => setMatch(p.key, e.target.value)}
+              className="border border-border-strong rounded px-2 py-1 text-sm bg-surface-0 text-text-primary"
+              aria-label={`Match for ${p.label}`}
+            >
+              <option value="">— Choose —</option>
+              {pool.map(o => <option key={o.id} value={o.id}>{o.text}</option>)}
+            </select>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 };
 
 const OrderingPlayer = ({ answers, value, onChange, readOnly, labelId }) => {

@@ -55,7 +55,7 @@ const ItemBankManagerPage = () => {
   useEffect(() => {
     if (!selectedBank) { setItems([]); return; }
     let cancelled = false;
-    api.listQuizItemBankItems(selectedBank.id)
+    api.listQuizItemBankItems(courseId, selectedBank.id)
       .then(data => { if (!cancelled) setItems(data || []); })
       .catch(err => { if (!cancelled) setError(err.message); });
     return () => { cancelled = true; };
@@ -121,14 +121,11 @@ const ItemBankManagerPage = () => {
     if (!targetQuizId || selectedItemIds.length === 0) return;
     setPushing(true);
     try {
-      // Prefer the Wave A from-bank-item endpoint; fall back to the legacy
-      // pull_to_quiz endpoint when the new one isn't deployed yet.
+      // Item-bank ids live in quiz_item_banks; never fall back to the legacy
+      // /question_banks/:id/pull_to_quiz endpoint, which targets a different
+      // table and would pull an unrelated bank.
       for (const itemId of selectedItemIds) {
-        try {
-          await api.addBankItemToQuiz(pushDialog.bank.id, itemId, targetQuizId);
-        } catch {
-          await api.pullBankQuestionsToQuiz(courseId, pushDialog.bank.id, targetQuizId, [itemId]);
-        }
+        await api.addBankItemToQuiz(courseId, pushDialog.bank.id, itemId, targetQuizId);
       }
       reportOk(t('itemBankManager.addedNItems', { count: selectedItemIds.length }));
       setPushDialog(null);
@@ -143,19 +140,10 @@ const ItemBankManagerPage = () => {
     if (!targetQuizId || !randomCount) return;
     setPushing(true);
     try {
-      try {
-        await api.randomDrawFromBank(pushDialog.bank.id, targetQuizId, Number(randomCount));
-      } catch {
-        // Fallback: pick N random item ids client-side and push them.
-        const pool = [...items];
-        const picks = [];
-        for (let i = 0; i < Math.min(Number(randomCount), pool.length); i++) {
-          const idx = Math.floor(Math.random() * pool.length);
-          picks.push(pool.splice(idx, 1)[0]);
-        }
-        await api.pullBankQuestionsToQuiz(courseId, pushDialog.bank.id, targetQuizId, picks.map(p => p.id));
-      }
-      reportOk(t('itemBankManager.randomDrawAdded', { count: randomCount }));
+      // The server draws AND persists the items into the target quiz.
+      const added = await api.randomDrawFromBank(courseId, pushDialog.bank.id, targetQuizId, Number(randomCount));
+      const addedCount = Array.isArray(added) ? added.length : Number(randomCount);
+      reportOk(t('itemBankManager.randomDrawAdded', { count: addedCount }));
       setPushDialog(null);
     } catch (err) {
       reportErr(err);

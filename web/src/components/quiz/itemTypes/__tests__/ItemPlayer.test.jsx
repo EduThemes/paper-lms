@@ -172,3 +172,34 @@ describe('ItemPlayer — legacy types still work', () => {
     expect(valueOf()).toBe('b');
   });
 });
+
+describe('ItemPlayer — matching (Canvas import shape)', () => {
+  it('renders a select per left item and emits [{left, right_id}]', () => {
+    const question = {
+      ...baseQ,
+      question_type: 'matching',
+      answers: JSON.stringify([
+        { id: '31', left: '31', text: 'France' },
+        { id: '901', text: 'Paris', blank_id: '_match_options_' },
+        { id: '902', text: 'London', blank_id: '_match_options_' },
+      ]),
+    };
+    render(<Player question={question} initial={[]} />);
+    fireEvent.change(screen.getByLabelText('Match for France'), { target: { value: '901' } });
+    expect(valueOf()).toEqual([{ left: '31', right_id: '901' }]);
+  });
+});
+
+describe('ItemPlayer — fill_in_multiple_blanks', () => {
+  it('renders an inline input per [blank] and writes a map', () => {
+    const question = {
+      ...baseQ,
+      question_type: 'fill_in_multiple_blanks',
+      question_text: 'The [color] sky.',
+      answers: JSON.stringify([{ blank_id: 'color' }]),
+    };
+    render(<Player question={question} initial={{}} />);
+    fireEvent.change(screen.getByLabelText('Blank color'), { target: { value: 'blue' } });
+    expect(valueOf()).toEqual({ color: 'blue' });
+  });
+});

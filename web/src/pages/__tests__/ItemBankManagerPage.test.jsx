@@ -71,7 +71,7 @@ describe('ItemBankManagerPage', () => {
     renderPage();
     const row = await screen.findByText('Alpha bank');
     fireEvent.click(row);
-    await waitFor(() => expect(mockApi.listQuizItemBankItems).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(mockApi.listQuizItemBankItems).toHaveBeenCalledWith('1', 1));
     expect(await screen.findByText(/Q1\?/)).toBeInTheDocument();
   });
 
@@ -87,7 +87,7 @@ describe('ItemBankManagerPage', () => {
     const checkbox = screen.getByRole('checkbox');
     fireEvent.click(checkbox);
     fireEvent.click(screen.getByRole('button', { name: /Add 1/ }));
-    await waitFor(() => expect(mockApi.addBankItemToQuiz).toHaveBeenCalledWith(1, 10, '99'));
+    await waitFor(() => expect(mockApi.addBankItemToQuiz).toHaveBeenCalledWith('1', 1, 10, '99'));
   });
 
   it('random draw calls randomDrawFromBank with the bank + count', async () => {
@@ -99,6 +99,23 @@ describe('ItemBankManagerPage', () => {
     const select = await screen.findByRole('combobox');
     fireEvent.change(select, { target: { value: '99' } });
     fireEvent.click(screen.getByRole('button', { name: /Draw 5/ }));
-    await waitFor(() => expect(mockApi.randomDrawFromBank).toHaveBeenCalledWith(1, '99', 5));
+    await waitFor(() => expect(mockApi.randomDrawFromBank).toHaveBeenCalledWith('1', 1, '99', 5));
+  });
+
+  // B133: a failed add must surface the error, never silently fall back to
+  // the legacy question_banks pull (a different table → wrong bank).
+  it('does not fall back to the legacy pull_to_quiz endpoint on failure', async () => {
+    mockApi.addBankItemToQuiz.mockRejectedValue(new Error('nope'));
+    renderPage();
+    fireEvent.click(await screen.findByText('Alpha bank'));
+    await screen.findByText(/Q1\?/);
+    fireEvent.click(screen.getByText(/Add to quiz/));
+    const dialogSelect = await screen.findByRole('combobox');
+    fireEvent.change(dialogSelect, { target: { value: '99' } });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /Add 1/ }));
+    await waitFor(() => expect(mockApi.addBankItemToQuiz).toHaveBeenCalled());
+    expect(mockApi.pullBankQuestionsToQuiz).not.toHaveBeenCalled();
+    expect(await screen.findByText(/nope/)).toBeInTheDocument();
   });
 });
