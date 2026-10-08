@@ -21,12 +21,15 @@ const (
 	DeepLinkTargetAssignment = "assignment"
 	DeepLinkTargetEditor     = "editor"
 	DeepLinkTargetLink       = "link"
+	// DeepLinkTargetSubmission is homework_submission: a student submits
+	// content chosen in the tool to an assignment.
+	DeepLinkTargetSubmission = "submission"
 )
 
 // ValidDeepLinkTarget reports whether kind is a supported target.
 func ValidDeepLinkTarget(kind string) bool {
 	switch kind {
-	case DeepLinkTargetModule, DeepLinkTargetAssignment, DeepLinkTargetEditor, DeepLinkTargetLink:
+	case DeepLinkTargetModule, DeepLinkTargetAssignment, DeepLinkTargetEditor, DeepLinkTargetLink, DeepLinkTargetSubmission:
 		return true
 	}
 	return false
@@ -54,6 +57,10 @@ func (s *LTIService) deepLinkingSettings(h ltiLaunchHint, devKeyID uint) (map[st
 		targets = []string{"embed", "iframe", "window"}
 	case DeepLinkTargetAssignment:
 		acceptTypes = []string{"ltiResourceLink"}
+		multiple = false
+	case DeepLinkTargetSubmission:
+		acceptTypes = []string{"link", "file"}
+		targets = []string{"window"}
 		multiple = false
 	case DeepLinkTargetModule:
 		autoCreate = true
@@ -205,7 +212,11 @@ func (s *LTIService) HandleDeepLinkingResponse(ctx context.Context, rawJWT strin
 
 	userID, accountID, courseID := claimUint(data, "uid"), claimUint(data, "acct"), claimUint(data, "cid")
 	kind := claimString(data, "kind")
-	if !s.userIsCourseStaff(ctx, userID, courseID, accountID) {
+	if kind == DeepLinkTargetSubmission {
+		if !s.userIsActiveStudent(ctx, userID, courseID, accountID) {
+			return nil, ErrLTILaunchNotFound
+		}
+	} else if !s.userIsCourseStaff(ctx, userID, courseID, accountID) {
 		return nil, ErrLTILaunchNotFound
 	}
 	tool, err := s.adv.Store.FindActiveToolForCourse(ctx, toolID, courseID, accountID)
@@ -229,6 +240,9 @@ func (s *LTIService) HandleDeepLinkingResponse(ctx context.Context, rawJWT strin
 	case DeepLinkTargetAssignment:
 		res.AssignmentID = claimUint(data, "aid")
 		err = s.applyDeepLinkToAssignment(ctx, res, items, tool, accountID)
+	case DeepLinkTargetSubmission:
+		res.AssignmentID = claimUint(data, "aid")
+		err = s.applyDeepLinkToSubmission(ctx, res, items, userID, accountID)
 	default:
 		err = s.applyDeepLinkToEditor(ctx, res, items, tool, claimString(data, "pl"))
 	}
@@ -404,6 +418,40 @@ func (s *LTIService) applyDeepLinkToAssignment(ctx context.Context, res *DeepLin
 		break // accept_multiple is false for assignments
 	}
 	return nil
+}
+
+// userIsActiveStudent reports whether the user is an active student of
+// the course (homework_submission is a student placement).
+func (s *LTIService) userIsActiveStudent(ctx context.Context, userID, courseID, accountID uint) bool {
+	if userID == 0 || courseID == 0 || accountID == 0 {
+		return false
+	}
+	e, err := s.enrollRepo.FindByUserAndCourse(ctx, userID, courseID, accountID)
+	return err == nil && e != nil && e.WorkflowState == "active" && e.Type == "StudentEnrollment"
+}
+
+// applyDeepLinkToSubmission submits the first link/file item as the
+// student's online_url submission (G131 homework_submission). The normal
+// submit path enforces publication, the accepted types and lock dates.
+func (s *LTIService) applyDeepLinkToSubmission(ctx context.Context, res *DeepLinkResult, items []DeepLinkContentItem, userID, accountID uint) error {
+	if s.adv.Submitter == nil {
+		return errors.New("submissions are not configured")
+	}
+	for _, it := range items {
+		if (it.Type != "link" && it.Type != "file") || !validToolURL(it.URL) {
+			res.Ignored++
+			continue
+		}
+		subType := "online_url"
+		u := it.URL
+		sub := &models.Submission{AssignmentID: res.AssignmentID, UserID: userID, SubmissionType: &subType, URL: &u}
+		if err := s.adv.Submitter.Submit(ctx, sub, res.CourseID, accountID); err != nil {
+			return dlInvalid(err.Error())
+		}
+		res.Items = append(res.Items, DeepLinkReturnedItem{Type: it.Type, Title: itemTitle(it, it.URL), URL: it.URL, AssignmentID: res.AssignmentID})
+		return nil
+	}
+	return dlInvalid("the tool returned nothing to submit")
 }
 
 func (s *LTIService) applyDeepLinkToEditor(ctx context.Context, res *DeepLinkResult, items []DeepLinkContentItem, tool *models.ContextExternalTool, placement string) error {

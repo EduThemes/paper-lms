@@ -86,6 +86,16 @@ describe('AssignmentExternalToolPanel', () => {
     expect(container.innerHTML).toBe('');
   });
 
+  test('a student can submit a URL assignment from a homework_submission tool', async () => {
+    ltiApi.getAssignmentTool.mockRejectedValue(Object.assign(new Error('nf'), { status: 404 }));
+    ltiApi.courseTools.mockResolvedValue([{ id: 6, name: 'Portfolio', text: 'Portfolio' }]);
+    render(<AssignmentExternalToolPanel courseId="3" assignment={{ id: 71, submission_types: ['online_url'] }} isTeacher={false} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Submit from Portfolio/ }));
+    expect(ltiApi.courseTools).toHaveBeenCalledWith('3', 'homework_submission');
+    const frame = await screen.findByTitle('Submit from Portfolio');
+    expect(frame.getAttribute('src')).toBe('/api/v1/courses/3/external_tools/6/launch?placement=homework_submission&deep_link=submission&assignment_id=71');
+  });
+
   test('a teacher attaches a tool', async () => {
     ltiApi.getAssignmentTool.mockRejectedValue(Object.assign(new Error('nf'), { status: 404 }));
     ltiApi.courseTools.mockImplementation((_c, placement) => Promise.resolve(placement ? [] : [{ id: 4, name: 'Quiz Tool' }]));

@@ -110,13 +110,26 @@ func (g *recordingGrader) last() string {
 	return g.calls[len(g.calls)-1]
 }
 
+type recordingSubmitter struct {
+	mu   sync.Mutex
+	subs []models.Submission
+}
+
+func (s *recordingSubmitter) Submit(_ context.Context, sub *models.Submission, courseID, accountID uint) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.subs = append(s.subs, *sub)
+	return nil
+}
+
 type ltiLane struct {
-	t       *testing.T
-	g       *gorm.DB
-	svc     *service.LTIService
-	grader  *recordingGrader
-	app     *fiber.App
-	toolKey *rsa.PrivateKey
+	t         *testing.T
+	g         *gorm.DB
+	svc       *service.LTIService
+	grader    *recordingGrader
+	submitter *recordingSubmitter
+	app       *fiber.App
+	toolKey   *rsa.PrivateKey
 
 	admin, teacher, student, outsider *models.User
 	course, otherCourse               *models.Course
@@ -155,7 +168,7 @@ func newLTILane(t *testing.T) *ltiLane {
 			`INSERT INTO accounts (id, name, workflow_state, mfa_policy, default_locale, tenant_mode, max_upload_size_mb)
 			 VALUES (?, ?, 'active', 'off', 'en', 'higher_ed', 500) ON CONFLICT (id) DO NOTHING`, id, fmt.Sprintf("District %d", id)).Error)
 	}
-	l := &ltiLane{t: t, g: g, grader: &recordingGrader{}}
+	l := &ltiLane{t: t, g: g, grader: &recordingGrader{}, submitter: &recordingSubmitter{}}
 	mkUser := func(acct uint, login, name, role string) *models.User {
 		u := &models.User{AccountID: acct, Name: name, LoginID: login, Email: login + "@example.com", PasswordHash: "x", Role: role}
 		require.NoError(t, g.Create(u).Error)
@@ -196,7 +209,7 @@ func newLTILane(t *testing.T) *ltiLane {
 	svc.SetAdvantageDeps(service.LTIAdvantageDeps{
 		Store: store, UserRepo: userRepo, AssignmentRepo: assignmentRepo, LineItemRepo: lineItemRepo, ResultRepo: resultRepo,
 		ModuleRepo: postgres.NewModuleRepository(g), ModuleItemRepo: postgres.NewModuleItemRepository(g),
-		OpenSecret: func(s string) (string, error) { return s, nil }, Grader: l.grader,
+		OpenSecret: func(s string) (string, error) { return s, nil }, Grader: l.grader, Submitter: l.submitter,
 	})
 	devKeyService := service.NewDeveloperKeyService(devKeyRepo)
 	svc.SetDeveloperKeyCreator(devKeyService)
@@ -324,6 +337,7 @@ func (l *ltiLane) register(extra map[string]interface{}) map[string]interface{} 
 			{"placement": "editor_button", "message_type": "LtiDeepLinkingRequest"},
 			{"placement": "link_selection"},
 			{"placement": "assignment_selection"},
+			{"placement": "homework_submission"},
 		},
 		"scopes": service.LTIAdvantageScopes,
 	}
@@ -661,6 +675,33 @@ func TestLTIAdvantage_EndToEnd(t *testing.T) {
 			body: jsonReader(map[string]interface{}{"tool_id": toolID, "title": "Library"})})
 		require.Equal(t, http.StatusCreated, resp.StatusCode, body)
 		assert.Contains(t, body, `"type":"ContextExternalTool"`)
+	})
+
+	t.Run("homework_submission submits the student's selection", func(t *testing.T) {
+		a := &models.Assignment{CourseID: l.course.ID, Name: "Essay", SubmissionTypes: "online_url", WorkflowState: models.AssignmentPublished, Published: true}
+		require.NoError(t, postgres.NewAssignmentRepository(l.g).Create(ctx, a))
+		claims := l.launch(l.student, "StudentEnrollment", clientID, fmt.Sprintf("%s/launch?placement=homework_submission&deep_link=submission&assignment_id=%d", toolID, a.ID))
+		settings := claims["https://purl.imsglobal.org/spec/lti-dl/claim/deep_linking_settings"].(map[string]interface{})
+		assert.Equal(t, []interface{}{"link", "file"}, settings["accept_types"])
+		respJWT := l.signTool(jwt.MapClaims{
+			"iss": clientID, "aud": ltiIssuer, "exp": time.Now().Add(5 * time.Minute).Unix(), "nonce": "hw-1",
+			"https://purl.imsglobal.org/spec/lti/claim/message_type":  "LtiDeepLinkingResponse",
+			"https://purl.imsglobal.org/spec/lti/claim/version":       "1.3.0",
+			"https://purl.imsglobal.org/spec/lti/claim/deployment_id": deploymentID,
+			"https://purl.imsglobal.org/spec/lti-dl/claim/data":       settings["data"],
+			"https://purl.imsglobal.org/spec/lti-dl/claim/content_items": []map[string]interface{}{
+				{"type": "link", "url": "https://tool.example.com/work/42", "title": "My work"},
+			},
+		})
+		resp, body := l.do(ltiReq{method: "POST", path: "/lti/deep_linking_response", contentType: "application/x-www-form-urlencoded",
+			body: strings.NewReader(url.Values{"JWT": {respJWT}}.Encode())})
+		require.Equal(t, http.StatusOK, resp.StatusCode, body)
+		require.Len(t, l.submitter.subs, 1)
+		sub := l.submitter.subs[0]
+		assert.Equal(t, a.ID, sub.AssignmentID)
+		assert.Equal(t, l.student.ID, sub.UserID)
+		assert.Equal(t, "online_url", *sub.SubmissionType)
+		assert.Equal(t, "https://tool.example.com/work/42", *sub.URL)
 	})
 
 	// --- G133: LTI 1.1 ---------------------------------------------------------------------

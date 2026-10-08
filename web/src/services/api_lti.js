@@ -16,6 +16,7 @@ export const LTI_PLACEMENTS = [
   { value: 'assignment_selection', label: 'Assignment selection', messageType: 'LtiDeepLinkingRequest' },
   { value: 'link_selection', label: 'Module link selection', messageType: 'LtiDeepLinkingRequest' },
   { value: 'module_index_menu', label: 'Modules menu', messageType: 'LtiDeepLinkingRequest' },
+  { value: 'homework_submission', label: 'Student submission', messageType: 'LtiDeepLinkingRequest' },
   { value: 'account_navigation', label: 'Account navigation', messageType: 'LtiResourceLinkRequest' },
 ];
 

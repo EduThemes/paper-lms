@@ -22,7 +22,7 @@ func wireLTIAdvantage(
 	agsService *service.LTIAGSService,
 	nrpsService *service.LTINRPSService,
 	devKeyService *service.DeveloperKeyService,
-	grader service.AGSGrader,
+	submissions *service.SubmissionService,
 	userRepo repository.UserRepository,
 	courseRepo repository.CourseRepository,
 	assignmentRepo repository.AssignmentRepository,
@@ -42,7 +42,8 @@ func wireLTIAdvantage(
 		ModuleItemRepo: moduleItemRepo,
 		OpenSecret:     auth.OpenString,
 		SealSecret:     auth.SealString,
-		Grader:         grader,
+		Grader:         submissions,
+		Submitter:      submissions,
 		ValidateURL:    security.ValidateExternalURL,
 		// Tool JWKS fetches go through the SSRF-safe dialer.
 		HTTPClient: &http.Client{Transport: security.SafeTransport(), Timeout: 15 * time.Second},

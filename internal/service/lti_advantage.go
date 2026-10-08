@@ -37,6 +37,9 @@ type LTIAdvantageDeps struct {
 	SealSecret func(string) (string, error)
 	// Grader writes LTI 1.1 Outcomes scores into the gradebook.
 	Grader AGSGrader
+	// Submitter creates homework_submission submissions through the
+	// normal submit path (*SubmissionService satisfies it).
+	Submitter LTISubmitter
 	// ValidateURL is the SSRF guard (security.ValidateExternalURL) run
 	// before any fetch of a tool's JWKS URL.
 	ValidateURL func(ctx context.Context, rawURL string) error
@@ -45,6 +48,11 @@ type LTIAdvantageDeps struct {
 	// APIBaseURL is the absolute base of Paper's REST API, e.g.
 	// "https://lms.example.com/api/v1". Defaults to PlatformIssuer+"/api/v1".
 	APIBaseURL string
+}
+
+// LTISubmitter submits on a student's behalf (homework_submission).
+type LTISubmitter interface {
+	Submit(ctx context.Context, submission *models.Submission, courseID, accountID uint) error
 }
 
 // SetAdvantageDeps installs the LTI Advantage collaborators.

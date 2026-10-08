@@ -619,7 +619,7 @@ const AssignmentPage = () => {
       )}
 
       {assignment && (
-        <AssignmentExternalToolPanel courseId={courseId} assignment={assignment} isTeacher={Boolean(isTeacher)} />
+        <AssignmentExternalToolPanel courseId={courseId} assignment={assignment} isTeacher={Boolean(isTeacher)} onChanged={() => window.location.reload()} />
       )}
 
       {/* Section Date Overrides (teacher only) */}

@@ -4,11 +4,14 @@ import { ltiApi, ltiLaunchUrl } from '../../services/api_lti';
 import LtiLaunchFrame from './LtiLaunchFrame';
 import LtiDeepLinkModal from './LtiDeepLinkModal';
 
-export function assignmentUsesExternalTool(assignment) {
-  const types = Array.isArray(assignment?.submission_types)
+function submissionTypes(assignment) {
+  return Array.isArray(assignment?.submission_types)
     ? assignment.submission_types
     : String(assignment?.submission_types || '').split(',').map((t) => t.trim());
-  return types.includes('external_tool');
+}
+
+export function assignmentUsesExternalTool(assignment) {
+  return submissionTypes(assignment).includes('external_tool');
 }
 
 /**
@@ -32,6 +35,11 @@ export default function AssignmentExternalToolPanel({ courseId, assignment, isTe
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [picking, setPicking] = useState(null);
+  // homework_submission tools a student can submit from (URL assignments).
+  const [hwTools, setHwTools] = useState([]);
+  const [submitting, setSubmitting] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const acceptsUrl = submissionTypes(assignment).includes('online_url');
 
   const load = useCallback(async () => {
     try {
@@ -55,8 +63,13 @@ export default function AssignmentExternalToolPanel({ courseId, assignment, isTe
     ltiApi.courseTools(courseId, 'assignment_selection').then(setSelectionTools).catch(() => setSelectionTools([]));
   }, [isTeacher, courseId]);
 
+  useEffect(() => {
+    if (isTeacher || !courseId || !acceptsUrl) return;
+    ltiApi.courseTools(courseId, 'homework_submission').then(setHwTools).catch(() => setHwTools([]));
+  }, [isTeacher, courseId, acceptsUrl]);
+
   const uses = assignmentUsesExternalTool(assignment);
-  if (!loaded || (!config && !uses && !isTeacher)) return null;
+  if (!loaded || (!config && !uses && !isTeacher && hwTools.length === 0)) return null;
 
   const save = async (e) => {
     e.preventDefault();
@@ -112,6 +125,25 @@ export default function AssignmentExternalToolPanel({ courseId, assignment, isTe
       </div>
 
       {error && <p role="alert" className="mb-2 text-sm text-accent-danger">{error}</p>}
+      {notice && <p role="status" className="mb-2 text-sm text-accent-success">{notice}</p>}
+
+      {!isTeacher && hwTools.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {hwTools.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => {
+                setError(null);
+                setSubmitting(t);
+              }}
+              className="inline-flex items-center gap-1 rounded-md border border-border-strong px-3 py-1.5 text-sm hover:bg-surface-1"
+            >
+              <Puzzle className="h-3.5 w-3.5" /> Submit from {t.text || t.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {showForm && (
         <form onSubmit={save} className="mb-3 space-y-2">
@@ -159,6 +191,24 @@ export default function AssignmentExternalToolPanel({ courseId, assignment, isTe
           height={640}
         />
       )}
+
+      <LtiDeepLinkModal
+        open={Boolean(submitting)}
+        title={submitting ? `Submit from ${submitting.text || submitting.name}` : ''}
+        src={submitting ? ltiLaunchUrl(courseId, submitting.id, { placement: 'homework_submission', deep_link: 'submission', assignment_id: assignmentId }) : ''}
+        width={submitting?.selection_width}
+        height={submitting?.selection_height}
+        onClose={() => setSubmitting(null)}
+        onResult={({ error: err }) => {
+          setSubmitting(null);
+          if (err) {
+            setError(err);
+            return;
+          }
+          setNotice('Your work was submitted.');
+          onChanged?.();
+        }}
+      />
 
       <LtiDeepLinkModal
         open={Boolean(picking)}
