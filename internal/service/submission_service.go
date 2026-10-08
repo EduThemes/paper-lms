@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -47,6 +48,8 @@ type SubmissionService struct {
 	overrideService      *OverrideService
 	accommodationService *AccommodationService
 	gradeChangeLogger    GradeChangeLogger
+	// versionRepo records a snapshot of every submitted attempt (nil-safe).
+	versionRepo repository.GradingUIRepository
 
 	// onGradedCallbacks fire (in goroutines) after a successful Grade(...).
 	// Registered via OnGraded; never invoked in tests unless explicitly wired.
@@ -96,6 +99,12 @@ func (s *SubmissionService) SetAccommodationService(a *AccommodationService) {
 
 // SetGradeChangeLogger registers the grade-change audit sink.
 func (s *SubmissionService) SetGradeChangeLogger(l GradeChangeLogger) { s.gradeChangeLogger = l }
+
+// SetVersionRepository enables the per-attempt submission history that
+// SpeedGrader shows (nil-safe: without it no history is kept).
+func (s *SubmissionService) SetVersionRepository(r repository.GradingUIRepository) {
+	s.versionRepo = r
+}
 
 func (s *SubmissionService) logGradeChange(ctx context.Context, assignment *models.Assignment, sub *models.Submission, graderID uint, oldGrade *string, oldScore *float64) {
 	if s.gradeChangeLogger == nil || assignment == nil || sub == nil {
@@ -269,8 +278,169 @@ func (s *SubmissionService) Submit(ctx context.Context, submission *models.Submi
 		if submission.Attachments == nil || *submission.Attachments == "" {
 			return errors.New("at least one file is required for a file upload submission")
 		}
+		for _, f := range submissionAttachmentFiles(submission.Attachments) {
+			if !FileExtensionAllowed(assignment, f.Filename) {
+				return fmt.Errorf("%w: %s", ErrFileExtensionNotAllowed, f.Filename)
+			}
+		}
+	case "media_recording":
+		files := submissionAttachmentFiles(submission.Attachments)
+		if len(files) == 0 {
+			return errors.New("a recording or media file is required for a media submission")
+		}
+		for _, f := range files {
+			if !IsMediaContentType(f.ContentType) {
+				return errors.New("media submissions accept audio or video files only")
+			}
+		}
+	case "student_annotation":
+		if assignment.AnnotatableAttachmentID == nil || *assignment.AnnotatableAttachmentID == 0 {
+			return errors.New("this assignment has no document to annotate")
+		}
+		// The annotations live on the submission row (DocumentAnnotation);
+		// the submission itself carries no body.
+		submission.Body = nil
+		submission.URL = nil
+		submission.Attachments = nil
+	}
+	if err := s.checkAttemptsRemaining(ctx, assignment, submission.UserID); err != nil {
+		return err
 	}
 	return s.createForAssignment(ctx, assignment, submission)
+}
+
+// ErrAttemptsExhausted is returned when a student has used every attempt
+// the assignment allows (allowed_attempts plus any extra attempts the
+// instructor granted). Handlers map it to 409.
+var ErrAttemptsExhausted = errors.New("you have used all of the attempts allowed for this assignment")
+
+// ErrFileExtensionNotAllowed is returned when an uploaded file's
+// extension is not in the assignment's allowed_extensions.
+var ErrFileExtensionNotAllowed = errors.New("file type not allowed for this assignment")
+
+// checkAttemptsRemaining enforces allowed_attempts (Canvas semantics:
+// the limit counts submitted attempts; extra_attempts on the student's
+// submission raise it).
+func (s *SubmissionService) checkAttemptsRemaining(ctx context.Context, assignment *models.Assignment, userID uint) error {
+	if assignment.AttemptsLimit() == 0 {
+		return nil
+	}
+	existing, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignment.ID, userID, 0)
+	if err != nil || existing == nil {
+		return nil
+	}
+	if AttemptsRemaining(assignment, existing) == 0 {
+		return ErrAttemptsExhausted
+	}
+	return nil
+}
+
+// AttemptsRemaining returns how many more attempts the submission's
+// student may make, or -1 when the assignment does not limit attempts.
+func AttemptsRemaining(assignment *models.Assignment, sub *models.Submission) int {
+	limit := assignment.AttemptsLimit()
+	if limit == 0 {
+		return -1
+	}
+	used := 0
+	if sub != nil {
+		used = sub.Attempt
+		if sub.ExtraAttempts != nil && *sub.ExtraAttempts > 0 {
+			limit += *sub.ExtraAttempts
+		}
+	}
+	if used >= limit {
+		return 0
+	}
+	return limit - used
+}
+
+// NormalizeAllowedExtensions turns user input (".PDF, docx ,.txt") into
+// the stored form ("pdf,docx,txt").
+func NormalizeAllowedExtensions(raw string) string {
+	seen := map[string]bool{}
+	out := make([]string, 0)
+	for _, part := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ' ' || r == ';' }) {
+		ext := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(part), "."))
+		if ext == "" || seen[ext] {
+			continue
+		}
+		seen[ext] = true
+		out = append(out, ext)
+	}
+	return strings.Join(out, ",")
+}
+
+// FileExtensionAllowed reports whether filename may be uploaded to the
+// assignment: true when the assignment does not restrict extensions.
+func FileExtensionAllowed(assignment *models.Assignment, filename string) bool {
+	if assignment == nil || strings.TrimSpace(assignment.AllowedExtensions) == "" {
+		return true
+	}
+	dot := strings.LastIndex(filename, ".")
+	if dot < 0 || dot == len(filename)-1 {
+		return false
+	}
+	ext := strings.ToLower(filename[dot+1:])
+	for _, allowed := range strings.Split(assignment.AllowedExtensions, ",") {
+		if strings.TrimSpace(allowed) == ext {
+			return true
+		}
+	}
+	return false
+}
+
+// IsMediaContentType reports whether a MIME type is audio or video.
+func IsMediaContentType(ct string) bool {
+	ct = strings.ToLower(strings.TrimSpace(ct))
+	return strings.HasPrefix(ct, "audio/") || strings.HasPrefix(ct, "video/")
+}
+
+// submissionFile is the subset of an attachment entry the validators read.
+type submissionFile struct {
+	ID          uint   `json:"id"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+}
+
+// submissionAttachmentFiles decodes a submission's attachments JSON.
+func submissionAttachmentFiles(raw *string) []submissionFile {
+	if raw == nil || *raw == "" {
+		return nil
+	}
+	var files []submissionFile
+	if err := json.Unmarshal([]byte(*raw), &files); err != nil {
+		return nil
+	}
+	return files
+}
+
+// RecordExternalToolSubmission is the hook an LTI tool's submission
+// callback (an AGS score reporting a submitted activity, or a deep-link
+// return) uses to turn a launch into a submission of type
+// basic_lti_launch. The assignment must already be loaded under the
+// caller's tenant; lock/unlock windows and attempt limits still apply.
+func (s *SubmissionService) RecordExternalToolSubmission(ctx context.Context, assignment *models.Assignment, userID uint, submittedURL string) (*models.Submission, error) {
+	if assignment == nil {
+		return nil, ErrAssignmentUnavailable
+	}
+	subType := "basic_lti_launch"
+	sub := &models.Submission{AssignmentID: assignment.ID, UserID: userID, SubmissionType: &subType}
+	if u := strings.TrimSpace(submittedURL); u != "" {
+		parsed, err := url.Parse(u)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return nil, errors.New("url must be an http or https link")
+		}
+		clean := parsed.String()
+		sub.URL = &clean
+	}
+	if err := s.checkAttemptsRemaining(ctx, assignment, userID); err != nil {
+		return nil, err
+	}
+	if err := s.createForAssignment(ctx, assignment, sub); err != nil {
+		return nil, err
+	}
+	return sub, nil
 }
 
 // Create is the internal (non-HTTP) create path; the assignment is
@@ -336,12 +506,38 @@ func (s *SubmissionService) createForAssignment(ctx context.Context, assignment 
 		}
 	}
 
+	s.recordVersion(ctx, submission)
+
 	// For group assignments, create/update submissions for all other group members
 	if assignment.GroupCategoryID != nil && *assignment.GroupCategoryID > 0 {
 		s.createGroupSubmissions(ctx, assignment, submission)
 	}
 
 	return nil
+}
+
+// recordVersion snapshots a just-submitted attempt into the history.
+// Failures are logged, never surfaced: history is a convenience for
+// graders and must not block a student's submission.
+func (s *SubmissionService) recordVersion(ctx context.Context, sub *models.Submission) {
+	if s.versionRepo == nil || sub == nil || sub.ID == 0 || sub.SubmittedAt == nil {
+		return
+	}
+	v := &models.SubmissionVersion{
+		SubmissionID:   sub.ID,
+		Attempt:        sub.Attempt,
+		AssignmentID:   sub.AssignmentID,
+		UserID:         sub.UserID,
+		SubmissionType: sub.SubmissionType,
+		Body:           sub.Body,
+		URL:            sub.URL,
+		Attachments:    sub.Attachments,
+		SubmittedAt:    sub.SubmittedAt,
+		Late:           sub.Late,
+	}
+	if err := s.versionRepo.CreateSubmissionVersion(ctx, v); err != nil {
+		slog.Warn("could not record submission version", "submission_id", sub.ID, "error", err)
+	}
 }
 
 // GetByAssignmentAndUser is the cross-tenant-sensitive read path.
@@ -510,11 +706,35 @@ func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, gra
 		return nil, ErrGradeCrossTenant
 	}
 
+	// Moderated grading: until the moderator publishes, graders record
+	// provisional grades (GradingUIService), never the student's grade.
+	if !assignment.GradesPublished() {
+		return nil, ErrModerationInProgress
+	}
+
 	// Check if grading period is closed for this assignment
 	if closed, periodTitle := s.isGradingPeriodClosed(ctx, assignment); closed {
 		return nil, fmt.Errorf("grading period %q is closed — grades cannot be modified", periodTitle)
 	}
 
+	return s.gradeLoaded(ctx, assignment, userID, graderID, callerAccountID, clearing, entered)
+}
+
+// ErrModerationInProgress is returned when a grade is posted directly to
+// a moderated assignment whose grades the moderator has not published.
+var ErrModerationInProgress = errors.New("this assignment is moderated: enter a provisional grade; the moderator publishes the final grades")
+
+// PublishModeratedGrade writes the moderator's selected grade onto the
+// student's submission while publishing a moderated assignment. The
+// assignment has already been loaded under the moderator's tenant.
+func (s *SubmissionService) PublishModeratedGrade(ctx context.Context, assignment *models.Assignment, userID, graderID, accountID uint, score float64) (*models.Submission, error) {
+	return s.gradeLoaded(ctx, assignment, userID, graderID, accountID, false, score)
+}
+
+// gradeLoaded is Grade after the tenant, moderation and grading-period
+// gates.
+func (s *SubmissionService) gradeLoaded(ctx context.Context, assignment *models.Assignment, userID, graderID, callerAccountID uint, clearing bool, entered float64) (*models.Submission, error) {
+	assignmentID := assignment.ID
 	now := time.Now()
 
 	submission, findErr := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, callerAccountID)
@@ -533,7 +753,7 @@ func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, gra
 		s.logGradeChange(ctx, assignment, submission, graderID, oldGrade, oldScore)
 		// A group grade was applied to every member, so clearing it
 		// clears it for every member too.
-		if assignment.GroupCategoryID != nil && *assignment.GroupCategoryID > 0 {
+		if assignment.GradesGroupTogether() {
 			for _, memberID := range s.getGroupMemberIDs(ctx, userID, *assignment.GroupCategoryID) {
 				member, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, memberID, callerAccountID)
 				if err != nil || member == nil || (member.Score == nil && member.Grade == nil) {
@@ -572,9 +792,10 @@ func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, gra
 	}
 	s.logGradeChange(ctx, assignment, submission, graderID, oldGrade, oldScore)
 
-	// For group assignments, apply the same grade to all other group members.
-	// Tenant is already enforced via the assignment load above.
-	if assignment.GroupCategoryID != nil && *assignment.GroupCategoryID > 0 {
+	// For group assignments, apply the same grade to all other group members
+	// (unless the assignment grades each student individually). Tenant is
+	// already enforced via the assignment load above.
+	if assignment.GradesGroupTogether() {
 		s.gradeGroupMembers(ctx, assignment, userID, graderID, entered, now)
 	}
 
@@ -681,7 +902,9 @@ func (s *SubmissionService) createGroupSubmissions(ctx context.Context, assignme
 			existing.Attempt = existing.Attempt + 1
 			existing.Late = submission.Late
 			existing.WorkflowState = "submitted"
-			_ = s.submissionRepo.Update(ctx, existing)
+			if err := s.submissionRepo.Update(ctx, existing); err == nil {
+				s.recordVersion(ctx, existing)
+			}
 		} else {
 			memberSubmission := &models.Submission{
 				AssignmentID:   submission.AssignmentID,
@@ -695,7 +918,9 @@ func (s *SubmissionService) createGroupSubmissions(ctx context.Context, assignme
 				Late:           submission.Late,
 				WorkflowState:  models.SubmissionSubmitted,
 			}
-			_ = s.submissionRepo.Create(ctx, memberSubmission)
+			if err := s.submissionRepo.Create(ctx, memberSubmission); err == nil {
+				s.recordVersion(ctx, memberSubmission)
+			}
 		}
 	}
 }

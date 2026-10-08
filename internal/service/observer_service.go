@@ -694,7 +694,9 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 		if assignments != nil {
 			assignmentList = assignments.Items
 		}
-		if pct, ok := CurrentCourseScore(course.ApplyGroupWeights, assignmentList, groups, visibleSubs); ok {
+		// A course that hides totals from students hides them from
+		// observers too (Canvas hide_final_grades).
+		if pct, ok := CurrentCourseScore(course.ApplyGroupWeights, assignmentList, groups, visibleSubs); ok && !course.HideFinalGrades {
 			grade = &pct
 		}
 		courseSummaries = append(courseSummaries, ChildCourseSummary{
