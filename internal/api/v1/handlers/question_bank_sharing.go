@@ -32,6 +32,11 @@ func (h *QuestionBankHandler) usableBank(c *fiber.Ctx) (*models.QuestionBank, ui
 		return nil, 0, true
 	}
 	bank, err := h.service.GetBank(c.Context(), uint(bankID))
+	// Banks shared from other courses are a staff resource; students only
+	// ever reach their own course's banks.
+	if err == nil && bank != nil && bank.CourseID != uint(courseID) && !quizCallerIsStaff(c) {
+		bank = nil
+	}
 	if err != nil || bank == nil || !h.service.BankUsableInCourse(c.Context(), bank, uint(courseID)) {
 		_ = responses.NotFound(c, "question bank")
 		return nil, 0, true

@@ -161,6 +161,10 @@ func TestQuestionBanks_SharedBankReadableNotEditable(t *testing.T) {
 	resp = testutil.MakeRequest(app, http.MethodPut, "/courses/8/question_banks/1", testutil.JSONBody(map[string]interface{}{"title": "Hijacked"}))
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode, "only the owning course edits a shared bank")
 	assert.Nil(t, repo.updated)
+
+	// Students never reach another course's shared bank.
+	resp = testutil.MakeRequest(bankApp("StudentEnrollment", repo), http.MethodGet, "/courses/8/question_banks/1", nil)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
 func TestQuestionBanks_OwnerSharesBank(t *testing.T) {

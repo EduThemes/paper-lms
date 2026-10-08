@@ -512,6 +512,31 @@ func TestQuizItems_StudentAnalysisAnonymousSurvey(t *testing.T) {
 	}
 }
 
+// G058: on an anonymous survey, staff cannot open one respondent's answers;
+// the respondent still can.
+func TestQuizItems_AnonymousSurveyAnswersHiddenFromStaff(t *testing.T) {
+	quiz := publishedQuiz(5, 7)
+	quiz.QuizType, quiz.AnonymousSubmissions = "survey", true
+	sub := &models.QuizSubmission{ID: 3, QuizID: 5, UserID: 10, WorkflowState: "complete", Attempt: 1}
+	answers := []models.QuizSubmissionAnswer{{ID: 1, QuizSubmissionID: 3, QuestionID: 1, Answer: "honest feedback"}}
+
+	teacher, d := quizItemsApp(t, "TeacherEnrollment", 2)
+	teacher.Get("/courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/answers", handlers.NewQuizSubmissionHandler(service.NewQuizService(d.quizRepo, d.qRepo, d.sRepo, d.aRepo), nil, nil).GetSubmissionAnswers)
+	d.quizRepo.On("FindByID", mock.Anything, uint(5), uint(1)).Return(quiz, nil)
+	d.sRepo.On("FindByID", mock.Anything, uint(3)).Return(sub, nil)
+	d.aRepo.On("ListBySubmissionID", mock.Anything, uint(3)).Return(answers, nil)
+	resp := testutil.MakeRequest(teacher, http.MethodGet, "/courses/7/quizzes/5/submissions/3/answers", nil)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	student, d2 := quizItemsApp(t, "StudentEnrollment", 10)
+	student.Get("/courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/answers", handlers.NewQuizSubmissionHandler(service.NewQuizService(d2.quizRepo, d2.qRepo, d2.sRepo, d2.aRepo), nil, nil).GetSubmissionAnswers)
+	d2.quizRepo.On("FindByID", mock.Anything, uint(5), uint(1)).Return(quiz, nil)
+	d2.sRepo.On("FindByID", mock.Anything, uint(3)).Return(sub, nil)
+	d2.aRepo.On("ListBySubmissionID", mock.Anything, uint(3)).Return(answers, nil)
+	resp = testutil.MakeRequest(student, http.MethodGet, "/courses/7/quizzes/5/submissions/3/answers", nil)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
 func TestQuizItems_ItemAnalysisScopedToCourse(t *testing.T) {
 	app, d := quizItemsApp(t, "TeacherEnrollment", 2)
 	d.quizRepo.On("FindByID", mock.Anything, uint(5), uint(1)).Return(&models.Quiz{ID: 5, CourseID: 99}, nil)

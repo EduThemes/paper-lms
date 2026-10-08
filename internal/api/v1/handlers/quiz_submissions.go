@@ -336,7 +336,7 @@ func (h *QuizSubmissionHandler) GetSubmissionAnswers(c *fiber.Ctx) error {
 	if wrote {
 		return nil
 	}
-	if !h.callerCanViewAttempt(c, sub.UserID) {
+	if !h.callerCanViewAttempt(c, sub.UserID) || anonymousSurveyHidden(c, quiz, sub) {
 		return responses.NotFound(c, "quiz submission")
 	}
 

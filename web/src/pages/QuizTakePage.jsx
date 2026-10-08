@@ -260,17 +260,20 @@ const QuizTakePage = () => {
     return () => clearInterval(interval);
   }, [timeLeft, completed, handleSubmit]);
 
-  const goNext = useCallback(() => {
-    // Can't go back: the question being left is locked server-side first.
+  const goNext = useCallback(async () => {
+    // Can't go back: persist the final answer, then lock the question
+    // server-side before moving on (a lock that raced ahead of the save
+    // would make the server refuse the answer).
     if (policy.locksOnNext && submissionRef.current) {
       const leaving = questions[currentIdx];
-      if (leaving) {
+      if (leaving && !leaving.locked) {
+        if (answers[leaving.id] !== undefined) await saveAnswerToServer(leaving.id, answers[leaving.id]);
         quizItemsApi.markQuestionRead(courseId, quizId, submissionRef.current.id, leaving.id).catch(() => {});
         setQuestions(prev => prev.map(q => (q.id === leaving.id ? { ...q, locked: true } : q)));
       }
     }
     setCurrentIdx(i => Math.min(questions.length - 1, i + 1));
-  }, [questions, currentIdx, policy.locksOnNext, courseId, quizId]);
+  }, [questions, currentIdx, answers, saveAnswerToServer, policy.locksOnNext, courseId, quizId]);
   const goPrev = useCallback(() => {
     if (!policy.canGoBack) return;
     setCurrentIdx(i => Math.max(0, i - 1));

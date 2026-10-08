@@ -233,6 +233,17 @@ func enforceQuizTakeRestrictions(c *fiber.Ctx, quiz *models.Quiz, checkAccessCod
 	return false
 }
 
+// anonymousSurveyHidden reports whether the caller must not see this
+// attempt's individual responses: on an anonymous survey only the
+// respondent reads their own answers; staff see the aggregate reports.
+func anonymousSurveyHidden(c *fiber.Ctx, quiz *models.Quiz, sub *models.QuizSubmission) bool {
+	if quiz == nil || sub == nil || !quiz.AnonymousSubmissions || !service.QuizIsSurvey(quiz) {
+		return false
+	}
+	userID, _ := c.Locals("user_id").(uint)
+	return userID == 0 || userID != sub.UserID
+}
+
 // ---------- Attempt question rendering ----------
 
 // attemptQuestionJSON renders one question of an attempt: the viewer JSON

@@ -88,6 +88,11 @@ const QuizSubmissionsPage = () => {
           {quiz?.points_possible ? `${quiz.points_possible} points` : 'Ungraded'}
           {quiz?.time_limit ? ` · ${quiz.time_limit} min time limit` : ''}
         </p>
+        {quiz?.anonymous_submissions && (
+          <p className="text-sm text-text-secondary mt-1">
+            Anonymous survey: this list shows who responded; individual answers are only visible in the aggregated Item Analysis.
+          </p>
+        )}
       </div>
 
       <div className="bg-surface-0 rounded-lg shadow">
