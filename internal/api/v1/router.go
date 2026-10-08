@@ -111,6 +111,7 @@ type Router struct {
 
 	// Peer reviews, question banks, quiz groups + statistics, setup
 	PeerReviewHandler        *handlers.PeerReviewHandler
+	GradingUIHandler         *handlers.GradingUIHandler // routes_grading_ui.go
 	QuestionBankHandler      *handlers.QuestionBankHandler
 	QuizQuestionGroupHandler *handlers.QuizQuestionGroupHandler
 	QuizStatisticsHandler    *handlers.QuizStatisticsHandler
@@ -850,6 +851,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Put("/courses/:course_id/modules/:id/prerequisites", instructor, r.ModuleHandler.SetPrerequisites)
 
 	r.registerP3FeatureRoutes(protected, admin, enrolled, instructor)
+	r.registerGradingUIRoutes(protected, admin, enrolled, instructor)
 	r.registerQuizExtensionRoutes(protected, enrolled, instructor)
 	r.registerGamificationRoutes(protected, admin, instructor, selfOrAdmin)
 	r.registerSuperAdminRoutes(protected)

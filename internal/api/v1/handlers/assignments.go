@@ -9,11 +9,16 @@ import (
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
 
 type AssignmentHandler struct {
 	assignmentService *service.AssignmentService
+
+	// Optional (SetGradingUIDeps): validate final grader / annotatable doc.
+	enrollmentRepo repository.EnrollmentRepository
+	attachmentRepo repository.AttachmentRepository
 }
 
 func NewAssignmentHandler(assignmentService *service.AssignmentService) *AssignmentHandler {
@@ -21,7 +26,7 @@ func NewAssignmentHandler(assignmentService *service.AssignmentService) *Assignm
 }
 
 func assignmentToJSON(a *models.Assignment) fiber.Map {
-	return fiber.Map{
+	m := fiber.Map{
 		"id":                   a.ID,
 		"course_id":            a.CourseID,
 		"assignment_group_id":  a.AssignmentGroupID,
@@ -45,6 +50,8 @@ func assignmentToJSON(a *models.Assignment) fiber.Map {
 		"created_at":           a.CreatedAt,
 		"updated_at":           a.UpdatedAt,
 	}
+	addGradingUIFields(m, a)
+	return m
 }
 
 func (h *AssignmentHandler) ListAssignments(c *fiber.Ctx) error {
@@ -169,6 +176,9 @@ func (h *AssignmentHandler) CreateAssignment(c *fiber.Ctx) error {
 	}
 	if assignment.SubmissionTypes == "" {
 		assignment.SubmissionTypes = "online_text_entry"
+	}
+	if err := h.applyGradingUISettings(c, assignment, true); err != nil {
+		return responses.BadRequest(c, err.Error())
 	}
 
 	if err := h.assignmentService.Create(c.Context(), assignment); err != nil {
@@ -319,6 +329,10 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 		} else {
 			assignment.GroupCategoryID = input.Assignment.GroupCategoryID
 		}
+	}
+
+	if err := h.applyGradingUISettings(c, assignment, false); err != nil {
+		return responses.BadRequest(c, err.Error())
 	}
 
 	if err := h.assignmentService.Update(c.Context(), assignment); err != nil {

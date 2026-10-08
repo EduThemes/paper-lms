@@ -8,6 +8,7 @@ import (
 	"sort"
 	"html"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
@@ -16,6 +17,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 type SubmissionHandler struct {
@@ -33,6 +35,7 @@ type SubmissionHandler struct {
 	// Optional, wired with setters (nil-safe).
 	fileService       *service.FileService
 	peerReviewService *service.PeerReviewService
+	gradingUI         *service.GradingUIService
 }
 
 func NewSubmissionHandler(submissionService *service.SubmissionService, commentRepo repository.SubmissionCommentRepository, attachmentRepo repository.AttachmentRepository, userRepo repository.UserRepository, assignmentRepo repository.AssignmentRepository, notificationDeliveryService *service.NotificationDeliveryService, observerService *service.ObserverService, outcomeAlignmentRepo repository.OutcomeAlignmentRepository, outcomeService *service.LearningOutcomeService, auditService *service.AuditService) *SubmissionHandler {
@@ -53,6 +56,10 @@ func NewSubmissionHandler(submissionService *service.SubmissionService, commentR
 // SetFileService enables the student submission-file upload/download
 // endpoints.
 func (h *SubmissionHandler) SetFileService(fs *service.FileService) { h.fileService = fs }
+
+// SetGradingUIService enables submission statuses, group comments and
+// the other grading-UI features (nil-safe).
+func (h *SubmissionHandler) SetGradingUIService(g *service.GradingUIService) { h.gradingUI = g }
 
 // SetPeerReviewService lets an assigned peer reviewer read the work they
 // were asked to review.
@@ -84,6 +91,10 @@ func submissionToJSON(s *models.Submission) fiber.Map {
 		"excused":         s.Excused,
 		"workflow_state":  s.WorkflowState,
 		"preview_url":     nil,
+
+		"custom_grade_status_id": s.CustomGradeStatusID,
+		"late_policy_status":     s.LatePolicyStatus,
+		"extra_attempts":         s.ExtraAttempts,
 	}
 	if s.Attachments != nil && *s.Attachments != "" {
 		var attachments []map[string]interface{}
@@ -525,7 +536,7 @@ func (h *SubmissionHandler) CreateSubmission(c *fiber.Ctx) error {
 		// the client UI can show the right "not yet" vs "too late"
 		// message. 409 Conflict matches the state-machine semantics.
 		switch err {
-		case service.ErrSubmissionLocked, service.ErrSubmissionNotYetUnlocked:
+		case service.ErrSubmissionLocked, service.ErrSubmissionNotYetUnlocked, service.ErrAttemptsExhausted:
 			return responses.Error(c, fiber.StatusConflict, err.Error())
 		case service.ErrAssignmentUnavailable:
 			return responses.NotFound(c, "assignment")
@@ -579,25 +590,48 @@ func (h *SubmissionHandler) UpdateSubmission(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid user ID")
 	}
 
-	graderID, err := getUserID(c)
-	if err != nil {
+	submission, wrote, err := h.updateSubmissionFor(c, uint(courseID), uint(assignmentID), uint(userID))
+	if wrote || err != nil {
 		return err
 	}
+	return c.JSON(submissionToJSON(submission))
+}
 
-	var input struct {
-		Submission struct {
-			// Pointer so an explicit "" (clear the grade) is
-			// distinguishable from "not provided".
-			PostedGrade *string `json:"posted_grade"`
-			Excused     *bool   `json:"excused"`
-		} `json:"submission"`
+// submissionUpdateInput is the grader's PUT body (Canvas submission[...]).
+type submissionUpdateInput struct {
+	Submission struct {
+		// Pointer so an explicit "" (clear the grade) is
+		// distinguishable from "not provided".
+		PostedGrade         *string `json:"posted_grade"`
+		Excused             *bool   `json:"excused"`
+		CustomGradeStatusID *uint   `json:"custom_grade_status_id"`
+		LatePolicyStatus    *string `json:"late_policy_status"`
+		ExtraAttempts       *int    `json:"extra_attempts"`
+	} `json:"submission"`
+}
+
+// updateSubmissionFor grades / excuses / sets the status of userID's
+// submission. Shared by the user-addressed route and the anonymous
+// SpeedGrader route. (result, wrote, err): on wrote=true a response was
+// written and the caller returns err as-is.
+func (h *SubmissionHandler) updateSubmissionFor(c *fiber.Ctx, courseID, assignmentID, userID uint) (*models.Submission, bool, error) {
+	graderID, err := getUserID(c)
+	if err != nil {
+		return nil, true, err
 	}
 
+	var input submissionUpdateInput
 	if err := c.BodyParser(&input); err != nil {
-		return responses.BadRequest(c, "Invalid input")
+		return nil, true, responses.BadRequest(c, "Invalid input")
 	}
-	if input.Submission.PostedGrade == nil && input.Submission.Excused == nil {
-		return responses.BadRequest(c, "No valid update fields provided")
+	in := input.Submission
+	status := service.SubmissionStatusUpdate{
+		CustomGradeStatusID: in.CustomGradeStatusID,
+		LatePolicyStatus:    in.LatePolicyStatus,
+		ExtraAttempts:       in.ExtraAttempts,
+	}
+	if in.PostedGrade == nil && in.Excused == nil && status.Empty() {
+		return nil, true, responses.BadRequest(c, "No valid update fields provided")
 	}
 
 	// B015 / F-013: the assignment must belong to :course_id (and the
@@ -605,54 +639,78 @@ func (h *SubmissionHandler) UpdateSubmission(c *fiber.Ctx) error {
 	// course. Without this a teacher of course A could grade course B's
 	// assignments or mint graded submissions for arbitrary user ids.
 	acct := callerAccountID(c)
-	if err := h.gradeTargetError(c.Context(), uint(assignmentID), uint(userID), uint(courseID), acct, nil); err != nil {
+	if err := h.gradeTargetError(c.Context(), assignmentID, userID, courseID, acct, nil); err != nil {
 		if err == errGradeTargetStudent {
-			return responses.NotFound(c, "user")
+			return nil, true, responses.NotFound(c, "user")
 		}
-		return responses.NotFound(c, "assignment")
+		return nil, true, responses.NotFound(c, "assignment")
 	}
-	assignment, aErr := h.assignmentRepo.FindByID(c.Context(), uint(assignmentID), acct)
+	assignment, aErr := h.assignmentRepo.FindByID(c.Context(), assignmentID, acct)
 	if aErr != nil {
-		return responses.NotFound(c, "assignment")
+		return nil, true, responses.NotFound(c, "assignment")
 	}
 
 	var submission *models.Submission
 
+	// Grader-set statuses (custom status, late/missing/extended, extra
+	// attempts) are applied first so a combined update returns them.
+	if !status.Empty() {
+		if h.gradingUI == nil {
+			return nil, true, responses.BadRequest(c, "Submission statuses are not available")
+		}
+		courseAcct, cErr := h.gradingUI.CourseAccountID(c.Context(), courseID, acct)
+		if cErr != nil {
+			return nil, true, responses.NotFound(c, "assignment")
+		}
+		sub, sErr := h.gradingUI.UpdateSubmissionStatus(c.Context(), assignment, userID, courseAcct, status)
+		switch {
+		case sErr == service.ErrCustomStatusNotFound:
+			return nil, true, responses.NotFound(c, "custom grade status")
+		case sErr != nil:
+			return nil, true, responses.BadRequest(c, sErr.Error())
+		}
+		submission = sub
+	}
+
 	// Excusing takes precedence over a grade (Canvas: an excused
 	// submission has no grade to post).
-	if input.Submission.Excused != nil {
-		excused := *input.Submission.Excused
-		sub, exErr := h.submissionService.SetExcused(c.Context(), uint(assignmentID), uint(userID), graderID, acct, excused)
+	if in.Excused != nil {
+		excused := *in.Excused
+		sub, exErr := h.submissionService.SetExcused(c.Context(), assignmentID, userID, graderID, acct, excused)
 		switch {
 		case exErr == service.ErrGradeCrossTenant:
-			return responses.NotFound(c, "assignment")
+			return nil, true, responses.NotFound(c, "assignment")
 		case exErr == service.ErrSubmissionNotFound:
 			// Un-excusing a student with no submission row: nothing to
 			// change. Fall through to grading if a grade was also sent.
-			if input.Submission.PostedGrade == nil {
-				return responses.NotFound(c, "submission")
+			if in.PostedGrade == nil && submission == nil {
+				return nil, true, responses.NotFound(c, "submission")
 			}
 		case exErr != nil:
-			return responses.BadRequest(c, exErr.Error())
+			return nil, true, responses.BadRequest(c, exErr.Error())
 		default:
 			submission = sub
 		}
-		if excused {
+		if excused && submission != nil {
 			h.notifyGradePosted(c.Context(), assignment, submission)
-			return c.JSON(submissionToJSON(submission))
+			return submission, false, nil
 		}
 	}
 
-	if input.Submission.PostedGrade != nil {
+	if in.PostedGrade != nil {
 		// F-016: pass caller's tenant so cross-tenant grading attempts
 		// (teacher in tenant A → assignment in tenant B) return 404.
-		submission, err = h.submissionService.Grade(c.Context(), uint(assignmentID), uint(userID), graderID, acct, *input.Submission.PostedGrade)
-		if err != nil {
-			if err == service.ErrGradeCrossTenant {
-				return responses.NotFound(c, "assignment")
+		graded, gErr := h.submissionService.Grade(c.Context(), assignmentID, userID, graderID, acct, *in.PostedGrade)
+		if gErr != nil {
+			switch gErr {
+			case service.ErrGradeCrossTenant:
+				return nil, true, responses.NotFound(c, "assignment")
+			case service.ErrModerationInProgress:
+				return nil, true, responses.Error(c, fiber.StatusConflict, gErr.Error())
 			}
-			return responses.BadRequest(c, err.Error())
+			return nil, true, responses.BadRequest(c, gErr.Error())
 		}
+		submission = graded
 
 		// B012: only notify when the student can actually see the grade
 		// (automatic post policy, or an already-posted submission).
@@ -665,9 +723,9 @@ func (h *SubmissionHandler) UpdateSubmission(c *fiber.Ctx) error {
 	}
 
 	if submission == nil {
-		return responses.NotFound(c, "submission")
+		return nil, true, responses.NotFound(c, "submission")
 	}
-	return c.JSON(submissionToJSON(submission))
+	return submission, false, nil
 }
 
 // loadCommentableSubmission resolves the submission addressed by the
@@ -701,63 +759,179 @@ func (h *SubmissionHandler) loadCommentableSubmission(c *fiber.Ctx) (*models.Ass
 	return assignment, submission, false
 }
 
+// commentInput is the comment POST body (Canvas comment[...]).
+type commentInput struct {
+	Comment struct {
+		TextComment  string `json:"text_comment"`
+		FileIDs      []uint `json:"file_ids"`
+		GroupComment bool   `json:"group_comment"`
+		Draft        bool   `json:"draft"`
+	} `json:"comment"`
+}
+
+// commentPathKey is the URL segment that addresses a submission in a
+// comment-file download link: "submissions/<user_id>" normally, or
+// "anonymous_submissions/<anonymous_id>" under anonymous grading so the
+// link never carries the student's id.
+func commentPathKey(sub *models.Submission, anonymize bool) string {
+	if anonymize && sub.AnonymousID != nil {
+		return "anonymous_submissions/" + *sub.AnonymousID
+	}
+	return fmt.Sprintf("submissions/%d", sub.UserID)
+}
+
+// commentJSON renders a comment with download links for its files.
+func commentJSON(courseID, assignmentID uint, pathKey string, sc *models.SubmissionComment) fiber.Map {
+	j := submissionCommentToJSON(sc)
+	j["group_comment_id"] = sc.GroupCommentID
+	j["attempt"] = sc.Attempt
+	files := make([]map[string]interface{}, 0)
+	if sc.Attachments != nil && *sc.Attachments != "" {
+		_ = json.Unmarshal([]byte(*sc.Attachments), &files)
+		for _, f := range files {
+			if id, ok := f["id"].(float64); ok {
+				f["url"] = fmt.Sprintf("/api/v1/courses/%d/assignments/%d/%s/comments/%d/files/%d/download", courseID, assignmentID, pathKey, sc.ID, uint(id))
+			}
+		}
+	}
+	j["attachments"] = files
+	return j
+}
+
+// commentVisibleTo decides whether callerID may read sc on submission.
+// Drafts are private to their author. Students and observers see only
+// the student's own comments until the submission is posted. On a
+// moderated assignment whose grades are unpublished, graders see other
+// graders' comments only when the assignment allows it (the moderator
+// always does).
+func (h *SubmissionHandler) commentVisibleTo(c *fiber.Ctx, assignment *models.Assignment, submission *models.Submission, sc *models.SubmissionComment, callerID uint, isStaff bool) bool {
+	if sc.Draft && sc.AuthorID != callerID {
+		return false
+	}
+	if !isStaff {
+		return submission.PostedAt != nil || sc.AuthorID == submission.UserID
+	}
+	if assignment != nil && assignment.ModeratedGrading && !assignment.GradesPublished() &&
+		!assignment.GraderCommentsVisibleToGraders && sc.AuthorID != callerID && sc.AuthorID != submission.UserID {
+		isAdmin, _ := c.Locals("is_admin").(bool)
+		return service.IsModerator(assignment, callerID, isAdmin)
+	}
+	return true
+}
+
 func (h *SubmissionHandler) CreateSubmissionComment(c *fiber.Ctx) error {
-	authorID, err := getUserID(c)
-	if err != nil {
+	if _, err := getUserID(c); err != nil {
 		return err
 	}
-
-	var input struct {
-		Comment struct {
-			TextComment string `json:"text_comment"`
-		} `json:"comment"`
-	}
-
-	if err := c.BodyParser(&input); err != nil {
-		return responses.BadRequest(c, "Invalid input")
-	}
-
-	if input.Comment.TextComment == "" {
-		return responses.BadRequest(c, "Comment text is required")
-	}
-
 	assignment, submission, wrote := h.loadCommentableSubmission(c)
 	if wrote {
 		return nil
+	}
+	j, wrote, err := h.createCommentFor(c, assignment, submission, false)
+	if wrote || err != nil {
+		return err
+	}
+	return c.Status(fiber.StatusCreated).JSON(j)
+}
+
+// createCommentFor adds a comment (with optional files, as a draft, or
+// to every member of a group) to submission. (result, wrote, err).
+func (h *SubmissionHandler) createCommentFor(c *fiber.Ctx, assignment *models.Assignment, submission *models.Submission, anonymize bool) (fiber.Map, bool, error) {
+	authorID, err := getUserID(c)
+	if err != nil {
+		return nil, true, err
+	}
+
+	var input commentInput
+	if err := c.BodyParser(&input); err != nil {
+		return nil, true, responses.BadRequest(c, "Invalid input")
+	}
+	in := input.Comment
+	if strings.TrimSpace(in.TextComment) == "" && len(in.FileIDs) == 0 {
+		return nil, true, responses.BadRequest(c, "Comment text is required")
+	}
+	if len(in.FileIDs) > 20 {
+		return nil, true, responses.BadRequest(c, "A comment can carry at most 20 files")
 	}
 
 	// B016: only the submission owner and course staff may comment.
 	// Classmates (and observers) get the same 404 as a missing row.
 	isStaff := callerIsCourseStaff(c)
 	if !isStaff && authorID != submission.UserID {
-		return responses.NotFound(c, "submission")
+		return nil, true, responses.NotFound(c, "submission")
+	}
+	// Drafts are a grader tool (Canvas); a student comment is always sent.
+	draft := in.Draft && isStaff
+
+	// Attached files (documents or recorded audio/video) must be the
+	// author's own uploads.
+	var attachmentsJSON *string
+	if len(in.FileIDs) > 0 {
+		files := make([]map[string]interface{}, 0, len(in.FileIDs))
+		for _, fid := range in.FileIDs {
+			att, aErr := h.attachmentRepo.FindByID(c.Context(), fid, callerAccountID(c))
+			if aErr != nil || att == nil || att.UserID != authorID {
+				return nil, true, responses.BadRequest(c, fmt.Sprintf("File ID %d not found", fid))
+			}
+			files = append(files, map[string]interface{}{
+				"id":           att.ID,
+				"display_name": att.DisplayName,
+				"filename":     att.Filename,
+				"content_type": att.ContentType,
+				"size":         att.Size,
+			})
+		}
+		raw, _ := json.Marshal(files)
+		s := string(raw)
+		attachmentsJSON = &s
 	}
 
-	comment := &models.SubmissionComment{
-		SubmissionID: submission.ID,
-		AuthorID:     authorID,
-		Comment:      input.Comment.TextComment,
+	targets := []*models.Submission{submission}
+	var groupCommentID *string
+	if in.GroupComment && assignment.IsGroupAssignment() && h.gradingUI != nil {
+		if subs, gErr := h.gradingUI.GroupSubmissions(c.Context(), assignment, submission.UserID); gErr == nil && len(subs) > 1 {
+			targets = subs
+			gid := uuid.NewString()
+			groupCommentID = &gid
+		}
 	}
 
-	if err := h.commentRepo.Create(c.Context(), comment); err != nil {
-		return responses.InternalError(c, "Could not create comment")
+	var primary *models.SubmissionComment
+	for _, target := range targets {
+		attempt := target.Attempt
+		comment := &models.SubmissionComment{
+			SubmissionID:   target.ID,
+			AuthorID:       authorID,
+			Comment:        in.TextComment,
+			Draft:          draft,
+			Attachments:    attachmentsJSON,
+			GroupCommentID: groupCommentID,
+			Attempt:        &attempt,
+		}
+		if err := h.commentRepo.Create(c.Context(), comment); err != nil {
+			return nil, true, responses.InternalError(c, "Could not create comment")
+		}
+		if primary == nil {
+			primary = comment
+		}
+		// Canvas: on an automatically-posted assignment an instructor
+		// comment posts the submission, so the student can read the
+		// feedback. Not while a moderated assignment is unpublished.
+		if isStaff && !draft && !assignment.UsesManualPostPolicy() && assignment.GradesPublished() {
+			_ = h.submissionService.MarkPosted(c.Context(), target)
+		}
 	}
 
-	// Canvas: on an automatically-posted assignment an instructor comment
-	// posts the submission, so the student can read the feedback.
-	if isStaff && !assignment.UsesManualPostPolicy() {
-		_ = h.submissionService.MarkPosted(c.Context(), submission)
-	}
-
-	j := submissionCommentToJSON(comment)
+	courseID, _ := c.ParamsInt("course_id")
+	j := commentJSON(uint(courseID), assignment.ID, commentPathKey(submission, anonymize), primary)
 	if author, err := h.userRepo.FindByID(c.Context(), authorID, callerAccountID(c)); err == nil {
 		j["author_name"] = author.Name
 	}
-	return c.Status(fiber.StatusCreated).JSON(j)
+	return j, false, nil
 }
 
 func (h *SubmissionHandler) ListSubmissionComments(c *fiber.Ctx) error {
-	_, submission, wrote := h.loadCommentableSubmission(c)
+	assignment, submission, wrote := h.loadCommentableSubmission(c)
 	if wrote {
 		return nil
 	}
@@ -766,28 +940,29 @@ func (h *SubmissionHandler) ListSubmissionComments(c *fiber.Ctx) error {
 	if !h.callerCanViewSubmission(c, submission.UserID) {
 		return responses.NotFound(c, "submission")
 	}
+	result, wrote, err := h.listCommentsFor(c, assignment, submission, false)
+	if wrote || err != nil {
+		return err
+	}
+	return c.JSON(result)
+}
+
+// listCommentsFor renders the comments callerID may see on submission.
+// Under anonymize the student's own comments carry no name or id.
+func (h *SubmissionHandler) listCommentsFor(c *fiber.Ctx, assignment *models.Assignment, submission *models.Submission, anonymize bool) ([]fiber.Map, bool, error) {
 	isStaff := callerIsCourseStaff(c)
 	callerID, _ := c.Locals("user_id").(uint)
 
 	comments, err := h.commentRepo.ListBySubmissionID(c.Context(), submission.ID, callerAccountID(c))
 	if err != nil {
-		return responses.InternalError(c, "Could not fetch comments")
+		return nil, true, responses.InternalError(c, "Could not fetch comments")
 	}
 
-	// Students/observers never see other authors' drafts, and until the
-	// submission is posted they see only the student's own comments
-	// (instructor feedback is part of the hidden grade).
 	visible := make([]models.SubmissionComment, 0, len(comments))
-	for _, sc := range comments {
-		if !isStaff {
-			if sc.Draft && sc.AuthorID != callerID {
-				continue
-			}
-			if submission.PostedAt == nil && sc.AuthorID != submission.UserID {
-				continue
-			}
+	for i := range comments {
+		if h.commentVisibleTo(c, assignment, submission, &comments[i], callerID, isStaff) {
+			visible = append(visible, comments[i])
 		}
-		visible = append(visible, sc)
 	}
 
 	// Build author name cache to avoid N+1
@@ -800,10 +975,15 @@ func (h *SubmissionHandler) ListSubmissionComments(c *fiber.Ctx) error {
 		}
 	}
 
+	courseID, _ := c.ParamsInt("course_id")
+	pathKey := commentPathKey(submission, anonymize)
 	result := make([]fiber.Map, len(visible))
 	for i := range visible {
-		j := submissionCommentToJSON(&visible[i])
-		if name, ok := authorNames[visible[i].AuthorID]; ok {
+		j := commentJSON(uint(courseID), submission.AssignmentID, pathKey, &visible[i])
+		if anonymize && visible[i].AuthorID == submission.UserID {
+			j["author_id"] = nil
+			j["author_name"] = "Student"
+		} else if name, ok := authorNames[visible[i].AuthorID]; ok {
 			j["author_name"] = name
 		}
 		result[i] = j
@@ -816,7 +996,7 @@ func (h *SubmissionHandler) ListSubmissionComments(c *fiber.Ctx) error {
 		_ = h.auditService.LogPIIAccess(c.Context(), callerID, submission.UserID, "read", "submission_comments", "submission_comments", submission.ID, c.IP(), c.Get("User-Agent"))
 	}
 
-	return c.JSON(result)
+	return result, false, nil
 }
 
 func (h *SubmissionHandler) BulkGrade(c *fiber.Ctx) error {
@@ -915,6 +1095,11 @@ func (h *SubmissionHandler) PostGrades(c *fiber.Ctx) error {
 	assignment, wrote := h.requireAssignmentInCourse(c, uint(assignmentID), uint(courseID))
 	if wrote {
 		return nil
+	}
+	// A moderated assignment has nothing to post until the moderator
+	// publishes its grades (Canvas parity).
+	if !assignment.GradesPublished() {
+		return responses.Error(c, fiber.StatusConflict, "Grades for this moderated assignment have not been published yet")
 	}
 
 	// Collect the submissions this call newly posts so their students

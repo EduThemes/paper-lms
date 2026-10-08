@@ -911,6 +911,7 @@ func main() {
 	courseHomeHandler := handlers.NewCourseHomeHandler(courseHomeService)
 	peerReviewHandler := handlers.NewPeerReviewHandler(peerReviewService, auditService)
 	peerReviewHandler.SetAssignmentService(assignmentService)
+	gradingUIHandler := wireGradingUI(database, gradingUIDeps{submissionRepo: submissionRepo, assignmentRepo: assignmentRepo, courseRepo: courseRepo, groupMembershipRepo: groupMembershipRepo, peerReviewRepo: peerReviewRepo, enrollmentRepo: enrollmentRepo, attachmentRepo: attachmentRepo, userRepo: userRepo, submissionService: submissionService, peerReviewService: peerReviewService, fileService: fileService, submissionHandler: submissionHandler, speedGraderHandler: speedGraderHandler, gradebookHandler: gradebookHandler, assignmentHandler: assignmentHandler, peerReviewHandler: peerReviewHandler})
 	questionBankHandler := handlers.NewQuestionBankHandler(questionBankService)
 	quizQuestionGroupHandler := handlers.NewQuizQuestionGroupHandler(quizService)
 	quizStatisticsHandler := handlers.NewQuizStatisticsHandler(quizService)
@@ -1049,6 +1050,7 @@ func main() {
 		CourseHomeHandler: courseHomeHandler,
 
 		PeerReviewHandler:         peerReviewHandler,
+		GradingUIHandler:          gradingUIHandler,
 		QuestionBankHandler:       questionBankHandler,
 		QuizQuestionGroupHandler:  quizQuestionGroupHandler,
 		QuizStatisticsHandler:     quizStatisticsHandler,

@@ -61,6 +61,7 @@ func courseToJSON(c *models.Course) fiber.Map {
 		"apply_assignment_group_weights":   c.ApplyGroupWeights,
 		"navigation_tabs":                  navTabs,
 		"created_at":                       c.CreatedAt,
+		"hide_final_grades":                c.HideFinalGrades,
 	}
 }
 
@@ -227,6 +228,7 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 			WorkflowState     *string          `json:"workflow_state"`
 			ApplyGroupWeights *bool            `json:"apply_assignment_group_weights"`
 			NavigationTabs    *json.RawMessage `json:"navigation_tabs"`
+			HideFinalGrades   *bool            `json:"hide_final_grades"`
 		} `json:"course"`
 	}
 
@@ -281,6 +283,9 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 	}
 	if input.Course.NavigationTabs != nil {
 		course.NavigationTabs = string(*input.Course.NavigationTabs)
+	}
+	if input.Course.HideFinalGrades != nil {
+		course.HideFinalGrades = *input.Course.HideFinalGrades
 	}
 
 	if err := h.courseService.Update(c.Context(), course); err != nil {
