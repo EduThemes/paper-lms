@@ -3,11 +3,20 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	repoPostgres "github.com/EduThemes/paper-lms/internal/repository/postgres"
+)
+
+// Announcement workflow states.
+const (
+	AnnouncementStateDraft     = "draft"
+	AnnouncementStateScheduled = "scheduled"
+	AnnouncementStatePublished = "published"
+	AnnouncementStateDeleted   = "deleted"
 )
 
 // AnnouncementStats holds read/acknowledged counts for an announcement.
@@ -17,11 +26,18 @@ type AnnouncementStats struct {
 	TotalAudience     int64 `json:"total_audience"`
 }
 
+// Notifier queues a per-user notification (in-app plus the
+// user's delivery channels). NotificationDeliveryService satisfies it.
+type Notifier interface {
+	QueueNotification(ctx context.Context, userID uint, notificationType, subject, body, contextType string, contextID uint) error
+}
+
 // AnnouncementService provides business logic for announcements.
 type AnnouncementService struct {
 	announcementRepo repoPostgres.AnnouncementRepository
 	receiptRepo      repoPostgres.AnnouncementReadReceiptRepository
 	enrollmentRepo   repository.EnrollmentRepository
+	notifier         Notifier
 }
 
 // NewAnnouncementService creates a new AnnouncementService.
@@ -34,6 +50,38 @@ func NewAnnouncementService(
 		announcementRepo: announcementRepo,
 		receiptRepo:      receiptRepo,
 		enrollmentRepo:   enrollmentRepo,
+	}
+}
+
+// SetNotifier wires the notification fan-out used when an announcement
+// becomes visible (published immediately or by the delayed-post job).
+// Nil disables notifications (tests, tools).
+func (s *AnnouncementService) SetNotifier(n Notifier) {
+	s.notifier = n
+}
+
+// resolveWorkflowState maps the requested state + delayed_post_at onto
+// the stored state. "scheduled" and "published" both mean "post it": a
+// future delayed_post_at keeps the row scheduled until the delayed-post
+// job publishes it, otherwise it is published now. "draft" stays draft.
+func resolveWorkflowState(a *models.Announcement, now time.Time) error {
+	switch a.WorkflowState {
+	case "", AnnouncementStatePublished, AnnouncementStateScheduled:
+		if a.DelayedPostAt != nil && a.DelayedPostAt.After(now) {
+			a.WorkflowState = AnnouncementStateScheduled
+			a.PostedAt = nil
+			return nil
+		}
+		a.WorkflowState = AnnouncementStatePublished
+		if a.PostedAt == nil {
+			t := now
+			a.PostedAt = &t
+		}
+		return nil
+	case AnnouncementStateDraft:
+		return nil
+	default:
+		return errors.New("workflow_state must be 'draft', 'scheduled', or 'published'")
 	}
 }
 
@@ -59,38 +107,38 @@ func (s *AnnouncementService) CreateAnnouncement(ctx context.Context, announceme
 		announcement.TargetAudience = "all"
 	}
 
-	// State machine: determine workflow state
-	if announcement.WorkflowState == "published" || announcement.WorkflowState == "" {
-		if announcement.DelayedPostAt != nil && announcement.DelayedPostAt.After(time.Now()) {
-			announcement.WorkflowState = "scheduled"
-		} else {
-			announcement.WorkflowState = "published"
-			now := time.Now()
-			announcement.PostedAt = &now
-		}
+	if err := resolveWorkflowState(announcement, time.Now()); err != nil {
+		return err
 	}
 
-	return s.announcementRepo.Create(ctx, announcement)
+	if err := s.announcementRepo.Create(ctx, announcement); err != nil {
+		return err
+	}
+	if announcement.WorkflowState == AnnouncementStatePublished {
+		s.notifyPublished(ctx, announcement)
+	}
+	return nil
 }
 
-// UpdateAnnouncement updates an existing announcement.
-func (s *AnnouncementService) UpdateAnnouncement(ctx context.Context, announcement *models.Announcement) error {
+// UpdateAnnouncement updates an existing announcement. previousState is
+// the stored state before the caller applied its changes; a transition
+// into "published" fans out notifications.
+func (s *AnnouncementService) UpdateAnnouncement(ctx context.Context, announcement *models.Announcement, previousState string) error {
 	if announcement.Title == "" {
 		return errors.New("announcement title is required")
 	}
 
-	// If transitioning to published and no posted_at, set it now
-	if announcement.WorkflowState == "published" && announcement.PostedAt == nil {
-		now := time.Now()
-		announcement.PostedAt = &now
+	if err := resolveWorkflowState(announcement, time.Now()); err != nil {
+		return err
 	}
 
-	// If delayed_post_at is set in the future and state is not draft, schedule it
-	if announcement.DelayedPostAt != nil && announcement.DelayedPostAt.After(time.Now()) && announcement.WorkflowState != "draft" {
-		announcement.WorkflowState = "scheduled"
+	if err := s.announcementRepo.Update(ctx, announcement); err != nil {
+		return err
 	}
-
-	return s.announcementRepo.Update(ctx, announcement)
+	if announcement.WorkflowState == AnnouncementStatePublished && previousState != AnnouncementStatePublished {
+		s.notifyPublished(ctx, announcement)
+	}
+	return nil
 }
 
 // DeleteAnnouncement soft-deletes an announcement.
@@ -98,49 +146,176 @@ func (s *AnnouncementService) DeleteAnnouncement(ctx context.Context, id uint) e
 	return s.announcementRepo.Delete(ctx, id)
 }
 
-// ListCourseAnnouncements returns announcements for a course, filtering by audience if applicable.
-func (s *AnnouncementService) ListCourseAnnouncements(ctx context.Context, courseID uint, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Announcement], error) {
-	result, err := s.announcementRepo.ListByCourseID(ctx, courseID, params)
-	if err != nil {
-		return nil, err
-	}
-
-	// Determine user enrollment type for audience filtering.
-	// accountID=0: service doesn't yet thread tenant context.
-	enrollment, enrollErr := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID, 0)
-
-	// If user has no enrollment, return all (admin or global context)
-	if enrollErr != nil || enrollment == nil {
-		return result, nil
-	}
-
-	// Filter by target audience
-	filtered := make([]models.Announcement, 0, len(result.Items))
-	for _, a := range result.Items {
-		if matchesAudience(a.TargetAudience, enrollment.Type) {
-			filtered = append(filtered, a)
-		}
-	}
-
-	result.Items = filtered
-	result.TotalCount = int64(len(filtered))
-	return result, nil
+func isInstructorEnrollmentType(t string) bool {
+	return t == "TeacherEnrollment" || t == "TaEnrollment" || t == "DesignerEnrollment"
 }
 
-// matchesAudience checks if a user's enrollment type matches the announcement target.
-func matchesAudience(target, enrollmentType string) bool {
-	switch target {
-	case "all":
+// courseEnrollments returns all of the user's enrollments (any state) in
+// the course.
+func (s *AnnouncementService) courseEnrollments(ctx context.Context, courseID, userID uint) []models.Enrollment {
+	if s.enrollmentRepo == nil || userID == 0 {
+		return nil
+	}
+	// accountID=0: the course id was already tenant-checked by the
+	// enrolled route middleware / handler authz before this runs.
+	all, err := s.enrollmentRepo.ListByUserID(ctx, userID, 0)
+	if err != nil {
+		return nil
+	}
+	out := make([]models.Enrollment, 0, 1)
+	for _, e := range all {
+		if e.CourseID == courseID {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// viewerFor resolves how a user sees a course's announcements.
+//
+//   - An ACTIVE teacher/TA/designer enrollment → instructor view.
+//   - No enrollment at all → instructor view: the enrolled route
+//     middleware and the handler authz only let a non-member this far
+//     when they are an admin.
+//   - Anyone else (students, observers, members with only inactive
+//     enrollments) gets the audience-filtered, posted-only view.
+func (s *AnnouncementService) viewerFor(ctx context.Context, courseID, userID uint) repoPostgres.AnnouncementViewer {
+	enrollments := s.courseEnrollments(ctx, courseID, userID)
+	if len(enrollments) == 0 {
+		return repoPostgres.AnnouncementViewer{Instructor: true}
+	}
+	v := repoPostgres.AnnouncementViewer{}
+	seen := map[string]bool{}
+	for _, e := range enrollments {
+		if e.WorkflowState != "active" {
+			continue
+		}
+		if isInstructorEnrollmentType(e.Type) {
+			return repoPostgres.AnnouncementViewer{Instructor: true}
+		}
+		if aud := audienceForEnrollmentType(e.Type); aud != "" && !seen[aud] {
+			seen[aud] = true
+			v.Audiences = append(v.Audiences, aud)
+		}
+		if e.CourseSectionID != nil {
+			v.SectionIDs = append(v.SectionIDs, *e.CourseSectionID)
+		}
+	}
+	return v
+}
+
+// ListCourseAnnouncements returns the announcements of a course visible
+// to the user. Instructors (and admins) see drafts, delayed posts and
+// every audience; other users see posted rows targeted at them, by role
+// (students / observers / teachers) or by one of their sections. The
+// filtering happens in SQL so pagination counts are exact.
+func (s *AnnouncementService) ListCourseAnnouncements(ctx context.Context, courseID uint, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Announcement], error) {
+	return s.announcementRepo.ListForViewer(ctx, courseID, s.viewerFor(ctx, courseID, userID), params)
+}
+
+// CanView reports whether the user may read this announcement through a
+// direct GET / mark-read / acknowledge. Mirrors ListCourseAnnouncements:
+// drafts and not-yet-posted delayed announcements are instructor-only,
+// and audience / section targeting applies.
+func (s *AnnouncementService) CanView(ctx context.Context, a *models.Announcement, userID uint) bool {
+	if a.WorkflowState == AnnouncementStateDeleted {
+		return false
+	}
+	if a.CourseID == nil {
+		return isPosted(a)
+	}
+	v := s.viewerFor(ctx, *a.CourseID, userID)
+	if v.Instructor {
 		return true
-	case "students":
-		return enrollmentType == "StudentEnrollment"
-	case "teachers":
-		return enrollmentType == "TeacherEnrollment" || enrollmentType == "TaEnrollment"
-	case "observers":
-		return enrollmentType == "ObserverEnrollment"
-	default:
-		// section:<id> targeting — show to all for now (section filtering done at repo level)
+	}
+	return isPosted(a) && viewerMatchesAudience(v, a.TargetAudience)
+}
+
+func isPosted(a *models.Announcement) bool {
+	if a.WorkflowState != AnnouncementStatePublished {
+		return false
+	}
+	return a.PostedAt == nil || !a.PostedAt.After(time.Now())
+}
+
+func audienceForEnrollmentType(t string) string {
+	switch t {
+	case "StudentEnrollment":
+		return "students"
+	case "ObserverEnrollment":
+		return "observers"
+	case "TeacherEnrollment", "TaEnrollment", "DesignerEnrollment":
+		return "teachers"
+	}
+	return ""
+}
+
+func viewerMatchesAudience(v repoPostgres.AnnouncementViewer, target string) bool {
+	if v.Instructor || target == "" || target == "all" {
 		return true
+	}
+	for _, a := range v.Audiences {
+		if a == target {
+			return true
+		}
+	}
+	for _, id := range v.SectionIDs {
+		if target == fmt.Sprintf("section:%d", id) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesAudience checks whether a member with the given enrollment type
+// (and section) is targeted by the announcement. Instructors are always
+// in the audience of their own course's announcements.
+func matchesAudience(target, enrollmentType string, sectionID *uint) bool {
+	v := repoPostgres.AnnouncementViewer{Instructor: isInstructorEnrollmentType(enrollmentType)}
+	if aud := audienceForEnrollmentType(enrollmentType); aud != "" {
+		v.Audiences = []string{aud}
+	}
+	if sectionID != nil {
+		v.SectionIDs = []uint{*sectionID}
+	}
+	if target == "teachers" {
+		// "Teachers only" is a real restriction even though instructors
+		// see everything when listing.
+		return v.Instructor
+	}
+	return viewerMatchesAudience(v, target)
+}
+
+// notifyPublished fans a "new_announcement" notification out to the
+// course members the announcement targets (never the author). Failures
+// are swallowed: notification delivery must not fail the write.
+func (s *AnnouncementService) notifyPublished(ctx context.Context, a *models.Announcement) {
+	if s.notifier == nil || a.CourseID == nil || s.enrollmentRepo == nil {
+		return
+	}
+	const perPage = 200
+	subject := "New announcement: " + a.Title
+	seen := map[uint]bool{a.UserID: true}
+	for page := 1; ; page++ {
+		// accountID=0: background fan-out; the course id comes from a
+		// stored announcement row, not from caller input.
+		res, err := s.enrollmentRepo.ListByCourseID(ctx, *a.CourseID, 0, repository.PaginationParams{Page: page, PerPage: perPage})
+		if err != nil || res == nil {
+			return
+		}
+		for _, e := range res.Items {
+			if seen[e.UserID] || e.WorkflowState != "active" {
+				continue
+			}
+			if !matchesAudience(a.TargetAudience, e.Type, e.CourseSectionID) {
+				continue
+			}
+			seen[e.UserID] = true
+			_ = s.notifier.QueueNotification(ctx, e.UserID, "new_announcement", subject, a.Message, "Course", *a.CourseID)
+		}
+		if len(res.Items) < perPage || int64(page*perPage) >= res.TotalCount {
+			return
+		}
 	}
 }
 
@@ -159,8 +334,9 @@ func (s *AnnouncementService) GetAnnouncement(ctx context.Context, id uint) (*mo
 	return s.announcementRepo.FindByID(ctx, id)
 }
 
-// PublishScheduledAnnouncements transitions scheduled announcements to published
-// when their DelayedPostAt time has passed.
+// PublishScheduledAnnouncements transitions scheduled announcements to
+// published once their DelayedPostAt has passed, and notifies their
+// audience. Run every minute by the background scheduler.
 func (s *AnnouncementService) PublishScheduledAnnouncements(ctx context.Context) (int, error) {
 	ready, err := s.announcementRepo.ListScheduledReady(ctx)
 	if err != nil {
@@ -169,12 +345,13 @@ func (s *AnnouncementService) PublishScheduledAnnouncements(ctx context.Context)
 
 	count := 0
 	for i := range ready {
-		ready[i].WorkflowState = "published"
+		ready[i].WorkflowState = AnnouncementStatePublished
 		now := time.Now()
 		ready[i].PostedAt = &now
 		if err := s.announcementRepo.Update(ctx, &ready[i]); err != nil {
 			return count, err
 		}
+		s.notifyPublished(ctx, &ready[i])
 		count++
 	}
 

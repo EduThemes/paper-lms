@@ -671,7 +671,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Delete("/announcements/:id", r.AnnouncementHandler.DeleteAnnouncement)
 	protected.Post("/announcements/:id/read", r.AnnouncementHandler.MarkAsRead)
 	protected.Post("/announcements/:id/acknowledge", r.AnnouncementHandler.AcknowledgeAnnouncement)
-	protected.Get("/announcements/:id/read_receipts", instructor, r.AnnouncementHandler.GetReadReceipts)
+	protected.Get("/announcements/:id/read_receipts", r.AnnouncementHandler.GetReadReceipts) // authz in handler (no :course_id for course-role middleware)
 	protected.Get("/accounts/:account_id/announcements", r.AnnouncementHandler.ListAccountAnnouncements)
 	protected.Post("/accounts/:account_id/announcements", admin, r.AnnouncementHandler.CreateAccountAnnouncement)
 

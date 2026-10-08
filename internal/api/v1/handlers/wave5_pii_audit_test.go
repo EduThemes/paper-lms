@@ -369,13 +369,17 @@ func (f *fakeAnnouncementRepo) ListGlobal(ctx context.Context, params repository
 func (f *fakeAnnouncementRepo) ListScheduledReady(ctx context.Context) ([]models.Announcement, error) {
 	return nil, nil
 }
+func (f *fakeAnnouncementRepo) ListForViewer(ctx context.Context, courseID uint, viewer postgres.AnnouncementViewer, params repository.PaginationParams) (*repository.PaginatedResult[models.Announcement], error) {
+	return &repository.PaginatedResult[models.Announcement]{}, nil
+}
 
 var _ postgres.AnnouncementRepository = (*fakeAnnouncementRepo)(nil)
 var _ postgres.AnnouncementReadReceiptRepository = (*fakeReceiptRepo)(nil)
 
 func TestGetReadReceipts_FiresLogPIIAccess(t *testing.T) {
 	annRepo := newFakeAnnouncementRepo()
-	annRepo.byID[10] = &models.Announcement{ID: 10, Title: "t", Message: "m"}
+	acct := uint(1)
+	annRepo.byID[10] = &models.Announcement{ID: 10, AccountID: &acct, Title: "t", Message: "m", WorkflowState: "published"}
 
 	receiptRepo := newFakeReceiptRepo()
 	receiptRepo.byAnn[10] = []models.AnnouncementReadReceipt{
@@ -385,7 +389,11 @@ func TestGetReadReceipts_FiresLogPIIAccess(t *testing.T) {
 
 	sink := newPIISink()
 	announcementService := service.NewAnnouncementService(annRepo, receiptRepo, new(mocks.MockEnrollmentRepository))
-	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), new(mocks.MockUserRepository))
+	// Read receipts of an account announcement require an admin of the
+	// owning tenant (caller 7 is an admin in account 1).
+	userRepo := new(mocks.MockUserRepository)
+	userRepo.On("FindByID", mock.Anything, uint(7), mock.AnythingOfType("uint")).Return(&models.User{ID: 7, Role: "admin"}, nil)
+	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), userRepo)
 	auditService := service.NewAuditService(nil, nil, sink)
 	h := handlers.NewAnnouncementHandler(announcementService, authz, auditService)
 
