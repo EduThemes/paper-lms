@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -45,6 +46,36 @@ type DiscussionGradedInput struct {
 	UnlockAt          *time.Time `json:"unlock_at"`
 	LockAt            *time.Time `json:"lock_at"`
 	AssignmentGroupID *uint      `json:"assignment_group_id"`
+
+	// present records which keys the request body carried, so an edit
+	// that leaves a field out keeps the assignment's current value
+	// (the topic form sends only points_possible and due_at). nil means
+	// "built in code": every field counts as given.
+	present map[string]bool
+}
+
+// UnmarshalJSON decodes the object and remembers which keys were sent.
+func (in *DiscussionGradedInput) UnmarshalJSON(b []byte) error {
+	type plain DiscussionGradedInput
+	var v plain
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(b, &keys); err != nil {
+		return err
+	}
+	*in = DiscussionGradedInput(v)
+	in.present = make(map[string]bool, len(keys))
+	for k := range keys {
+		in.present[k] = true
+	}
+	return nil
+}
+
+// has reports whether the request carried the key.
+func (in *DiscussionGradedInput) has(key string) bool {
+	return in.present == nil || in.present[key]
 }
 
 // DiscussionIndexItem is one row of the discussion index with the
@@ -674,10 +705,21 @@ func (s *DiscussionParityService) ApplyGraded(ctx context.Context, topic *models
 			if in.PointsPossible != nil {
 				a.PointsPossible = in.PointsPossible
 			}
-			a.GradingType = gradingType
-			a.DueAt = in.DueAt
-			a.UnlockAt = in.UnlockAt
-			a.LockAt = in.LockAt
+			// Only what the request names changes: an edit from the topic
+			// form (points and due date) must not reset a grading type or
+			// availability dates set elsewhere.
+			if strings.TrimSpace(in.GradingType) != "" {
+				a.GradingType = gradingType
+			}
+			if in.has("due_at") {
+				a.DueAt = in.DueAt
+			}
+			if in.has("unlock_at") {
+				a.UnlockAt = in.UnlockAt
+			}
+			if in.has("lock_at") {
+				a.LockAt = in.LockAt
+			}
 			if in.AssignmentGroupID != nil {
 				a.AssignmentGroupID = in.AssignmentGroupID
 			}
@@ -984,6 +1026,18 @@ func (s *DiscussionParityService) subscribers(ctx context.Context, topic *models
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out, nil
+}
+
+// SubscribeAuthor subscribes a poster to the topic, as Canvas does on
+// every new entry (DiscussionEntry#subscribe_author): posting re-subscribes
+// someone who had unsubscribed, or whose participant row was seeded
+// unsubscribed before they posted (e.g. by "mark all as read"), so they
+// hear about the replies to what they wrote.
+func (s *DiscussionParityService) SubscribeAuthor(ctx context.Context, topicID, userID uint) error {
+	if s.topicParticipantRepo == nil || topicID == 0 || userID == 0 {
+		return nil
+	}
+	return s.topicParticipantRepo.UpdateSubscription(ctx, topicID, userID, true)
 }
 
 // audienceFilter keeps the users who can still open the topic: active

@@ -137,8 +137,12 @@ func (h *DiscussionEntryHandler) createEntry(c *fiber.Ctx, topic *models.Discuss
 		return responses.BadRequest(c, err.Error())
 	}
 
-	if h.parity != nil && len(input.MentionedUserIDs) > 0 {
-		_, _ = h.parity.ProcessMentions(c.Context(), topic, entry, input.MentionedUserIDs)
+	if h.parity != nil {
+		// Canvas subscribe_author: posting subscribes the poster.
+		_ = h.parity.SubscribeAuthor(c.Context(), topic.ID, userID)
+		if len(input.MentionedUserIDs) > 0 {
+			_, _ = h.parity.ProcessMentions(c.Context(), topic, entry, input.MentionedUserIDs)
+		}
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(presentEntry(c, h.parity, topic, entry))

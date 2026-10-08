@@ -730,3 +730,75 @@ func TestDiscussionParity_Index(t *testing.T) {
 	page := env.index(t, env.alice, "?per_page=2&page=2")
 	assert.Len(t, page, 1)
 }
+
+// G084: editing a graded topic from the topic form (which sends only
+// points_possible and due_at) keeps the assignment's grading type and
+// availability dates.
+func TestDiscussionParity_GradedEditKeepsAssignmentSettings(t *testing.T) {
+	env := newDiscParityEnv(t)
+	unlock := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+	lock := time.Now().Add(240 * time.Hour).UTC().Truncate(time.Second)
+	due := time.Now().Add(120 * time.Hour).UTC().Truncate(time.Second)
+	topic := env.createTopic(t, map[string]any{
+		"title": "Graded reflection",
+		"assignment": map[string]any{
+			"points_possible": 10, "grading_type": "pass_fail",
+			"due_at": due.Format(time.RFC3339), "unlock_at": unlock.Format(time.RFC3339), "lock_at": lock.Format(time.RFC3339),
+		},
+	})
+	assignmentID := uint(topic["assignment"].(map[string]any)["id"].(float64))
+
+	status, out := env.req(t, env.teacher, http.MethodPut, env.topicsPath(fmt.Sprintf("/%d", idOf(topic))),
+		map[string]any{"discussion_topic": map[string]any{
+			"title":      "Graded reflection (revised)",
+			"assignment": map[string]any{"points_possible": 5, "due_at": nil},
+		}})
+	require.Equal(t, http.StatusOK, status, string(out))
+
+	var a models.Assignment
+	require.NoError(t, env.g.First(&a, assignmentID).Error)
+	assert.Equal(t, "Graded reflection (revised)", a.Name)
+	require.NotNil(t, a.PointsPossible)
+	assert.Equal(t, 5.0, *a.PointsPossible)
+	assert.Nil(t, a.DueAt, "a due date sent as null is cleared")
+	assert.Equal(t, "pass_fail", a.GradingType, "a grading type the edit didn't name is kept")
+	require.NotNil(t, a.UnlockAt, "unlock_at the edit didn't name is kept")
+	assert.True(t, a.UnlockAt.Equal(unlock))
+	require.NotNil(t, a.LockAt, "lock_at the edit didn't name is kept")
+	assert.True(t, a.LockAt.Equal(lock))
+
+	// Naming a field still changes it.
+	status, out = env.req(t, env.teacher, http.MethodPut, env.topicsPath(fmt.Sprintf("/%d", idOf(topic))),
+		map[string]any{"discussion_topic": map[string]any{
+			"assignment": map[string]any{"grading_type": "points", "lock_at": nil},
+		}})
+	require.Equal(t, http.StatusOK, status, string(out))
+	a = models.Assignment{}
+	require.NoError(t, env.g.First(&a, assignmentID).Error)
+	assert.Equal(t, "points", a.GradingType)
+	assert.Nil(t, a.LockAt)
+	require.NotNil(t, a.UnlockAt)
+}
+
+// G088: posting subscribes the poster (Canvas subscribe_author), even
+// when an earlier participant row said unsubscribed.
+func TestDiscussionParity_PostingResubscribesAuthor(t *testing.T) {
+	env := newDiscParityEnv(t)
+	topic := env.createTopic(t, map[string]any{"title": "Field trip"})
+	tid := idOf(topic)
+
+	// Carol had unsubscribed (or her row was seeded unsubscribed) before
+	// she ever posted.
+	status, _ := env.req(t, env.carol, http.MethodPut, env.topicsPath(fmt.Sprintf("/%d/subscription", tid)), map[string]any{"subscribed": false})
+	require.Equal(t, http.StatusOK, status)
+
+	status, carolPost := env.post(t, env.carol, tid, map[string]any{"message": "<p>Can we bring lunch?</p>"})
+	require.Equal(t, http.StatusCreated, status)
+
+	env.notifier.reset()
+	status, _ = env.req(t, env.alice, http.MethodPost,
+		env.topicsPath(fmt.Sprintf("/%d/entries/%d/replies", tid, idOf(carolPost))), map[string]any{"message": "<p>Yes</p>"})
+	require.Equal(t, http.StatusCreated, status)
+	eventually(t, func() bool { return env.notifier.of("discussion_reply")[env.carol.ID] > 0 },
+		"the author of the post replied to is notified")
+}
