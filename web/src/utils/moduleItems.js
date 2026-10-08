@@ -5,7 +5,16 @@ const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
 
 // Item types that link to existing course content and therefore need a
 // content_id (Canvas requires one; an item without it is a dead row).
-export const CONTENT_ITEM_TYPES = ['Assignment', 'Quiz', 'Discussion', 'Page'];
+export const CONTENT_ITEM_TYPES = ['Assignment', 'Quiz', 'Discussion', 'Page', 'File', 'ExternalTool'];
+
+// Item types that only link existing content: there is no "[ New … ]"
+// option (G064 — files are uploaded on the Files page, tools installed
+// on the External Tools page).
+export const LINK_ONLY_TYPES = ['File', 'ExternalTool'];
+
+export function canCreateContent(type) {
+  return itemNeedsContent(type) && !LINK_ONLY_TYPES.includes(type);
+}
 
 export const NEW_CONTENT = 'new';
 
@@ -41,6 +50,9 @@ export function getModuleItemLink(item, courseId) {
       return id ? `${API_BASE}/files/${id}/download` : null;
     case 'Announcement':
       return `/courses/${courseId}/announcements`;
+    case 'ExternalTool':
+      // Launched through an LTI form post (launchModuleTool), not a link.
+      return null;
     default:
       return null;
   }
@@ -64,6 +76,16 @@ export async function fetchContentOptions(api, courseId, type) {
     case 'Page': {
       const res = await api.getPages(courseId, 1, 100);
       return (res?.data || []).map((p) => ({ id: p.page_id ?? p.id, label: p.title }));
+    }
+    case 'File': {
+      const res = await api.getCourseFiles(courseId, 1, 100);
+      return (res?.data || []).map((f) => ({ id: f.id, label: f.display_name || f.filename }));
+    }
+    case 'ExternalTool': {
+      const res = await api.getExternalTools(courseId, 1, 100);
+      return (res?.data || [])
+        .filter((t) => !t.workflow_state || t.workflow_state === 'active')
+        .map((t) => ({ id: t.id, label: t.name }));
     }
     default:
       return [];
@@ -96,9 +118,16 @@ export async function createContentForItem(api, courseId, type, title) {
 // picker value: an existing content id, NEW_CONTENT, or '' (none).
 export async function buildModuleItemPayload(api, courseId, { title, type, selection, externalUrl, newTab, position }) {
   const payload = { title: (title || '').trim(), type, position };
-  if (type === 'ExternalUrl') {
-    payload.external_url = externalUrl;
+  if (type === 'ExternalUrl' || type === 'ExternalTool') {
+    if (externalUrl) payload.external_url = externalUrl;
     payload.new_tab = newTab;
+  }
+  if (LINK_ONLY_TYPES.includes(type)) {
+    if (!selection || selection === NEW_CONTENT) {
+      throw new Error(type === 'File' ? 'Choose a file' : 'Choose an external tool');
+    }
+    payload.content_id = Number(selection);
+    return payload;
   }
   if (itemNeedsContent(type)) {
     if (selection && selection !== NEW_CONTENT) {

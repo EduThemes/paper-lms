@@ -259,3 +259,56 @@ func (r *MasteryPathRepository) ListAssignmentIDsForSets(ctx context.Context, se
 		Pluck("assignment_id", &ids).Error
 	return ids, err
 }
+
+// ListGatedAssignmentIDs returns every assignment a live rule of the
+// course releases through Mastery Paths: assignments in an active
+// association of an active set of an active range of an active rule.
+// Such assignments are hidden from a student until a set containing
+// them is assigned to that student.
+func (r *MasteryPathRepository) ListGatedAssignmentIDs(ctx context.Context, courseID uint) ([]uint, error) {
+	var ids []uint
+	err := r.db.WithContext(ctx).
+		Table("conditional_release_assignment_set_associations AS a").
+		Joins("JOIN conditional_release_assignment_sets AS s ON s.id = a.set_id AND s.workflow_state = 'active'").
+		Joins("JOIN conditional_release_scoring_ranges AS sr ON sr.id = s.scoring_range_id AND sr.workflow_state = 'active'").
+		Joins("JOIN conditional_release_rules AS rl ON rl.id = sr.rule_id AND rl.workflow_state = 'active'").
+		Where("rl.course_id = ? AND a.workflow_state = 'active'", courseID).
+		Distinct().
+		Pluck("a.assignment_id", &ids).Error
+	return ids, err
+}
+
+// ReplaceStudentAssignment makes chosenSetIDs the student's released
+// sets for the rule: 'assigned' rows on the rule's other sets are
+// removed (a regrade into another band moves the student to that band's
+// assignments, as Canvas does), and the chosen sets are assigned.
+func (r *MasteryPathRepository) ReplaceStudentAssignment(ctx context.Context, ruleID, studentID uint, chosenSetIDs []uint, actedAt time.Time, source string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		ruleSets := tx.Session(&gorm.Session{NewDB: true}).Table("conditional_release_assignment_sets AS s").
+			Select("s.id").
+			Joins("JOIN conditional_release_scoring_ranges AS sr ON sr.id = s.scoring_range_id").
+			Where("sr.rule_id = ?", ruleID)
+		del := tx.Where("student_id = ? AND set_id IN (?)", studentID, ruleSets)
+		if len(chosenSetIDs) > 0 {
+			del = del.Where("set_id NOT IN ?", chosenSetIDs)
+		}
+		if err := del.Delete(&models.ConditionalReleaseAssignmentSetAction{}).Error; err != nil {
+			return err
+		}
+		if len(chosenSetIDs) == 0 {
+			return nil
+		}
+		// A stale 'unassigned' row would mask the new assignment.
+		if err := tx.Where("student_id = ? AND set_id IN ? AND action_type = ?", studentID, chosenSetIDs, "unassigned").
+			Delete(&models.ConditionalReleaseAssignmentSetAction{}).Error; err != nil {
+			return err
+		}
+		actions := make([]models.ConditionalReleaseAssignmentSetAction, 0, len(chosenSetIDs))
+		for _, id := range chosenSetIDs {
+			actions = append(actions, models.ConditionalReleaseAssignmentSetAction{
+				SetID: id, StudentID: studentID, ActionType: "assigned", ActedAt: actedAt, Source: source,
+			})
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&actions).Error
+	})
+}

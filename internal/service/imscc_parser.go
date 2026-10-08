@@ -187,6 +187,12 @@ type CCModuleSettings struct {
 	WorkflowState             string
 	RequireSequentialProgress bool
 	HasRequireSeq             bool // true if the source XML actually specified the field
+	// G068: unlock date, "complete one" requirement count, prerequisite
+	// module identifiers and item completion requirements.
+	UnlockAt         *time.Time
+	RequirementCount int
+	Prerequisites    []string
+	Requirements     []CCCompletionRequirement
 }
 
 // CCItemSettings holds the per-item fields read from module_meta.xml.
@@ -236,6 +242,11 @@ type ImportResult struct {
 	// course_settings/assignment_groups.xml.
 	assignmentGroupByMigID map[string]uint `json:"-"`
 
+	// itemTagByMigID maps a manifest/module_meta item identifier to the
+	// ContentTag created for it, so module_meta completion requirements
+	// (which reference items, not resources) can be applied (G068).
+	itemTagByMigID map[string]uint `json:"-"`
+
 	// Rubric → assignment associations queued during pre-1 (rubrics.xml is
 	// read before assignments are created in pass-1). Drained after pass-1
 	// in applyPendingRubricAssocs.
@@ -269,6 +280,9 @@ type IMSCCParser struct {
 	outcomeGroupRepo      repository.LearningOutcomeGroupRepository
 	outcomeRepo           repository.LearningOutcomeRepository
 	calendarEventRepo     repository.CalendarEventRepository
+	// prereqRepo (optional, SetPrerequisiteRepo) stores imported module
+	// prerequisites (G068).
+	prereqRepo repository.ModulePrerequisiteRepository
 }
 
 // NewIMSCCParser creates a new IMSCC parser with all required dependencies.
@@ -379,6 +393,7 @@ func (p *IMSCCParser) ParsePackage(ctx context.Context, courseID uint, userID ui
 		pageBySlug:              map[string]uint{},
 		attachmentByPath:        map[string]uint{},
 		assignmentGroupByMigID:  map[string]uint{},
+		itemTagByMigID:          map[string]uint{},
 		ownerUserID:             userID,
 	}
 
@@ -405,6 +420,9 @@ func (p *IMSCCParser) ParsePackage(ctx context.Context, courseID uint, userID ui
 	for _, org := range manifest.Organizations.Organizations {
 		p.processOrganization(ctx, courseID, org, resourceMap, zipFiles, result)
 	}
+	// G068: prerequisites and completion requirements reference other
+	// modules / items, so they are applied once every module exists.
+	p.applyModuleMetaLinks(ctx, courseID, result)
 
 	// pass-1 (cont'd): import orphan resources (not referenced by any module).
 	referencedResources := collectReferencedResources(manifest)
@@ -548,6 +566,8 @@ func (p *IMSCCParser) processOrganization(
 			if ms.WorkflowState == "unpublished" {
 				module.WorkflowState = "unpublished"
 			}
+			module.UnlockAt = ms.UnlockAt
+			module.RequirementCount = ms.RequirementCount
 		}
 
 		if err := p.moduleRepo.Create(ctx, module); err != nil {
@@ -564,7 +584,9 @@ func (p *IMSCCParser) processOrganization(
 		if topItem.IdentifierRef != "" && len(topItem.Items) == 0 {
 			res, ok := resourceMap[topItem.IdentifierRef]
 			if ok {
+				before := len(result.CreatedEntities)
 				p.importResource(ctx, courseID, res, zipFiles, module, 1, result)
+				result.recordItemTag(topItem.Identifier, before)
 			}
 			continue
 		}
@@ -593,6 +615,7 @@ func (p *IMSCCParser) processOrganization(
 				} else {
 					result.ModuleItemsCreated++
 					result.CreatedEntities = append(result.CreatedEntities, EntityRef{Type: "ContentTag", ID: tag.ID})
+					result.itemTagByMigID[subItem.Identifier] = tag.ID
 				}
 				continue
 			}
@@ -603,7 +626,9 @@ func (p *IMSCCParser) processOrganization(
 				continue
 			}
 
+			before := len(result.CreatedEntities)
 			p.importResource(ctx, courseID, res, zipFiles, module, itemPos+1, result)
+			result.recordItemTag(subItem.Identifier, before)
 		}
 	}
 }
@@ -1302,6 +1327,11 @@ type ccModuleXML struct {
 	WorkflowState             string             `xml:"workflow_state"`
 	RequireSequentialProgress string             `xml:"require_sequential_progress"`
 	Items                     ccModuleItemsXML   `xml:"items"`
+	// G068 (imscc_module_meta.go).
+	UnlockAt               string                     `xml:"unlock_at"`
+	RequirementCount       string                     `xml:"requirement_count"`
+	Prerequisites          ccPrerequisitesXML         `xml:"prerequisites"`
+	CompletionRequirements ccCompletionRequirementsXML `xml:"completionRequirements"`
 }
 
 type ccModuleItemsXML struct {
@@ -1359,6 +1389,7 @@ func parseModuleMeta(zipFiles map[string]*zip.File, result *ImportResult) (
 			ms.HasRequireSeq = true
 			ms.RequireSequentialProgress = parseBoolFlag(v)
 		}
+		applyModuleMetaXML(&ms, m)
 		if m.Identifier != "" {
 			moduleMeta[m.Identifier] = ms
 		}
@@ -1435,6 +1466,7 @@ func (p *IMSCCParser) extractFiles(
 	if err != nil {
 		return fmt.Errorf("could not get root folder: %w", err)
 	}
+	folders := map[string]uint{}
 
 	for name, f := range zipFiles {
 		if strings.HasSuffix(name, "/") || f.UncompressedSize64 == 0 {
@@ -1458,6 +1490,11 @@ func (p *IMSCCParser) extractFiles(
 		base := path.Base(name)
 		size := int64(f.UncompressedSize64)
 		folderID := folder.ID
+		// G068: keep the cartridge's folder structure (web_resources/
+		// is the course files root) instead of flattening every file.
+		if sub, ferr := p.importFolderFor(ctx, courseID, folder, name, folders); ferr == nil && sub != 0 {
+			folderID = sub
+		}
 
 		uid := result.ownerUserID
 		if uid == 0 {

@@ -10,6 +10,9 @@ import (
 
 type AssignmentService struct {
 	repo repository.AssignmentRepository
+	// visibility hides unreleased Mastery Paths assignments from
+	// students (SetStudentVisibility; see assignment_visibility.go).
+	visibility AssignmentVisibility
 }
 
 func NewAssignmentService(repo repository.AssignmentRepository) *AssignmentService {

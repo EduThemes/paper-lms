@@ -37,6 +37,12 @@ type CoursePaceService struct {
 	courseRepo          repository.CourseRepository
 	enrollmentRepo      repository.EnrollmentRepository
 	sectionRepo         repository.SectionRepository
+
+	// G079 (SetPacingRepos, course_pace_schedule.go): blackout dates and
+	// the quiz / discussion repos that let paces date them too.
+	blackouts BlackoutDateStore
+	quizRepo  repository.QuizRepository
+	topicRepo repository.DiscussionTopicRepository
 }
 
 func NewCoursePaceService(paceRepo repository.CoursePaceRepository, paceItemRepo repository.CoursePaceModuleItemRepository, moduleItemRepo repository.ModuleItemRepository, assignmentRepo repository.AssignmentRepository) *CoursePaceService {
@@ -216,24 +222,25 @@ func (s *CoursePaceService) applyPaceDates(ctx context.Context, pace *models.Cou
 		return
 	}
 
-	currentDate := s.paceStartDate(ctx, pace)
-	for _, item := range items {
-		currentDate = addBusinessDays(currentDate, item.Duration, pace.ExcludeWeekends)
-
+	// G079: the shared schedule skips weekends (when excluded) and
+	// blackout dates, and compresses to the end date for hard end dates.
+	dates := s.paceSchedule(ctx, pace, items)
+	for i, item := range items {
 		moduleItem, err := s.moduleItemInCourse(ctx, item.ModuleItemID, pace.CourseID)
 		if err != nil {
 			continue
 		}
-		if moduleItem.ContentType != "Assignment" || moduleItem.ContentID == nil {
+		assignmentID, handled := s.pacedAssignmentID(ctx, pace, moduleItem, dates[i])
+		if handled || assignmentID == 0 {
 			continue
 		}
 
-		assignment, err := s.assignmentRepo.FindByID(ctx, *moduleItem.ContentID, 0)
+		assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, 0)
 		if err != nil || assignment == nil || assignment.CourseID != pace.CourseID {
 			continue
 		}
 
-		projectedDate := currentDate
+		projectedDate := dates[i]
 		switch {
 		case pace.UserID != nil:
 			s.upsertStudentPaceOverride(ctx, assignment.ID, *pace.UserID, projectedDate)
@@ -355,36 +362,15 @@ func (s *CoursePaceService) ComputeTimeline(ctx context.Context, paceID, account
 	}
 
 	timeline := make([]map[string]interface{}, len(items))
-	currentDate := s.paceStartDate(ctx, pace)
+	dates := s.paceSchedule(ctx, pace, items)
 
 	for i, item := range items {
-		currentDate = addBusinessDays(currentDate, item.Duration, pace.ExcludeWeekends)
-
 		timeline[i] = map[string]interface{}{
 			"module_item_id": item.ModuleItemID,
 			"duration":       item.Duration,
-			"projected_date": currentDate.Format(time.RFC3339),
+			"projected_date": dates[i].Format(time.RFC3339),
 		}
 	}
 
 	return timeline, nil
-}
-
-// addBusinessDays adds the given number of days to a date, optionally skipping weekends.
-func addBusinessDays(start time.Time, days int, excludeWeekends bool) time.Time {
-	current := start
-	remaining := days
-
-	for remaining > 0 {
-		current = current.AddDate(0, 0, 1)
-		if excludeWeekends {
-			weekday := current.Weekday()
-			if weekday == time.Saturday || weekday == time.Sunday {
-				continue
-			}
-		}
-		remaining--
-	}
-
-	return current
 }

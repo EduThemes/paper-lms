@@ -199,6 +199,9 @@ func allAutoMigrateModels() []interface{} {
 		&models.QuestionBank{},
 		&models.QuestionBankEntry{},
 		&models.ModulePrerequisite{},
+		&models.ContextModuleProgression{},
+		&models.ModuleItemUserAction{},
+		&models.BlackoutDate{},
 		// Quiz Question Groups (random selection anti-cheating)
 		&models.QuizQuestionGroup{},
 		// P3 Features: Feature Flags

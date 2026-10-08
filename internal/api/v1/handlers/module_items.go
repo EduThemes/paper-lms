@@ -13,6 +13,14 @@ import (
 type ModuleItemHandler struct {
 	moduleService *service.ModuleService
 	pageService   *service.PageService
+	// progression (optional): hides unreleased Mastery Paths items from
+	// students and enforces module locks on tool launches.
+	progression *service.ModuleProgressionService
+}
+
+// SetProgressionService wires student item visibility and lock checks.
+func (h *ModuleItemHandler) SetProgressionService(p *service.ModuleProgressionService) {
+	h.progression = p
 }
 
 func NewModuleItemHandler(moduleService *service.ModuleService, pageService *service.PageService) *ModuleItemHandler {
@@ -70,6 +78,12 @@ func (h *ModuleItemHandler) scopedModuleItem(c *fiber.Ctx) (*models.ContentTag, 
 		_ = responses.NotFound(c, "module item")
 		return nil, true
 	}
+	// G080: so are unreleased Mastery Paths assignments.
+	visible, err := studentVisibleItems(c, h.progression, uint(courseID), []models.ContentTag{*item})
+	if err != nil || len(visible) == 0 {
+		_ = responses.NotFound(c, "module item")
+		return nil, true
+	}
 	return item, false
 }
 
@@ -99,8 +113,12 @@ func (h *ModuleItemHandler) ListModuleItems(c *fiber.Ctx) error {
 
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
 
-	items := make([]fiber.Map, len(result.Items))
-	for i, item := range result.Items {
+	visible, err := studentVisibleItems(c, h.progression, uint(courseID), result.Items)
+	if err != nil {
+		return responses.InternalError(c, "Could not fetch module items")
+	}
+	items := make([]fiber.Map, len(visible))
+	for i, item := range visible {
 		items[i] = moduleItemToJSON(&item)
 	}
 
@@ -133,7 +151,7 @@ func (h *ModuleItemHandler) CreateModuleItem(c *fiber.Ctx) error {
 	var input struct {
 		ModuleItem struct {
 			Title       string `json:"title"`
-			Type        string `json:"type"` // Page, Assignment, Quiz, ExternalUrl, SubHeader, Discussion
+			Type        string `json:"type"` // Page, Assignment, Quiz, ExternalUrl, SubHeader, Discussion, File, ExternalTool
 			ContentID   *uint  `json:"content_id"`
 			PageURL     string `json:"page_url"`
 			ExternalURL string `json:"external_url"`
@@ -151,7 +169,13 @@ func (h *ModuleItemHandler) CreateModuleItem(c *fiber.Ctx) error {
 	}
 
 	contentType := itemTypeToContentType(input.ModuleItem.Type)
-	input.ModuleItem.Title = strings.TrimSpace(input.ModuleItem.Title)
+	input.ModuleItem.Title = strings.TrimSpace(service.SanitizePlainText(input.ModuleItem.Title))
+	switch contentType {
+	case "WikiPage", "Assignment", "Quizzes::Quiz", "DiscussionTopic", "ExternalUrl", "ContextModuleSubHeader",
+		service.ModuleItemContentAttachment, service.ModuleItemContentExternalTool:
+	default:
+		return responses.BadRequest(c, "Unsupported module item type")
+	}
 
 	// B042: Assignment / Quiz / Discussion items are links to existing
 	// content. Canvas requires content_id for them; without it the item
@@ -213,6 +237,45 @@ func (h *ModuleItemHandler) CreateModuleItem(c *fiber.Ctx) error {
 	itemURL := input.ModuleItem.ExternalURL
 	if input.ModuleItem.Type == "Page" && pageSlug != "" {
 		itemURL = pageSlug
+	}
+
+	// G064: File items link a file of this course; External Tool items
+	// link an LTI tool installed in the course (or its account), with an
+	// optional launch URL on the tool's domain.
+	switch contentType {
+	case service.ModuleItemContentAttachment:
+		if input.ModuleItem.ContentID == nil || *input.ModuleItem.ContentID == 0 {
+			return responses.BadRequest(c, "content_id is required for File items")
+		}
+		name, err := h.moduleService.ValidateFileItem(c.Context(), *input.ModuleItem.ContentID, uint(courseID), callerAccountID(c))
+		if err != nil {
+			return responses.BadRequest(c, "content_id does not name a file in this course")
+		}
+		if input.ModuleItem.Title == "" {
+			input.ModuleItem.Title = name
+		}
+		itemURL = ""
+	case service.ModuleItemContentExternalTool:
+		if input.ModuleItem.ContentID == nil || *input.ModuleItem.ContentID == 0 {
+			return responses.BadRequest(c, "content_id is required for External Tool items")
+		}
+		tool, err := h.moduleService.ExternalToolForCourse(c.Context(), *input.ModuleItem.ContentID, uint(courseID), callerAccountID(c))
+		if err != nil {
+			return responses.BadRequest(c, "content_id does not name an external tool available in this course")
+		}
+		launchURL, err := service.ValidateToolLaunchURL(tool, input.ModuleItem.ExternalURL)
+		if err != nil {
+			return responses.BadRequest(c, err.Error())
+		}
+		itemURL = launchURL
+		if input.ModuleItem.Title == "" {
+			input.ModuleItem.Title = tool.Name
+		}
+	case "ExternalUrl":
+		lower := strings.ToLower(strings.TrimSpace(itemURL))
+		if !strings.HasPrefix(lower, "https://") && !strings.HasPrefix(lower, "http://") {
+			return responses.BadRequest(c, "external_url must be an absolute http(s) URL")
+		}
 	}
 
 	item := &models.ContentTag{
@@ -426,7 +489,52 @@ func itemTypeToContentType(itemType string) string {
 		return "ExternalUrl"
 	case "SubHeader":
 		return "ContextModuleSubHeader"
+	case "File":
+		return service.ModuleItemContentAttachment
+	case "ExternalTool":
+		return service.ModuleItemContentExternalTool
 	default:
 		return itemType
 	}
+}
+
+// LaunchParams returns the LTI 1.3 launch parameters for an External
+// Tool item; the browser posts them to /api/v1/lti/oidc/login, which
+// re-checks the caller, COPPA and the tool install. A locked item cannot
+// be launched by a student, and launching counts as viewing it.
+// GET /courses/:course_id/modules/:module_id/items/:item_id/launch
+func (h *ModuleItemHandler) LaunchParams(c *fiber.Ctx) error {
+	item, wrote := h.scopedModuleItem(c)
+	if wrote {
+		return nil
+	}
+	courseID, _ := c.ParamsInt("course_id")
+	if item.ContentType != service.ModuleItemContentExternalTool {
+		return responses.NotFound(c, "external tool item")
+	}
+	learner := false
+	if h.progression != nil {
+		var err error
+		learner, err = h.progression.IsLearner(c.Context(), callerUserID(c), uint(courseID))
+		if err != nil {
+			return responses.InternalError(c, "Could not check module access")
+		}
+		if learner {
+			progress, err := h.progression.Evaluate(c.Context(), uint(courseID), callerUserID(c))
+			if err != nil {
+				return responses.InternalError(c, "Could not check module access")
+			}
+			if _, ip := progress.Item(item.ID); ip == nil || ip.Locked {
+				return responses.Forbidden(c, "This module item is locked")
+			}
+		}
+	}
+	launch, err := h.moduleService.ExternalToolLaunch(c.Context(), item, uint(courseID), callerAccountID(c))
+	if err != nil {
+		return responses.NotFound(c, "external tool")
+	}
+	if learner {
+		_ = h.progression.RecordContentView(c.Context(), callerUserID(c), []uint{item.ID})
+	}
+	return c.JSON(launch)
 }
