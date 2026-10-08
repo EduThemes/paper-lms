@@ -24,6 +24,7 @@ type pagesFilesDeps struct {
 	userHandler    *handlers.UserHandler
 	authz          *handlers.ResourceAuthorizer
 	permMiddleware *middleware.PermissionMiddleware
+	courseHandler  *handlers.CourseHandler
 }
 
 // wirePagesFiles builds the lane's services and handlers, attaches the
@@ -43,6 +44,12 @@ func wirePagesFiles(d pagesFilesDeps) *v1.PagesFilesRoutes {
 	studentView := handlers.NewStudentViewHandler(service.NewStudentViewService(d.database), d.courseRepo, d.userHandler)
 	d.permMiddleware.SetStudentViewCheck(studentView.IsTestStudentOf)
 	d.authz.SetStudentViewCheck(studentView.IsTestStudentOf)
+
+	// Course publish gating (G077): a course with graded student work
+	// can't be unpublished.
+	if d.courseHandler != nil {
+		d.courseHandler.SetUnpublishGuard(service.NewCoursePublishService(d.database).HasGradedStudentWork)
+	}
 
 	return &v1.PagesFilesRoutes{
 		Revisions:      handlers.NewWikiPageRevisionHandler(d.pageHandler, revisionService),

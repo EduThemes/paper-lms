@@ -19,6 +19,9 @@ type CourseHandler struct {
 	// userRepo backs the DB role check (middleware.EffectiveRole) that
 	// gates ?scope=all. Nil means nobody gets the tenant-wide list.
 	userRepo repository.UserRepository
+	// unpublishGuard (optional, G077) refuses unpublishing a course with
+	// graded student work; see SetUnpublishGuard.
+	unpublishGuard UnpublishGuard
 }
 
 // SetUserRepo wires the user repository used for the admin check on
@@ -275,6 +278,9 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 		newState := models.CourseWorkflow(*input.Course.WorkflowState)
 		if err := models.TransitionCourseWorkflowState(course.WorkflowState, newState, callerRoleForStateMachine(c)); err != nil {
 			return responses.BadRequest(c, err.Error())
+		}
+		if wrote, gerr := h.checkUnpublishable(c, course, newState); wrote {
+			return gerr
 		}
 		course.WorkflowState = newState
 	}
