@@ -276,6 +276,13 @@ func (h *CourseHandler) DeleteCourse(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid course ID")
 	}
 
+	// courseService.Delete is keyed by bare id; confirm the course is in
+	// the caller's tenant first (404 across tenants), independent of the
+	// route middleware.
+	if _, err := h.courseService.GetByID(c.Context(), uint(id), callerAccountID(c)); err != nil {
+		return responses.NotFound(c, "course")
+	}
+
 	if err := h.courseService.Delete(c.Context(), uint(id)); err != nil {
 		return responses.InternalError(c, "Could not delete course")
 	}

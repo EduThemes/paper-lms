@@ -1,6 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import i18n from 'i18next';
 import { api } from '../services/api';
+import { setCurrentAccountId } from '../services/currentAccount';
 
 const AuthContext = createContext(null);
 
@@ -19,8 +20,16 @@ const applyAccountDefaultLocale = (data) => {
 };
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  const [user, setUserState] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Keep the API client's tenant id in step with the signed-in user, set
+  // synchronously so admin pages that fetch on mount already use it.
+  const setUser = (next) => {
+    const value = typeof next === 'function' ? next(user) : next;
+    setCurrentAccountId(value?.account_id);
+    setUserState(value);
+  };
 
   useEffect(() => {
     // On mount, verify session by calling /users/self

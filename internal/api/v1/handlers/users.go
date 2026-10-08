@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -157,6 +158,7 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 				"avatar_url":    result.User.AvatarURL,
 				"locale":        result.User.Locale,
 				"role":          result.User.Role,
+				"account_id":    result.User.AccountID,
 			},
 		}
 		if result.MustEnroll {
@@ -185,6 +187,7 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 			"avatar_url":    user.AvatarURL,
 			"locale":        user.Locale,
 			"role":          user.Role,
+			"account_id":    user.AccountID,
 		},
 	})
 }
@@ -276,6 +279,7 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 			"email":         user.Email,
 			"locale":        user.Locale,
 			"role":          user.Role,
+			"account_id":    user.AccountID,
 		},
 	})
 }
@@ -370,6 +374,7 @@ func (h *UserHandler) SetPassword(c *fiber.Ctx) error {
 			"avatar_url":    user.AvatarURL,
 			"locale":        user.Locale,
 			"role":          user.Role,
+			"account_id":    user.AccountID,
 		},
 	})
 }
@@ -662,6 +667,7 @@ func (h *UserHandler) GetSelf(c *fiber.Ctx) error {
 		"locale":        user.Locale,
 		"time_zone":     user.TimeZone,
 		"role":          user.Role,
+		"account_id":    user.AccountID,
 	}
 
 	// If masquerading, include masquerade info so the frontend can show the banner
@@ -679,6 +685,15 @@ func (h *UserHandler) GetSelf(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(result)
+}
+
+// auditAccountPtr returns a pointer for an audit row's account_id, or nil
+// when the tenant is unknown (0).
+func auditAccountPtr(accountID uint) *uint {
+	if accountID == 0 {
+		return nil
+	}
+	return &accountID
 }
 
 // StartMasquerade allows an admin to start masquerading as a target user.
@@ -712,6 +727,16 @@ func (h *UserHandler) StartMasquerade(c *fiber.Ctx) error {
 		return responses.NotFound(c, "user")
 	}
 
+	// A masquerade must never grant more than the caller already has
+	// (Canvas: the target's account permissions must be a subset of the
+	// masquerader's). Without this an account admin could masquerade as a
+	// super_admin in the same tenant and inherit /superadmin/* access.
+	// The caller's role is the DB-verified one cached by RequireAdmin.
+	callerRole := middleware.EffectiveRole(c, nil)
+	if middleware.RoleRank(targetUser.Role) > middleware.RoleRank(callerRole) {
+		return responses.Forbidden(c, "You do not have permission to masquerade as this user")
+	}
+
 	// 13.1.B — pass the admin's home tenant so the masquerade token's
 	// admin_account_id claim attributes the impersonation correctly.
 	adminAccountID, _ := c.Locals("account_id").(uint)
@@ -727,16 +752,25 @@ func (h *UserHandler) StartMasquerade(c *fiber.Ctx) error {
 
 	// Create an audit log entry
 	if h.auditService != nil {
+		// account_id is set so the event shows up in the tenant's
+		// /accounts/:id/audit_log (which filters on account_id); the
+		// payload is marshalled so a quote in the user's name can't
+		// produce invalid jsonb (which silently dropped the row).
+		startPayload, _ := json.Marshal(fiber.Map{
+			"admin_user_id":    adminUserID,
+			"target_user_id":   targetUser.ID,
+			"target_user_name": targetUser.Name,
+		})
 		_ = h.auditService.LogEvent(
 			c.Context(),
 			"masquerade_start",
 			adminUserID,
 			nil, // courseID
-			nil, // accountID
+			auditAccountPtr(adminAccountID),
 			"User",
 			targetUser.ID,
-			fmt.Sprintf("Admin user %d started masquerading as user %d (%s)", adminUserID, targetUser.ID, targetUser.Name),
-			fmt.Sprintf(`{"admin_user_id":%d,"target_user_id":%d,"target_user_name":"%s"}`, adminUserID, targetUser.ID, targetUser.Name),
+			fmt.Sprintf("Admin user %d started masquerading as user %d", adminUserID, targetUser.ID),
+			string(startPayload),
 			c.IP(),
 			c.Get("User-Agent"),
 		)
@@ -754,6 +788,7 @@ func (h *UserHandler) StartMasquerade(c *fiber.Ctx) error {
 			"avatar_url":    targetUser.AvatarURL,
 			"locale":        targetUser.Locale,
 			"role":          targetUser.Role,
+			"account_id":    targetUser.AccountID,
 		},
 	})
 }
@@ -804,7 +839,7 @@ func (h *UserHandler) EndMasquerade(c *fiber.Ctx) error {
 			"masquerade_end",
 			masqueradeByID,
 			nil, // courseID
-			nil, // accountID
+			auditAccountPtr(adminAcctID),
 			"User",
 			masqueradedUserID,
 			fmt.Sprintf("Admin user %d stopped masquerading as user %d", masqueradeByID, masqueradedUserID),
@@ -826,6 +861,7 @@ func (h *UserHandler) EndMasquerade(c *fiber.Ctx) error {
 			"avatar_url":    adminUser.AvatarURL,
 			"locale":        adminUser.Locale,
 			"role":          adminUser.Role,
+			"account_id":    adminUser.AccountID,
 		},
 	})
 }

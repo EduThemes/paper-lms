@@ -63,10 +63,16 @@ func (r *AuditLogRepo) ListByFilter(ctx context.Context, filter AuditLogFilter, 
 	}, nil
 }
 
-// CountByEventType returns aggregated counts per event type within a date range.
-func (r *AuditLogRepo) CountByEventType(ctx context.Context, dateFrom, dateTo *time.Time) ([]EventTypeCount, error) {
+// CountByEventType returns aggregated counts per event type within a date
+// range. accountID != nil restricts the counts to one tenant; nil counts the
+// whole deployment (super_admin only).
+func (r *AuditLogRepo) CountByEventType(ctx context.Context, accountID *uint, dateFrom, dateTo *time.Time) ([]EventTypeCount, error) {
 	query := r.db.WithContext(ctx).Model(&models.AuditLog{}).
 		Select("event_type, COUNT(*) as count")
+
+	if accountID != nil {
+		query = query.Where("account_id = ?", *accountID)
+	}
 
 	if dateFrom != nil {
 		query = query.Where("created_at >= ?", *dateFrom)

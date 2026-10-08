@@ -396,7 +396,14 @@ const AuditLogPage = () => {
                       <React.Fragment key={log.id}>
                         <tr className="hover:bg-surface-1">
                           <td className="px-4 py-3 whitespace-nowrap text-sm text-text-secondary">{formatDate(log.created_at)}</td>
-                          <td className="px-4 py-3 whitespace-nowrap text-sm text-text-primary">User {log.user_id}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-text-primary">
+                            User {log.user_id}
+                            {log.real_user_id ? (
+                              <span className="block text-xs text-text-tertiary">
+                                acted by User {log.real_user_id} (masquerading)
+                              </span>
+                            ) : null}
+                          </td>
                           <td className="px-4 py-3 whitespace-nowrap">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEventTypeClass(log.event_type)}`}>
                               {log.event_type}

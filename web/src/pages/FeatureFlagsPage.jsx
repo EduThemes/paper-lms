@@ -3,6 +3,7 @@ import { Flag, Lock, RefreshCw, AlertCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../services/api';
+import { getCurrentAccountId } from '../services/currentAccount';
 
 /**
  * Admin-only page that lists every feature flag for the current account
@@ -71,7 +72,7 @@ const FeatureFlagsPage = () => {
   const [search, setSearch] = useState('');
   const [busyFeature, setBusyFeature] = useState(null);
 
-  const accountId = 1; // single-tenant default
+  const accountId = getCurrentAccountId();
 
   const load = async () => {
     setLoading(true);

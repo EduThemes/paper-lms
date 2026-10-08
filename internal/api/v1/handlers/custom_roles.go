@@ -278,6 +278,12 @@ func (h *CustomRoleHandler) ListOverrides(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid role ID")
 	}
 
+	// GetRoleOverrides reads by bare role id; tie the role to the caller's
+	// tenant first so another tenant's role overrides can't be listed.
+	if _, err := h.customRoleService.GetRole(c.Context(), uint(id), callerAccountID(c)); err != nil {
+		return responses.NotFound(c, "role")
+	}
+
 	overrides, err := h.customRoleService.GetRoleOverrides(c.Context(), uint(id))
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch overrides")

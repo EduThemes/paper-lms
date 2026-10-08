@@ -292,6 +292,7 @@ func TestUpdateCourse_NotFound(t *testing.T) {
 func TestDeleteCourse(t *testing.T) {
 	app, mockCourseRepo, _, _ := setupCourseHandler()
 
+	mockCourseRepo.On("FindByID", mock.Anything, uint(1), uint(1)).Return(&models.Course{ID: 1, AccountID: 1}, nil)
 	mockCourseRepo.On("Delete", mock.Anything, uint(1)).Return(nil)
 
 	resp := testutil.MakeRequest(app, http.MethodDelete, "/courses/1", nil)
@@ -302,6 +303,17 @@ func TestDeleteCourse(t *testing.T) {
 	assert.Equal(t, true, result["delete"])
 
 	mockCourseRepo.AssertExpectations(t)
+}
+
+// B064: a course outside the caller's tenant is never deleted (404).
+func TestDeleteCourse_CrossTenant_NotFound(t *testing.T) {
+	app, mockCourseRepo, _, _ := setupCourseHandler()
+
+	mockCourseRepo.On("FindByID", mock.Anything, uint(2), uint(1)).Return(nil, errors.New("record not found"))
+
+	resp := testutil.MakeRequest(app, http.MethodDelete, "/courses/2", nil)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	mockCourseRepo.AssertNotCalled(t, "Delete", mock.Anything, uint(2))
 }
 
 func TestDeleteCourse_InvalidID(t *testing.T) {

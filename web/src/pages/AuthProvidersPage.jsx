@@ -2,14 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Shield, Plus, Trash2, Edit3, AlertTriangle, X, TestTube2, Check } from 'lucide-react';
 import Layout from '../components/Layout';
 import { getCSRFToken } from '../services/api';
+import { getCurrentAccountId } from '../services/currentAccount';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 const getHeaders = () => ({
   'Content-Type': 'application/json',
   'X-CSRF-Token': getCSRFToken(),
 });
-
-const ACCOUNT_ID = 1;
 
 const AUTH_TYPES = [
   { value: 'saml', label: 'SAML' },
@@ -77,7 +76,7 @@ const AuthProvidersPage = () => {
 
   const fetchProviders = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/authentication_providers?per_page=100`, {
+      const res = await fetch(`${API_URL}/accounts/${getCurrentAccountId()}/authentication_providers?per_page=100`, {
         credentials: 'include', headers: getHeaders(),
       });
       if (!res.ok) throw new Error('Failed to fetch authentication providers');
@@ -148,13 +147,13 @@ const AuthProvidersPage = () => {
     try {
       let res;
       if (editingId) {
-        res = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/authentication_providers/${editingId}`, {
+        res = await fetch(`${API_URL}/accounts/${getCurrentAccountId()}/authentication_providers/${editingId}`, {
           method: 'PUT',
           credentials: 'include', headers: getHeaders(),
           body: JSON.stringify(body),
         });
       } else {
-        res = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/authentication_providers`, {
+        res = await fetch(`${API_URL}/accounts/${getCurrentAccountId()}/authentication_providers`, {
           method: 'POST',
           credentials: 'include', headers: getHeaders(),
           body: JSON.stringify(body),
@@ -180,7 +179,7 @@ const AuthProvidersPage = () => {
     setDeleting(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/authentication_providers/${id}`, {
+      const res = await fetch(`${API_URL}/accounts/${getCurrentAccountId()}/authentication_providers/${id}`, {
         method: 'DELETE',
         credentials: 'include', headers: getHeaders(),
       });
@@ -200,7 +199,7 @@ const AuthProvidersPage = () => {
     setError(null);
     setSuccess(null);
     try {
-      const res = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/authentication_providers/${id}/test`, {
+      const res = await fetch(`${API_URL}/accounts/${getCurrentAccountId()}/authentication_providers/${id}/test`, {
         method: 'POST',
         credentials: 'include', headers: getHeaders(),
       });

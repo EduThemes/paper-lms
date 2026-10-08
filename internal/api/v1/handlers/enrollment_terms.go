@@ -107,41 +107,48 @@ func (h *EnrollmentTermHandler) CreateTerm(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(enrollmentTermToJSON(term))
 }
 
-func (h *EnrollmentTermHandler) GetTerm(c *fiber.Ctx) error {
-	_, err := c.ParamsInt("account_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
+// loadTermInAccount loads the :id term and ties it to the URL :account_id
+// and the caller's tenant. GetTerm loads by bare id, so without this tie an
+// admin of tenant B could read, edit or delete tenant A's terms via
+// /accounts/B/terms/<A term id>. Every failure is the same 404
+// (existence-leak contract). Returns wrote=true after writing a response;
+// the caller MUST return nil in that case.
+func (h *EnrollmentTermHandler) loadTermInAccount(c *fiber.Ctx) (*models.EnrollmentTerm, bool) {
+	accountID, err := c.ParamsInt("account_id")
+	if err != nil || accountID <= 0 {
+		_ = responses.BadRequest(c, "Invalid account ID")
+		return nil, true
 	}
-
 	termID, err := c.ParamsInt("id")
 	if err != nil {
-		return responses.BadRequest(c, "Invalid term ID")
+		_ = responses.BadRequest(c, "Invalid term ID")
+		return nil, true
 	}
-
 	term, err := h.termService.GetTerm(c.Context(), uint(termID))
-	if err != nil {
-		return responses.NotFound(c, "enrollment term")
+	if err != nil || term == nil || term.AccountID != uint(accountID) {
+		_ = responses.NotFound(c, "enrollment term")
+		return nil, true
+	}
+	if assertSameTenant(c, term.AccountID) {
+		return nil, true
+	}
+	return term, false
+}
+
+func (h *EnrollmentTermHandler) GetTerm(c *fiber.Ctx) error {
+	term, wrote := h.loadTermInAccount(c)
+	if wrote {
+		return nil
 	}
 
 	return c.JSON(enrollmentTermToJSON(term))
 }
 
 func (h *EnrollmentTermHandler) UpdateTerm(c *fiber.Ctx) error {
-	_, err := c.ParamsInt("account_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
-	}
-
-	termID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid term ID")
-	}
-
 	// user_id verified by auth middleware
-
-	term, err := h.termService.GetTerm(c.Context(), uint(termID))
-	if err != nil {
-		return responses.NotFound(c, "enrollment term")
+	term, wrote := h.loadTermInAccount(c)
+	if wrote {
+		return nil
 	}
 
 	var input struct {
@@ -190,19 +197,13 @@ func (h *EnrollmentTermHandler) UpdateTerm(c *fiber.Ctx) error {
 }
 
 func (h *EnrollmentTermHandler) DeleteTerm(c *fiber.Ctx) error {
-	_, err := c.ParamsInt("account_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
-	}
-
-	termID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid term ID")
-	}
-
 	// user_id verified by auth middleware
+	term, wrote := h.loadTermInAccount(c)
+	if wrote {
+		return nil
+	}
 
-	if err := h.termService.DeleteTerm(c.Context(), uint(termID)); err != nil {
+	if err := h.termService.DeleteTerm(c.Context(), term.ID); err != nil {
 		return responses.InternalError(c, "Could not delete enrollment term")
 	}
 
