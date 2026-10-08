@@ -48,6 +48,29 @@ func TestUpdateUser_LocalePreference(t *testing.T) {
 	}
 }
 
+// A locale saved before validation existed is echoed back by the profile
+// form on every save; that must not block saving the name.
+func TestUpdateUser_LegacyLocaleEchoedBack(t *testing.T) {
+	app, repo := setupUserHandler()
+	repo.On("FindByID", mock.Anything, uint(1), uint(1)).Return(&models.User{ID: 1, Name: "Jane Doe", Locale: "fr"}, nil)
+	repo.On("Update", mock.Anything, mock.AnythingOfType("*models.User")).Return(nil)
+
+	resp := testutil.MakeRequest(app, http.MethodPut, "/users/1", testutil.JSONBody(map[string]interface{}{
+		"user": map[string]interface{}{"name": "Jane Q. Doe", "locale": "fr"},
+	}))
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	out, err := testutil.ParseJSONMap(resp)
+	require.NoError(t, err)
+	assert.Equal(t, "Jane Q. Doe", out["name"])
+	assert.Equal(t, "fr", out["locale"])
+
+	// Changing it to another unsupported value is still refused.
+	resp = testutil.MakeRequest(app, http.MethodPut, "/users/1", testutil.JSONBody(map[string]interface{}{
+		"user": map[string]interface{}{"locale": "de"},
+	}))
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
 func TestNormalizeUserLocale(t *testing.T) {
 	for in, want := range map[string]string{"": "", " en ": "en", "EN-us": "en-US", "es-419": "es-419"} {
 		got, err := service.NormalizeUserLocale(in)

@@ -505,7 +505,10 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 	if input.User.Name != "" {
 		user.Name = input.User.Name
 	}
-	if input.User.Locale != nil {
+	// A profile form echoes the stored locale back on every save; a value
+	// saved before validation existed (e.g. "fr") must not block saving
+	// the name or time zone, so an unchanged locale is left as is.
+	if input.User.Locale != nil && *input.User.Locale != user.Locale {
 		locale, err := service.NormalizeUserLocale(*input.User.Locale)
 		if err != nil {
 			return responses.BadRequest(c, "locale is not a supported language")
