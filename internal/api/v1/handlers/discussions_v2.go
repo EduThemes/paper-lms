@@ -3,9 +3,9 @@ package handlers
 import (
 	"time"
 
-	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/gofiber/fiber/v2"
 )
 
 // DiscussionV2Handler provides enhanced discussion endpoints with read/unread tracking,
