@@ -7,6 +7,13 @@ vi.mock('../../components/Layout', () => ({ default: ({ children }) => <div>{chi
 vi.mock('../../components/CourseNav', () => ({ default: () => null }));
 vi.mock('../../components/quiz/QuizzesSubNav', () => ({ default: () => null }));
 vi.mock('../../hooks/useIsTeacher', () => ({ default: () => true }));
+// Question text and feedback use the rich content editor (G010); a
+// textarea named by its placeholder stands in for it here.
+vi.mock('../../components/rce/RichContentEditorV2', () => ({
+  default: ({ value, onChange, placeholder }) => (
+    <textarea aria-label={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
+  ),
+}));
 
 const { mockApi, mockItemsApi } = vi.hoisted(() => ({
   mockApi: {
@@ -90,7 +97,7 @@ describe('QuestionBanksPage (single bank system, G060)', () => {
     fireEvent.click(await screen.findByText('Add Question'));
     fireEvent.change(screen.getByLabelText('Question Name'), { target: { value: 'Capitals' } });
     fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'matching' } });
-    fireEvent.change(screen.getByLabelText('Question Text'), { target: { value: 'Match them' } });
+    fireEvent.change(screen.getByLabelText('Enter the question text...'), { target: { value: 'Match them' } });
     fireEvent.change(screen.getByLabelText('Prompt 1'), { target: { value: 'France' } });
     fireEvent.change(screen.getByLabelText('Match for prompt 1'), { target: { value: 'Paris' } });
     fireEvent.click(screen.getByText('Save Question'));
