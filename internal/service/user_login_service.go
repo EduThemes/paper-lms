@@ -307,27 +307,31 @@ func (s *UserLoginService) TouchLastLogin(ctx context.Context, loginID uint) {
 
 // AuthenticateLocal verifies a password against an extra local login and
 // returns its user. A login without its own password uses the user's.
+// found reports whether an active local login of that name exists; when
+// it does, exactly one bcrypt comparison ran, and when it doesn't, none
+// did — the caller (UserService.Authenticate) pays the user-miss dummy
+// compare itself, so every path costs the same single bcrypt op and the
+// timing doesn't reveal which login names exist.
 // AUTH-INTERNAL: pre-authentication.
-func (s *UserLoginService) AuthenticateLocal(ctx context.Context, name, password string) (*models.User, error) {
+func (s *UserLoginService) AuthenticateLocal(ctx context.Context, name, password string) (*models.User, bool, error) {
 	login, err := s.FindActiveLocal(ctx, name)
 	if err != nil {
-		_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
-		return nil, errors.New("invalid credentials")
+		return nil, false, errors.New("invalid credentials")
 	}
 	var user models.User
 	if err := s.db.WithContext(ctx).Where("id = ?", login.UserID).First(&user).Error; err != nil {
 		_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
-		return nil, errors.New("invalid credentials")
+		return nil, true, errors.New("invalid credentials")
 	}
 	if login.HasPassword() {
 		if err := login.CheckPassword(password); err != nil {
-			return nil, errors.New("invalid credentials")
+			return nil, true, errors.New("invalid credentials")
 		}
 	} else if err := user.CheckPassword(password); err != nil {
-		return nil, errors.New("invalid credentials")
+		return nil, true, errors.New("invalid credentials")
 	}
 	s.TouchLastLogin(ctx, login.ID)
-	return &user, nil
+	return &user, true, nil
 }
 
 // isUniqueViolation reports a Postgres unique-constraint error.

@@ -74,6 +74,19 @@ func TestAdminUsers_CreateUpdateAndLogins(t *testing.T) {
 	if _, err := userSvc.Authenticate(ctx, "jane.doe", "correct-horse-1"); err != nil {
 		t.Fatalf("primary login broke: %v", err)
 	}
+	// Timing parity: an unknown name reports found=false (no bcrypt ran,
+	// the caller pays the single dummy compare); an existing login with a
+	// wrong password reports found=true (its one compare ran).
+	if _, found, err := logins.AuthenticateLocal(ctx, "nobody-here", "x"); found || err == nil {
+		t.Fatalf("unknown login: found=%v err=%v", found, err)
+	}
+	if _, found, err := logins.AuthenticateLocal(ctx, "jdoe-alt", "wrong-pass"); !found || err == nil {
+		t.Fatalf("wrong password on an existing login: found=%v err=%v", found, err)
+	}
+	// The email fallback still works for a name that is not a login.
+	if _, err := userSvc.Authenticate(ctx, u.Email, "correct-horse-1"); err != nil {
+		t.Fatalf("email sign-in broke: %v", err)
+	}
 
 	// Suspending the login stops it.
 	if _, err := logins.Update(ctx, u.ID, l.ID, 2, service.UserLoginInput{WorkflowState: strp("suspended")}); err != nil {
