@@ -335,6 +335,15 @@ const OrderingPlayer = ({ answers, value, onChange, readOnly, labelId }) => {
   }, [answers, value]);
   const order = Array.isArray(value) && value.length === answers.length ? value : initial;
 
+  // The items arrive in a uniformly shuffled order, which can by chance be
+  // the correct one. Record the displayed order as the answer so a student
+  // who agrees with it does not have to drag items away and back.
+  const hasValue = Array.isArray(value) && value.length === answers.length;
+  React.useEffect(() => {
+    if (!readOnly && !hasValue && answers.length > 0) onChange(answers.map(a => a.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answers, readOnly, hasValue]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),

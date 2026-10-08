@@ -107,6 +107,28 @@ describe('ItemPlayer — ordering', () => {
     expect(screen.getByText('First')).toBeInTheDocument();
     expect(screen.getByText('Second')).toBeInTheDocument();
   });
+
+  it('records the displayed order as the answer without requiring a drag', () => {
+    // The server shuffles ordering items uniformly, so the shown order can
+    // already be correct; the student must be able to submit it as-is.
+    const question = {
+      ...baseQ,
+      question_type: 'ordering',
+      answers: JSON.stringify([{ id: 'i2', text: 'Second' }, { id: 'i1', text: 'First' }]),
+    };
+    render(<Player question={question} initial={undefined} />);
+    expect(valueOf()).toEqual(['i2', 'i1']);
+  });
+
+  it('does not overwrite an existing answer', () => {
+    const question = {
+      ...baseQ,
+      question_type: 'ordering',
+      answers: JSON.stringify([{ id: 'i2', text: 'Second' }, { id: 'i1', text: 'First' }]),
+    };
+    render(<Player question={question} initial={['i1', 'i2']} />);
+    expect(valueOf()).toEqual(['i1', 'i2']);
+  });
 });
 
 describe('ItemPlayer — categorization', () => {

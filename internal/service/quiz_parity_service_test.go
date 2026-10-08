@@ -246,10 +246,24 @@ func TestStudentSafeQuizAnswers(t *testing.T) {
 		}
 	}
 
-	// Ordering: never returned in the authored (= correct) order.
-	order := `[{"id":"o1","text":"1"},{"id":"o2","text":"2"},{"id":"o3","text":"3"}]`
-	for seed := int64(0); seed < 50; seed++ {
-		out := service.StudentSafeQuizAnswers("ordering", order, seed)
-		assert.False(t, strings.HasPrefix(out, `[{"id":"o1","text":"1"},{"id":"o2","text":"2"},{"id":"o3"`), "seed %d returned the key order", seed)
+	// Ordering: the presentation must be a UNIFORM shuffle. If the
+	// authored (= correct) order were excluded, a two-item question would
+	// always come back reversed and the student could read the answer off
+	// the page. Across seeds both orders of a 2-item list must occur.
+	twoItems := `[{"id":"o1","text":"1"},{"id":"o2","text":"2"}]`
+	seenOrders := map[string]bool{}
+	for seed := int64(0); seed < 64; seed++ {
+		seenOrders[service.StudentSafeQuizAnswers("ordering", twoItems, seed)] = true
 	}
+	assert.Len(t, seenOrders, 2, "2-item ordering presentation must not be deterministic: %v", seenOrders)
+
+	// Same for a two-pair matching pool: the pool order must not encode
+	// the pairing.
+	twoPairs := `[{"left":"France","right_id":"paris","right":"Paris","weight":100},{"left":"UK","right_id":"london","right":"London","weight":100}]`
+	poolFirst := map[bool]bool{}
+	for seed := int64(0); seed < 64; seed++ {
+		out := service.StudentSafeQuizAnswers("matching", twoPairs, seed)
+		poolFirst[strings.Index(out, `"id":"paris"`) < strings.Index(out, `"id":"london"`)] = true
+	}
+	assert.Len(t, poolFirst, 2, "2-pair matching pool order must not be deterministic")
 }

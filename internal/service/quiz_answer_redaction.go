@@ -68,10 +68,15 @@ func QuizShuffleSeed(ids ...uint) int64 {
 	return int64(h.Sum64() & 0x7fffffffffffffff)
 }
 
-// shuffleNotIdentity shuffles s with the given seed; when the result equals
-// the original order (and len > 1) it rotates by one so the authored order
-// (which IS the ordering key) is never handed back verbatim.
-func shuffleNotIdentity[T any](s []T, seed int64, same func(a, b T) bool) []T {
+// seededShuffle returns a uniformly shuffled copy of s for the given seed.
+//
+// The shuffle must be UNIFORM — including the authored order itself.
+// Excluding (or remapping) the identity permutation leaks the key: a
+// two-item ordering question would always come back reversed, and a
+// two-pair matching pool would always be swapped, so the student could
+// read the answer off the presentation. A uniform permutation carries no
+// information about the authored (= correct) order.
+func seededShuffle[T any](s []T, seed int64) []T {
 	out := make([]T, len(s))
 	copy(out, s)
 	if len(out) < 2 {
@@ -79,16 +84,6 @@ func shuffleNotIdentity[T any](s []T, seed int64, same func(a, b T) bool) []T {
 	}
 	r := mathrand.New(mathrand.NewSource(seed))
 	r.Shuffle(len(out), func(i, j int) { out[i], out[j] = out[j], out[i] })
-	identical := true
-	for i := range out {
-		if !same(out[i], s[i]) {
-			identical = false
-			break
-		}
-	}
-	if identical {
-		out = append(out[1:], out[0])
-	}
 	return out
 }
 
@@ -136,7 +131,7 @@ func StudentSafeQuizAnswers(questionType, answers string, seed int64) string {
 			}
 			items = append(items, safeChoice{ID: o.ID, Text: o.Text.String()})
 		}
-		return mustJSON(shuffleNotIdentity(items, seed, func(a, b safeChoice) bool { return a.ID == b.ID }))
+		return mustJSON(seededShuffle(items, seed))
 
 	case "matching":
 		var opts []rawOption
@@ -172,7 +167,7 @@ func StudentSafeQuizAnswers(questionType, answers string, seed int64) string {
 				pool = append(pool, safeChoice{ID: right, Text: o.Right, BlankID: matchOptionsSentinel})
 			}
 		}
-		pool = shuffleNotIdentity(pool, seed, func(a, b safeChoice) bool { return a.ID == b.ID })
+		pool = seededShuffle(pool, seed)
 		out := make([]interface{}, 0, len(pairs)+len(pool))
 		for _, p := range pairs {
 			out = append(out, p)
