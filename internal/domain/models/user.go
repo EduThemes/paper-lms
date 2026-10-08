@@ -31,6 +31,13 @@ type User struct {
 	// device choice, then the account default_locale). Migration 000076.
 	Locale       string  `json:"locale" gorm:"default:''"`
 	TimeZone     string  `json:"time_zone" gorm:"default:'America/New_York'"`
+	// Profile (migration 000165): pronouns and a short plain-text bio
+	// shown on the user's profile card. AvatarKey is the storage key of
+	// an uploaded avatar image ('' = none); AvatarURL then points at
+	// GET /users/:id/avatar.
+	Pronouns  string `json:"pronouns" gorm:"type:varchar(50);default:''"`
+	Bio       string `json:"bio" gorm:"type:text;default:''"`
+	AvatarKey string `json:"-" gorm:"type:text;default:''"`
 	// LeaderboardOptOut is the user-facing privacy toggle shipped in
 	// W2-C. When true, this user is excluded from public leaderboard
 	// surfaces — but their currencies / awards / mastery are unchanged

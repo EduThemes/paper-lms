@@ -19,6 +19,10 @@ type Course struct {
 	IsPublic          bool           `json:"is_public" gorm:"default:false"`
 	ApplyGroupWeights bool           `json:"apply_assignment_group_weights" gorm:"default:false"`
 	NavigationTabs    string         `json:"navigation_tabs" gorm:"type:text"`
+	// HideFinalGrades hides the course total from students and observers
+	// on the Grades page (Canvas course setting hide_final_grades).
+	// Migration 000166.
+	HideFinalGrades bool `json:"hide_final_grades" gorm:"not null;default:false"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
 }

@@ -163,5 +163,10 @@ func AllModels() []interface{} {
 		// Planner / mastery — not in AutoMigrate but persisted.
 		&PlannerNote{},
 		&PlannerOverride{},
+		// Learner dashboard lane (migrations 000163-000165).
+		&UserCoursePreference{},
+		&ObserverAlertThreshold{},
+		&ObserverAlert{},
+		&UserProfileLink{},
 	}
 }

@@ -161,6 +161,37 @@ func MigrateForce(db *gorm.DB, version int) error {
 	return m.Force(version)
 }
 
+// MigrateTo migrates up or down to exactly `version`. Migration numbers
+// are not contiguous (parallel work reserves number blocks), so callers
+// that want "the schema as of migration N" must not compute a step count
+// from version arithmetic.
+func MigrateTo(db *gorm.DB, version uint) error {
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get sql.DB: %w", err)
+	}
+	subFS, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to create sub filesystem: %w", err)
+	}
+	source, err := iofs.New(subFS, ".")
+	if err != nil {
+		return fmt.Errorf("failed to create migration source: %w", err)
+	}
+	driver, err := postgres.WithInstance(sqlDB, &postgres.Config{})
+	if err != nil {
+		return fmt.Errorf("failed to create migration driver: %w", err)
+	}
+	m, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	if err != nil {
+		return fmt.Errorf("failed to create migrator: %w", err)
+	}
+	if err := m.Migrate(version); err != nil && err != migrate.ErrNoChange {
+		return err
+	}
+	return nil
+}
+
 // MigrateUp runs all pending migrations and logs the result.
 func MigrateUp(db *gorm.DB) error {
 	applied, err := RunMigrations(db)
