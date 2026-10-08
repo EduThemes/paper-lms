@@ -19,6 +19,9 @@ type CourseHandler struct {
 	// userRepo backs the DB role check (middleware.EffectiveRole) that
 	// gates ?scope=all. Nil means nobody gets the tenant-wide list.
 	userRepo repository.UserRepository
+	// canvasAPI adds Canvas course fields / include[] (G137); see
+	// canvas_course_includes.go. Nil leaves the JSON as is.
+	canvasAPI *service.CanvasAPIService
 }
 
 // SetUserRepo wires the user repository used for the admin check on
@@ -124,6 +127,7 @@ func (h *CourseHandler) ListCourses(c *fiber.Ctx) error {
 		cj["total_students"] = studentCounts[course.ID]
 		courses[i] = cj
 	}
+	h.applyCourseIncludes(c, items, courses)
 
 	return c.JSON(courses)
 }
@@ -139,7 +143,9 @@ func (h *CourseHandler) GetCourse(c *fiber.Ctx) error {
 		return responses.NotFound(c, "course")
 	}
 
-	return c.JSON(courseToJSON(course))
+	out := courseToJSON(course)
+	h.applyCourseIncludes(c, []models.Course{*course}, []fiber.Map{out})
+	return c.JSON(out)
 }
 
 type createCourseRequest struct {

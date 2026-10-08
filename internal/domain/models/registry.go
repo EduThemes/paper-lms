@@ -39,6 +39,8 @@ func AllModels() []interface{} {
 		&Nonce{},
 		&OAuthAuthorizationCode{},
 		&LTIPlatformKey{},
+		&LoginSessionToken{},
+		&AccountReport{},
 		&DiscussionTopic{},
 		&DiscussionEntry{},
 		&DiscussionEntryRating{},

@@ -49,29 +49,7 @@ func hashToken(raw string) string {
 // user. It returns the persisted model and the raw token string. The raw token
 // is only available at creation time; afterwards only the hash is stored.
 func (s *AccessTokenService) CreatePersonalAccessToken(ctx context.Context, userID uint, purpose string, scopes []string) (*models.AccessToken, string, error) {
-	// Generate a random 64-character hex token (32 bytes)
-	rawToken, err := generateRandomHex(32)
-	if err != nil {
-		return nil, "", errors.New("failed to generate token")
-	}
-
-	tokenHash := hashToken(rawToken)
-	hint := rawToken[len(rawToken)-4:] // last 4 characters
-
-	token := &models.AccessToken{
-		UserID:        userID,
-		Token:         tokenHash,
-		TokenHint:     hint,
-		Scopes:        ScopesToJSON(scopes),
-		Purpose:       purpose,
-		WorkflowState: "active",
-	}
-
-	if err := s.tokenRepo.Create(ctx, token); err != nil {
-		return nil, "", err
-	}
-
-	return token, rawToken, nil
+	return s.CreatePersonalAccessTokenWithExpiry(ctx, userID, purpose, scopes, nil)
 }
 
 // CreateOAuthToken generates a new OAuth2 access token and refresh token for

@@ -149,6 +149,13 @@ type Router struct {
 	// routes; that helper carries the RequireSuperAdmin gate.
 	SuperAdminSettingsHandler *handlers.SuperAdminSettingsHandler
 
+	// Canvas REST API compatibility (api lane: G136/G137/G138/G143).
+	// CanvasIDs is middleware.CanvasIDs(...); nil disables the rewrite.
+	CanvasAPIHandler     *handlers.CanvasAPIHandler
+	AccountReportHandler *handlers.AccountReportHandler
+	SessionTokenHandler  *handlers.SessionTokenHandler
+	CanvasIDs            fiber.Handler
+
 	// Middleware
 	AuthMiddleware *middleware.AuthMiddleware
 	PermMiddleware *middleware.PermissionMiddleware
@@ -198,6 +205,7 @@ func (r *Router) Register(app *fiber.App) {
 	// (~333 of them) without per-route plumbing. MUST sit before any
 	// route declarations on this group.
 	protected.Use(middleware.AuditWrites(r.AuditService, "http.write"))
+	r.useCanvasIDs(protected)
 
 	// SECURITY (F-055): LTI 1.3 OIDC initiation and Launch endpoints
 	// must verify the caller IS the user being launched. The browser
@@ -853,4 +861,5 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerQuizExtensionRoutes(protected, enrolled, instructor)
 	r.registerGamificationRoutes(protected, admin, instructor, selfOrAdmin)
 	r.registerSuperAdminRoutes(protected)
+	r.registerAPICompatRoutes(app, protected, authLimit, admin, enrolled, selfOrAdmin)
 }
