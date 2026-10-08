@@ -1088,6 +1088,7 @@ func main() {
 		// the same settingsLookup closure as SMTP / AI Assist / OIDC.
 		SettingsLookup: settingsLookup,
 	}
+	router.AdminAccountsHandler = wireAdminAccounts(adminAccountsWiring{DB: database, PermMiddleware: permMiddleware, CustomRoleService: customRoleService, EnrollmentService: enrollmentService, UserService: userService, LoginPipeline: loginPipeline, ObserverService: observerService, GradingService: gradingService, FileService: fileService, SISImportService: sisImportService, AuditService: auditService, CourseRepo: courseRepo})
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
@@ -1223,6 +1224,7 @@ func main() {
 		publishJob, deliverJob := scheduler.NewMinuteJobs(announcementService, notificationDeliveryService)
 		minuteSched.Register("publishScheduledAnnouncements", scheduler.EveryTick(), publishJob)
 		minuteSched.Register("deliverImmediateNotifications", scheduler.EveryTick(), deliverJob)
+		minuteSched.Register("sisResumePending", scheduler.EveryTick(), sisResumeJob(sisImportService))
 		minuteSched.Start(schedCtx)
 	}
 

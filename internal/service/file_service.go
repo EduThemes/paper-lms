@@ -66,6 +66,20 @@ type FileService struct {
 	storageBackend storage.Backend
 	storagePath    string // kept for backward compat (local path prefix)
 	maxUploadSize  int64
+	// quota enforces storage quotas on user uploads (G120). Optional.
+	quota UploadQuotaChecker
+}
+
+// UploadQuotaChecker refuses uploads that would exceed a context's storage
+// quota (*StorageQuotaService).
+type UploadQuotaChecker interface {
+	CheckQuota(ctx context.Context, contextType string, contextID uint, addBytes int64) error
+}
+
+// SetQuotaChecker enables storage-quota enforcement on user uploads.
+func (s *FileService) SetQuotaChecker(q UploadQuotaChecker) *FileService {
+	s.quota = q
+	return s
 }
 
 func NewFileService(folderRepo repository.FolderRepository, attachmentRepo repository.AttachmentRepository, storagePath string) *FileService {
@@ -251,6 +265,13 @@ func (s *FileService) uploadFile(ctx context.Context, attachment *models.Attachm
 		}
 	} else if err := s.ValidateUploadWithMIME(attachment.Filename, attachment.Size, attachment.ContentType); err != nil {
 		return err
+	}
+	// Storage quota (G120): user uploads only; trusted course imports are
+	// an instructor's own content migration and are not refused midway.
+	if !trusted && s.quota != nil {
+		if err := s.quota.CheckQuota(ctx, attachment.ContextType, attachment.ContextID, attachment.Size); err != nil {
+			return err
+		}
 	}
 
 	// Build storage key: ContextType/ContextID/UUID/filename

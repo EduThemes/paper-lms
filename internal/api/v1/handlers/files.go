@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -199,6 +200,9 @@ func (h *FileHandler) UploadCourseFile(c *fiber.Ctx) error {
 	// instance/env. Enables per-district S3 buckets on the upload path.
 	uploadCtx := settingsctx.WithAccountID(c.Context(), callerAccountID(c))
 	if err := h.fileService.UploadFile(uploadCtx, attachment, file); err != nil {
+		if errors.Is(err, service.ErrStorageQuotaExceeded) {
+			return responses.BadRequest(c, "Course storage quota exceeded")
+		}
 		return responses.InternalError(c, "Could not upload file")
 	}
 
