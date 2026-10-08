@@ -304,6 +304,29 @@ func TestAGSPostScore_StringUserIDGradesThroughGradebook(t *testing.T) {
 	f.resultRepo.AssertCalled(t, "Upsert", mock.Anything, mock.Anything)
 }
 
+// A line item linked to an existing assignment can carry a scoreMaximum
+// that differs from the assignment's points_possible (Paper does not sync
+// them as Canvas does). The gradebook grade must be on the assignment's
+// scale: 8/10 on a 100-point assignment is 80, not 16.
+func TestAGSPostScore_ScalesToAssignmentPointsPossible(t *testing.T) {
+	f := newAGSFixture()
+	f.lineItemRepo.On("FindByID", mock.Anything, uint(42)).Return(assignmentLinkedLineItem(), nil)
+	f.enrollRepo.On("FindByUserAndCourse", mock.Anything, uint(500), uint(10), uint(1)).Return(&models.Enrollment{
+		UserID: 500, CourseID: 10, Type: "StudentEnrollment", WorkflowState: "active",
+	}, nil)
+	points := 100.0
+	f.assignmentRepo.On("FindByID", mock.Anything, uint(70), uint(1)).Return(&models.Assignment{ID: 70, CourseID: 10, PointsPossible: &points}, nil)
+	f.resultRepo.On("Upsert", mock.Anything, mock.AnythingOfType("*models.LTIResult")).Return(nil)
+
+	resp := testutil.MakeRequest(f.scoreApp(), http.MethodPost, "/lti/courses/10/line_items/42/scores", testutil.JSONBody(map[string]interface{}{
+		"userId": "500", "scoreGiven": 8, "scoreMaximum": 10,
+		"activityProgress": "Completed", "gradingProgress": "FullyGraded",
+	}))
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	require.Len(t, f.grader.calls, 1)
+	assert.Equal(t, "a=70 u=500 g=3 acct=1 grade=80", f.grader.calls[0])
+}
+
 func TestAGSPostScore_PendingIsNotWrittenToGradebook(t *testing.T) {
 	f := newAGSFixture()
 	f.lineItemRepo.On("FindByID", mock.Anything, uint(42)).Return(assignmentLinkedLineItem(), nil)

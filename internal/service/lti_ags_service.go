@@ -175,8 +175,11 @@ var acceptGivenScore = map[string]bool{
 //     fires post-grade callbacks. Only FullyGraded/PendingManual scores are
 //     applied (Canvas parity); a refused grade fails the request and the
 //     result is not saved.
-//   - The score is scaled to the line item's scoreMaximum, as Canvas does:
-//     scoreGiven * lineItem.scoreMaximum / scoreMaximum.
+//   - The score is scaled into the gradebook's range, as Canvas does
+//     (scoreGiven * max / scoreMaximum). Canvas keeps an assignment's line
+//     item scoreMaximum equal to its points_possible; Paper does not sync
+//     them, so the assignment's points_possible is the target when set,
+//     else the line item's scoreMaximum.
 func (s *LTIAGSService) PostScore(ctx context.Context, lineItem *models.LTILineItem, accountID, graderID uint, result *models.LTIResult) error {
 	if result.ActivityProgress != "" && !validActivityProgress[result.ActivityProgress] {
 		return agsErr(ErrAGSInvalid, fmt.Sprintf("invalid activityProgress: %s", result.ActivityProgress))
@@ -208,7 +211,11 @@ func (s *LTIAGSService) PostScore(ctx context.Context, lineItem *models.LTILineI
 			if s.grader == nil {
 				return agsErr(ErrAGSGradeRefused, "gradebook sync is not configured")
 			}
-			score := *result.ResultScore * agsScoreScale(lineItem.ScoreMaximum, result.ResultMaximum)
+			targetMax := lineItem.ScoreMaximum
+			if assignment.PointsPossible != nil && *assignment.PointsPossible > 0 {
+				targetMax = *assignment.PointsPossible
+			}
+			score := *result.ResultScore * agsScoreScale(targetMax, result.ResultMaximum)
 			grade := strconv.FormatFloat(score, 'f', -1, 64)
 			if _, gErr := s.grader.Grade(ctx, assignment.ID, result.UserID, graderID, accountID, grade); gErr != nil {
 				return agsErr(ErrAGSGradeRefused, gErr.Error())
