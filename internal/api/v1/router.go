@@ -434,6 +434,8 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Post("/courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/complete", enrolled, r.QuizSubmissionHandler.CompleteSubmission)
 	protected.Get("/courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/answers", enrolled, r.QuizSubmissionHandler.GetSubmissionAnswers)
 	protected.Get("/courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/questions", enrolled, r.QuizSubmissionHandler.GetSubmissionQuestions)
+	protected.Post("/courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/questions/:question_id/file", middleware.UploadRateLimit(), middleware.EnforceUploadSize(r.SettingsLookup), enrolled, r.QuizSubmissionHandler.UploadAnswerFile)
+	protected.Get("/courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/questions/:question_id/file", enrolled, r.QuizSubmissionHandler.DownloadAnswerFile)
 
 	// Quiz Statistics (instructor only)
 	protected.Get("/courses/:course_id/quizzes/:quiz_id/statistics", instructor, r.QuizStatisticsHandler.GetQuizStatistics)
@@ -816,7 +818,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Get("/courses/:course_id/question_banks/:bank_id", enrolled, r.QuestionBankHandler.GetBank)
 	protected.Put("/courses/:course_id/question_banks/:bank_id", instructor, r.QuestionBankHandler.UpdateBank)
 	protected.Delete("/courses/:course_id/question_banks/:bank_id", instructor, r.QuestionBankHandler.DeleteBank)
-	protected.Get("/courses/:course_id/question_banks/:bank_id/questions", enrolled, r.QuestionBankHandler.ListQuestions)
+	protected.Get("/courses/:course_id/question_banks/:bank_id/questions", instructor, r.QuestionBankHandler.ListQuestions)
 	protected.Post("/courses/:course_id/question_banks/:bank_id/questions", instructor, r.QuestionBankHandler.AddQuestion)
 	protected.Put("/courses/:course_id/question_banks/:bank_id/questions/:question_id", instructor, r.QuestionBankHandler.UpdateQuestion)
 	protected.Delete("/courses/:course_id/question_banks/:bank_id/questions/:question_id", instructor, r.QuestionBankHandler.DeleteQuestion)

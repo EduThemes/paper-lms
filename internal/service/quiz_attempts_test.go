@@ -201,6 +201,7 @@ func TestAnswerQuestion_Success(t *testing.T) {
 
 	submissionRepo.On("FindByID", ctx, uint(1)).Return(submission, nil)
 	// No existing answer
+	questionRepo.On("FindByID", ctx, uint(100)).Return(&models.QuizQuestion{ID: 100, QuizID: 1}, nil)
 	answerRepo.On("FindBySubmissionAndQuestion", ctx, uint(1), uint(100)).Return(nil, errors.New("not found"))
 	answerRepo.On("Create", ctx, mock.AnythingOfType("*models.QuizSubmissionAnswer")).Return(nil)
 
@@ -241,6 +242,7 @@ func TestAnswerQuestion_Update(t *testing.T) {
 	}
 
 	submissionRepo.On("FindByID", ctx, uint(1)).Return(submission, nil)
+	questionRepo.On("FindByID", ctx, uint(100)).Return(&models.QuizQuestion{ID: 100, QuizID: 1}, nil)
 	answerRepo.On("FindBySubmissionAndQuestion", ctx, uint(1), uint(100)).Return(existingAnswer, nil)
 	answerRepo.On("Update", ctx, existingAnswer).Return(nil)
 

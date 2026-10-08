@@ -55,6 +55,14 @@ func (m *MockQuizSubmissionRepository) ListByQuizID(ctx context.Context, quizID 
 	return args.Get(0).(*repository.PaginatedResult[models.QuizSubmission]), args.Error(1)
 }
 
+func (m *MockQuizSubmissionRepository) ListByQuizAndUserIDs(ctx context.Context, quizID uint, userIDs []uint) ([]models.QuizSubmission, error) {
+	args := m.Called(ctx, quizID, userIDs)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.QuizSubmission), args.Error(1)
+}
+
 func (m *MockQuizSubmissionRepository) ListCompletedByQuizID(ctx context.Context, quizID uint) ([]models.QuizSubmission, error) {
 	args := m.Called(ctx, quizID)
 	if args.Get(0) == nil {

@@ -20,4 +20,9 @@ type QuizQuestion struct {
 	// Wave A2 additions — both nullable so existing rows are unaffected.
 	BankItemID *uint `json:"bank_item_id" gorm:"index"`
 	StimulusID *uint `json:"stimulus_id" gorm:"index"`
+	// QuestionBankEntryID is set on the per-quiz copy of a question-bank
+	// entry drawn by a bank-linked question group (migration 000076). It
+	// records provenance so later attempts reuse the same copy; these
+	// copies are never treated as ungrouped quiz questions.
+	QuestionBankEntryID *uint `json:"question_bank_entry_id" gorm:"column:question_bank_entry_id;index"`
 }

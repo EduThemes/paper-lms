@@ -27,6 +27,8 @@ type QuizService struct {
 	answerRepo           repository.QuizSubmissionAnswerRepository
 	groupRepo            repository.QuizQuestionGroupRepository
 	bankEntryRepo        repository.QuestionBankEntryRepository
+	questionBankRepo     repository.QuestionBankRepository
+	stimulusRepo         repository.QuizStimulusRepository
 	accommodationService *AccommodationService
 
 	// onCompletedCallbacks fire (in goroutines) after a successful
@@ -63,6 +65,22 @@ func WithQuestionGroupRepo(repo repository.QuizQuestionGroupRepository) func(*Qu
 func WithBankEntryRepo(repo repository.QuestionBankEntryRepository) func(*QuizService) {
 	return func(s *QuizService) {
 		s.bankEntryRepo = repo
+	}
+}
+
+// WithQuestionBankRepo lets the service verify that a group's linked
+// question bank lives in the quiz's course before drawing from it.
+func WithQuestionBankRepo(repo repository.QuestionBankRepository) func(*QuizService) {
+	return func(s *QuizService) {
+		s.questionBankRepo = repo
+	}
+}
+
+// WithStimulusRepo lets the service embed (and validate) stimulus passages
+// linked to quiz questions.
+func WithStimulusRepo(repo repository.QuizStimulusRepository) func(*QuizService) {
+	return func(s *QuizService) {
+		s.stimulusRepo = repo
 	}
 }
 

@@ -46,7 +46,12 @@ func (h *QuizHandler) ListQuizzes(c *fiber.Ctx) error {
 	}
 
 	params := middleware.GetPagination(c)
-	result, err := h.quizRepo.ListByCourseID(c.Context(), uint(courseID), params)
+	// B128: students (and observers) only ever see published quizzes.
+	list := h.quizRepo.ListPublishedByCourseID
+	if quizCallerIsStaff(c) {
+		list = h.quizRepo.ListByCourseID
+	}
+	result, err := list(c.Context(), uint(courseID), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch quizzes")
 	}
@@ -61,13 +66,20 @@ func (h *QuizHandler) ListQuizzes(c *fiber.Ctx) error {
 }
 
 func (h *QuizHandler) GetQuiz(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
 
 	quiz, err := h.quizRepo.FindByID(c.Context(), uint(id), callerAccountID(c))
-	if err != nil {
+	// F-013 parent-course tie; deleted quizzes are gone; non-staff callers
+	// cannot see unpublished quizzes (B128).
+	if err != nil || quiz.CourseID != uint(courseID) || quiz.WorkflowState == "deleted" ||
+		(!quizCallerIsStaff(c) && !quizVisibleToStudents(quiz)) {
 		return responses.NotFound(c, "quiz")
 	}
 
@@ -167,13 +179,15 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 			Title           *string    `json:"title"`
 			Description     *string    `json:"description"`
 			QuizType        *string    `json:"quiz_type"`
-			TimeLimit       *int       `json:"time_limit"`
-			AllowedAttempts *int       `json:"allowed_attempts"`
-			DueAt           *time.Time `json:"due_at"`
-			UnlockAt        *time.Time `json:"unlock_at"`
-			LockAt          *time.Time `json:"lock_at"`
-			PointsPossible  *float64   `json:"points_possible"`
-			Published       *bool      `json:"published"`
+			// optionalField: an explicit null clears the value (B129);
+			// an absent key leaves it unchanged.
+			TimeLimit       optionalField[int]       `json:"time_limit"`
+			AllowedAttempts *int                     `json:"allowed_attempts"`
+			DueAt           optionalField[time.Time] `json:"due_at"`
+			UnlockAt        optionalField[time.Time] `json:"unlock_at"`
+			LockAt          optionalField[time.Time] `json:"lock_at"`
+			PointsPossible  *float64                 `json:"points_possible"`
+			Published       *bool                    `json:"published"`
 		} `json:"quiz"`
 	}
 
@@ -190,21 +204,20 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 	if input.Quiz.QuizType != nil {
 		quiz.QuizType = *input.Quiz.QuizType
 	}
-	if input.Quiz.TimeLimit != nil {
-		quiz.TimeLimit = input.Quiz.TimeLimit
+	if input.Quiz.TimeLimit.Set {
+		if input.Quiz.TimeLimit.Null || input.Quiz.TimeLimit.Value <= 0 {
+			quiz.TimeLimit = nil
+		} else {
+			v := input.Quiz.TimeLimit.Value
+			quiz.TimeLimit = &v
+		}
 	}
 	if input.Quiz.AllowedAttempts != nil {
 		quiz.AllowedAttempts = *input.Quiz.AllowedAttempts
 	}
-	if input.Quiz.DueAt != nil {
-		quiz.DueAt = input.Quiz.DueAt
-	}
-	if input.Quiz.UnlockAt != nil {
-		quiz.UnlockAt = input.Quiz.UnlockAt
-	}
-	if input.Quiz.LockAt != nil {
-		quiz.LockAt = input.Quiz.LockAt
-	}
+	applyOptionalTime(&quiz.DueAt, input.Quiz.DueAt)
+	applyOptionalTime(&quiz.UnlockAt, input.Quiz.UnlockAt)
+	applyOptionalTime(&quiz.LockAt, input.Quiz.LockAt)
 	if input.Quiz.PointsPossible != nil {
 		quiz.PointsPossible = input.Quiz.PointsPossible
 	}
@@ -222,6 +235,20 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(quizToJSON(quiz))
+}
+
+// applyOptionalTime sets *dst from a PATCH-style optional field: null
+// clears it, a value replaces it, absence leaves it unchanged.
+func applyOptionalTime(dst **time.Time, f optionalField[time.Time]) {
+	if !f.Set {
+		return
+	}
+	if f.Null {
+		*dst = nil
+		return
+	}
+	v := f.Value
+	*dst = &v
 }
 
 func (h *QuizHandler) DeleteQuiz(c *fiber.Ctx) error {

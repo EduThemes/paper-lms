@@ -1076,14 +1076,14 @@ func TestNumericalMarginFix(t *testing.T) {
 			note:         "no margin → legacy string equality (backwards compat)",
 		},
 		{
-			name:         "no_margin_42_vs_42_0_still_misses",
+			name:         "no_margin_42_vs_42_0_matches",
 			questionType: "numerical_question",
 			points:       2.0,
 			answersJSON:  `[{"id":"n1","text":"42","weight":100}]`,
 			submitted:    "42.0",
-			wantScore:    0.0,
+			wantScore:    2.0,
 			wantWorkflow: "complete",
-			note:         "legacy quirk preserved: no margin → string equality",
+			note:         "B130: numeric comparison (Canvas parity)",
 		},
 	}
 	for _, tc := range cases {

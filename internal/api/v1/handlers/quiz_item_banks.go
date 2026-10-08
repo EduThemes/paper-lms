@@ -159,27 +159,78 @@ func (h *QuizItemBankHandler) DeleteBank(c *fiber.Ctx) error {
 }
 
 // ---------- Bank Items ----------
+//
+// SECURITY (B032): every item route is mounted under
+// /courses/:course_id/quiz_item_banks/:bank_id/items behind the
+// `instructor` middleware, and each handler ties the bank to :course_id
+// and the item to :bank_id. Previously the routes were course-less and
+// unguarded, so any authenticated user in any tenant could read answer
+// keys or modify / delete items by raw id.
 
-func (h *QuizItemBankHandler) ListBankItems(c *fiber.Ctx) error {
+// scopedItemBank loads :bank_id and verifies it lives in :course_id.
+// Returns wrote=true after writing an error response.
+func (h *QuizItemBankHandler) scopedItemBank(c *fiber.Ctx) (*models.QuizItemBank, bool) {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid course ID")
+		return nil, true
+	}
 	bankID, err := c.ParamsInt("bank_id")
 	if err != nil {
-		return responses.BadRequest(c, "Invalid bank ID")
+		_ = responses.BadRequest(c, "Invalid bank ID")
+		return nil, true
 	}
-	items, err := h.svc.ListBankItems(c.Context(), uint(bankID))
+	if courseID <= 0 {
+		_ = responses.NotFound(c, "item bank")
+		return nil, true
+	}
+	bank, err := h.svc.GetBank(c.Context(), uint(courseID), uint(bankID))
+	if err != nil || bank == nil || bank.CourseID != uint(courseID) {
+		_ = responses.NotFound(c, "item bank")
+		return nil, true
+	}
+	return bank, false
+}
+
+// scopedBankItem loads :item_id and verifies it belongs to the scoped bank.
+func (h *QuizItemBankHandler) scopedBankItem(c *fiber.Ctx) (*models.QuizItemBank, *models.QuizItemBankItem, bool) {
+	bank, wrote := h.scopedItemBank(c)
+	if wrote {
+		return nil, nil, true
+	}
+	itemID, err := c.ParamsInt("item_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid item ID")
+		return nil, nil, true
+	}
+	item, err := h.svc.GetBankItemInBank(c.Context(), bank.ID, uint(itemID))
+	if err != nil {
+		_ = responses.NotFound(c, "bank item")
+		return nil, nil, true
+	}
+	return bank, item, false
+}
+
+func (h *QuizItemBankHandler) ListBankItems(c *fiber.Ctx) error {
+	bank, wrote := h.scopedItemBank(c)
+	if wrote {
+		return nil
+	}
+	items, err := h.svc.ListBankItems(c.Context(), bank.ID)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch bank items")
 	}
 	out := make([]fiber.Map, len(items))
-	for i, it := range items {
-		out[i] = quizItemBankItemToJSON(&it)
+	for i := range items {
+		out[i] = quizItemBankItemToJSON(&items[i])
 	}
 	return c.JSON(out)
 }
 
 func (h *QuizItemBankHandler) CreateBankItem(c *fiber.Ctx) error {
-	bankID, err := c.ParamsInt("bank_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid bank ID")
+	bank, wrote := h.scopedItemBank(c)
+	if wrote {
+		return nil
 	}
 	var input struct {
 		Item struct {
@@ -197,7 +248,7 @@ func (h *QuizItemBankHandler) CreateBankItem(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 	item := &models.QuizItemBankItem{
-		BankID:            uint(bankID),
+		BankID:            bank.ID,
 		Position:          input.Item.Position,
 		QuestionType:      input.Item.QuestionType,
 		QuestionText:      service.SanitizeHTML(input.Item.QuestionText),
@@ -214,25 +265,17 @@ func (h *QuizItemBankHandler) CreateBankItem(c *fiber.Ctx) error {
 }
 
 func (h *QuizItemBankHandler) GetBankItem(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("item_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid item ID")
-	}
-	item, err := h.svc.GetBankItem(c.Context(), uint(id))
-	if err != nil {
-		return responses.NotFound(c, "bank item")
+	_, item, wrote := h.scopedBankItem(c)
+	if wrote {
+		return nil
 	}
 	return c.JSON(quizItemBankItemToJSON(item))
 }
 
 func (h *QuizItemBankHandler) UpdateBankItem(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("item_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid item ID")
-	}
-	item, err := h.svc.GetBankItem(c.Context(), uint(id))
-	if err != nil {
-		return responses.NotFound(c, "bank item")
+	_, item, wrote := h.scopedBankItem(c)
+	if wrote {
+		return nil
 	}
 	var input struct {
 		Item struct {
@@ -280,11 +323,11 @@ func (h *QuizItemBankHandler) UpdateBankItem(c *fiber.Ctx) error {
 }
 
 func (h *QuizItemBankHandler) DeleteBankItem(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("item_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid item ID")
+	_, item, wrote := h.scopedBankItem(c)
+	if wrote {
+		return nil
 	}
-	if err := h.svc.DeleteBankItem(c.Context(), uint(id)); err != nil {
+	if err := h.svc.DeleteBankItem(c.Context(), item.ID); err != nil {
 		return responses.NotFound(c, "bank item")
 	}
 	return c.JSON(fiber.Map{"delete": true})
@@ -293,47 +336,60 @@ func (h *QuizItemBankHandler) DeleteBankItem(c *fiber.Ctx) error {
 // ---------- Quiz integration ----------
 
 // AddBankItemToQuiz copies a bank item into the given quiz as a QuizQuestion.
-// POST /api/v1/quiz_item_banks/:bank_id/items/:item_id/add_to_quiz/:quiz_id
+// POST /api/v1/courses/:course_id/quiz_item_banks/:bank_id/items/:item_id/add_to_quiz/:quiz_id
+// The quiz must live in the bank's course and the caller's tenant (B133).
 func (h *QuizItemBankHandler) AddBankItemToQuiz(c *fiber.Ctx) error {
-	itemID, err := c.ParamsInt("item_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid item ID")
+	bank, item, wrote := h.scopedBankItem(c)
+	if wrote {
+		return nil
 	}
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
+	if err := h.svc.VerifyQuizInCourse(c.Context(), uint(quizID), bank.CourseID, callerAccountID(c)); err != nil {
+		return responses.NotFound(c, "quiz")
+	}
 	var input struct {
 		Position int `json:"position"`
 	}
 	_ = c.BodyParser(&input)
-	q, err := h.svc.AddBankItemToQuiz(c.Context(), uint(itemID), uint(quizID), input.Position)
+	q, err := h.svc.AddBankItemToQuiz(c.Context(), item.ID, uint(quizID), input.Position)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 	return c.Status(fiber.StatusCreated).JSON(quizQuestionToJSON(q))
 }
 
-// RandomDraw returns N randomly-shuffled bank items shaped like QuizQuestions.
-// POST /api/v1/quiz_item_banks/:bank_id/random_draw  body {"count": 5}
+// RandomDraw draws N random items from a bank and adds them to the quiz.
+// POST /api/v1/courses/:course_id/quiz_item_banks/:bank_id/random_draw
+// body {"quiz_id": 9, "count": 5}
 func (h *QuizItemBankHandler) RandomDraw(c *fiber.Ctx) error {
-	bankID, err := c.ParamsInt("bank_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid bank ID")
+	bank, wrote := h.scopedItemBank(c)
+	if wrote {
+		return nil
 	}
 	var input struct {
-		Count int `json:"count"`
+		QuizID   uint `json:"quiz_id"`
+		Count    int  `json:"count"`
+		Position int  `json:"position"`
 	}
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
-	questions, err := h.svc.RandomDrawFromBank(c.Context(), uint(bankID), input.Count)
+	if input.QuizID == 0 {
+		return responses.BadRequest(c, "quiz_id is required")
+	}
+	if err := h.svc.VerifyQuizInCourse(c.Context(), input.QuizID, bank.CourseID, callerAccountID(c)); err != nil {
+		return responses.NotFound(c, "quiz")
+	}
+	questions, err := h.svc.DrawItemsIntoQuiz(c.Context(), bank.ID, input.QuizID, input.Count, input.Position)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 	out := make([]fiber.Map, len(questions))
-	for i, q := range questions {
-		out[i] = quizQuestionToJSON(&q)
+	for i := range questions {
+		out[i] = quizQuestionToJSON(&questions[i])
 	}
-	return c.JSON(out)
+	return c.Status(fiber.StatusCreated).JSON(out)
 }

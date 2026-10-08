@@ -1,0 +1,239 @@
+package service
+
+// Student-facing redaction of quiz question answer keys.
+//
+// quiz_questions.answers holds the full answer key (weights, accepted
+// short-answer strings, numerical values, matching right_ids, hot-spot
+// regions, categorization bucket assignments, …). Anyone who is not course
+// staff must only ever see the parts of that JSON needed to RENDER the item:
+// option ids and labels. StudentSafeQuizAnswers produces that view per item
+// type; unknown types are redacted to "[]" (default-deny).
+
+import (
+	"encoding/json"
+	"hash/fnv"
+	mathrand "math/rand"
+	"strconv"
+	"strings"
+)
+
+type safeChoice struct {
+	ID      string `json:"id"`
+	Text    string `json:"text"`
+	BlankID string `json:"blank_id,omitempty"`
+}
+
+type safeMatchPair struct {
+	ID   string `json:"id"`
+	Left string `json:"left"`
+	Text string `json:"text"`
+}
+
+type safeLabel struct {
+	ID    string `json:"id"`
+	Text  string `json:"text,omitempty"`
+	Label string `json:"label,omitempty"`
+}
+
+// rawOption is a loose decode of one answers entry used only for
+// redaction (texts and labels are kept as raw JSON-ish strings).
+type rawOption struct {
+	ID      string     `json:"id"`
+	Text    flexString `json:"text"`
+	Left    string     `json:"left"`
+	Right   string     `json:"right"`
+	RightID string     `json:"right_id"`
+	MatchID string     `json:"match_id"`
+	BlankID string     `json:"blank_id"`
+	Weight  float64    `json:"weight"`
+	Items   []struct {
+		ID   string     `json:"id"`
+		Text flexString `json:"text"`
+	} `json:"items"`
+	Buckets []struct {
+		ID    string     `json:"id"`
+		Label flexString `json:"label"`
+	} `json:"buckets"`
+	ImageURL string `json:"image_url"`
+}
+
+// QuizShuffleSeed derives a stable shuffle seed from the given ids so the
+// redacted order is stable across reloads of the same attempt.
+func QuizShuffleSeed(ids ...uint) int64 {
+	h := fnv.New64a()
+	for _, id := range ids {
+		_, _ = h.Write([]byte(strconv.FormatUint(uint64(id), 10)))
+		_, _ = h.Write([]byte{':'})
+	}
+	return int64(h.Sum64() & 0x7fffffffffffffff)
+}
+
+// shuffleNotIdentity shuffles s with the given seed; when the result equals
+// the original order (and len > 1) it rotates by one so the authored order
+// (which IS the ordering key) is never handed back verbatim.
+func shuffleNotIdentity[T any](s []T, seed int64, same func(a, b T) bool) []T {
+	out := make([]T, len(s))
+	copy(out, s)
+	if len(out) < 2 {
+		return out
+	}
+	r := mathrand.New(mathrand.NewSource(seed))
+	r.Shuffle(len(out), func(i, j int) { out[i], out[j] = out[j], out[i] })
+	identical := true
+	for i := range out {
+		if !same(out[i], s[i]) {
+			identical = false
+			break
+		}
+	}
+	if identical {
+		out = append(out[1:], out[0])
+	}
+	return out
+}
+
+func mustJSON(v interface{}) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
+
+// StudentSafeQuizAnswers returns the answers JSON with every answer-key
+// field removed, shaped for the student item player. seed drives the
+// deterministic shuffle of order-revealing lists (ordering items, matching
+// right-hand pools).
+func StudentSafeQuizAnswers(questionType, answers string, seed int64) string {
+	qType := NormalizeQuizQuestionType(questionType)
+	trimmed := strings.TrimSpace(answers)
+
+	switch qType {
+	case "multiple_choice", "true_false", "multiple_answer", "multiple_dropdown":
+		var opts []rawOption
+		if err := json.Unmarshal([]byte(trimmed), &opts); err != nil {
+			return "[]"
+		}
+		out := make([]safeChoice, 0, len(opts))
+		for _, o := range opts {
+			c := safeChoice{ID: o.ID, Text: o.Text.String()}
+			if qType == "multiple_dropdown" {
+				c.BlankID = o.BlankID
+			}
+			out = append(out, c)
+		}
+		return mustJSON(out)
+
+	case "ordering":
+		var opts []rawOption
+		if err := json.Unmarshal([]byte(trimmed), &opts); err != nil {
+			return "[]"
+		}
+		items := make([]safeChoice, 0, len(opts))
+		for _, o := range opts {
+			if o.ID == "" || o.Weight < 0 {
+				continue
+			}
+			items = append(items, safeChoice{ID: o.ID, Text: o.Text.String()})
+		}
+		return mustJSON(shuffleNotIdentity(items, seed, func(a, b safeChoice) bool { return a.ID == b.ID }))
+
+	case "matching":
+		var opts []rawOption
+		if err := json.Unmarshal([]byte(trimmed), &opts); err != nil {
+			return "[]"
+		}
+		pairs := []safeMatchPair{}
+		pool := []safeChoice{}
+		poolSeen := map[string]bool{}
+		for _, o := range opts {
+			if o.BlankID == matchOptionsSentinel {
+				if o.ID != "" && !poolSeen[o.ID] {
+					poolSeen[o.ID] = true
+					pool = append(pool, safeChoice{ID: o.ID, Text: o.Text.String(), BlankID: matchOptionsSentinel})
+				}
+				continue
+			}
+			key := o.Left
+			if key == "" {
+				key = o.ID
+			}
+			display := o.Left
+			if display == "" {
+				display = o.Text.String()
+			}
+			pairs = append(pairs, safeMatchPair{ID: o.ID, Left: key, Text: display})
+			right := o.RightID
+			if right == "" {
+				right = o.MatchID
+			}
+			if right != "" && !poolSeen[right] && o.Right != "" {
+				poolSeen[right] = true
+				pool = append(pool, safeChoice{ID: right, Text: o.Right, BlankID: matchOptionsSentinel})
+			}
+		}
+		pool = shuffleNotIdentity(pool, seed, func(a, b safeChoice) bool { return a.ID == b.ID })
+		out := make([]interface{}, 0, len(pairs)+len(pool))
+		for _, p := range pairs {
+			out = append(out, p)
+		}
+		for _, p := range pool {
+			out = append(out, p)
+		}
+		return mustJSON(out)
+
+	case "fill_in_multiple_blanks":
+		// Only the blank ids (no accepted strings).
+		blanks := []map[string]string{}
+		seen := map[string]bool{}
+		if strings.HasPrefix(trimmed, "[") {
+			var opts []rawOption
+			if err := json.Unmarshal([]byte(trimmed), &opts); err != nil {
+				return "[]"
+			}
+			for _, o := range opts {
+				if o.BlankID != "" && !seen[o.BlankID] {
+					seen[o.BlankID] = true
+					blanks = append(blanks, map[string]string{"blank_id": o.BlankID})
+				}
+			}
+		} else {
+			var m map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(trimmed), &m); err != nil {
+				return "[]"
+			}
+			for k := range m {
+				blanks = append(blanks, map[string]string{"blank_id": k})
+			}
+		}
+		return mustJSON(blanks)
+
+	case "categorization":
+		var opts []rawOption
+		if err := json.Unmarshal([]byte(trimmed), &opts); err != nil || len(opts) == 0 {
+			return "[]"
+		}
+		cfg := opts[0]
+		items := make([]safeLabel, 0, len(cfg.Items))
+		for _, it := range cfg.Items {
+			items = append(items, safeLabel{ID: it.ID, Text: it.Text.String()})
+		}
+		buckets := make([]safeLabel, 0, len(cfg.Buckets))
+		for _, b := range cfg.Buckets {
+			buckets = append(buckets, safeLabel{ID: b.ID, Label: b.Label.String()})
+		}
+		return mustJSON([]map[string]interface{}{{"id": cfg.ID, "items": items, "buckets": buckets}})
+
+	case "hot_spot":
+		var opts []rawOption
+		if err := json.Unmarshal([]byte(trimmed), &opts); err != nil || len(opts) == 0 {
+			return "[]"
+		}
+		return mustJSON([]map[string]interface{}{{"id": opts[0].ID, "image_url": opts[0].ImageURL}})
+	}
+
+	// short_answer, essay, numerical_question, fill_in_the_blank, formula,
+	// file_upload, text_only, and anything unknown: nothing in answers is
+	// needed to render the item, and for most of them answers IS the key.
+	return "[]"
+}

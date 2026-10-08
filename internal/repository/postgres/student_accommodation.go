@@ -68,10 +68,16 @@ func (r *studentAccommodationRepo) ListByUserID(ctx context.Context, userID uint
 	}, nil
 }
 
+// ListByUserAndCourse returns the accommodations in effect right now for
+// the user in the course (course-specific or global). Like
+// ListActiveByUserID it honors the effective_from / effective_until window
+// — a plan that ended last term (or starts next term) does not apply.
 func (r *studentAccommodationRepo) ListByUserAndCourse(ctx context.Context, userID uint, courseID uint) ([]models.StudentAccommodation, error) {
 	var items []models.StudentAccommodation
+	now := time.Now()
 	if err := r.db.WithContext(ctx).
-		Where("user_id = ? AND (course_id = ? OR course_id IS NULL) AND status = ?", userID, courseID, "active").
+		Where("user_id = ? AND (course_id = ? OR course_id IS NULL) AND status = ? AND effective_from <= ? AND (effective_until IS NULL OR effective_until >= ?)",
+			userID, courseID, "active", now, now).
 		Find(&items).Error; err != nil {
 		return nil, err
 	}

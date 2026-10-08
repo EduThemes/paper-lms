@@ -41,10 +41,22 @@ func (r *quizRepo) Delete(ctx context.Context, id uint) error {
 }
 
 func (r *quizRepo) ListByCourseID(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Quiz], error) {
+	query := r.db.WithContext(ctx).Model(&models.Quiz{}).Where("course_id = ? AND workflow_state != 'deleted'", courseID)
+	return r.paginate(query, params)
+}
+
+// ListPublishedByCourseID lists only published, non-deleted quizzes — the
+// student view (Canvas hides unpublished quizzes from students).
+func (r *quizRepo) ListPublishedByCourseID(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Quiz], error) {
+	query := r.db.WithContext(ctx).Model(&models.Quiz{}).
+		Where("course_id = ? AND workflow_state != 'deleted' AND (published = TRUE OR workflow_state = 'published')", courseID)
+	return r.paginate(query, params)
+}
+
+func (r *quizRepo) paginate(query *gorm.DB, params repository.PaginationParams) (*repository.PaginatedResult[models.Quiz], error) {
 	var items []models.Quiz
 	var totalCount int64
 
-	query := r.db.WithContext(ctx).Model(&models.Quiz{}).Where("course_id = ? AND workflow_state != 'deleted'", courseID)
 	query.Count(&totalCount)
 
 	offset := (params.Page - 1) * params.PerPage

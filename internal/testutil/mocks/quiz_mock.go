@@ -36,6 +36,14 @@ func (m *MockQuizRepository) Delete(ctx context.Context, id uint) error {
 	return args.Error(0)
 }
 
+func (m *MockQuizRepository) ListPublishedByCourseID(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Quiz], error) {
+	args := m.Called(ctx, courseID, params)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*repository.PaginatedResult[models.Quiz]), args.Error(1)
+}
+
 func (m *MockQuizRepository) ListByCourseID(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Quiz], error) {
 	args := m.Called(ctx, courseID, params)
 	if args.Get(0) == nil {
