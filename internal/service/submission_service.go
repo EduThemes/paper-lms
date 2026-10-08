@@ -109,6 +109,14 @@ func (s *SubmissionService) Create(ctx context.Context, submission *models.Submi
 		return errors.New("submission_type is required")
 	}
 
+	// B002: online_text_entry bodies are HTML rendered in SpeedGrader and on
+	// the assignment page, so sanitize at the single submit chokepoint (also
+	// covers the copies made for group members below).
+	if submission.Body != nil && *submission.Body != "" {
+		clean := SanitizeHTML(*submission.Body)
+		submission.Body = &clean
+	}
+
 	now := time.Now()
 
 	// F-047: unlock_at / lock_at windows. The pre-fix path flagged
