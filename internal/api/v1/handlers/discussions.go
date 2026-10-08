@@ -311,7 +311,7 @@ func (h *DiscussionHandler) CreateTopic(c *fiber.Ctx) error {
 	if h.parity != nil {
 		ctx := c.Context()
 		if in.AssignmentID != nil {
-			if err := h.parity.ValidateLinkedAssignment(ctx, *in.AssignmentID, topic.CourseID, callerAccountID(c)); err != nil {
+			if err := h.parity.ValidateLinkedAssignment(ctx, topic.ID, *in.AssignmentID, topic.CourseID, callerAccountID(c)); err != nil {
 				return responses.BadRequest(c, err.Error())
 			}
 		}
@@ -532,7 +532,7 @@ func (h *DiscussionHandler) UpdateTopic(c *fiber.Ctx) error {
 	if h.parity != nil {
 		ctx := c.Context()
 		if in.AssignmentID != nil {
-			if err := h.parity.ValidateLinkedAssignment(ctx, *in.AssignmentID, topic.CourseID, callerAccountID(c)); err != nil {
+			if err := h.parity.ValidateLinkedAssignment(ctx, topic.ID, *in.AssignmentID, topic.CourseID, callerAccountID(c)); err != nil {
 				return responses.BadRequest(c, err.Error())
 			}
 			topic.AssignmentID = in.AssignmentID

@@ -555,12 +555,31 @@ func (s *DiscussionParityService) GroupNames(ctx context.Context, root *models.D
 
 // ValidateLinkedAssignment checks that an assignment_id sent on a topic
 // names an assignment of the same course and tenant.
-func (s *DiscussionParityService) ValidateLinkedAssignment(ctx context.Context, assignmentID, courseID, accountID uint) error {
+//
+// Only a discussion_topic assignment no other topic uses may be linked:
+// posts write discussion_topic submissions, which must never overwrite a
+// student's submission to an ordinary assignment.
+func (s *DiscussionParityService) ValidateLinkedAssignment(ctx context.Context, topicID, assignmentID, courseID, accountID uint) error {
 	a, err := s.assignmentRepo.FindByID(ctx, assignmentID, accountID)
-	if err != nil || a == nil || a.CourseID != courseID || a.WorkflowState == models.AssignmentDeleted {
+	if err != nil || a == nil || a.CourseID != courseID || a.WorkflowState == models.AssignmentDeleted ||
+		!assignmentTakesDiscussionPosts(a) {
+		return ErrDiscussionInvalidAssignment
+	}
+	if other, err := s.parity.FindTopicByAssignment(ctx, assignmentID, courseID); err == nil && other != nil && other.ID != topicID {
 		return ErrDiscussionInvalidAssignment
 	}
 	return nil
+}
+
+// assignmentTakesDiscussionPosts reports whether the assignment's
+// submission types include discussion_topic.
+func assignmentTakesDiscussionPosts(a *models.Assignment) bool {
+	for _, t := range strings.Split(a.SubmissionTypes, ",") {
+		if strings.TrimSpace(t) == "discussion_topic" {
+			return true
+		}
+	}
+	return false
 }
 
 func assignmentStateForTopic(topic *models.DiscussionTopic) (models.AssignmentWorkflow, bool) {
@@ -792,7 +811,7 @@ func (s *DiscussionParityService) SyncSubmissionForUser(ctx context.Context, top
 		return nil
 	}
 	assignment := s.GradedAssignment(ctx, root)
-	if assignment == nil {
+	if assignment == nil || !assignmentTakesDiscussionPosts(assignment) {
 		return nil
 	}
 	student, err := s.parity.IsActiveStudent(ctx, root.CourseID, userID)

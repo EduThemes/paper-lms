@@ -443,6 +443,16 @@ func TestDiscussionParity_GradedDiscussion(t *testing.T) {
 	status, _ = env.req(t, env.teacher, http.MethodPost, env.topicsPath(""),
 		map[string]any{"discussion_topic": map[string]any{"title": "Steal", "assignment_id": foreign.ID}})
 	assert.Equal(t, http.StatusBadRequest, status)
+
+	// Nor an ordinary assignment (posts would overwrite real
+	// submissions), nor one another topic already uses.
+	essay := seedContentAssignment(t, env.g, env.course.ID, "Essay")
+	status, _ = env.req(t, env.teacher, http.MethodPost, env.topicsPath(""),
+		map[string]any{"discussion_topic": map[string]any{"title": "Hijack", "assignment_id": essay.ID}})
+	assert.Equal(t, http.StatusBadRequest, status)
+	status, _ = env.req(t, env.teacher, http.MethodPost, env.topicsPath(""),
+		map[string]any{"discussion_topic": map[string]any{"title": "Twin", "assignment_id": assignmentID}})
+	assert.Equal(t, http.StatusBadRequest, status)
 }
 
 // G085: group discussions split per group.
