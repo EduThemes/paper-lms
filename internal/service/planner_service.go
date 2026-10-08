@@ -139,12 +139,16 @@ func studentCourses(ctx context.Context, enrollments repository.EnrollmentReposi
 	var kept []models.Enrollment
 	ids := []uint{}
 	seen := map[uint]bool{}
+	staffIn := map[uint]bool{}
 	for _, e := range all {
 		if e.WorkflowState != models.EnrollmentActive || e.Type == "ObserverEnrollment" {
 			continue
 		}
 		if !includeStaff && e.Type != "StudentEnrollment" {
 			continue
+		}
+		if e.Type != "StudentEnrollment" {
+			staffIn[e.CourseID] = true
 		}
 		kept = append(kept, e)
 		if !seen[e.CourseID] {
@@ -159,12 +163,20 @@ func studentCourses(ctx context.Context, enrollments repository.EnrollmentReposi
 	byID := make(map[uint]models.Course, len(courses))
 	for _, c := range courses {
 		// Students only see a published course; an unpublished course's work
-		// is not theirs to plan yet.
-		if c.WorkflowState == models.CourseAvailable || (includeStaff && c.WorkflowState != models.CourseDeleted) {
+		// is not theirs to plan yet. Its staff still plan in it.
+		if c.WorkflowState == models.CourseAvailable || (staffIn[c.ID] && c.WorkflowState != models.CourseDeleted) {
 			byID[c.ID] = c
 		}
 	}
-	return kept, byID, nil
+	// Drop enrollments whose course was filtered out, so callers that
+	// derive course lists from the enrollments see the same set.
+	filtered := kept[:0]
+	for _, e := range kept {
+		if _, ok := byID[e.CourseID]; ok {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered, byID, nil
 }
 
 // effectiveDueAt resolves the due date the student actually has: the most

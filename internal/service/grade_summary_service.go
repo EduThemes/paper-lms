@@ -333,10 +333,15 @@ func (s *GradeSummaryService) Summary(ctx context.Context, courseID, studentID, 
 	// Grading periods come from the course's term.
 	var periods []models.GradingPeriod
 	displayAllTotals := true
+	groupShowsAll := false
 	if course.EnrollmentTermID != nil {
 		terms, _ := s.learner.EnrollmentTermsByIDs(ctx, []uint{*course.EnrollmentTermID})
 		if len(terms) == 1 && terms[0].GradingPeriodGroupID != nil {
-			periods, _ = s.learner.GradingPeriodsForGroup(ctx, *terms[0].GradingPeriodGroupID)
+			gid := *terms[0].GradingPeriodGroupID
+			if grp, err := s.learner.GradingPeriodGroup(ctx, gid); err == nil {
+				periods, _ = s.learner.GradingPeriodsForGroup(ctx, gid)
+				groupShowsAll = grp.DisplayTotals || grp.Weighted
+			}
 		}
 	}
 	periodWeights := map[uint]float64{}
@@ -352,9 +357,10 @@ func (s *GradeSummaryService) Summary(ctx context.Context, courseID, studentID, 
 			}
 		}
 		out.PeriodsWeighted = weighted
-		// Account-level display flag lives on the period group; treat a
-		// weighted set as displayable (Canvas shows the weighted total).
-		displayAllTotals = weighted
+		// The period group's "display totals for All Grading Periods" flag
+		// decides whether the all-periods total is shown (Canvas); weighted
+		// periods always produce one.
+		displayAllTotals = groupShowsAll || weighted
 		switch {
 		case periodID == nil:
 			now := time.Now()

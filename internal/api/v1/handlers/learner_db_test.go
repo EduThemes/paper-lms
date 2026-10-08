@@ -314,6 +314,23 @@ func TestLearnerPlanner_ItemsNotesAndOverrides(t *testing.T) {
 	assert.Equal(t, 400, resp.StatusCode)
 }
 
+// G144: work in an unpublished course is not on a student's planner.
+func TestLearnerPlanner_UnpublishedCourseHidden(t *testing.T) {
+	f := newLearnerFixture(t)
+	now := time.Now()
+	require.NoError(t, f.g.Model(&models.Course{}).Where("id = ?", lnCourse2).Update("workflow_state", models.CourseUnpublished).Error)
+	hidden := f.assignment(lnCourse2, "Draft lab", ptrTime(now.Add(24*time.Hour)), 10, nil)
+	shown := f.assignment(lnCourse, "Essay", ptrTime(now.Add(24*time.Hour)), 10, nil)
+	resp, data := f.do("GET", "/planner/items", lnStudent, 1, nil, "")
+	require.Equal(t, 200, resp.StatusCode, string(data))
+	ids := map[float64]bool{}
+	for _, it := range decodeList(t, data) {
+		ids[it["plannable_id"].(float64)] = true
+	}
+	assert.True(t, ids[float64(shown.ID)])
+	assert.False(t, ids[float64(hidden.ID)])
+}
+
 // G145: favorites, nicknames and colors are per user, only for enrolled
 // courses, and the dashboard shows favorites once any exist.
 func TestLearnerDashboard_FavoritesNicknamesColors(t *testing.T) {

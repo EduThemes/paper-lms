@@ -343,8 +343,9 @@ func (s *ObserverAlertService) Evaluate(ctx context.Context, t *models.ObserverA
 		}
 		low := t.AlertType == models.ObserverAlertCourseGradeLow
 		for _, cid := range courseIDs {
-			all := uint(0)
-			sum, err := s.grades.Summary(ctx, cid, t.StudentID, t.AccountID, &all, GradeSummaryViewer{})
+			// nil period: the current grading period when the course has
+			// periods (what the parent sees by default), else the whole course.
+			sum, err := s.grades.Summary(ctx, cid, t.StudentID, t.AccountID, nil, GradeSummaryViewer{})
 			if err != nil || sum.Totals == nil || sum.Totals.CurrentScore == nil {
 				continue
 			}

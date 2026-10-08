@@ -61,6 +61,14 @@ func (r *learnerRepo) GradingPeriodsForGroup(ctx context.Context, groupID uint) 
 	return out, err
 }
 
+func (r *learnerRepo) GradingPeriodGroup(ctx context.Context, groupID uint) (*models.GradingPeriodGroup, error) {
+	var g models.GradingPeriodGroup
+	if err := r.db.WithContext(ctx).Where("id = ? AND workflow_state <> ?", groupID, "deleted").First(&g).Error; err != nil {
+		return nil, notFoundOr(err)
+	}
+	return &g, nil
+}
+
 // --- Dashboard course preferences ---
 
 func (r *learnerRepo) ListCoursePreferences(ctx context.Context, userID uint) ([]models.UserCoursePreference, error) {

@@ -26,6 +26,7 @@ type LearnerRepository interface {
 	CoursesByIDs(ctx context.Context, ids []uint, accountID uint) ([]models.Course, error)
 	EnrollmentTermsByIDs(ctx context.Context, ids []uint) ([]models.EnrollmentTerm, error)
 	GradingPeriodsForGroup(ctx context.Context, groupID uint) ([]models.GradingPeriod, error)
+	GradingPeriodGroup(ctx context.Context, groupID uint) (*models.GradingPeriodGroup, error)
 
 	// Dashboard course preferences
 	ListCoursePreferences(ctx context.Context, userID uint) ([]models.UserCoursePreference, error)
