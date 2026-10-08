@@ -928,6 +928,20 @@ export const api = {
     const { data } = await request(`/courses/${courseId}/quizzes/${quizId}/submissions/${submissionId}/answers`);
     return data?.quiz_submission_answers || data || [];
   },
+  // The attempt's own (personalized) question set. Students get answer keys
+  // redacted until the attempt is over and the quiz allows showing them.
+  getQuizSubmissionQuestions: async (courseId, quizId, submissionId) => {
+    const { data } = await request(`/courses/${courseId}/quizzes/${quizId}/submissions/${submissionId}/questions`);
+    return Array.isArray(data) ? data : [];
+  },
+  // File-upload question: stores the file and records it as the answer.
+  uploadQuizAnswerFile: async (courseId, quizId, submissionId, questionId, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return uploadFile(`/courses/${courseId}/quizzes/${quizId}/submissions/${submissionId}/questions/${questionId}/file`, formData);
+  },
+  getQuizAnswerFileUrl: (courseId, quizId, submissionId, questionId) =>
+    `${API_URL}/courses/${courseId}/quizzes/${quizId}/submissions/${submissionId}/questions/${questionId}/file`,
 
   // Quiz Statistics (instructor only)
   getQuizStatistics: async (courseId, quizId) => {
@@ -2413,22 +2427,23 @@ export const api = {
     const { data } = await request(`/courses/${courseId}/quiz_item_banks/${bankId}`, { method: 'DELETE' });
     return data;
   },
-  listQuizItemBankItems: async (bankId) => {
-    const { data } = await request(`/quiz_item_banks/${bankId}/items`);
+  // Item routes are course-scoped and instructor-only (items carry answer keys).
+  listQuizItemBankItems: async (courseId, bankId) => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks/${bankId}/items`);
     return data || [];
   },
 
   // Add a single bank item to a quiz.
-  addBankItemToQuiz: async (bankId, itemId, quizId) => {
-    const { data } = await request(`/quiz_item_banks/${bankId}/items/${itemId}/add_to_quiz/${quizId}`, {
+  addBankItemToQuiz: async (courseId, bankId, itemId, quizId) => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks/${bankId}/items/${itemId}/add_to_quiz/${quizId}`, {
       method: 'POST',
     });
     return data;
   },
-  // Random draw: copy N random items from a bank into a quiz.
-  randomDrawFromBank: async (bankId, quizId, count) => {
-    const { data } = await request(`/quiz_item_banks/${bankId}/random_draw`, {
-      method: 'POST', body: JSON.stringify({ quiz_id: quizId, count }),
+  // Random draw: copy N random items from a bank into a quiz (persisted server-side).
+  randomDrawFromBank: async (courseId, bankId, quizId, count) => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks/${bankId}/random_draw`, {
+      method: 'POST', body: JSON.stringify({ quiz_id: Number(quizId), count: Number(count) }),
     });
     return data;
   },
@@ -2458,8 +2473,8 @@ export const api = {
     const { data } = await request(`/courses/${courseId}/quiz_stimuli/${stimulusId}`, { method: 'DELETE' });
     return data;
   },
-  getStimulusQuestions: async (stimulusId) => {
-    const { data } = await request(`/quiz_stimuli/${stimulusId}/questions`);
+  getStimulusQuestions: async (courseId, stimulusId) => {
+    const { data } = await request(`/courses/${courseId}/quiz_stimuli/${stimulusId}/questions`);
     return data || [];
   },
 

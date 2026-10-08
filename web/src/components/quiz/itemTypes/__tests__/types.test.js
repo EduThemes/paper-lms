@@ -7,6 +7,9 @@ import {
   parseAnswers,
   stringifyAnswers,
   TYPE_LABELS,
+  computeQuizPointsPossible,
+  normalizeQuestionType,
+  matchingParts,
 } from '../types';
 
 describe('item-type registry', () => {
@@ -79,5 +82,45 @@ describe('item-type registry', () => {
     expect(parseAnswers(s)).toEqual(input);
     expect(parseAnswers('[invalid')).toEqual([]);
     expect(parseAnswers(input)).toEqual(input);
+  });
+});
+
+describe('quiz parity helpers', () => {
+  it('computeQuizPointsPossible honors group pick counts (B131)', () => {
+    const questions = [
+      { id: 1, points_possible: 1 },
+      ...Array.from({ length: 10 }, (_, i) => ({ id: 10 + i, points_possible: 1, quiz_question_group_id: 7 })),
+    ];
+    const groups = [{ id: 7, pick_count: 2 }];
+    expect(computeQuizPointsPossible(questions, groups)).toBe(3);
+  });
+
+  it('computeQuizPointsPossible uses points_per_item and ignores bank-draw copies', () => {
+    const questions = [
+      { id: 1, points_possible: 2 },
+      { id: 2, points_possible: 5, quiz_question_group_id: 8, question_bank_entry_id: 44 },
+    ];
+    const groups = [{ id: 8, pick_count: 3, points_per_item: 2, question_bank_id: 5 }];
+    expect(computeQuizPointsPossible(questions, groups)).toBe(8);
+  });
+
+  it('computeQuizPointsPossible treats questions of a deleted group as ungrouped', () => {
+    expect(computeQuizPointsPossible([{ id: 1, points_possible: 4, quiz_question_group_id: 99 }], [])).toBe(4);
+  });
+
+  it('normalizeQuestionType maps legacy Canvas spellings', () => {
+    expect(normalizeQuestionType('multiple_answers')).toBe('multiple_answer');
+    expect(normalizeQuestionType('multiple_dropdowns')).toBe('multiple_dropdown');
+    expect(normalizeQuestionType('essay')).toBe('essay');
+  });
+
+  it('matchingParts splits pairs from the right-hand pool', () => {
+    const { pairs, pool } = matchingParts([
+      { id: '31', left: '31', text: 'France' },
+      { id: '901', text: 'Paris', blank_id: '_match_options_' },
+      { id: '902', text: 'London', blank_id: '_match_options_' },
+    ]);
+    expect(pairs).toEqual([{ key: '31', label: 'France' }]);
+    expect(pool.map(p => p.id)).toEqual(['901', '902']);
   });
 });

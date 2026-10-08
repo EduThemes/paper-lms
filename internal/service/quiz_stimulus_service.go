@@ -13,6 +13,7 @@ import (
 type QuizStimulusService struct {
 	stimulusRepo repository.QuizStimulusRepository
 	questionRepo repository.QuizQuestionRepository
+	quizRepo     repository.QuizRepository
 }
 
 func NewQuizStimulusService(
@@ -113,6 +114,87 @@ func (s *QuizStimulusService) UnlinkQuestionFromStimulus(ctx context.Context, qu
 		return errors.New("quiz question not found")
 	}
 	return s.stimulusRepo.SetQuestionStimulus(ctx, questionID, nil)
+}
+
+// SetQuizRepo wires the quiz repository used by the course-scoped link /
+// list methods to tie a question's quiz to the stimulus' course.
+func (s *QuizStimulusService) SetQuizRepo(repo repository.QuizRepository) {
+	s.quizRepo = repo
+}
+
+// questionInCourse loads a question and verifies its quiz lives in courseID
+// within the caller's tenant.
+func (s *QuizStimulusService) questionInCourse(ctx context.Context, questionID, courseID, accountID uint) (*models.QuizQuestion, error) {
+	q, err := s.questionRepo.FindByID(ctx, questionID)
+	if err != nil || q == nil {
+		return nil, errors.New("quiz question not found")
+	}
+	if s.quizRepo == nil {
+		return nil, errors.New("quiz question not found")
+	}
+	quiz, err := s.quizRepo.FindByID(ctx, q.QuizID, accountID)
+	if err != nil || quiz == nil || quiz.CourseID != courseID {
+		return nil, errors.New("quiz question not found")
+	}
+	return q, nil
+}
+
+// LinkQuestionToStimulusInCourse links a question to a stimulus when both
+// belong to courseID (and the caller's tenant).
+func (s *QuizStimulusService) LinkQuestionToStimulusInCourse(ctx context.Context, courseID, accountID, questionID, stimulusID uint) error {
+	if _, err := s.GetStimulus(ctx, courseID, stimulusID); err != nil {
+		return errors.New("stimulus not found")
+	}
+	if _, err := s.questionInCourse(ctx, questionID, courseID, accountID); err != nil {
+		return err
+	}
+	sid := stimulusID
+	return s.stimulusRepo.SetQuestionStimulus(ctx, questionID, &sid)
+}
+
+// UnlinkQuestionFromStimulusInCourse clears the link when the question (in
+// courseID) currently points at stimulusID.
+func (s *QuizStimulusService) UnlinkQuestionFromStimulusInCourse(ctx context.Context, courseID, accountID, questionID, stimulusID uint) error {
+	if _, err := s.GetStimulus(ctx, courseID, stimulusID); err != nil {
+		return errors.New("stimulus not found")
+	}
+	q, err := s.questionInCourse(ctx, questionID, courseID, accountID)
+	if err != nil {
+		return err
+	}
+	if q.StimulusID == nil || *q.StimulusID != stimulusID {
+		return errors.New("quiz question is not linked to this stimulus")
+	}
+	return s.stimulusRepo.SetQuestionStimulus(ctx, questionID, nil)
+}
+
+// ListQuestionsForStimulusInCourse lists the course's questions linked to a
+// stimulus of that course.
+func (s *QuizStimulusService) ListQuestionsForStimulusInCourse(ctx context.Context, courseID, accountID, stimulusID uint) ([]models.QuizQuestion, error) {
+	if _, err := s.GetStimulus(ctx, courseID, stimulusID); err != nil {
+		return nil, errors.New("stimulus not found")
+	}
+	all, err := s.stimulusRepo.ListQuestionsForStimulus(ctx, stimulusID)
+	if err != nil {
+		return nil, err
+	}
+	if s.quizRepo == nil {
+		return []models.QuizQuestion{}, nil
+	}
+	inCourse := map[uint]bool{}
+	out := make([]models.QuizQuestion, 0, len(all))
+	for _, q := range all {
+		ok, seen := inCourse[q.QuizID]
+		if !seen {
+			quiz, qErr := s.quizRepo.FindByID(ctx, q.QuizID, accountID)
+			ok = qErr == nil && quiz != nil && quiz.CourseID == courseID
+			inCourse[q.QuizID] = ok
+		}
+		if ok {
+			out = append(out, q)
+		}
+	}
+	return out, nil
 }
 
 func (s *QuizStimulusService) ListQuestionsForStimulus(ctx context.Context, stimulusID uint) ([]models.QuizQuestion, error) {

@@ -13,8 +13,10 @@ package service
 // so the call surface from quiz_attempts_service.go is unchanged.
 
 import (
+	"bytes"
 	"encoding/json"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 
@@ -27,30 +29,113 @@ import (
 // (which pre-date this constant) can be distinguished from newly-graded ones.
 const gradedViaAuto = "auto"
 
+// matchOptionsSentinel is the blank_id the Canvas importer stamps on the
+// right-hand "match pool" entries of a matching question. Those entries are
+// distractor/option rows, not left→right pairs, so the grader skips them.
+const matchOptionsSentinel = "_match_options_"
+
+// flexString is a string that also accepts JSON numbers (and null). Canvas
+// exports — and the Canvas importer — serialize numeric fields such as the
+// numerical `margin` or an exact value as JSON numbers, while Paper's own
+// editor writes strings. Unmarshalling a number into a plain string field
+// fails the WHOLE answers array, which made those questions ungradable.
+type flexString string
+
+func (f *flexString) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || bytes.Equal(b, []byte("null")) {
+		*f = ""
+		return nil
+	}
+	if b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		*f = flexString(s)
+		return nil
+	}
+	if b[0] == 't' || b[0] == 'f' {
+		*f = flexString(string(b))
+		return nil
+	}
+	// Any other scalar (a JSON number) is kept verbatim.
+	var n json.Number
+	if err := json.Unmarshal(b, &n); err != nil {
+		// Objects / arrays: ignore rather than fail the whole question.
+		*f = ""
+		return nil
+	}
+	*f = flexString(n.String())
+	return nil
+}
+
+func (f flexString) String() string { return string(f) }
+
+// hotSpotRegion is one accepted rectangle authored by HotSpotEditor. All
+// values are fractions (0..1) of the rendered image.
+type hotSpotRegion struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	W float64 `json:"w"`
+	H float64 `json:"h"`
+}
+
+type categorizationItem struct {
+	ID string `json:"id"`
+}
+
+type categorizationBucket struct {
+	ID      string   `json:"id"`
+	ItemIDs []string `json:"item_ids"`
+}
+
 // answerOption represents one answer choice in a quiz question's Answers JSON field.
 // Extended in Wave A1: the optional Margin field is now read by the numerical
 // grader, and several new fields are consumed by the 9 new item-type graders.
 type answerOption struct {
-	ID       string  `json:"id"`
-	Text     string  `json:"text"`
-	Comments string  `json:"comments"`
-	Weight   float64 `json:"weight"`
+	ID       string     `json:"id"`
+	Text     flexString `json:"text"`
+	Comments string     `json:"comments"`
+	Weight   float64    `json:"weight"`
 	// Margin is the numerical tolerance for numerical_question / formula items.
-	// Empty string preserves legacy string-equality behavior. A bare number is
-	// absolute tolerance ("0.5"); a trailing "%" is percentage of the correct
-	// value (e.g. "5%" of 200 = ±10).
-	Margin string `json:"margin"`
-	// BlankID identifies which blank an option belongs to (multiple_dropdown).
+	// A bare number is absolute tolerance ("0.5"); a trailing "%" is percentage
+	// of the correct value (e.g. "5%" of 200 = ±10). Accepts JSON numbers.
+	Margin flexString `json:"margin"`
+	// Canvas numerical answer shapes (numerical_answer_type exact_answer /
+	// range_answer / precision_answer).
+	NumericalAnswerType string     `json:"numerical_answer_type"`
+	Exact               flexString `json:"exact"`
+	Start               flexString `json:"start"`
+	End                 flexString `json:"end"`
+	Approximate         flexString `json:"approximate"`
+	Precision           flexString `json:"precision"`
+	// BlankID identifies which blank an option belongs to (multiple_dropdown,
+	// fill_in_multiple_blanks in the Canvas array shape).
 	BlankID string `json:"blank_id"`
-	// Coordinates for hot_spot accepted rectangles.
+	// Coordinates for legacy absolute hot_spot accepted rectangles.
 	X      float64 `json:"x"`
 	Y      float64 `json:"y"`
 	Width  float64 `json:"w"`
 	Height float64 `json:"h"`
-	// RightID is the matching-pair right-hand option ID.
+	// Regions is the HotSpotEditor shape: normalized rectangles stored on the
+	// single config option.
+	Regions []hotSpotRegion `json:"regions"`
+	// RightID is the matching-pair right-hand option ID. MatchID is the
+	// Canvas spelling of the same thing.
 	RightID string `json:"right_id"`
+	MatchID string `json:"match_id"`
 	// Left is the matching-pair left-hand label (human readable).
 	Left string `json:"left"`
+	// Categorization editor shape: one config option carrying items and
+	// buckets (each bucket lists the item ids that belong in it).
+	Items   []categorizationItem   `json:"items"`
+	Buckets []categorizationBucket `json:"buckets"`
+	// Formula editor shape: fixed expected value + tolerance, optionally
+	// with per-student variables.
+	AnswerValue flexString        `json:"answer_value"`
+	Tolerance   flexString        `json:"tolerance"`
+	Variables   []json.RawMessage `json:"variables"`
 }
 
 // ---------- Auto-Grading Logic ----------
@@ -64,13 +149,17 @@ type answerOption struct {
 // completed submissions exercise the new code paths. The graded_via column
 // on quiz_submission_answer (migration 000014) provides the audit trail.
 func (s *QuizService) autoGrade(question *models.QuizQuestion, submittedAnswer string) (float64, bool, bool) {
-	qType := question.QuestionType
 	pointsPossible := 1.0
 	if question.PointsPossible != nil {
 		pointsPossible = *question.PointsPossible
 	}
+	return s.autoGradeWithPoints(question, submittedAnswer, pointsPossible)
+}
 
-	switch qType {
+// autoGradeWithPoints is autoGrade with an explicit points value (used when a
+// question group overrides the per-question points via points_per_item).
+func (s *QuizService) autoGradeWithPoints(question *models.QuizQuestion, submittedAnswer string, pointsPossible float64) (float64, bool, bool) {
+	switch NormalizeQuizQuestionType(question.QuestionType) {
 	case "multiple_choice", "true_false":
 		return s.gradeMultipleChoice(question, submittedAnswer, pointsPossible)
 	case "short_answer":
@@ -81,12 +170,8 @@ func (s *QuizService) autoGrade(question *models.QuizQuestion, submittedAnswer s
 		// Essays cannot be auto-graded
 		return 0, false, false
 	case "matching":
-		// Wave A1 (bug 2B fix): per-pair scoring. Was previously routed to
-		// pending_review; legacy already-pending rows stay there because this
-		// path only runs on newly-completed submissions.
 		return s.gradeMatching(question, submittedAnswer, pointsPossible)
 	case "fill_in_multiple_blanks":
-		// Wave A1 (bug 2B fix): per-blank case-insensitive scoring.
 		return s.gradeFillInMultipleBlanks(question, submittedAnswer, pointsPossible)
 
 	// ---- Wave A1: 9 new item types ----
@@ -117,6 +202,42 @@ func (s *QuizService) autoGrade(question *models.QuizQuestion, submittedAnswer s
 	}
 }
 
+// NormalizeQuizQuestionType maps legacy / Canvas spellings that older imports
+// persisted (e.g. "multiple_answers", "multiple_dropdowns",
+// "multiple_choice_question") onto Paper's unified question_type values so
+// rows written before the importer fix still grade and render.
+func NormalizeQuizQuestionType(t string) string {
+	switch t {
+	case "multiple_answers", "multiple_answers_question":
+		return "multiple_answer"
+	case "multiple_dropdowns", "multiple_dropdowns_question":
+		return "multiple_dropdown"
+	case "multiple_choice_question":
+		return "multiple_choice"
+	case "true_false_question":
+		return "true_false"
+	case "short_answer_question":
+		return "short_answer"
+	case "essay_question":
+		return "essay"
+	case "matching_question":
+		return "matching"
+	case "fill_in_multiple_blanks_question":
+		return "fill_in_multiple_blanks"
+	case "file_upload_question":
+		return "file_upload"
+	case "text_only_question":
+		return "text_only"
+	case "calculated_question":
+		return "formula"
+	}
+	return t
+}
+
+func roundScore(score float64) float64 {
+	return math.Round(score*100) / 100
+}
+
 // gradeMultipleChoice checks if the submitted answer ID matches an answer with weight > 0.
 func (s *QuizService) gradeMultipleChoice(question *models.QuizQuestion, submittedAnswer string, pointsPossible float64) (float64, bool, bool) {
 	var options []answerOption
@@ -129,9 +250,7 @@ func (s *QuizService) gradeMultipleChoice(question *models.QuizQuestion, submitt
 	for _, opt := range options {
 		if opt.ID == submittedAnswer && opt.Weight > 0 {
 			// Partial credit: score = pointsPossible * (weight / 100)
-			score := pointsPossible * (opt.Weight / 100.0)
-			score = math.Round(score*100) / 100
-			return score, true, true
+			return roundScore(pointsPossible * (opt.Weight / 100.0)), true, true
 		}
 	}
 
@@ -139,6 +258,12 @@ func (s *QuizService) gradeMultipleChoice(question *models.QuizQuestion, submitt
 }
 
 // gradeShortAnswer checks if the submitted text matches any correct answer (case-insensitive).
+//
+// Every option on a short_answer question is an "acceptable answer" (Canvas
+// semantics). The editor's "Add Acceptable Answer" button historically
+// appended options with weight 0, which could never match; a weight of
+// exactly 0 is therefore treated as full credit. Positive weights below 100
+// keep their partial-credit meaning; negative weights never match.
 func (s *QuizService) gradeShortAnswer(question *models.QuizQuestion, submittedAnswer string, pointsPossible float64) (float64, bool, bool) {
 	var options []answerOption
 	if err := json.Unmarshal([]byte(question.Answers), &options); err != nil {
@@ -146,12 +271,17 @@ func (s *QuizService) gradeShortAnswer(question *models.QuizQuestion, submittedA
 	}
 
 	submittedAnswer = strings.TrimSpace(strings.ToLower(submittedAnswer))
+	if submittedAnswer == "" {
+		return 0, false, true
+	}
 
 	for _, opt := range options {
-		if opt.Weight > 0 && strings.TrimSpace(strings.ToLower(opt.Text)) == submittedAnswer {
-			score := pointsPossible * (opt.Weight / 100.0)
-			score = math.Round(score*100) / 100
-			return score, true, true
+		weight := opt.Weight
+		if weight == 0 {
+			weight = 100
+		}
+		if weight > 0 && strings.TrimSpace(strings.ToLower(opt.Text.String())) == submittedAnswer {
+			return roundScore(pointsPossible * (weight / 100.0)), true, true
 		}
 	}
 
@@ -159,17 +289,15 @@ func (s *QuizService) gradeShortAnswer(question *models.QuizQuestion, submittedA
 }
 
 // gradeNumerical checks if the submitted number matches a correct numerical answer.
-// The Answers JSON for numerical questions has the format:
-// [{"id":"a1","text":"42","weight":100,"margin":"0.5"}]
+// Supported answer shapes (all may coexist in one question):
 //
-// Wave A1 (bug 1B fix): the `margin` field is now honored. Two modes:
-//   - Empty margin: legacy string-equality match on opt.Text (backwards-compat
-//     with quizzes authored before margin support existed).
-//   - Non-empty margin: numeric parse + tolerance band. Margin is absolute
-//     ("0.5" → ±0.5) or percentage of the correct value ("5%" → ±5% of opt.Text).
+//	[{"id":"a1","text":"42","weight":100,"margin":"0.5"}]            // Paper editor
+//	[{"numerical_answer_type":"exact_answer","exact":42,"margin":0.5}] // Canvas exact
+//	[{"numerical_answer_type":"range_answer","start":1,"end":2}]       // Canvas range
+//	[{"numerical_answer_type":"precision_answer","approximate":1.5,"precision":2}]
 //
-// Percent semantics: "5%" applied to a correct answer of 200 yields a band of
-// ±10 (200 * 0.05). Sign-agnostic — `math.Abs` is used on the correct value.
+// Comparison is numeric (Canvas parity): "3.50" and "+3.5" both match "3.5".
+// Margin is inclusive and may be absolute ("0.5") or a percentage ("5%").
 func (s *QuizService) gradeNumerical(question *models.QuizQuestion, submittedAnswer string, pointsPossible float64) (float64, bool, bool) {
 	var options []answerOption
 	if err := json.Unmarshal([]byte(question.Answers), &options); err != nil {
@@ -183,60 +311,142 @@ func (s *QuizService) gradeNumerical(question *models.QuizQuestion, submittedAns
 			continue
 		}
 		if numericalMatch(submittedAnswer, opt) {
-			score := pointsPossible * (opt.Weight / 100.0)
-			score = math.Round(score*100) / 100
-			return score, true, true
+			return roundScore(pointsPossible * (opt.Weight / 100.0)), true, true
 		}
 	}
 
 	return 0, false, true
 }
 
+// parseDecimal parses a user- or author-entered decimal string exactly
+// (big.Rat avoids float rounding at the edge of a tolerance band, the same
+// reason Canvas uses BigDecimal). A thousands separator is not supported;
+// a single leading "+" is.
+func parseDecimal(s string) (*big.Rat, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, false
+	}
+	s = strings.TrimPrefix(s, "+")
+	r, ok := new(big.Rat).SetString(s)
+	if !ok {
+		return nil, false
+	}
+	return r, true
+}
+
 // numericalMatch returns true if submitted answers the given option, respecting
 // the option's optional margin tolerance. Used by both gradeNumerical and
-// gradeFormula (Wave A1).
+// gradeFormula.
 func numericalMatch(submitted string, opt answerOption) bool {
-	optText := strings.TrimSpace(opt.Text)
-	margin := strings.TrimSpace(opt.Margin)
+	submitted = strings.TrimSpace(submitted)
+	if submitted == "" {
+		return false
+	}
+	user, userIsNum := parseDecimal(submitted)
 
-	// Legacy path: no margin → exact string equality. Preserves backwards
-	// compat for quizzes authored before margin support existed.
+	switch {
+	case opt.NumericalAnswerType == "range_answer" ||
+		(opt.NumericalAnswerType == "" && opt.Text == "" && opt.Exact == "" && opt.Start != "" && opt.End != ""):
+		lo, okLo := parseDecimal(opt.Start.String())
+		hi, okHi := parseDecimal(opt.End.String())
+		if !userIsNum || !okLo || !okHi {
+			return false
+		}
+		if lo.Cmp(hi) > 0 {
+			lo, hi = hi, lo
+		}
+		return user.Cmp(lo) >= 0 && user.Cmp(hi) <= 0
+
+	case opt.NumericalAnswerType == "precision_answer":
+		if !userIsNum {
+			return false
+		}
+		return precisionMatch(submitted, opt.Approximate.String(), opt.Precision.String())
+	}
+
+	// Exact answer (with optional margin). Canvas stores the value in
+	// `exact`; Paper's editor stores it in `text`.
+	expectedText := strings.TrimSpace(opt.Exact.String())
+	if expectedText == "" {
+		expectedText = strings.TrimSpace(opt.Text.String())
+	}
+	if expectedText == "" {
+		return false
+	}
+	expected, expectedIsNum := parseDecimal(expectedText)
+	if !userIsNum || !expectedIsNum {
+		// Non-numeric key or submission: only an exact textual match counts.
+		return !expectedIsNum && expectedText == submitted
+	}
+
+	margin := strings.TrimSpace(opt.Margin.String())
 	if margin == "" {
-		return optText == submitted
+		return user.Cmp(expected) == 0
 	}
-
-	userVal, err := strconv.ParseFloat(submitted, 64)
-	if err != nil {
-		return false
-	}
-	correctVal, err := strconv.ParseFloat(optText, 64)
-	if err != nil {
-		return false
-	}
-
-	tolerance, ok := parseMargin(margin, correctVal)
+	tolerance, ok := parseMarginRat(margin, expected)
 	if !ok {
 		return false
 	}
-	return math.Abs(userVal-correctVal) <= tolerance
+	diff := new(big.Rat).Sub(user, expected)
+	diff.Abs(diff)
+	return diff.Cmp(tolerance) <= 0
 }
 
-// parseMargin parses a margin string into an absolute tolerance value.
-// "0.5" → 0.5. "5%" → 5% of |correctVal|. Returns (tolerance, ok).
-func parseMargin(margin string, correctVal float64) (float64, bool) {
+// parseMarginRat parses a margin string into an absolute tolerance.
+// "0.5" → 0.5. "5%" → 5% of |expected|.
+func parseMarginRat(margin string, expected *big.Rat) (*big.Rat, bool) {
 	margin = strings.TrimSpace(margin)
 	if strings.HasSuffix(margin, "%") {
-		pct, err := strconv.ParseFloat(strings.TrimSuffix(margin, "%"), 64)
-		if err != nil {
-			return 0, false
+		pct, ok := parseDecimal(strings.TrimSuffix(margin, "%"))
+		if !ok {
+			return nil, false
 		}
-		return math.Abs(correctVal) * (pct / 100.0), true
+		abs := new(big.Rat).Abs(expected)
+		tol := new(big.Rat).Mul(abs, pct)
+		tol.Quo(tol, big.NewRat(100, 1))
+		return tol.Abs(tol), true
 	}
-	tol, err := strconv.ParseFloat(margin, 64)
-	if err != nil {
-		return 0, false
+	tol, ok := parseDecimal(margin)
+	if !ok {
+		return nil, false
 	}
-	return math.Abs(tol), true
+	return tol.Abs(tol), true
+}
+
+// precisionMatch implements Canvas's precision_answer: the submission matches
+// when its sign, decimal exponent, and first `precision` significant digits
+// (truncated, not rounded) equal the approximate value's.
+func precisionMatch(submitted, approximate, precision string) bool {
+	p, err := strconv.Atoi(strings.TrimSpace(precision))
+	if err != nil || p <= 0 {
+		return false
+	}
+	u, err1 := strconv.ParseFloat(strings.TrimPrefix(strings.TrimSpace(submitted), "+"), 64)
+	a, err2 := strconv.ParseFloat(strings.TrimSpace(approximate), 64)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	us, ud, ue := sciParts(u)
+	as, ad, ae := sciParts(a)
+	if us != as || ue != ae {
+		return false
+	}
+	for len(ud) < p {
+		ud += "0"
+	}
+	for len(ad) < p {
+		ad += "0"
+	}
+	return ud[:p] == ad[:p]
+}
+
+// sciParts splits a float into (negative?, significant digits, exponent)
+// using the shortest exact decimal representation.
+func sciParts(v float64) (bool, string, string) {
+	s := strconv.FormatFloat(math.Abs(v), 'e', -1, 64) // e.g. "1.345e+01"
+	mant, exp, _ := strings.Cut(s, "e")
+	return v < 0, strings.Replace(mant, ".", "", 1), exp
 }
 
 // ---------- Wave A1: New auto-graders ----------
@@ -262,9 +472,7 @@ func (s *QuizService) gradeMultipleAnswer(question *models.QuizQuestion, submitt
 	}
 
 	correctIDs := map[string]bool{}
-	knownIDs := map[string]bool{}
 	for _, opt := range options {
-		knownIDs[opt.ID] = true
 		if opt.Weight > 0 {
 			correctIDs[opt.ID] = true
 		}
@@ -286,11 +494,8 @@ func (s *QuizService) gradeMultipleAnswer(question *models.QuizQuestion, submitt
 		seen[sel] = true
 		if correctIDs[sel] {
 			score += perOption
-		} else if knownIDs[sel] {
-			score -= perOption
-			exact = false
 		} else {
-			// Unknown option ID: treat as wrong selection.
+			// Known-but-incorrect or unknown option ID: treat as wrong selection.
 			score -= perOption
 			exact = false
 		}
@@ -298,7 +503,7 @@ func (s *QuizService) gradeMultipleAnswer(question *models.QuizQuestion, submitt
 	if score < 0 {
 		score = 0
 	}
-	score = math.Round(score*100) / 100
+	score = roundScore(score)
 
 	// Exact match only when every correct option was selected and nothing else.
 	for id := range correctIDs {
@@ -355,8 +560,7 @@ func (s *QuizService) gradeMultipleDropdown(question *models.QuizQuestion, submi
 			correctCount++
 		}
 	}
-	score = math.Round(score*100) / 100
-	return score, correctCount == blankCount, true
+	return roundScore(score), correctCount == blankCount, true
 }
 
 // gradeFillInTheBlank scores a single-blank fill_in_the_blank. Like
@@ -370,19 +574,29 @@ func (s *QuizService) gradeFillInTheBlank(question *models.QuizQuestion, submitt
 	}
 
 	submittedAnswer = strings.TrimSpace(strings.ToLower(submittedAnswer))
+	if submittedAnswer == "" {
+		return 0, false, true
+	}
 	for _, opt := range options {
-		if opt.Weight > 0 && strings.TrimSpace(strings.ToLower(opt.Text)) == submittedAnswer {
-			score := pointsPossible * (opt.Weight / 100.0)
-			score = math.Round(score*100) / 100
-			return score, true, true
+		if opt.Weight > 0 && strings.TrimSpace(strings.ToLower(opt.Text.String())) == submittedAnswer {
+			return roundScore(pointsPossible * (opt.Weight / 100.0)), true, true
 		}
 	}
 	return 0, false, true
 }
 
 // gradeFormula scores a formula item. Re-uses the numerical-tolerance logic.
-// Submission is the user-computed value; each option carries the expected
-// value (Text) and optional Margin (absolute or percent).
+//
+// Two authoring shapes are accepted:
+//   - numerical shape: [{text: "42", margin: "0.5", weight: 100}]
+//   - FormulaEditor shape: [{formula, variables, tolerance, answer_value}]
+//     where answer_value is the expected value (no-variable mode) and
+//     tolerance the ± allowed deviation.
+//
+// A formula with per-student variables but no fixed expected value cannot be
+// scored automatically (variable generation is not implemented), so it is
+// routed to manual review rather than mis-graded. A blank submission never
+// matches.
 func (s *QuizService) gradeFormula(question *models.QuizQuestion, submittedAnswer string, pointsPossible float64) (float64, bool, bool) {
 	var options []answerOption
 	if err := json.Unmarshal([]byte(question.Answers), &options); err != nil {
@@ -390,35 +604,55 @@ func (s *QuizService) gradeFormula(question *models.QuizQuestion, submittedAnswe
 	}
 
 	submittedAnswer = strings.TrimSpace(submittedAnswer)
+	anyKey := false
 	for _, opt := range options {
 		if opt.Weight <= 0 {
 			continue
 		}
-		if numericalMatch(submittedAnswer, opt) {
-			score := pointsPossible * (opt.Weight / 100.0)
-			score = math.Round(score*100) / 100
-			return score, true, true
+		candidate := opt
+		if strings.TrimSpace(candidate.Text.String()) == "" && strings.TrimSpace(candidate.Exact.String()) == "" {
+			candidate.Text = flexString(strings.TrimSpace(opt.AnswerValue.String()))
+			if strings.TrimSpace(candidate.Margin.String()) == "" {
+				tol := strings.TrimSpace(opt.Tolerance.String())
+				if tol != "" && tol != "0" {
+					candidate.Margin = flexString(tol)
+				}
+			}
 		}
+		if strings.TrimSpace(candidate.Text.String()) == "" && strings.TrimSpace(candidate.Exact.String()) == "" &&
+			candidate.NumericalAnswerType == "" {
+			continue
+		}
+		anyKey = true
+		if numericalMatch(submittedAnswer, candidate) {
+			return roundScore(pointsPossible * (opt.Weight / 100.0)), true, true
+		}
+	}
+	if !anyKey {
+		// No expected value is defined (e.g. variable-mode formula):
+		// an instructor has to score it.
+		return 0, false, false
 	}
 	return 0, false, true
 }
 
 // gradeOrdering scores an ordering item. Submission JSON: ["id1","id2",…]
-// representing the user's order. Option list defines the canonical order
-// (by Position-like array index of options where Weight > 0). Score is
-// pointsPossible × (correctPositions / totalPositions).
+// representing the user's order. The canonical order is the authored order
+// of the options (OrderingEditor stores them in correct order and does not
+// set a weight, so weight is ignored except that explicitly negative-weight
+// rows are skipped). Score is pointsPossible × (correctPositions / totalPositions).
 func (s *QuizService) gradeOrdering(question *models.QuizQuestion, submittedAnswer string, pointsPossible float64) (float64, bool, bool) {
 	var options []answerOption
 	if err := json.Unmarshal([]byte(question.Answers), &options); err != nil {
 		return 0, false, false
 	}
 
-	// Canonical order = order of options as authored (Weight > 0 only).
 	var canonical []string
 	for _, opt := range options {
-		if opt.Weight > 0 {
-			canonical = append(canonical, opt.ID)
+		if opt.ID == "" || opt.Weight < 0 {
+			continue
 		}
+		canonical = append(canonical, opt.ID)
 	}
 
 	var submitted []string
@@ -440,15 +674,20 @@ func (s *QuizService) gradeOrdering(question *models.QuizQuestion, submittedAnsw
 		}
 	}
 
-	score := pointsPossible * float64(correct) / float64(total)
-	score = math.Round(score*100) / 100
-	return score, correct == total, true
+	return roundScore(pointsPossible * float64(correct) / float64(total)), correct == total, true
 }
 
 // gradeCategorization scores a categorization (bucket-drop) item. Submission
-// JSON: {"item_id":"bucket_id"}. The question's Answers JSON encodes the
-// correct bucket for each item via opt.ID = item_id and opt.RightID = bucket_id
-// (only options with Weight > 0). Score per item is pointsPossible/|items|.
+// JSON: {"item_id":"bucket_id"}. Two key shapes are accepted:
+//   - CategorizationEditor shape: one config option carrying
+//     {items:[{id}], buckets:[{id, item_ids:[...]}]}; an item's correct bucket
+//     is the bucket whose item_ids lists it. Items not assigned to any
+//     bucket are distractors and do not count.
+//   - legacy shape: one option per item with opt.ID = item_id and
+//     opt.RightID = bucket_id (Weight > 0). Options without a RightID are
+//     ignored — an empty correct bucket must never match an absent answer.
+//
+// Score per item is pointsPossible/|items|.
 func (s *QuizService) gradeCategorization(question *models.QuizQuestion, submittedAnswer string, pointsPossible float64) (float64, bool, bool) {
 	var options []answerOption
 	if err := json.Unmarshal([]byte(question.Answers), &options); err != nil {
@@ -457,7 +696,20 @@ func (s *QuizService) gradeCategorization(question *models.QuizQuestion, submitt
 
 	correctBucket := map[string]string{}
 	for _, opt := range options {
-		if opt.Weight > 0 && opt.ID != "" {
+		if len(opt.Buckets) > 0 || len(opt.Items) > 0 {
+			for _, b := range opt.Buckets {
+				if b.ID == "" {
+					continue
+				}
+				for _, itemID := range b.ItemIDs {
+					if itemID != "" {
+						correctBucket[itemID] = b.ID
+					}
+				}
+			}
+			continue
+		}
+		if opt.Weight > 0 && opt.ID != "" && opt.RightID != "" {
 			correctBucket[opt.ID] = opt.RightID
 		}
 	}
@@ -478,19 +730,23 @@ func (s *QuizService) gradeCategorization(question *models.QuizQuestion, submitt
 	score := 0.0
 	correctPlaced := 0
 	for item, bucket := range correctBucket {
-		if submitted[item] == bucket {
+		if got, ok := submitted[item]; ok && got == bucket {
 			score += perItem
 			correctPlaced++
 		}
 	}
-	score = math.Round(score*100) / 100
-	return score, correctPlaced == itemCount, true
+	return roundScore(score), correctPlaced == itemCount, true
 }
 
 // gradeHotSpot scores a hot_spot item. Submission JSON: {"x":N,"y":M}.
-// Each option (Weight > 0) defines an axis-aligned rectangle via X, Y, Width,
-// Height (top-left origin). Binary scoring: the click is correct if it falls
-// inside ANY of the accepted rectangles (boundary inclusive).
+// Two key shapes:
+//   - HotSpotEditor shape: answers[0].regions = [{x,y,w,h}] as fractions of
+//     the image (the player reports the click as fractions too).
+//   - legacy shape: each option (Weight > 0) is an absolute rectangle via
+//     x, y, w, h (top-left origin).
+//
+// Binary scoring: the click is correct if it falls inside ANY accepted
+// rectangle (boundary inclusive). Zero-area rectangles never match.
 func (s *QuizService) gradeHotSpot(question *models.QuizQuestion, submittedAnswer string, pointsPossible float64) (float64, bool, bool) {
 	var options []answerOption
 	if err := json.Unmarshal([]byte(question.Answers), &options); err != nil {
@@ -498,8 +754,8 @@ func (s *QuizService) gradeHotSpot(question *models.QuizQuestion, submittedAnswe
 	}
 
 	var click struct {
-		X float64 `json:"x"`
-		Y float64 `json:"y"`
+		X *float64 `json:"x"`
+		Y *float64 `json:"y"`
 	}
 	if strings.TrimSpace(submittedAnswer) == "" {
 		return 0, false, true
@@ -507,30 +763,57 @@ func (s *QuizService) gradeHotSpot(question *models.QuizQuestion, submittedAnswe
 	if err := json.Unmarshal([]byte(submittedAnswer), &click); err != nil {
 		return 0, false, false
 	}
+	if click.X == nil || click.Y == nil {
+		return 0, false, true
+	}
+	cx, cy := *click.X, *click.Y
+
+	inside := func(x, y, w, h float64) bool {
+		if w <= 0 || h <= 0 {
+			return false
+		}
+		return cx >= x && cx <= x+w && cy >= y && cy <= y+h
+	}
 
 	for _, opt := range options {
 		if opt.Weight <= 0 {
 			continue
 		}
-		if click.X >= opt.X && click.X <= opt.X+opt.Width &&
-			click.Y >= opt.Y && click.Y <= opt.Y+opt.Height {
-			score := math.Round(pointsPossible*100) / 100
-			return score, true, true
+		if len(opt.Regions) > 0 {
+			for _, r := range opt.Regions {
+				if inside(r.X, r.Y, r.W, r.H) {
+					return roundScore(pointsPossible), true, true
+				}
+			}
+			continue
+		}
+		if inside(opt.X, opt.Y, opt.Width, opt.Height) {
+			return roundScore(pointsPossible), true, true
 		}
 	}
 	return 0, false, true
 }
 
+// matchingKey returns the identifier a submission uses to name the left-hand
+// side of a matching pair: the human label when present, else the pair id
+// (the Canvas importer emits id + prompt text without a separate label).
+func matchingKey(opt answerOption) string {
+	if opt.Left != "" {
+		return opt.Left
+	}
+	return opt.ID
+}
+
 // gradeMatching scores a matching item. Question Answers JSON is an array of
 // option objects, each with Left (label) and RightID (the correct right-hand
-// option id). Submission JSON is the same shape: [{left, right_id}, …].
-// Score = pointsPossible × (correctPairs / totalPairs).
+// option id; Canvas's match_id is accepted as an alias). Entries flagged with
+// the "_match_options_" blank_id are the right-hand pool and are skipped.
+// Submission JSON: [{left, right_id}, …]. Score = pointsPossible ×
+// (correctPairs / totalPairs).
 //
-// Wave A1 NOTE on backwards compatibility: prior to this commit, matching was
-// hard-routed to pending_review (see internal/service/quiz_service_grading_regression_test.go).
-// Existing submissions already in pending_review are NOT retroactively
-// re-graded; only newly-completed submissions hit this code path. The
-// graded_via column added in migration 000014 distinguishes them.
+// Each left item is scored at most once: duplicate submissions for the same
+// left (e.g. one pair per possible right option) only count the first, so a
+// shotgun answer cannot collect full credit.
 func (s *QuizService) gradeMatching(question *models.QuizQuestion, submittedAnswer string, pointsPossible float64) (float64, bool, bool) {
 	var correctPairs []answerOption
 	if err := json.Unmarshal([]byte(question.Answers), &correctPairs); err != nil {
@@ -539,9 +822,18 @@ func (s *QuizService) gradeMatching(question *models.QuizQuestion, submittedAnsw
 
 	correctByLeft := map[string]string{}
 	for _, p := range correctPairs {
-		if p.Left != "" {
-			correctByLeft[p.Left] = p.RightID
+		if p.BlankID == matchOptionsSentinel {
+			continue
 		}
+		right := p.RightID
+		if right == "" {
+			right = p.MatchID
+		}
+		key := matchingKey(p)
+		if key == "" || right == "" {
+			continue
+		}
+		correctByLeft[key] = right
 	}
 
 	type submittedPair struct {
@@ -563,27 +855,29 @@ func (s *QuizService) gradeMatching(question *models.QuizQuestion, submittedAnsw
 	}
 
 	correct := 0
+	seenLeft := map[string]bool{}
 	for _, sp := range submitted {
+		if seenLeft[sp.Left] {
+			continue
+		}
+		seenLeft[sp.Left] = true
 		if want, ok := correctByLeft[sp.Left]; ok && want == sp.RightID {
 			correct++
 		}
 	}
 
-	score := pointsPossible * float64(correct) / float64(total)
-	score = math.Round(score*100) / 100
-	return score, correct == total, true
+	return roundScore(pointsPossible * float64(correct) / float64(total)), correct == total, true
 }
 
 // gradeFillInMultipleBlanks scores a fill_in_multiple_blanks item.
-// Question Answers JSON: {"blank_id": ["accepted1", "accepted2", …]}.
+// Question Answers JSON is either the Paper map shape
+// {"blank_id": ["accepted1", "accepted2", …]} or the Canvas array shape
+// [{blank_id, text, weight}] (one entry per accepted answer, weight > 0).
 // Submission JSON: {"blank_id": "user_text"}. Per-blank match is
 // case-insensitive + TrimSpace'd. Score = pointsPossible × (correct/total).
-//
-// Wave A1 NOTE: same backwards-compat caveat as gradeMatching — legacy
-// pending_review submissions are not retroactively scored.
 func (s *QuizService) gradeFillInMultipleBlanks(question *models.QuizQuestion, submittedAnswer string, pointsPossible float64) (float64, bool, bool) {
-	var accepted map[string][]string
-	if err := json.Unmarshal([]byte(question.Answers), &accepted); err != nil {
+	accepted, ok := parseBlankAnswers(question.Answers)
+	if !ok {
 		return 0, false, false
 	}
 
@@ -614,7 +908,30 @@ func (s *QuizService) gradeFillInMultipleBlanks(question *models.QuizQuestion, s
 		}
 	}
 
-	score := pointsPossible * float64(correct) / float64(total)
-	score = math.Round(score*100) / 100
-	return score, correct == total, true
+	return roundScore(pointsPossible * float64(correct) / float64(total)), correct == total, true
+}
+
+// parseBlankAnswers decodes fill_in_multiple_blanks answers in either the map
+// or the Canvas array shape. ok=false means the JSON is malformed.
+func parseBlankAnswers(raw string) (map[string][]string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if strings.HasPrefix(trimmed, "[") {
+		var options []answerOption
+		if err := json.Unmarshal([]byte(trimmed), &options); err != nil {
+			return nil, false
+		}
+		out := map[string][]string{}
+		for _, opt := range options {
+			if opt.BlankID == "" || opt.Weight <= 0 {
+				continue
+			}
+			out[opt.BlankID] = append(out[opt.BlankID], opt.Text.String())
+		}
+		return out, true
+	}
+	var accepted map[string][]string
+	if err := json.Unmarshal([]byte(trimmed), &accepted); err != nil {
+		return nil, false
+	}
+	return accepted, true
 }

@@ -408,6 +408,8 @@ func main() {
 	quizService := service.NewQuizService(quizRepo, quizQuestionRepo, quizSubmissionRepo, quizSubmissionAnswerRepo,
 		service.WithQuestionGroupRepo(quizQuestionGroupRepo),
 		service.WithBankEntryRepo(questionBankEntryRepo),
+		service.WithQuestionBankRepo(questionBankRepo),
+		service.WithStimulusRepo(postgres.NewQuizStimulusRepository(database)),
 	)
 	// Phase 6 Wave 1 Sprint D-1: register every gamification emit
 	// callback against the services that own the lifecycle event. The
@@ -796,6 +798,7 @@ func main() {
 	quizHandler := handlers.NewQuizHandler(quizRepo)
 	quizQuestionHandler := handlers.NewQuizQuestionHandler(quizService)
 	quizSubmissionHandler := handlers.NewQuizSubmissionHandler(quizService, observerService, auditService)
+	quizSubmissionHandler.SetFileService(fileService)
 	rubricHandler := handlers.NewRubricHandler(rubricService)
 	rubricAssessmentHandler := handlers.NewRubricAssessmentHandler(rubricService)
 	rubricAssessmentHandler.SetVisibilityDeps(submissionService, observerService)
@@ -884,7 +887,9 @@ func main() {
 	quizStimulusRepo := postgres.NewQuizStimulusRepository(database)
 	quizQuestionOutcomeAlignmentRepo := postgres.NewQuizQuestionOutcomeAlignmentRepository(database)
 	quizItemBankService := service.NewQuizItemBankService(quizItemBankRepo, quizItemBankItemRepo, quizQuestionRepo)
+	quizItemBankService.SetQuizRepo(quizRepo)
 	quizStimulusService := service.NewQuizStimulusService(quizStimulusRepo, quizQuestionRepo)
+	quizStimulusService.SetQuizRepo(quizRepo)
 	quizOutcomeAlignmentService := service.NewQuizOutcomeAlignmentService(quizQuestionOutcomeAlignmentRepo, quizQuestionRepo, outcomeRepo)
 	quizItemBankHandler := handlers.NewQuizItemBankHandler(quizItemBankService)
 	quizStimulusHandler := handlers.NewQuizStimulusHandler(quizStimulusService)

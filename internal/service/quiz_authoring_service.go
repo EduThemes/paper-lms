@@ -102,11 +102,86 @@ func (s *QuizService) UpdateQuestionGroup(ctx context.Context, group *models.Qui
 	return s.groupRepo.Update(ctx, group)
 }
 
+// DeleteQuestionGroup removes a group and ungroups the questions that were
+// directly assigned to it (Canvas: deleting a group keeps its questions as
+// regular quiz questions). Without this the questions kept a dangling
+// quiz_question_group_id. Materialized bank-draw copies stay attached —
+// they never become regular questions.
 func (s *QuizService) DeleteQuestionGroup(ctx context.Context, id uint) error {
 	if s.groupRepo == nil {
 		return errors.New("question group repository not configured")
 	}
+	if questions, err := s.questionRepo.ListByGroupID(ctx, id); err == nil {
+		for i := range questions {
+			if questions[i].QuestionBankEntryID != nil {
+				continue
+			}
+			questions[i].QuizQuestionGroupID = nil
+			if err := s.questionRepo.Update(ctx, &questions[i]); err != nil {
+				return err
+			}
+		}
+	}
 	return s.groupRepo.Delete(ctx, id)
+}
+
+// ErrQuestionBankNotInCourse is returned when a question group is linked
+// to a question bank that does not belong to the quiz's course.
+var ErrQuestionBankNotInCourse = errors.New("question bank not found in this course")
+
+// ValidateQuestionBankForCourse verifies a bank id names an active question
+// bank in the given course. A nil repo (tests) skips the check.
+func (s *QuizService) ValidateQuestionBankForCourse(ctx context.Context, bankID, courseID uint) error {
+	if s.questionBankRepo == nil {
+		return nil
+	}
+	bank, err := s.questionBankRepo.FindByID(ctx, bankID)
+	if err != nil || bank == nil || bank.CourseID != courseID || bank.WorkflowState == "deleted" {
+		return ErrQuestionBankNotInCourse
+	}
+	return nil
+}
+
+// ErrStimulusNotInCourse is returned when a question is linked to a
+// stimulus passage from another course.
+var ErrStimulusNotInCourse = errors.New("stimulus not found in this course")
+
+// ValidateStimulusForCourse verifies a stimulus id names a passage in the
+// given course.
+func (s *QuizService) ValidateStimulusForCourse(ctx context.Context, stimulusID, courseID uint) error {
+	if s.stimulusRepo == nil {
+		return ErrStimulusNotInCourse
+	}
+	stim, err := s.stimulusRepo.FindByID(ctx, stimulusID)
+	if err != nil || stim == nil || stim.CourseID != courseID {
+		return ErrStimulusNotInCourse
+	}
+	return nil
+}
+
+// StimuliForQuestions loads the stimulus passages referenced by the given
+// questions, keyed by stimulus id. Passages outside courseID are skipped.
+func (s *QuizService) StimuliForQuestions(ctx context.Context, courseID uint, questions []models.QuizQuestion) map[uint]*models.QuizStimulus {
+	out := map[uint]*models.QuizStimulus{}
+	if s.stimulusRepo == nil {
+		return out
+	}
+	for _, q := range questions {
+		if q.StimulusID == nil || *q.StimulusID == 0 {
+			continue
+		}
+		id := *q.StimulusID
+		if _, done := out[id]; done {
+			continue
+		}
+		stim, err := s.stimulusRepo.FindByID(ctx, id)
+		if err != nil || stim == nil || stim.CourseID != courseID {
+			out[id] = nil
+			continue
+		}
+		out[id] = stim
+	}
+	return out
 }
 
 func (s *QuizService) ListQuestionGroups(ctx context.Context, quizID uint) ([]models.QuizQuestionGroup, error) {

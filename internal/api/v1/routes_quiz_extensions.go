@@ -16,16 +16,18 @@ func (r *Router) registerQuizExtensionRoutes(protected fiber.Router, enrolled, i
 	protected.Put("/courses/:course_id/quiz_item_banks/:bank_id", instructor, r.QuizItemBankHandler.UpdateBank)
 	protected.Delete("/courses/:course_id/quiz_item_banks/:bank_id", instructor, r.QuizItemBankHandler.DeleteBank)
 
-	// Quiz Item Bank Items (the reusable templates inside a bank).
-	protected.Get("/quiz_item_banks/:bank_id/items", r.QuizItemBankHandler.ListBankItems)
-	protected.Post("/quiz_item_banks/:bank_id/items", r.QuizItemBankHandler.CreateBankItem)
-	protected.Get("/quiz_item_banks/:bank_id/items/:item_id", r.QuizItemBankHandler.GetBankItem)
-	protected.Put("/quiz_item_banks/:bank_id/items/:item_id", r.QuizItemBankHandler.UpdateBankItem)
-	protected.Delete("/quiz_item_banks/:bank_id/items/:item_id", r.QuizItemBankHandler.DeleteBankItem)
+	// Quiz Item Bank Items (the reusable templates inside a bank). Items
+	// carry answer keys, so every route is course-scoped and instructor-only;
+	// the handler ties bank → course and item → bank (B032).
+	protected.Get("/courses/:course_id/quiz_item_banks/:bank_id/items", instructor, r.QuizItemBankHandler.ListBankItems)
+	protected.Post("/courses/:course_id/quiz_item_banks/:bank_id/items", instructor, r.QuizItemBankHandler.CreateBankItem)
+	protected.Get("/courses/:course_id/quiz_item_banks/:bank_id/items/:item_id", instructor, r.QuizItemBankHandler.GetBankItem)
+	protected.Put("/courses/:course_id/quiz_item_banks/:bank_id/items/:item_id", instructor, r.QuizItemBankHandler.UpdateBankItem)
+	protected.Delete("/courses/:course_id/quiz_item_banks/:bank_id/items/:item_id", instructor, r.QuizItemBankHandler.DeleteBankItem)
 
-	// Quiz integration: copy an item into a quiz, or draw N random items from a bank.
-	protected.Post("/quiz_item_banks/:bank_id/items/:item_id/add_to_quiz/:quiz_id", instructor, r.QuizItemBankHandler.AddBankItemToQuiz)
-	protected.Post("/quiz_item_banks/:bank_id/random_draw", instructor, r.QuizItemBankHandler.RandomDraw)
+	// Quiz integration: copy an item into a quiz, or draw N random items from a bank (B133).
+	protected.Post("/courses/:course_id/quiz_item_banks/:bank_id/items/:item_id/add_to_quiz/:quiz_id", instructor, r.QuizItemBankHandler.AddBankItemToQuiz)
+	protected.Post("/courses/:course_id/quiz_item_banks/:bank_id/random_draw", instructor, r.QuizItemBankHandler.RandomDraw)
 
 	// Stimulus passages (TipTap docs shared across multiple quiz questions).
 	protected.Get("/courses/:course_id/quiz_stimuli", enrolled, r.QuizStimulusHandler.ListStimuli)
@@ -33,9 +35,11 @@ func (r *Router) registerQuizExtensionRoutes(protected fiber.Router, enrolled, i
 	protected.Get("/courses/:course_id/quiz_stimuli/:stimulus_id", enrolled, r.QuizStimulusHandler.GetStimulus)
 	protected.Put("/courses/:course_id/quiz_stimuli/:stimulus_id", instructor, r.QuizStimulusHandler.UpdateStimulus)
 	protected.Delete("/courses/:course_id/quiz_stimuli/:stimulus_id", instructor, r.QuizStimulusHandler.DeleteStimulus)
-	protected.Get("/quiz_stimuli/:stimulus_id/questions", r.QuizStimulusHandler.ListQuestions)
-	protected.Post("/quiz_stimuli/:stimulus_id/questions/:question_id", instructor, r.QuizStimulusHandler.LinkQuestion)
-	protected.Delete("/quiz_stimuli/:stimulus_id/questions/:question_id", instructor, r.QuizStimulusHandler.UnlinkQuestion)
+	// Stimulus ↔ question links are course-scoped; the listing returns
+	// answer keys, so all three are instructor-only.
+	protected.Get("/courses/:course_id/quiz_stimuli/:stimulus_id/questions", instructor, r.QuizStimulusHandler.ListQuestions)
+	protected.Post("/courses/:course_id/quiz_stimuli/:stimulus_id/questions/:question_id", instructor, r.QuizStimulusHandler.LinkQuestion)
+	protected.Delete("/courses/:course_id/quiz_stimuli/:stimulus_id/questions/:question_id", instructor, r.QuizStimulusHandler.UnlinkQuestion)
 
 	// Per-question outcome alignment (data layer only — grader does not consume yet).
 	protected.Get("/quiz_questions/:question_id/outcome_alignments", r.QuizOutcomeAlignmentHandler.ListByQuestion)
@@ -48,6 +52,6 @@ func (r *Router) registerQuizExtensionRoutes(protected fiber.Router, enrolled, i
 	// Canvas-sized exports complete in well under a second.
 	if r.QTIImportHandler != nil {
 		protected.Post("/courses/:course_id/qti_import", instructor, r.QTIImportHandler.Import)
-		protected.Get("/quizzes/:quiz_id/export.imscc", instructor, r.QTIImportHandler.Export)
+		protected.Get("/courses/:course_id/quizzes/:quiz_id/export.imscc", instructor, r.QTIImportHandler.Export)
 	}
 }

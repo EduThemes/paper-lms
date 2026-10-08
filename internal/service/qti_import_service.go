@@ -291,14 +291,43 @@ func (s *QTIImportService) ExportQuiz(ctx context.Context, quizID uint) ([]byte,
 	if err != nil {
 		return nil, fmt.Errorf("quiz not found: %w", err)
 	}
-	page, err := s.questionRepo.ListByQuizID(ctx, quizID, repository.PaginationParams{Page: 1, PerPage: 10000})
+	return s.exportLoadedQuiz(ctx, quiz)
+}
+
+// ErrQuizNotInCourse is returned when an export targets a quiz outside the
+// URL's course or the caller's tenant.
+var ErrQuizNotInCourse = errors.New("quiz not found in this course")
+
+// ExportQuizInCourse exports a quiz only when it lives in courseID within
+// the caller's tenant (accountID). The export carries the full answer key,
+// so the course tie is what keeps one tenant's staff from exporting another
+// tenant's quiz by raw id.
+func (s *QTIImportService) ExportQuizInCourse(ctx context.Context, quizID, courseID, accountID uint) ([]byte, error) {
+	quiz, err := s.quizRepo.FindByID(ctx, quizID, accountID)
+	if err != nil || quiz == nil || quiz.CourseID != courseID || quiz.WorkflowState == "deleted" {
+		return nil, ErrQuizNotInCourse
+	}
+	return s.exportLoadedQuiz(ctx, quiz)
+}
+
+func (s *QTIImportService) exportLoadedQuiz(ctx context.Context, quiz *models.Quiz) ([]byte, error) {
+	page, err := s.questionRepo.ListByQuizID(ctx, quiz.ID, repository.PaginationParams{Page: 1, PerPage: 10000})
 	if err != nil {
 		return nil, err
+	}
+	// Per-attempt copies of question-bank draws (question_bank_entry_id)
+	// are not authored questions; exporting them would turn every drawn
+	// bank entry into a standalone question on re-import.
+	authored := make([]models.QuizQuestion, 0, len(page.Items))
+	for _, q := range page.Items {
+		if q.QuestionBankEntryID == nil {
+			authored = append(authored, q)
+		}
 	}
 	// Collect referenced banks for self-contained export.
 	bankSeen := map[uint]bool{}
 	banks := []qti.ItemBankImport{}
-	for _, q := range page.Items {
+	for _, q := range authored {
 		if q.BankItemID == nil || bankSeen[*q.BankItemID] {
 			continue
 		}
@@ -323,7 +352,7 @@ func (s *QTIImportService) ExportQuiz(ctx context.Context, quizID uint) ([]byte,
 			}},
 		})
 	}
-	return qti.NewExporter().ExportQuiz(quiz, page.Items, banks)
+	return qti.NewExporter().ExportQuiz(quiz, authored, banks)
 }
 
 // --- small helpers ---

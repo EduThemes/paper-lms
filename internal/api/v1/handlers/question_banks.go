@@ -145,7 +145,13 @@ func (h *QuestionBankHandler) DeleteBank(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"deleted": true})
 }
 
+// ListQuestions returns bank entries INCLUDING their answer keys and
+// feedback, so it is course-staff only (B008). The route is mounted behind
+// `instructor`; this check is defense in depth.
 func (h *QuestionBankHandler) ListQuestions(c *fiber.Ctx) error {
+	if !quizCallerIsStaff(c) {
+		return responses.NotFound(c, "question bank")
+	}
 	bank, wrote := h.scopedBank(c)
 	if wrote {
 		return nil

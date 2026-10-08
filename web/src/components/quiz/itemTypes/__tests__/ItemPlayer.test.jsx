@@ -107,6 +107,28 @@ describe('ItemPlayer — ordering', () => {
     expect(screen.getByText('First')).toBeInTheDocument();
     expect(screen.getByText('Second')).toBeInTheDocument();
   });
+
+  it('records the displayed order as the answer without requiring a drag', () => {
+    // The server shuffles ordering items uniformly, so the shown order can
+    // already be correct; the student must be able to submit it as-is.
+    const question = {
+      ...baseQ,
+      question_type: 'ordering',
+      answers: JSON.stringify([{ id: 'i2', text: 'Second' }, { id: 'i1', text: 'First' }]),
+    };
+    render(<Player question={question} initial={undefined} />);
+    expect(valueOf()).toEqual(['i2', 'i1']);
+  });
+
+  it('does not overwrite an existing answer', () => {
+    const question = {
+      ...baseQ,
+      question_type: 'ordering',
+      answers: JSON.stringify([{ id: 'i2', text: 'Second' }, { id: 'i1', text: 'First' }]),
+    };
+    render(<Player question={question} initial={['i1', 'i2']} />);
+    expect(valueOf()).toEqual(['i1', 'i2']);
+  });
 });
 
 describe('ItemPlayer — categorization', () => {
@@ -170,5 +192,36 @@ describe('ItemPlayer — legacy types still work', () => {
     render(<Player question={question} initial={null} />);
     await user.click(screen.getByLabelText('Beta'));
     expect(valueOf()).toBe('b');
+  });
+});
+
+describe('ItemPlayer — matching (Canvas import shape)', () => {
+  it('renders a select per left item and emits [{left, right_id}]', () => {
+    const question = {
+      ...baseQ,
+      question_type: 'matching',
+      answers: JSON.stringify([
+        { id: '31', left: '31', text: 'France' },
+        { id: '901', text: 'Paris', blank_id: '_match_options_' },
+        { id: '902', text: 'London', blank_id: '_match_options_' },
+      ]),
+    };
+    render(<Player question={question} initial={[]} />);
+    fireEvent.change(screen.getByLabelText('Match for France'), { target: { value: '901' } });
+    expect(valueOf()).toEqual([{ left: '31', right_id: '901' }]);
+  });
+});
+
+describe('ItemPlayer — fill_in_multiple_blanks', () => {
+  it('renders an inline input per [blank] and writes a map', () => {
+    const question = {
+      ...baseQ,
+      question_type: 'fill_in_multiple_blanks',
+      question_text: 'The [color] sky.',
+      answers: JSON.stringify([{ blank_id: 'color' }]),
+    };
+    render(<Player question={question} initial={{}} />);
+    fireEvent.change(screen.getByLabelText('Blank color'), { target: { value: 'blue' } });
+    expect(valueOf()).toEqual({ color: 'blue' });
   });
 });

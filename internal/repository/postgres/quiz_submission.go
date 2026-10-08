@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -85,6 +86,44 @@ func (r *quizSubmissionRepo) ListByQuizID(ctx context.Context, quizID uint, para
 		Page:       params.Page,
 		PerPage:    params.PerPage,
 	}, nil
+}
+
+// ListByQuizAndUserIDs returns every attempt by the given users on the quiz.
+func (r *quizSubmissionRepo) ListByQuizAndUserIDs(ctx context.Context, quizID uint, userIDs []uint) ([]models.QuizSubmission, error) {
+	if len(userIDs) == 0 {
+		return []models.QuizSubmission{}, nil
+	}
+	var submissions []models.QuizSubmission
+	if err := r.db.WithContext(ctx).
+		Where("quiz_id = ? AND user_id IN ?", quizID, userIDs).
+		Order("user_id ASC, attempt ASC, id ASC").
+		Find(&submissions).Error; err != nil {
+		return nil, err
+	}
+	return submissions, nil
+}
+
+// FinalizeIfInProgress writes the terminal fields of a quiz submission only
+// while the row is still 'untaken'. Returns false (and writes nothing) when
+// another request already completed it — the guard that keeps a
+// double-submitted /complete from grading twice and firing completion
+// callbacks twice.
+func (r *quizSubmissionRepo) FinalizeIfInProgress(ctx context.Context, submission *models.QuizSubmission) (bool, error) {
+	res := r.db.WithContext(ctx).
+		Model(&models.QuizSubmission{}).
+		Where("id = ? AND workflow_state = ?", submission.ID, "untaken").
+		Updates(map[string]interface{}{
+			"finished_at":    submission.FinishedAt,
+			"score":          submission.Score,
+			"kept_score":     submission.KeptScore,
+			"time_spent":     submission.TimeSpent,
+			"workflow_state": submission.WorkflowState,
+			"updated_at":     time.Now(),
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
 }
 
 func (r *quizSubmissionRepo) ListCompletedByQuizID(ctx context.Context, quizID uint) ([]models.QuizSubmission, error) {

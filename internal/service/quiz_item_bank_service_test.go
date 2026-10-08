@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -376,4 +377,31 @@ func TestQuizItemBankService_RandomDrawFromBank(t *testing.T) {
 		_, err := svc.RandomDrawFromBank(ctx, 0, 3)
 		assert.EqualError(t, err, "bank_id is required")
 	})
+}
+
+// Concurrent random draws (two teachers drawing at once) must not share an
+// unsynchronized *rand.Rand. Run with -race to see the data race this
+// guards against.
+func TestQuizItemBankService_RandomDrawFromBank_Concurrent(t *testing.T) {
+	ctx := context.Background()
+	pool := make([]models.QuizItemBankItem, 0, 20)
+	for i := uint(1); i <= 20; i++ {
+		pool = append(pool, models.QuizItemBankItem{ID: i, BankID: 9, QuestionType: "essay"})
+	}
+	svc, _, ir, _ := newBankService(t)
+	ir.On("ListByBankID", mock.Anything, uint(9)).Return(pool, nil)
+
+	var wg sync.WaitGroup
+	for g := 0; g < 16; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 50; i++ {
+				got, err := svc.RandomDrawFromBank(ctx, 9, 5)
+				assert.NoError(t, err)
+				assert.Len(t, got, 5)
+			}
+		}()
+	}
+	wg.Wait()
 }

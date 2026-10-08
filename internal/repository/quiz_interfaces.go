@@ -13,6 +13,9 @@ type QuizRepository interface {
 	Update(ctx context.Context, quiz *models.Quiz) error
 	Delete(ctx context.Context, id uint) error
 	ListByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.Quiz], error)
+	// ListPublishedByCourseID is the student-facing list: published,
+	// non-deleted quizzes only.
+	ListPublishedByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.Quiz], error)
 }
 
 type QuizQuestionRepository interface {
@@ -37,6 +40,10 @@ type QuizSubmissionRepository interface {
 	ListByUserAndQuizIDs(ctx context.Context, userID uint, quizIDs []uint) ([]models.QuizSubmission, error)
 	ListByQuizID(ctx context.Context, quizID uint, params PaginationParams) (*PaginatedResult[models.QuizSubmission], error)
 	ListCompletedByQuizID(ctx context.Context, quizID uint) ([]models.QuizSubmission, error)
+	// ListByQuizAndUserIDs returns every attempt the given users made on
+	// the quiz (attempt order). Used for students' own history and for
+	// observers' linked students.
+	ListByQuizAndUserIDs(ctx context.Context, quizID uint, userIDs []uint) ([]models.QuizSubmission, error)
 }
 
 type QuizSubmissionAnswerRepository interface {
