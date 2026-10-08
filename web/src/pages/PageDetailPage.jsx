@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { FileText, ArrowLeft, Pencil, Save, X } from 'lucide-react';
+import { FileText, ArrowLeft, Pencil, Save, X, Home } from 'lucide-react';
 import { api } from '../services/api';
 import useIsTeacher from '../hooks/useIsTeacher';
 import useUnsavedChanges from '../hooks/useUnsavedChanges';
@@ -54,6 +54,20 @@ const PageDetailPage = () => {
       setPage((prev) => ({ ...prev, title: editForm.title, body: editForm.body, updated_at: new Date().toISOString() }));
       setIsDirty(false);
       setEditing(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // B147: the course home "Front Page" view shows the page marked here.
+  // Canvas requires the front page to be published, so publish it too.
+  const handleSetFrontPage = async () => {
+    setSaving(true);
+    try {
+      const updated = await api.updatePage(courseId, slug, { front_page: true, published: true });
+      setPage((prev) => ({ ...prev, ...(updated || {}), front_page: true }));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -155,13 +169,30 @@ const PageDetailPage = () => {
               )}
             </div>
             {isTeacher && (
-              <button
-                onClick={startEditing}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-surface-2 text-text-secondary hover:bg-border-default"
-              >
-                <Pencil className="w-4 h-4" />
-                Edit
-              </button>
+              <div className="flex items-center gap-2">
+                {page.front_page ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-brand-50 text-brand-700">
+                    <Home className="w-3 h-3" aria-hidden="true" />
+                    Front Page
+                  </span>
+                ) : (
+                  <button
+                    onClick={handleSetFrontPage}
+                    disabled={saving}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-surface-2 text-text-secondary hover:bg-border-default disabled:opacity-50"
+                  >
+                    <Home className="w-4 h-4" aria-hidden="true" />
+                    Use as Front Page
+                  </button>
+                )}
+                <button
+                  onClick={startEditing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-surface-2 text-text-secondary hover:bg-border-default"
+                >
+                  <Pencil className="w-4 h-4" />
+                  Edit
+                </button>
+              </div>
             )}
           </div>
           <div className="p-6">

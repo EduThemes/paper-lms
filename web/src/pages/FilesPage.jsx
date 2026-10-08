@@ -5,7 +5,10 @@ import { api } from '../services/api';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import ListPager from '../components/ListPager';
 import { Skeleton } from '@/components/ui/skeleton';
+
+const FILES_PER_PAGE = 50;
 
 function formatFileSize(bytes) {
   if (bytes === 0) return '0 Bytes';
@@ -27,6 +30,10 @@ const FilesPage = () => {
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [uploading, setUploading] = useState(false);
+  // B148: files are paginated server-side; page through them instead of
+  // silently showing only the first page.
+  const [filePage, setFilePage] = useState(1);
+  const [filePagination, setFilePagination] = useState({});
 
   const fetchContents = useCallback(async () => {
     try {
@@ -39,14 +46,14 @@ const FilesPage = () => {
       if (currentFolderId) {
         const [subfolders, folderFiles] = await Promise.all([
           api.getSubfolders(currentFolderId),
-          api.getFolderFiles(currentFolderId),
+          api.getFolderFiles(currentFolderId, filePage, FILES_PER_PAGE),
         ]);
         folderResult = subfolders;
         fileResult = folderFiles;
       } else {
         const [courseFolders, courseFiles] = await Promise.all([
           api.getCourseFolders(courseId),
-          api.getCourseFiles(courseId),
+          api.getCourseFiles(courseId, filePage, FILES_PER_PAGE),
         ]);
         folderResult = courseFolders;
         fileResult = courseFiles;
@@ -54,12 +61,19 @@ const FilesPage = () => {
 
       setFolders(folderResult.data || []);
       setFiles(fileResult.data || []);
+      setFilePagination(fileResult.pagination || {});
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [courseId, currentFolderId]);
+  }, [courseId, currentFolderId, filePage]);
+
+  // A different folder starts at its first page.
+  const openFolder = (folderId) => {
+    setFilePage(1);
+    setCurrentFolderId(folderId);
+  };
 
   useEffect(() => {
     fetchContents();
@@ -68,24 +82,24 @@ const FilesPage = () => {
   const navigateToFolder = async (folderId, folderName) => {
     if (folderId === null) {
       setBreadcrumbs([]);
-      setCurrentFolderId(null);
+      openFolder(null);
       return;
     }
 
     setBreadcrumbs(prev => [...prev, { id: folderId, name: folderName }]);
-    setCurrentFolderId(folderId);
+    openFolder(folderId);
   };
 
   const navigateToBreadcrumb = (index) => {
     if (index === -1) {
       setBreadcrumbs([]);
-      setCurrentFolderId(null);
+      openFolder(null);
       return;
     }
 
     const crumb = breadcrumbs[index];
     setBreadcrumbs(breadcrumbs.slice(0, index + 1));
-    setCurrentFolderId(crumb.id);
+    openFolder(crumb.id);
   };
 
   const handleCreateFolder = async (e) => {
@@ -112,7 +126,8 @@ const FilesPage = () => {
     try {
       setUploading(true);
       setError(null);
-      await api.uploadCourseFile(courseId, file);
+      // B138: upload into the folder being viewed.
+      await api.uploadCourseFile(courseId, file, currentFolderId);
       e.target.value = '';
       fetchContents();
     } catch (err) {
@@ -316,6 +331,7 @@ const FilesPage = () => {
           </div>
         )}
       </div>
+      <ListPager page={filePage} pagination={filePagination} onPageChange={setFilePage} label="Files pagination" />
     </Layout>
   );
 };

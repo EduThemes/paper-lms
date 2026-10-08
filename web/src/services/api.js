@@ -694,10 +694,15 @@ export const api = {
   getCourseFiles: async (courseId, page = 1, perPage = 20) => {
     return request(`/courses/${courseId}/files?page=${page}&per_page=${perPage}`);
   },
-  uploadCourseFile: async (courseId, file) => {
+  uploadCourseFile: async (courseId, file, folderId = null) => {
     const formData = new FormData();
     formData.append('file', file);
+    if (folderId) formData.append('folder_id', String(folderId));
     return uploadFile(`/courses/${courseId}/files`, formData);
+  },
+  getCourseFrontPage: async (courseId) => {
+    const { data } = await request(`/courses/${courseId}/front_page`);
+    return data;
   },
   getFile: async (courseId, fileId) => {
     const { data } = await request(`/courses/${courseId}/files/${fileId}`);
