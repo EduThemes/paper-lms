@@ -1,707 +1,468 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { Calculator, RotateCcw, MessageSquare, ClipboardList, ChevronDown, ChevronRight } from 'lucide-react';
 import { api } from '../services/api';
-import { useAuth } from '../contexts/AuthContext';
+import { useGradeSummary } from '../services/api_learner';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
-import { getLetterGrade, gradeColor, assignmentGradeWeight } from '../utils/grading';
-import { Calculator, RotateCcw } from 'lucide-react';
+import Page from '../components/Page';
+import useDocumentTitle from '../hooks/useDocumentTitle';
+import { computeTotals, letterFor, STATUS_LABELS } from '../utils/gradeSummary';
+import { gradeColor } from '../utils/grading';
 
-const isRecentlyGraded = (sub) => {
-  if (!sub?.graded_at) return false;
-  const gradedAt = new Date(sub.graded_at);
-  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
-  return gradedAt.getTime() > cutoff;
+// Student Grades page (G147). Everything comes from the server's grade
+// summary: posted scores only, drop rules, grading periods, hidden totals,
+// feedback comments and rubric assessments. What-If mode recomputes the
+// totals in the browser with the same rules (utils/gradeSummary).
+
+const STATUS_STYLES = {
+  graded: 'bg-accent-success/15 text-accent-success',
+  submitted: 'bg-brand-100 text-brand-800',
+  missing: 'bg-accent-danger/15 text-accent-danger',
+  late: 'bg-accent-warning/20 text-accent-warning',
+  excused: 'bg-surface-2 text-text-secondary',
+  not_posted: 'bg-surface-2 text-text-secondary',
+  unsubmitted: 'bg-surface-2 text-text-secondary',
 };
 
-const statusBadge = (sub) => {
-  if (!sub) return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500">Not submitted</span>;
-  if (sub.workflow_state === 'graded') return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">Graded</span>;
-  if (sub.workflow_state === 'submitted' || sub.submitted_at) return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-yellow-100 text-yellow-700">Submitted</span>;
-  if (sub.workflow_state === 'pending_review') return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700">Pending review</span>;
-  return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500">Not submitted</span>;
-};
+const formatDate = (iso) =>
+  iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
 
-const formatDate = (dateStr) => {
-  if (!dateStr) return '-';
-  return new Date(dateStr).toLocaleDateString(undefined, {
-    month: 'short', day: 'numeric', year: 'numeric',
+function StatusBadge({ status, late }) {
+  return (
+    <span className="inline-flex flex-wrap items-center justify-center gap-1">
+      <span className={`inline-block rounded-full px-2 py-0.5 text-xs ${STATUS_STYLES[status] || STATUS_STYLES.unsubmitted}`}>
+        {STATUS_LABELS[status] || status}
+      </span>
+      {late && status !== 'late' && (
+        <span className={`inline-block rounded-full px-2 py-0.5 text-xs ${STATUS_STYLES.late}`}>Late</span>
+      )}
+    </span>
+  );
+}
+
+function parseJSON(raw, fallback) {
+  if (raw && typeof raw === 'object') return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function RubricView({ rubric }) {
+  const criteria = parseJSON(rubric.criteria, []);
+  const assessment = parseJSON(rubric.assessment, {});
+  return (
+    <div className="mt-2 rounded-md border border-border-subtle">
+      <div className="border-b border-border-subtle px-3 py-2 text-xs font-semibold text-text-secondary">
+        Rubric: {rubric.title}
+        {!rubric.hide_score_total && rubric.score != null && (
+          <span className="ms-2 font-normal">
+            {rubric.score} / {rubric.points_possible} pts
+          </span>
+        )}
+      </div>
+      <table className="min-w-full text-sm">
+        <caption className="sr-only">Rubric assessment for {rubric.title}</caption>
+        <thead>
+          <tr className="text-left text-xs text-text-secondary">
+            <th scope="col" className="px-3 py-1.5">Criterion</th>
+            <th scope="col" className="px-3 py-1.5">Rating</th>
+            {!rubric.hide_points && <th scope="col" className="px-3 py-1.5 text-right">Points</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {(Array.isArray(criteria) ? criteria : []).map((c) => {
+            const a = assessment?.[c.id] || assessment?.[String(c.id)] || {};
+            const rating = (c.ratings || []).find((r) => r.id === a.rating_id) ||
+              (c.ratings || []).find((r) => a.points != null && Number(r.points) === Number(a.points));
+            return (
+              <tr key={c.id} className="border-t border-border-subtle align-top">
+                <td className="px-3 py-1.5">{c.description}</td>
+                <td className="px-3 py-1.5">
+                  {rating?.description || '—'}
+                  {a.comments && <div className="mt-1 text-xs text-text-secondary">{a.comments}</div>}
+                </td>
+                {!rubric.hide_points && (
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {a.points != null ? a.points : '—'} / {c.points}
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function AssignmentRow({ a, courseId, whatIf, whatIfValue, onWhatIf, scale, dropped }) {
+  const [open, setOpen] = useState(false);
+  const pts = Number(a.points_possible) || 0;
+  const hasDetails = a.comments.length > 0 || !!a.rubric;
+  const score = whatIf ? (whatIfValue === '' || whatIfValue === undefined ? null : Number(whatIfValue)) : a.score;
+  const pct = score != null && pts > 0 ? Math.round((score / pts) * 100) : null;
+  const detailsId = `grade-details-${a.id}`;
+  return (
+    <>
+      <tr className={dropped ? 'opacity-60' : ''}>
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Link to={`/courses/${courseId}/assignments/${a.id}`} className="text-sm font-medium text-brand-600 hover:underline">
+              {a.name}
+            </Link>
+            {dropped && (
+              <span className="rounded bg-surface-2 px-1.5 py-0.5 text-xs text-text-secondary" title="This score is dropped by the group's rules and does not count">
+                Dropped
+              </span>
+            )}
+          </div>
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-sm text-text-secondary">{formatDate(a.due_at)}</td>
+        <td className="px-4 py-3 text-center"><StatusBadge status={a.status} late={a.late} /></td>
+        <td className="whitespace-nowrap px-4 py-3 text-right">
+          {whatIf ? (
+            <span className="inline-flex items-center gap-1">
+              <input
+                type="text"
+                inputMode="decimal"
+                value={whatIfValue ?? ''}
+                onChange={(e) => onWhatIf(a.id, e.target.value)}
+                className="w-16 rounded border border-purple-300 bg-purple-50 px-2 py-1 text-right text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-purple-400"
+                placeholder="—"
+                aria-label={`What-if score for ${a.name}`}
+              />
+              <span className="text-sm text-text-secondary">/{pts}</span>
+            </span>
+          ) : a.excused ? (
+            <span className="text-xs italic text-text-secondary">Excused</span>
+          ) : score != null ? (
+            <span>
+              <span className="text-sm font-semibold text-text-primary">{score}/{pts}</span>
+              {pct !== null && (
+                <span className={`ms-2 text-xs font-medium ${gradeColor(letterFor(pct, scale) || '-')}`}>{pct}%</span>
+              )}
+              {a.points_deducted > 0 && (
+                <div className="text-xs text-accent-warning">−{a.points_deducted} late penalty</div>
+              )}
+            </span>
+          ) : (
+            <span className="text-sm text-text-disabled">–/{pts}</span>
+          )}
+        </td>
+        <td className="px-2 py-3 text-right">
+          {hasDetails && (
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              aria-expanded={open}
+              aria-controls={detailsId}
+              className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-1"
+            >
+              {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              {a.comments.length > 0 && (
+                <span className="inline-flex items-center gap-0.5">
+                  <MessageSquare className="h-3 w-3" aria-hidden="true" />
+                  {a.comments.length}
+                  <span className="sr-only"> comments</span>
+                </span>
+              )}
+              {a.rubric && (
+                <span className="inline-flex items-center gap-0.5">
+                  <ClipboardList className="h-3 w-3" aria-hidden="true" />
+                  <span className="sr-only">rubric</span>
+                </span>
+              )}
+              <span className="sr-only">Show feedback for {a.name}</span>
+            </button>
+          )}
+        </td>
+      </tr>
+      {open && hasDetails && (
+        <tr id={detailsId}>
+          <td colSpan={5} className="bg-surface-1 px-6 py-3">
+            {a.comments.length > 0 && (
+              <ul className="space-y-2">
+                {a.comments.map((c) => (
+                  <li key={c.id} className="text-sm">
+                    <span className="font-medium">{c.author_name || 'Instructor'}</span>
+                    <span className="ms-2 text-xs text-text-secondary">{formatDate(c.created_at)}</span>
+                    <p className="whitespace-pre-wrap text-text-primary">{c.comment}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {a.rubric && <RubricView rubric={a.rubric} />}
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function rulesText(rules) {
+  const parts = [];
+  if (rules?.drop_lowest > 0) parts.push(`lowest ${rules.drop_lowest} dropped`);
+  if (rules?.drop_highest > 0) parts.push(`highest ${rules.drop_highest} dropped`);
+  return parts.join(', ');
+}
+
+function QuizScores({ courseId, studentId }) {
+  const query = useQuery({
+    queryKey: ['learner', 'quizScores', String(courseId), String(studentId)],
+    queryFn: async () => {
+      const quizzes = ((await api.getQuizzes(courseId, 1, 200))?.data || []).filter((q) => q.published !== false);
+      const results = await Promise.allSettled(quizzes.map((q) => api.getQuizSubmissions(courseId, q.id, 1, 50)));
+      return quizzes.map((q, i) => {
+        const subs = results[i].status === 'fulfilled' ? results[i].value?.data || [] : [];
+        const mine = subs
+          .filter((s) => String(s.user_id) === String(studentId))
+          .sort((x, y) => (y.attempt || 0) - (x.attempt || 0))[0];
+        return { quiz: q, sub: mine };
+      });
+    },
   });
-};
+  if (!query.data || query.data.length === 0) return null;
+  return (
+    <section className="mb-6" aria-labelledby="quiz-scores-heading">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 id="quiz-scores-heading" className="text-lg font-semibold">Quizzes</h3>
+        <span className="text-xs text-text-secondary">Not included in the course total</span>
+      </div>
+      <div className="overflow-x-auto rounded-lg bg-surface-0 shadow">
+        <table className="min-w-full">
+          <caption className="sr-only">Quiz scores</caption>
+          <thead>
+            <tr className="border-b bg-surface-1 text-left text-xs uppercase text-text-secondary">
+              <th scope="col" className="px-4 py-3">Quiz</th>
+              <th scope="col" className="px-4 py-3">Due</th>
+              <th scope="col" className="px-4 py-3 text-right">Score</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border-subtle">
+            {query.data.map(({ quiz, sub }) => (
+              <tr key={quiz.id}>
+                <td className="px-4 py-3 text-sm">
+                  <Link
+                    className="font-medium text-brand-600 hover:underline"
+                    to={sub && sub.workflow_state === 'complete'
+                      ? `/courses/${courseId}/quizzes/${quiz.id}/submissions/${sub.id}/review`
+                      : `/courses/${courseId}/quizzes/${quiz.id}`}
+                  >
+                    {quiz.title}
+                  </Link>
+                </td>
+                <td className="px-4 py-3 text-sm text-text-secondary">{formatDate(quiz.due_at)}</td>
+                <td className="px-4 py-3 text-right text-sm">
+                  {sub?.score != null ? `${sub.score}/${quiz.points_possible ?? 0}` : `–/${quiz.points_possible ?? 0}`}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
 
 const StudentGradesPage = () => {
   const { t } = useTranslation();
   const { courseId } = useParams();
-  const { user } = useAuth();
-  const [searchParams] = useSearchParams();
-  const observeeId = searchParams.get('observee_id');
-  const targetUserId = observeeId ? parseInt(observeeId, 10) : user?.id;
-  const isObserverView = !!observeeId;
-  const [course, setCourse] = useState(null);
-  const [observeeName, setObserveeName] = useState(null);
-  const [assignments, setAssignments] = useState([]);
-  const [groups, setGroups] = useState([]);
-  const [submissions, setSubmissions] = useState({});
-  const [quizzes, setQuizzes] = useState([]);
-  const [quizSubmissions, setQuizSubmissions] = useState({});
-  const [gradingScale, setGradingScale] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const observeeId = searchParams.get('observee_id') || undefined;
+  const periodParam = searchParams.get('grading_period_id') ?? undefined;
+  const query = useGradeSummary(courseId, { studentId: observeeId, gradingPeriodId: periodParam });
+  const [whatIf, setWhatIf] = useState(false);
+  const [whatIfScores, setWhatIfScores] = useState({});
+  const summary = query.data;
+  useDocumentTitle(summary ? `Grades: ${summary.course_name}` : t('studentGradesPage.title'));
 
-  // What-If grade calculator state
-  const [whatIfMode, setWhatIfMode] = useState(false);
-  const [whatIfScores, setWhatIfScores] = useState({}); // keyed by assignment ID
-
-  const fetchData = async () => {
-    if (!user || !targetUserId) return;
-      try {
-        const [courseData, assignmentResult, groupResult, quizResult] = await Promise.all([
-          api.getCourse(courseId),
-          api.getAssignments(courseId, 1, 200),
-          api.getAssignmentGroups(courseId, 1, 50).catch(() => ({ data: [] })),
-          api.getQuizzes(courseId, 1, 200).catch(() => ({ data: [] })),
-        ]);
-
-        // Fetch grading standard for custom scale
-        try {
-          const standards = await api.getGradingStandards(courseId);
-          if (Array.isArray(standards) && standards.length > 0) {
-            const latest = standards[standards.length - 1];
-            if (Array.isArray(latest.data)) setGradingScale(latest.data);
-          }
-        } catch {}
-
-        // If observer view, resolve the observee's name from enrollments
-        if (isObserverView) {
-          try {
-            const enrollResult = await api.getAllEnrollments(courseId);
-            const enrollments = enrollResult.data || [];
-            const observeeEnrollment = enrollments.find(e =>
-              (e.user_id === targetUserId || e.user?.id === targetUserId) && e.type === 'StudentEnrollment'
-            );
-            if (observeeEnrollment) {
-              setObserveeName(observeeEnrollment.user?.name || observeeEnrollment.user_name || `Student #${targetUserId}`);
-            }
-          } catch {}
-        }
-
-        setCourse(courseData);
-        const assignmentList = (assignmentResult.data || []).filter(a => a.published !== false);
-        setAssignments(assignmentList);
-        setGroups(groupResult.data || []);
-
-        const publishedQuizzes = (quizResult.data || []).filter(q => q.published !== false);
-        setQuizzes(publishedQuizzes);
-
-        // Fetch all submissions for the target user in one bulk call
-        // For observers viewing observee data, pass the observee's user_id
-        const userIdParam = isObserverView ? String(targetUserId) : 'self';
-        const subMap = {};
-        try {
-          const subResult = await api.getCourseSubmissions(courseId, 1, 10000, userIdParam);
-          const subs = subResult.data || subResult || [];
-          for (const sub of (Array.isArray(subs) ? subs : [])) {
-            if (sub.user_id === targetUserId || String(sub.user_id) === String(targetUserId)) {
-              subMap[sub.assignment_id] = sub;
-            }
-          }
-        } catch {
-          // Fallback: fetch per-assignment if bulk endpoint fails
-          const batchSize = 6;
-          for (let i = 0; i < assignmentList.length; i += batchSize) {
-            const batch = assignmentList.slice(i, i + batchSize);
-            const results = await Promise.allSettled(
-              batch.map(a => api.getSubmission(courseId, a.id, targetUserId))
-            );
-            results.forEach((result, idx) => {
-              if (result.status === 'fulfilled' && result.value) {
-                subMap[batch[idx].id] = result.value;
-              }
-            });
-          }
-        }
-        setSubmissions(subMap);
-
-        // Fetch quiz submissions for student
-        if (publishedQuizzes.length > 0) {
-          const qsMap = {};
-          const qsResults = await Promise.allSettled(
-            publishedQuizzes.map(q => api.getQuizSubmissions(courseId, q.id, 1, 50))
-          );
-          qsResults.forEach((result, idx) => {
-            if (result.status === 'fulfilled') {
-              const subs = result.value?.data || [];
-              const mySub = subs
-                .filter(s => s.user_id === targetUserId || String(s.user_id) === String(targetUserId))
-                .sort((a, b) => (b.attempt || 0) - (a.attempt || 0))[0];
-              if (mySub) qsMap[publishedQuizzes[idx].id] = mySub;
-            }
-          });
-          setQuizSubmissions(qsMap);
-        }
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, [courseId, user, targetUserId]);
-
-  // Group assignments by assignment_group_id
-  const getGrouped = () => {
-    if (groups.length === 0) {
-      return [{ id: null, name: 'Assignments', weight: null, items: assignments }];
-    }
-    const grouped = groups.map(g => ({
-      id: g.id,
-      name: g.name,
-      weight: g.group_weight,
-      items: assignments.filter(a => a.assignment_group_id === g.id),
-    }));
-    const groupedIds = new Set(groups.map(g => g.id));
-    const ungrouped = assignments.filter(a => !groupedIds.has(a.assignment_group_id));
-    if (ungrouped.length > 0) {
-      grouped.push({ id: null, name: 'Other', weight: null, items: ungrouped });
-    }
-    return grouped.filter(g => g.items.length > 0);
-  };
-
-  // Calculate totals (with weighted grading support)
-  const calcTotals = () => {
-    const useWeights = course?.apply_assignment_group_weights && groups.length > 0 &&
-      groups.some(g => g.group_weight > 0);
-
-    // B205: quizzes are not assignments in Paper, so neither the teacher
-    // gradebook nor the server's course grade counts them; the student
-    // total must not either (it used to, so the two disagreed).
-    // B115: excused / unpublished / not_graded work never counts and a
-    // 0-point assignment is extra credit (assignmentGradeWeight).
-
-    if (useWeights) {
-      let weightedSum = 0;
-      let weightTotal = 0;
-      let totalEarned = 0;
-      let totalPossible = 0;
-      const groupedAssignmentIds = new Set();
-
-      for (const group of groups) {
-        if (!group.group_weight || group.group_weight <= 0) continue;
-        const groupAssignments = assignments.filter(a => a.assignment_group_id === group.id);
-        groupAssignments.forEach(a => groupedAssignmentIds.add(a.id));
-        let groupEarned = 0;
-        let groupPossible = 0;
-
-        for (const a of groupAssignments) {
-          const sub = submissions[a.id];
-          const w = assignmentGradeWeight(a, sub);
-          if (w.counts && sub && sub.score !== null && sub.score !== undefined) {
-            groupEarned += parseFloat(sub.score) || 0;
-            groupPossible += w.possible;
-          }
-        }
-
-        totalEarned += groupEarned;
-        totalPossible += groupPossible;
-
-        if (groupPossible > 0) {
-          const groupPct = (groupEarned / groupPossible) * 100;
-          weightedSum += groupPct * group.group_weight;
-          weightTotal += group.group_weight;
-        }
-      }
-
-      // Include ungrouped assignments as raw points in totals
-      const ungrouped = assignments.filter(a => !groupedAssignmentIds.has(a.id));
-      for (const a of ungrouped) {
-        const sub = submissions[a.id];
-        const w = assignmentGradeWeight(a, sub);
-        if (w.counts && sub && sub.score !== null && sub.score !== undefined) {
-          totalEarned += parseFloat(sub.score) || 0;
-          totalPossible += w.possible;
-        }
-      }
-
-      if (weightTotal === 0) return { earned: 0, possible: 0, pct: null, weighted: true };
+  const totals = useMemo(() => {
+    if (!summary) return null;
+    if (!whatIf) {
       return {
-        earned: totalEarned,
-        possible: totalPossible,
-        pct: (weightedSum / weightTotal).toFixed(1),
-        weighted: true,
+        current: summary.totals?.current_score ?? null,
+        final: summary.totals?.final_score ?? null,
+        earned: summary.totals?.earned ?? 0,
+        possible: summary.totals?.possible ?? 0,
+        dropped: new Set(summary.assignments.filter((a) => a.dropped).map((a) => a.id)),
       };
     }
+    const scores = {};
+    Object.entries(whatIfScores).forEach(([id, v]) => {
+      scores[id] = v === '' ? null : Number(v);
+    });
+    return computeTotals(summary, scores);
+  }, [summary, whatIf, whatIfScores]);
 
-    // Unweighted: simple point totals
-    let earned = 0;
-    let possible = 0;
-    for (const a of assignments) {
-      const sub = submissions[a.id];
-      const w = assignmentGradeWeight(a, sub);
-      if (w.counts && sub && sub.score !== null && sub.score !== undefined) {
-        earned += parseFloat(sub.score) || 0;
-        possible += w.possible;
-      }
-    }
-    if (possible === 0) return { earned: 0, possible: 0, pct: null, weighted: false };
-    return { earned, possible, pct: ((earned / possible) * 100).toFixed(1), weighted: false };
-  };
-
-  // --- What-If mode helpers ---
-
-  const enterWhatIfMode = useCallback(() => {
-    // Initialize whatIfScores from actual submission scores
+  const enterWhatIf = () => {
     const initial = {};
-    for (const a of assignments) {
-      const sub = submissions[a.id];
-      if (sub && sub.score !== null && sub.score !== undefined) {
-        initial[`a_${a.id}`] = String(parseFloat(sub.score));
-      }
-    }
-    for (const q of quizzes) {
-      const qs = quizSubmissions[q.id];
-      if (qs && qs.score !== null && qs.score !== undefined) {
-        initial[`q_${q.id}`] = String(parseFloat(qs.score));
-      }
-    }
+    summary.assignments.forEach((a) => {
+      if (a.score != null) initial[a.id] = String(a.score);
+    });
     setWhatIfScores(initial);
-    setWhatIfMode(true);
-  }, [assignments, submissions, quizzes, quizSubmissions]);
-
-  const exitWhatIfMode = useCallback(() => {
-    setWhatIfMode(false);
-    setWhatIfScores({});
-  }, []);
-
-  const handleWhatIfChange = useCallback((key, value) => {
-    // Allow empty string, digits, and one decimal point
+    setWhatIf(true);
+  };
+  const onWhatIf = (id, value) => {
     if (value !== '' && !/^\d*\.?\d*$/.test(value)) return;
-    setWhatIfScores(prev => ({ ...prev, [key]: value }));
-  }, []);
-
-  // Resolve the effective score for an assignment (What-If aware)
-  const getEffectiveAssignmentScore = useCallback((assignmentId) => {
-    if (!whatIfMode) {
-      const sub = submissions[assignmentId];
-      return (sub && sub.score !== null && sub.score !== undefined) ? parseFloat(sub.score) : null;
-    }
-    const val = whatIfScores[`a_${assignmentId}`];
-    if (val === undefined || val === '') return null;
-    const num = parseFloat(val);
-    return isNaN(num) ? null : num;
-  }, [whatIfMode, whatIfScores, submissions]);
-
-  // Calculate totals using effective scores (What-If aware)
-  const calcWhatIfTotals = useCallback(() => {
-    const useWeights = course?.apply_assignment_group_weights && groups.length > 0 &&
-      groups.some(g => g.group_weight > 0);
-
-    // Same inclusion rules as calcTotals (quizzes excluded, B205/B115).
-
-    if (useWeights) {
-      let weightedSum = 0;
-      let weightTotal = 0;
-      let totalEarned = 0;
-      let totalPossible = 0;
-      const groupedAssignmentIds = new Set();
-
-      for (const group of groups) {
-        if (!group.group_weight || group.group_weight <= 0) continue;
-        const groupAssignments = assignments.filter(a => a.assignment_group_id === group.id);
-        groupAssignments.forEach(a => groupedAssignmentIds.add(a.id));
-        let groupEarned = 0;
-        let groupPossible = 0;
-
-        for (const a of groupAssignments) {
-          const score = getEffectiveAssignmentScore(a.id);
-          const w = assignmentGradeWeight(a, { ...submissions[a.id], score });
-          if (w.counts && score !== null) {
-            groupEarned += score;
-            groupPossible += w.possible;
-          }
-        }
-
-        totalEarned += groupEarned;
-        totalPossible += groupPossible;
-
-        if (groupPossible > 0) {
-          const groupPct = (groupEarned / groupPossible) * 100;
-          weightedSum += groupPct * group.group_weight;
-          weightTotal += group.group_weight;
-        }
-      }
-
-      const ungrouped = assignments.filter(a => !groupedAssignmentIds.has(a.id));
-      for (const a of ungrouped) {
-        const score = getEffectiveAssignmentScore(a.id);
-        const w = assignmentGradeWeight(a, { ...submissions[a.id], score });
-        if (w.counts && score !== null) {
-          totalEarned += score;
-          totalPossible += w.possible;
-        }
-      }
-
-      if (weightTotal === 0) return { earned: 0, possible: 0, pct: null, weighted: true };
-      return {
-        earned: totalEarned,
-        possible: totalPossible,
-        pct: (weightedSum / weightTotal).toFixed(1),
-        weighted: true,
-      };
-    }
-
-    // Unweighted: simple point totals
-    let earned = 0;
-    let possible = 0;
-    for (const a of assignments) {
-      const score = getEffectiveAssignmentScore(a.id);
-      const w = assignmentGradeWeight(a, { ...submissions[a.id], score });
-      if (w.counts && score !== null) {
-        earned += score;
-        possible += w.possible;
-      }
-    }
-    if (possible === 0) return { earned: 0, possible: 0, pct: null, weighted: false };
-    return { earned, possible, pct: ((earned / possible) * 100).toFixed(1), weighted: false };
-  }, [course, groups, assignments, submissions, getEffectiveAssignmentScore]);
-
-  if (loading) {
-    return <Layout><div className="flex items-center justify-center py-12 gap-2 text-gray-500">
-  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-  {t('studentGradesPage.loading')}
-</div></Layout>;
-  }
-  if (error) {
-    return <Layout><div className="text-center py-12">
-  <p className="text-red-600 mb-3">{error}</p>
-  <button onClick={() => { setError(null); setLoading(true); fetchData(); }} className="text-blue-600 hover:text-blue-800 text-sm font-medium">{t('common.tryAgain')}</button>
-</div></Layout>;
-  }
-
-  const grouped = getGrouped();
-  const totals = whatIfMode ? calcWhatIfTotals() : calcTotals();
-  const letter = getLetterGrade(totals.pct, gradingScale);
+    setWhatIfScores((prev) => ({ ...prev, [id]: value }));
+  };
+  const selectPeriod = (value) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('grading_period_id', value);
+    setSearchParams(next, { replace: true });
+  };
 
   return (
-    <Layout>
-      <CourseNav />
-      <div className="mb-6">
-        <Link to={`/courses/${courseId}`} className="text-blue-600 hover:underline text-sm">
-          &larr; {t('course.backToCourse')}
-        </Link>
-        <div className="flex items-center justify-between mt-2">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">
-              {isObserverView
-                ? `Grades for ${observeeName || 'Student'}${course ? `: ${course.name}` : ''}`
-                : `My Grades${course ? `: ${course.name}` : ''}`}
-            </h2>
-            {isObserverView && (
-              <p className="text-sm text-gray-500 mt-1">Viewing as parent/observer</p>
+    <Page query={query} title={t('studentGradesPage.title')}>
+      {(s) => {
+        const groupsById = new Map(s.assignment_groups.map((g) => [g.id, g]));
+        const sections = s.assignment_groups.map((g) => ({
+          group: g,
+          items: s.assignments.filter((a) => a.assignment_group_id === g.id),
+        }));
+        const other = s.assignments.filter((a) => !groupsById.has(a.assignment_group_id));
+        if (other.length) sections.push({ group: { id: 0, name: sections.length ? 'Other' : 'Assignments', rules: {} }, items: other });
+        const showTotals = !s.hide_totals && (s.totals || whatIf);
+        const letter = totals?.current != null ? letterFor(totals.current, s.grading_scale) : '';
+        return (
+          <Layout>
+            <CourseNav />
+            <div className="mb-6">
+              <Link to={`/courses/${courseId}`} className="text-sm text-brand-600 hover:underline">
+                &larr; {t('course.backToCourse')}
+              </Link>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h1 className="text-2xl font-bold text-text-primary">
+                    {observeeId ? `Grades for ${s.student_name || 'student'}: ${s.course_name}` : `My grades: ${s.course_name}`}
+                  </h1>
+                  {observeeId && <p className="mt-1 text-sm text-text-secondary">Viewing as parent/observer</p>}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {s.grading_periods.length > 0 && (
+                    <label className="flex items-center gap-2 text-sm">
+                      <span>Grading period</span>
+                      <select
+                        value={s.grading_period_id ?? 0}
+                        onChange={(e) => selectPeriod(e.target.value)}
+                        className="rounded-md border border-border-default bg-surface-0 px-2 py-1.5 text-sm"
+                      >
+                        <option value={0}>All grading periods</option>
+                        {s.grading_periods.map((p) => (
+                          <option key={p.id} value={p.id}>{p.title}{p.is_closed ? ' (closed)' : ''}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {whatIf && (
+                    <button type="button" onClick={() => { setWhatIf(false); setWhatIfScores({}); }}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-surface-2 px-3 py-1.5 text-sm font-medium">
+                      <RotateCcw className="h-4 w-4" aria-hidden="true" /> Reset
+                    </button>
+                  )}
+                  {!s.hide_totals && (
+                    <button
+                      type="button"
+                      onClick={whatIf ? () => setWhatIf(false) : enterWhatIf}
+                      aria-pressed={whatIf}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${whatIf ? 'bg-purple-600 text-white' : 'border border-border-default bg-surface-0'}`}
+                    >
+                      <Calculator className="h-4 w-4" aria-hidden="true" />
+                      {whatIf ? 'Exit What-If' : 'What-If grades'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {whatIf && (
+              <div className="mb-6 rounded-lg border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-800" role="status">
+                What-If mode: these are hypothetical grades, not your actual grades.
+              </div>
             )}
-          </div>
-          <div className="flex items-center gap-2">
-            {whatIfMode && (
-              <button
-                onClick={exitWhatIfMode}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-                title="Reset to actual grades"
-              >
-                <RotateCcw className="w-4 h-4" />
-                Reset
-              </button>
+
+            {showTotals ? (
+              <div className="mb-6 rounded-lg bg-surface-0 p-6 shadow">
+                <div className="text-sm font-medium uppercase tracking-wide text-text-secondary">
+                  {whatIf ? 'Hypothetical grade' : t('studentGradesPage.currentGrade')}
+                </div>
+                <div className="mt-1 flex items-baseline gap-3">
+                  {letter && <span className={`text-4xl font-bold ${gradeColor(letter)}`}>{letter}</span>}
+                  <span className="text-2xl text-text-secondary">{totals?.current != null ? `${totals.current}%` : '—'}</span>
+                </div>
+                <div className="mt-1 text-sm text-text-secondary">
+                  {totals?.earned ?? 0} / {totals?.possible ?? 0} points on graded work
+                  {totals?.final != null && <> · {totals.final}% counting ungraded work as zero</>}
+                </div>
+              </div>
+            ) : s.hide_totals ? (
+              <p className="mb-6 rounded-lg bg-surface-1 px-4 py-3 text-sm text-text-secondary">
+                Your instructor has chosen not to show course totals.
+              </p>
+            ) : (
+              <p className="mb-6 rounded-lg bg-surface-1 px-4 py-3 text-sm text-text-secondary">
+                Select a grading period to see its total.
+              </p>
             )}
-            <button
-              onClick={whatIfMode ? exitWhatIfMode : enterWhatIfMode}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                whatIfMode
-                  ? 'bg-purple-600 text-white hover:bg-purple-700'
-                  : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-              }`}
-              title={whatIfMode ? 'Exit What-If mode' : 'Enter What-If mode'}
-            >
-              <Calculator className="w-4 h-4" />
-              {whatIfMode ? 'Exit What-If' : 'What-If Grades'}
-            </button>
-          </div>
-        </div>
-      </div>
 
-      {/* What-If mode banner */}
-      {whatIfMode && (
-        <div className="bg-purple-50 border border-purple-200 rounded-lg px-4 py-3 mb-6 flex items-center gap-3">
-          <Calculator className="w-5 h-5 text-purple-600 flex-shrink-0" />
-          <div>
-            <p className="text-sm font-medium text-purple-800">What-If mode: these are hypothetical grades, not your actual grades.</p>
-            <p className="text-xs text-purple-600 mt-0.5">Edit any score below to see how it affects your overall grade. Click &quot;Reset&quot; to restore actual grades.</p>
-          </div>
-        </div>
-      )}
+            {sections.filter((sec) => sec.items.length > 0).map(({ group, items }) => (
+              <section key={group.id} className="mb-6" aria-labelledby={`grp-${group.id}`}>
+                <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 id={`grp-${group.id}`} className="text-lg font-semibold">{group.name}</h2>
+                  <span className="text-sm text-text-secondary">
+                    {[s.apply_assignment_group_weights && group.group_weight ? `${group.group_weight}% of total` : '',
+                      rulesText(group.rules),
+                      !whatIf && group.score != null ? `${group.score}%` : '']
+                      .filter(Boolean).join(' · ')}
+                  </span>
+                </div>
+                <div className="overflow-x-auto rounded-lg bg-surface-0 shadow">
+                  <table className="min-w-full">
+                    <caption className="sr-only">{group.name} grades</caption>
+                    <thead>
+                      <tr className="border-b bg-surface-1 text-left text-xs uppercase text-text-secondary">
+                        <th scope="col" className="px-4 py-3">Assignment</th>
+                        <th scope="col" className="px-4 py-3">Due</th>
+                        <th scope="col" className="px-4 py-3 text-center">Status</th>
+                        <th scope="col" className="px-4 py-3 text-right">Score</th>
+                        <th scope="col" className="px-2 py-3"><span className="sr-only">Feedback</span></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border-subtle">
+                      {items.map((a) => (
+                        <AssignmentRow
+                          key={a.id}
+                          a={a}
+                          courseId={courseId}
+                          whatIf={whatIf}
+                          whatIfValue={whatIfScores[a.id]}
+                          onWhatIf={onWhatIf}
+                          scale={s.grading_scale}
+                          dropped={totals?.dropped?.has(a.id)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ))}
 
-      {/* Overall Grade Summary */}
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm text-gray-500 uppercase tracking-wide font-medium">
-              {whatIfMode ? <span className="text-purple-600">Hypothetical Grade</span> : 'Current Grade'}
-            </div>
-            <div className="mt-1 flex items-baseline gap-3">
-              <span className={`text-4xl font-bold ${gradeColor(letter)}`}>{letter}</span>
-              {totals.pct !== null && (
-                <span className="text-2xl text-gray-600">{totals.pct}%</span>
-              )}
-            </div>
-            <div className="text-sm text-gray-500 mt-1">
-              {totals.earned} / {totals.possible} points earned
-            </div>
-          </div>
-          <div className="text-right text-sm text-gray-500">
-            {assignments.length} assignment{assignments.length !== 1 ? 's' : ''}
-            {quizzes.length > 0 && (<>, {quizzes.length} quiz{quizzes.length !== 1 ? 'zes' : ''}</>)}
-          </div>
-        </div>
-      </div>
-
-      {/* Assignment Groups */}
-      {grouped.map(group => (
-        <div key={group.id || 'other'} className="mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-lg font-semibold text-gray-800">{group.name}</h3>
-            {group.weight != null && (
-              <span className="text-sm text-gray-500">{group.weight}% of total</span>
+            {s.assignments.length === 0 && (
+              <div className="rounded-lg bg-surface-0 p-8 text-center text-text-secondary shadow">
+                {t('studentGradesPage.noGrades')}
+              </div>
             )}
-          </div>
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <div className="overflow-x-auto">
-            <table className="min-w-full" aria-label="Grades">
-              <thead>
-                <tr className="bg-gray-50 border-b">
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Assignment</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Score</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {group.items.map(a => {
-                  const sub = submissions[a.id];
-                  // B109: the API withholds the score until the grade is
-                  // posted and serializes posted_at, so posted_at decides.
-                  const scoreVisible = !sub || !!sub.posted_at;
-                  const score = scoreVisible ? sub?.score : null;
-                  const pts = a.points_possible ?? 0;
-                  const pct = (score !== null && score !== undefined && pts > 0)
-                    ? ((parseFloat(score) / pts) * 100).toFixed(0)
-                    : null;
 
-                  return (
-                    <tr key={a.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <Link
-                            to={`/courses/${courseId}/assignments/${a.id}`}
-                            className="text-blue-600 hover:underline text-sm font-medium"
-                          >
-                            {a.name}
-                          </Link>
-                          {isRecentlyGraded(sub) && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 text-xs font-semibold rounded bg-orange-100 text-orange-700 animate-pulse">
-                              New
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
-                        {formatDate(a.due_at)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {statusBadge(sub)}
-                      </td>
-                      <td className="px-4 py-3 text-right whitespace-nowrap">
-                        {whatIfMode ? (() => {
-                          const wiKey = `a_${a.id}`;
-                          const wiVal = whatIfScores[wiKey] ?? '';
-                          const wiScore = wiVal !== '' ? parseFloat(wiVal) : null;
-                          const wiPct = (wiScore !== null && !isNaN(wiScore) && pts > 0)
-                            ? ((wiScore / pts) * 100).toFixed(0)
-                            : null;
-                          return (
-                            <div className="flex items-center justify-end gap-1">
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                value={wiVal}
-                                onChange={(e) => handleWhatIfChange(wiKey, e.target.value)}
-                                className="w-16 px-2 py-1 text-sm text-right font-semibold border border-purple-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-400 bg-purple-50"
-                                placeholder="-"
-                                aria-label={`What-if score for ${a.name}`}
-                              />
-                              <span className="text-sm text-gray-500">/{pts}</span>
-                              {wiPct !== null && (
-                                <span className={`ml-1 text-xs font-medium ${gradeColor(getLetterGrade(wiPct, gradingScale))}`}>
-                                  {wiPct}%
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })() : (
-                          sub?.excused && scoreVisible ? (
-                            <span className="text-xs text-gray-500 italic">Excused</span>
-                          ) : !scoreVisible && a.post_policy === 'manual' && sub?.submitted_at ? (
-                            <span className="text-xs text-gray-400 italic">Not posted</span>
-                          ) : score !== null && score !== undefined ? (
-                            <div>
-                              <span className="text-sm font-semibold text-gray-900">
-                                {parseFloat(score)}/{pts}
-                              </span>
-                              {pct !== null && (
-                                <span className={`ml-2 text-xs font-medium ${gradeColor(getLetterGrade(pct, gradingScale))}`}>
-                                  {pct}%
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-sm text-gray-400">-/{pts}</span>
-                          )
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            </div>
-          </div>
-        </div>
-      ))}
-
-      {/* Quizzes */}
-      {quizzes.length > 0 && (
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-lg font-semibold text-gray-800">Quizzes</h3>
-            <span className="text-xs text-gray-500">Not included in the course total</span>
-          </div>
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <div className="overflow-x-auto">
-            <table className="min-w-full">
-              <thead>
-                <tr className="bg-gray-50 border-b">
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quiz</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Score</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {quizzes.map(q => {
-                  const qs = quizSubmissions[q.id];
-                  const score = qs?.score;
-                  const pts = q.points_possible ?? 0;
-                  const pct = (score !== null && score !== undefined && pts > 0)
-                    ? ((parseFloat(score) / pts) * 100).toFixed(0)
-                    : null;
-
-                  const quizStatus = () => {
-                    if (!qs) return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500">Not attempted</span>;
-                    if (qs.workflow_state === 'complete') return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">Completed</span>;
-                    if (qs.workflow_state === 'pending_review') return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700">Pending review</span>;
-                    if (qs.workflow_state === 'untaken' && qs.started_at) return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-yellow-100 text-yellow-700">In progress</span>;
-                    return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500">Not attempted</span>;
-                  };
-
-                  const quizLink = qs && qs.workflow_state === 'complete'
-                    ? `/courses/${courseId}/quizzes/${q.id}/submissions/${qs.id}/review`
-                    : `/courses/${courseId}/quizzes/${q.id}`;
-
-                  return (
-                    <tr key={q.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <Link
-                            to={quizLink}
-                            className="text-blue-600 hover:underline text-sm font-medium"
-                          >
-                            {q.title}
-                          </Link>
-                          {qs && qs.workflow_state === 'complete' && (
-                            <Link
-                              to={`/courses/${courseId}/quizzes/${q.id}/submissions/${qs.id}/review`}
-                              className="text-xs text-purple-600 hover:underline"
-                            >
-                              Review
-                            </Link>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
-                        {formatDate(q.due_at)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {quizStatus()}
-                      </td>
-                      <td className="px-4 py-3 text-right whitespace-nowrap">
-                        {whatIfMode ? (() => {
-                          const wiKey = `q_${q.id}`;
-                          const wiVal = whatIfScores[wiKey] ?? '';
-                          const wiScore = wiVal !== '' ? parseFloat(wiVal) : null;
-                          const wiPct = (wiScore !== null && !isNaN(wiScore) && pts > 0)
-                            ? ((wiScore / pts) * 100).toFixed(0)
-                            : null;
-                          return (
-                            <div className="flex items-center justify-end gap-1">
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                value={wiVal}
-                                onChange={(e) => handleWhatIfChange(wiKey, e.target.value)}
-                                className="w-16 px-2 py-1 text-sm text-right font-semibold border border-purple-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-400 bg-purple-50"
-                                placeholder="-"
-                                aria-label={`What-if score for ${q.title}`}
-                              />
-                              <span className="text-sm text-gray-500">/{pts}</span>
-                              {wiPct !== null && (
-                                <span className={`ml-1 text-xs font-medium ${gradeColor(getLetterGrade(wiPct, gradingScale))}`}>
-                                  {wiPct}%
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })() : (
-                          score !== null && score !== undefined ? (
-                            <div>
-                              <span className="text-sm font-semibold text-gray-900">
-                                {parseFloat(score)}/{pts}
-                              </span>
-                              {pct !== null && (
-                                <span className={`ml-2 text-xs font-medium ${gradeColor(getLetterGrade(pct, gradingScale))}`}>
-                                  {pct}%
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-sm text-gray-400">-/{pts}</span>
-                          )
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {assignments.length === 0 && quizzes.length === 0 && (
-        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
-          No assignments or quizzes in this course yet.
-        </div>
-      )}
-    </Layout>
+            <QuizScores courseId={courseId} studentId={observeeId || s.student_id} />
+          </Layout>
+        );
+      }}
+    </Page>
   );
 };
 
