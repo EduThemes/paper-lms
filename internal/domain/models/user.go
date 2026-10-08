@@ -27,7 +27,9 @@ type User struct {
 	PasswordHash string  `json:"-" gorm:"not null"`
 	AvatarURL    string  `json:"avatar_url"`
 	Role         string  `json:"role" gorm:"not null;default:'user'"` // admin, user
-	Locale       string  `json:"locale" gorm:"default:'en'"`
+	// Locale is the user's explicit UI language choice; '' = none (use the
+	// device choice, then the account default_locale). Migration 000076.
+	Locale       string  `json:"locale" gorm:"default:''"`
 	TimeZone     string  `json:"time_zone" gorm:"default:'America/New_York'"`
 	// LeaderboardOptOut is the user-facing privacy toggle shipped in
 	// W2-C. When true, this user is excluded from public leaderboard

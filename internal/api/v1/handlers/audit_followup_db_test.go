@@ -352,3 +352,19 @@ func TestFERPACOPPA_CrossTenantAdminIsRefused(t *testing.T) {
 	own := mk(fxAdminA, 1)
 	assert.Equal(t, http.StatusOK, testutil.MakeRequest(own, http.MethodGet, fmt.Sprintf("/users/%d/pii_access_log", fxStudent), nil).StatusCode)
 }
+
+// F16: a user who never picked a language has no profile locale (''), so
+// the client falls back to the device choice and the account default
+// instead of a column default of 'en' that always won.
+func TestUsers_NoExplicitLocaleIsEmpty(t *testing.T) {
+	f := newFollowupFixture(t)
+	var u models.User
+	require.NoError(t, f.g.First(&u, fxStudent).Error)
+	assert.Equal(t, "", u.Locale)
+
+	u.Locale = "es"
+	require.NoError(t, f.g.Save(&u).Error)
+	var again models.User
+	require.NoError(t, f.g.First(&again, fxStudent).Error)
+	assert.Equal(t, "es", again.Locale)
+}
