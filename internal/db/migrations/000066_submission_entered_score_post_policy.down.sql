@@ -1,5 +1,5 @@
 -- The posted_at backfill is not reversible (it only released grades that
--- were already visible before 000071); only the new columns are dropped.
+-- were already visible before 000066); only the new columns are dropped.
 BEGIN;
 
 ALTER TABLE submissions

@@ -1,6 +1,6 @@
 -- Restoring the old per-user UNIQUE requires each student to be in at
 -- most one override row. Rows beyond the oldest per student (overrides on
--- other assignments, allowed since 000072) are dropped first; otherwise
+-- other assignments, allowed since 000067) are dropped first; otherwise
 -- the CREATE UNIQUE INDEX would fail.
 BEGIN;
 

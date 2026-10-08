@@ -68,7 +68,7 @@ func (r *EnrollmentTermRepository) ListByAccountID(ctx context.Context, accountI
 	}, nil
 }
 
-// FindBySISTermID — SIS term ids are unique per account (000091).
+// FindBySISTermID — SIS term ids are unique per account (000071).
 func (r *EnrollmentTermRepository) FindBySISTermID(ctx context.Context, sisTermID string, accountID uint) (*models.EnrollmentTerm, error) {
 	var term models.EnrollmentTerm
 	if err := r.db.WithContext(ctx).Where("sis_term_id = ? AND account_id = ? AND workflow_state != ?", sisTermID, accountID, "deleted").First(&term).Error; err != nil {

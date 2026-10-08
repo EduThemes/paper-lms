@@ -78,7 +78,7 @@ func TestLTIPlatformKeyRepo_CreateIfAbsentNeverOverwrites(t *testing.T) {
 	}
 }
 
-func TestMigration000096_HashesPlaintextClientSecrets(t *testing.T) {
+func TestMigration000075_HashesPlaintextClientSecrets(t *testing.T) {
 	g, cleanup := freshDB(t)
 	defer cleanup()
 	seedTenantAccountForWallet(t, g, 1)
@@ -88,7 +88,7 @@ func TestMigration000096_HashesPlaintextClientSecrets(t *testing.T) {
 		t.Fatalf("seed developer key: %v", err)
 	}
 
-	up, err := os.ReadFile("../../db/migrations/000096_hash_developer_key_secrets.up.sql")
+	up, err := os.ReadFile("../../db/migrations/000075_hash_developer_key_secrets.up.sql")
 	if err != nil {
 		t.Fatalf("read migration: %v", err)
 	}

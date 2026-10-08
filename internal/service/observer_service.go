@@ -98,7 +98,7 @@ type ObserverService struct {
 
 	// links is the durable pairing store (B177). When nil the service
 	// falls back to deriving pairings from ObserverEnrollment rows (the
-	// pre-000092 behavior), which unit tests with mock repos rely on.
+	// pre-000072 behavior), which unit tests with mock repos rely on.
 	links ObserverLinkStore
 
 	// Optional dependencies — only required for GetChildOverview. They are

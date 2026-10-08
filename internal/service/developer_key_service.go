@@ -16,7 +16,7 @@ import (
 
 // clientSecretHashPrefix marks a developer_keys.client_secret value that
 // holds a SHA-256 digest rather than the secret itself (B191). Migration
-// 000095 rewrites legacy plaintext rows into this form.
+// 000075 rewrites legacy plaintext rows into this form.
 const clientSecretHashPrefix = "sha256:"
 
 // HashClientSecret returns the at-rest form of an OAuth2 client secret.
@@ -70,7 +70,7 @@ func (s *DeveloperKeyService) Create(ctx context.Context, key *models.DeveloperK
 
 // VerifyClientSecret reports whether presented is the key's client secret.
 // Comparison is constant-time. Legacy rows that still hold the plaintext
-// (written before migration 000095) are compared directly.
+// (written before migration 000075) are compared directly.
 func (s *DeveloperKeyService) VerifyClientSecret(key *models.DeveloperKey, presented string) bool {
 	return VerifyClientSecret(key, presented)
 }

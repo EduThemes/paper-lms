@@ -21,7 +21,7 @@ type QuizQuestion struct {
 	BankItemID *uint `json:"bank_item_id" gorm:"index"`
 	StimulusID *uint `json:"stimulus_id" gorm:"index"`
 	// QuestionBankEntryID is set on the per-quiz copy of a question-bank
-	// entry drawn by a bank-linked question group (migration 000076). It
+	// entry drawn by a bank-linked question group (migration 000068). It
 	// records provenance so later attempts reuse the same copy; these
 	// copies are never treated as ungrouped quiz questions.
 	QuestionBankEntryID *uint `json:"question_bank_entry_id" gorm:"column:question_bank_entry_id;index"`

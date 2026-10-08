@@ -1,7 +1,7 @@
 package postgres_test
 
 // Grading-lane parity regressions that need real SQL (post/hide predicate,
-// override-student uniqueness and the 000072 migration). Gated on
+// override-student uniqueness and the 000067 migration). Gated on
 // PARITY_DB_URL / DATABASE_URL via freshDB. All data is made up.
 
 import (
@@ -174,10 +174,10 @@ func TestGradingParity_OverrideStudentSlots(t *testing.T) {
 	}
 }
 
-// 000072 down must apply even after students joined overrides on several
+// 000067 down must apply even after students joined overrides on several
 // assignments (the restored UNIQUE(user_id) would otherwise fail), and up
 // must re-apply cleanly.
-func TestGradingParity_Migration000072Reversible(t *testing.T) {
+func TestGradingParity_Migration000067Reversible(t *testing.T) {
 	g, cleanup := freshDB(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -194,8 +194,8 @@ func TestGradingParity_Migration000072Reversible(t *testing.T) {
 	}
 
 	for _, f := range []string{
-		"../../db/migrations/000072_override_student_unique_per_assignment.down.sql",
-		"../../db/migrations/000072_override_student_unique_per_assignment.up.sql",
+		"../../db/migrations/000067_override_student_unique_per_assignment.down.sql",
+		"../../db/migrations/000067_override_student_unique_per_assignment.up.sql",
 	} {
 		sqlText, err := os.ReadFile(f)
 		if err != nil {

@@ -70,7 +70,7 @@ func TestOneRosterRunDueAutoSyncs(t *testing.T) {
 }
 
 // A sync that fails before it starts (here: the sync-log INSERT fails,
-// as it did on every migration-built database before 000093) must not
+// as it did on every migration-built database before 000073) must not
 // leave the connection marked "syncing": that state refused every later
 // manual sync as "already in progress" and auto-sync never found it due.
 func TestOneRosterSyncStartFailureReleasesConnection(t *testing.T) {

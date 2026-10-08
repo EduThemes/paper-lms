@@ -9,7 +9,7 @@ import (
 )
 
 // ObserverLinkRepository persists observer -> student pairings
-// (migration 000092, B177).
+// (migration 000072, B177).
 type ObserverLinkRepository struct {
 	db *gorm.DB
 }

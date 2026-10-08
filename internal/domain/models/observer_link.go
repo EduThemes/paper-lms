@@ -13,7 +13,7 @@ const (
 )
 
 // ObserverLink is the durable observer → student pairing (Canvas's
-// UserObservationLink, migration 000092). Before it existed the pairing
+// UserObservationLink, migration 000072). Before it existed the pairing
 // lived only in the ObserverEnrollment rows created at link time, so it
 // was a one-time snapshot (B177): a parent who paired while the child
 // had no courses was refused, later courses never got an observer
