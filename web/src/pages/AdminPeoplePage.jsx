@@ -19,16 +19,21 @@ import Layout from '../components/Layout';
 import Page from '../components/Page';
 import { useUsersList, useUpdateUserRole } from '../services/apiQueries';
 
+// Roles an admin can assign from this page. super_admin is never
+// assignable here, but a super_admin row must still render as such (it
+// used to fall through to the 'user' option, so any change demoted them).
 const ROLES = ['user', 'observer', 'teacher', 'admin'];
 
 const ROLE_LABELS = {
-  user:     'User',
-  observer: 'Observer',
-  teacher:  'Teacher',
-  admin:    'Admin',
+  user:        'User',
+  observer:    'Observer',
+  teacher:     'Teacher',
+  admin:       'Admin',
+  super_admin: 'Super admin',
 };
 
 const ROLE_BADGE = {
+  super_admin: 'bg-brand-50 text-brand-700 border-brand-200',
   admin:    'bg-brand-50 text-brand-700 border-brand-200',
   teacher:  'bg-accent-success/10 text-accent-success border-accent-success/30',
   observer: 'bg-accent-warning/10 text-accent-warning border-accent-warning/30',
@@ -118,6 +123,10 @@ const AdminPeoplePage = () => {
                       const role = u.role || 'user';
                       const isSelf = currentUser?.id === u.id;
                       const isSaving = updateRole.isPending && updateRole.variables?.userId === u.id;
+                      // Only a super_admin may change a super_admin (the API
+                      // enforces the same rule).
+                      const isProtected = role === 'super_admin' && currentUser?.role !== 'super_admin';
+                      const options = role === 'super_admin' ? ['super_admin', ...ROLES] : ROLES;
                       return (
                         <tr key={u.id} className="border-t border-border-default hover:bg-surface-1">
                           <td className="px-4 py-2 font-medium text-text-primary">{u.name || '(unnamed)'}</td>
@@ -130,13 +139,22 @@ const AdminPeoplePage = () => {
                           <td className="px-4 py-2">
                             <select
                               value={role}
-                              disabled={isSelf || isSaving}
-                              onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                              disabled={isSelf || isSaving || isProtected}
+                              onChange={(e) => {
+                                if (e.target.value !== 'super_admin') handleRoleChange(u.id, e.target.value);
+                              }}
                               className="rounded-md border border-border-strong bg-surface-0 px-2 py-1 text-xs disabled:opacity-50"
-                              title={isSelf ? 'You cannot change your own role here' : ''}
+                              aria-label={`Change role for ${u.name || 'user'}`}
+                              title={
+                                isSelf
+                                  ? 'You cannot change your own role here'
+                                  : isProtected
+                                    ? 'Only a super admin can change a super admin'
+                                    : ''
+                              }
                             >
-                              {ROLES.map((r) => (
-                                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                              {options.map((r) => (
+                                <option key={r} value={r} disabled={r === 'super_admin'}>{ROLE_LABELS[r]}</option>
                               ))}
                             </select>
                           </td>

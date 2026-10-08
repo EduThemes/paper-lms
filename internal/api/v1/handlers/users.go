@@ -524,6 +524,18 @@ func (h *UserHandler) ChangePassword(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"changed": true})
 }
 
+// callerMayManageUser reports whether the caller may change target's
+// role, suspension or password state. A super_admin (platform operator)
+// sits above account admins: an account admin must not be able to demote,
+// suspend or force-reset one (B175). Super admins may manage anyone.
+func callerMayManageUser(c *fiber.Ctx, target *models.User) bool {
+	if target.Role != models.RoleSuperUser {
+		return true
+	}
+	isSuper, _ := c.Locals("is_super_admin").(bool)
+	return isSuper
+}
+
 // UpdateUserRole sets a user's role. Admin-only at the route level.
 func (h *UserHandler) UpdateUserRole(c *fiber.Ctx) error {
 	id, err := c.ParamsInt("id")
@@ -548,6 +560,9 @@ func (h *UserHandler) UpdateUserRole(c *fiber.Ctx) error {
 	user, err := h.userService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "user")
+	}
+	if !callerMayManageUser(c, user) {
+		return responses.Forbidden(c, "Only a super_admin can change a super_admin")
 	}
 	user.Role = role
 	if err := h.userService.Update(c.Context(), user); err != nil {
@@ -576,6 +591,9 @@ func (h *UserHandler) UpdateUserSuspension(c *fiber.Ctx) error {
 	user, err := h.userService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "user")
+	}
+	if !callerMayManageUser(c, user) {
+		return responses.Forbidden(c, "Only a super_admin can change a super_admin")
 	}
 	user.Suspended = *input.Suspended
 	// A manual decision supersedes roster provenance: clear the SIS flag
@@ -607,6 +625,9 @@ func (h *UserHandler) BulkUpdateSuspension(c *fiber.Ctx) error {
 		if err != nil {
 			continue // cross-tenant or missing — skip, don't leak
 		}
+		if !callerMayManageUser(c, user) {
+			continue // a super_admin is out of an account admin's reach
+		}
 		user.Suspended = *input.Suspended
 		// Manual decision supersedes roster provenance (see UpdateUserSuspension).
 		user.SuspendedBySIS = false
@@ -630,6 +651,9 @@ func (h *UserHandler) ForcePasswordReset(c *fiber.Ctx) error {
 	user, err := h.userService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "user")
+	}
+	if !callerMayManageUser(c, user) {
+		return responses.Forbidden(c, "Only a super_admin can change a super_admin")
 	}
 	user.RequiresPasswordReset = true
 	if err := h.userService.Update(c.Context(), user); err != nil {
