@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { api } from '../services/api';
 import BrandLogo from '../components/brand/BrandLogo';
 import { b64urlToBytes, bytesToB64url } from '../lib/webauthn';
+import { consumeSessionExpired } from '../utils/returnTo';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -142,7 +143,9 @@ const PaperLogo = () => (
 const LoginPageSSO = () => {
   const { t } = useTranslation();
   const [error, setError] = useState(null);
-  const [successMsg, setSuccessMsg] = useState(null);
+  // G160: say why the user is back on the sign-in page after an expiry.
+  const [successMsg, setSuccessMsg] = useState(() =>
+    consumeSessionExpired() ? 'Your session expired. Sign in again to pick up where you left off.' : null);
   const [isRegister, setIsRegister] = useState(false);
   const [view, setView] = useState('login'); // 'login' | 'forgotPassword' | 'resetPassword'
   const [resetToken, setResetToken] = useState('');

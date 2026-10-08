@@ -214,6 +214,7 @@ const CourseSettingsPage = () => {
     name: '', course_code: '', default_view: 'modules', ui_mode: 'standard',
     license: 'private', is_public: false, start_at: '', end_at: '',
     apply_assignment_group_weights: false,
+    hide_final_grades: false,
   });
   const [navTabs, setNavTabs] = useState(null);
   const [buttons, setButtons] = useState([]);
@@ -256,6 +257,7 @@ const CourseSettingsPage = () => {
       start_at: fmtDate(course.start_at),
       end_at: fmtDate(course.end_at),
       apply_assignment_group_weights: course.apply_assignment_group_weights || false,
+      hide_final_grades: course.hide_final_grades || false,
     };
     setForm(nextForm);
 
@@ -323,7 +325,8 @@ const CourseSettingsPage = () => {
     const gradingChanged =
       (base.gradingScale ? !eq(gradingScale, base.gradingScale) : false) ||
       (base.latePolicy ? !eq(latePolicy, base.latePolicy) : false) ||
-      (base.form ? form.apply_assignment_group_weights !== base.form.apply_assignment_group_weights : false);
+      (base.form ? form.apply_assignment_group_weights !== base.form.apply_assignment_group_weights : false) ||
+      (base.form ? form.hide_final_grades !== base.form.hide_final_grades : false);
     return {
       general: generalChanged,
       navigation: navigationChanged,
@@ -833,6 +836,17 @@ const CourseSettingsPage = () => {
                     />
                     <Label htmlFor="weight-groups" className="cursor-pointer">
                       Weight final grade based on assignment groups
+                    </Label>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <input
+                      id="hide-final-grades"
+                      type="checkbox"
+                      checked={form.hide_final_grades}
+                      onChange={(e) => updateForm({ hide_final_grades: e.target.checked })}
+                    />
+                    <Label htmlFor="hide-final-grades" className="cursor-pointer">
+                      Hide totals in student grades summary
                     </Label>
                   </div>
                 </CardContent>

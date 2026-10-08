@@ -122,6 +122,11 @@ const AccountSettingsPage = React.lazy(() => import('./pages/AccountSettingsPage
 const SmartSearchPage = React.lazy(() => import('./pages/SmartSearchPage'));
 const CommonsPage = React.lazy(() => import('./pages/CommonsPage'));
 const CommonsPublishPage = React.lazy(() => import('./pages/CommonsPublishPage'));
+// Learner dashboard lane: planner, profile, legal pages, route a11y.
+const PlannerPage = React.lazy(() => import('./pages/PlannerPage'));
+const ProfilePage = React.lazy(() => import('./pages/ProfilePage'));
+const LegalPage = React.lazy(() => import('./pages/LegalPage'));
+import RouteAnnouncer from './components/RouteAnnouncer';
 
 const App = () => {
   const { user, loading } = useAuth();
@@ -158,8 +163,15 @@ const App = () => {
 
   return (
     <BrowserRouter>
+      <RouteAnnouncer />
       <React.Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-gray-600">Loading...</div></div>}>
       <Routes>
+        <Route path="/privacy" element={<LegalPage kind="privacy" />} />
+        <Route path="/terms" element={<LegalPage kind="terms" />} />
+        <Route path="/accessibility" element={<LegalPage kind="accessibility" />} />
+        <Route path="/planner" element={<ProtectedRoute><PlannerPage /></ProtectedRoute>} />
+        <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+        <Route path="/users/:userId/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPageSSO />} />
         {/* Phase 9-B — TOTP MFA. Verify route is unauthenticated
             (pending_token IS the credential); enroll route is gated

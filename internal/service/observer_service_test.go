@@ -121,6 +121,24 @@ func TestListObservedStudentProfiles_IncludesNames(t *testing.T) {
 // the Grades page: assignment-group weights apply, and a hidden (unposted)
 // grade counts as not graded yet.
 func TestObserverOverview_CourseGradeAppliesGroupWeights(t *testing.T) {
+	overview := weightedOverview(t, false)
+	require.Len(t, overview.Courses, 1)
+	require.NotNil(t, overview.Courses[0].CurrentGrade)
+	// Exams 50% x 80 + Homework 100% x 20 = 60%, not the 75% point average,
+	// and the hidden 0 does not drag homework down.
+	assert.InDelta(t, 60.0, *overview.Courses[0].CurrentGrade, 1e-9)
+}
+
+// G147: a course that hides totals from students (hide_final_grades) hides
+// the course grade from the observer dashboard too.
+func TestObserverOverview_HideFinalGradesHidesCourseGrade(t *testing.T) {
+	overview := weightedOverview(t, true)
+	require.Len(t, overview.Courses, 1)
+	assert.Nil(t, overview.Courses[0].CurrentGrade)
+}
+
+func weightedOverview(t *testing.T, hideFinalGrades bool) *service.ChildOverview {
+	t.Helper()
 	child := uint(200)
 	enrollments := new(mocks.MockEnrollmentRepository)
 	enrollments.On("ListByUserID", mock.Anything, uint(100), uint(0)).Return([]models.Enrollment{
@@ -131,7 +149,7 @@ func TestObserverOverview_CourseGradeAppliesGroupWeights(t *testing.T) {
 	}, nil)
 	enrollments.On("Create", mock.Anything, mock.Anything).Return(nil).Maybe()
 	courses := new(mocks.MockCourseRepository)
-	courses.On("FindByID", mock.Anything, uint(1), uint(0)).Return(&models.Course{ID: 1, Name: "Math", ApplyGroupWeights: true}, nil)
+	courses.On("FindByID", mock.Anything, uint(1), uint(0)).Return(&models.Course{ID: 1, Name: "Math", ApplyGroupWeights: true, HideFinalGrades: hideFinalGrades}, nil)
 
 	svc := service.NewObserverService(enrollments, courses, new(mocks.MockUserRepository))
 	submissions := new(mocks.MockSubmissionRepository)
@@ -167,9 +185,5 @@ func TestObserverOverview_CourseGradeAppliesGroupWeights(t *testing.T) {
 
 	overview, err := svc.GetChildOverview(context.Background(), 100, 200)
 	require.NoError(t, err)
-	require.Len(t, overview.Courses, 1)
-	require.NotNil(t, overview.Courses[0].CurrentGrade)
-	// Exams 50% x 80 + Homework 100% x 20 = 60%, not the 75% point average,
-	// and the hidden 0 does not drag homework down.
-	assert.InDelta(t, 60.0, *overview.Courses[0].CurrentGrade, 1e-9)
+	return overview
 }

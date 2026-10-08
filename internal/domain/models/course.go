@@ -24,6 +24,10 @@ type Course struct {
 	RestrictEnrollmentsToCourseDates bool `json:"restrict_enrollments_to_course_dates" gorm:"not null;default:false"`
 	RestrictStudentFutureView        bool `json:"restrict_student_future_view" gorm:"not null;default:false"`
 	RestrictStudentPastView          bool `json:"restrict_student_past_view" gorm:"not null;default:false"`
+	// HideFinalGrades hides the course total from students and observers
+	// on the Grades page (Canvas course setting hide_final_grades).
+	// Migration 000166.
+	HideFinalGrades bool `json:"hide_final_grades" gorm:"not null;default:false"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
 }

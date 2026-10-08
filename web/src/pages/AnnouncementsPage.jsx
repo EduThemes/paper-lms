@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { Megaphone, AlertTriangle, Clock, CheckCircle, Eye, Users, Plus, Edit2, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
+import { dateTimeLocalToISO, isoToDateTimeLocal } from '../utils/datetimeLocal';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import useScrollToHash from '../hooks/useScrollToHash';
@@ -16,7 +17,6 @@ import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import AnnouncementReplies from '../components/AnnouncementReplies';
 import { audienceLabel, validateAnnouncementForm } from '../utils/notifyInbox';
-import { isoToDateTimeLocal } from '../utils/datetimeLocal';
 
 const AnnouncementsPage = () => {
   const { t } = useTranslation();
@@ -136,7 +136,7 @@ const AnnouncementsPage = () => {
       payload.section_ids = formData.target_audience === 'sections' ? formData.section_ids : [];
 
       if (formData.schedule && formData.delayed_post_at) {
-        payload.delayed_post_at = new Date(formData.delayed_post_at).toISOString();
+        payload.delayed_post_at = dateTimeLocalToISO(formData.delayed_post_at);
       }
 
       if (editingId) {

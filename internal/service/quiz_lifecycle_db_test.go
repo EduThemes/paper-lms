@@ -923,11 +923,11 @@ func TestQuizLifecycle_PlannerListsGradedQuizOnce(t *testing.T) {
 	require.NoError(t, f.g.First(&linked, quiz.ID).Error)
 	require.NotNil(t, linked.AssignmentID)
 
-	// Planner notes / overrides have no tables in the migration chain;
-	// they are empty here and beside the point.
+	// Planner notes / overrides are empty here and beside the point.
 	planner := service.NewPlannerService(noPlannerNotes{}, noPlannerOverrides{},
 		postgres.NewEnrollmentRepository(f.g), postgres.NewAssignmentRepository(f.g), postgres.NewQuizRepository(f.g),
-		postgres.NewCalendarEventRepository(f.g))
+		postgres.NewCalendarEventRepository(f.g)).
+		SetLearnerRepository(postgres.NewLearnerRepository(f.g))
 	items, err := planner.GetPlannerItems(ctx, f.students[0], time.Now(), time.Now().Add(7*24*time.Hour))
 	require.NoError(t, err)
 	var kinds []string

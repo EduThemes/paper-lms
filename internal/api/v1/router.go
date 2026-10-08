@@ -172,6 +172,8 @@ type Router struct {
 	CanvasAPIHandler    *handlers.CanvasAPIHandler
 	SessionTokenHandler *handlers.SessionTokenHandler
 	CanvasIDs           fiber.Handler
+	// Learner dashboard lane (routes_learner.go).
+	LearnerHandler *handlers.LearnerHandler
 
 	// Middleware
 	AuthMiddleware *middleware.AuthMiddleware
@@ -888,4 +890,5 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerAdminAccountsRoutes(protected, admin, enrolled, instructor)
 	r.registerLTIRoutes(protected, admin, enrolled, instructor)
 	r.registerAPICompatRoutes(app, protected, authLimit, admin, enrolled, selfOrAdmin)
+	r.registerLearnerRoutes(protected, enrolled)
 }

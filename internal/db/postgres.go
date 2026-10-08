@@ -282,6 +282,15 @@ func allAutoMigrateModels() []interface{} {
 		// store backing the settings service in internal/service/settings/;
 		// catalog declares the typed vocabulary that maps to these rows.
 		&models.Setting{},
+		// Learner dashboard lane: planner (tables first created in the SQL
+		// chain by 000163), dashboard course preferences, observer alerts
+		// and profile links (000163-000165).
+		&models.PlannerNote{},
+		&models.PlannerOverride{},
+		&models.UserCoursePreference{},
+		&models.ObserverAlertThreshold{},
+		&models.ObserverAlert{},
+		&models.UserProfileLink{},
 	}
 }
 

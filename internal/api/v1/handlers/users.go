@@ -505,7 +505,14 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 	if input.User.Locale != "" {
 		user.Locale = input.User.Locale
 	}
-	if input.User.TimeZone != "" {
+	if input.User.TimeZone != "" && input.User.TimeZone != user.TimeZone {
+		// G157: due dates are shown and entered in this zone, so a new
+		// value must be a real IANA zone name. (The old settings form took
+		// free text; re-sending a legacy stored value unchanged must not
+		// block saving the other fields.)
+		if _, tzErr := time.LoadLocation(input.User.TimeZone); tzErr != nil || input.User.TimeZone == "Local" {
+			return responses.BadRequest(c, "time_zone must be an IANA time zone name such as America/Chicago")
+		}
 		user.TimeZone = input.User.TimeZone
 	}
 
@@ -710,6 +717,8 @@ func (h *UserHandler) GetSelf(c *fiber.Ctx) error {
 		"avatar_url":    user.AvatarURL,
 		"locale":        user.Locale,
 		"time_zone":     user.TimeZone,
+		"pronouns":      user.Pronouns,
+		"bio":           user.Bio,
 		"role":          user.Role,
 		"account_id":    user.AccountID,
 		"account_default_locale": h.accountDefaultLocale(c.Context(), user.AccountID),

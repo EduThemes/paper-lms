@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { FileCheck, ChevronDown, ChevronRight, Plus, Eye, EyeOff, Search, Users } from 'lucide-react';
 import { api } from '../services/api';
+import { dateTimeLocalToISO, isoToDateTimeLocal } from '../utils/datetimeLocal';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
@@ -78,7 +79,7 @@ const AssignmentsPage = () => {
         name: newAssignment.name,
         description: newAssignment.description,
         points_possible: Number(newAssignment.points_possible),
-        due_at: newAssignment.due_at ? new Date(newAssignment.due_at).toISOString() : null,
+        due_at: newAssignment.due_at ? dateTimeLocalToISO(newAssignment.due_at) : null,
         submission_types: newAssignment.submission_types,
         anonymous_grading: newAssignment.anonymous_grading,
         post_policy: newAssignment.post_policy,

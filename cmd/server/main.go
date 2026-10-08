@@ -1018,6 +1018,17 @@ func main() {
 	qtiImportService := service.NewQTIImportService(quizRepo, quizQuestionRepo, quizItemBankService, quizStimulusService, cfg.FileStoragePath)
 	qtiImportHandler := handlers.NewQTIImportHandler(qtiImportService)
 
+	// Learner dashboard lane: planner, dashboard customization, activity
+	// stream, missing work, grade summary, observer alerts, profile.
+	learnerRepo := postgres.NewLearnerRepository(database)
+	plannerService := service.NewPlannerService(postgres.NewPlannerNoteRepository(database), postgres.NewPlannerOverrideRepository(database), enrollmentRepo, assignmentRepo, quizRepo, calendarEventRepo).
+		SetLearnerRepository(learnerRepo).SetAnnouncementVisibility(announcementService)
+	learnerDashboardService := service.NewLearnerDashboardService(learnerRepo, enrollmentRepo).SetAnnouncementVisibility(announcementService)
+	gradeSummaryService := service.NewGradeSummaryService(learnerRepo, enrollmentRepo, gradingStandardRepo)
+	observerAlertService := service.NewObserverAlertService(learnerRepo, observerService, learnerDashboardService, gradeSummaryService).SetAnnouncementVisibility(announcementService)
+	learnerHandler := handlers.NewLearnerHandler(plannerService, learnerDashboardService, gradeSummaryService, observerAlertService,
+		service.NewUserProfileService(userRepo, learnerRepo, storageBackend), observerService, userRepo)
+
 	authMiddleware := middleware.NewAuthMiddleware(cfg.JWTSecret, accessTokenService, userRepo, tokenBlacklist)
 	permMiddleware := middleware.NewPermissionMiddleware(enrollmentRepo, userRepo, courseRepo)
 	pagesFilesRoutes := wirePagesFiles(pagesFilesDeps{database: database, pageRepo: pageRepo, courseRepo: courseRepo, pageHandler: pageHandler,
@@ -1118,6 +1129,7 @@ func main() {
 		SetupHandler:              setupHandler,
 		SuperAdminSettingsHandler: superAdminSettingsHandler,
 		PagesFiles:                pagesFilesRoutes,
+		LearnerHandler:            learnerHandler,
 
 		FeatureFlagHandler:           featureFlagHandler,
 		CustomGradebookColumnHandler: customGradebookColumnHandler,
@@ -1290,6 +1302,7 @@ func main() {
 		sched.Register("dailyDigest", scheduler.DailyAt(7), dailyJob)
 		sched.Register("onerosterAutoSync", scheduler.EveryTick(), scheduler.NewOneRosterAutoSyncJob(onerosterService))
 		sched.Register("linkGradedQuizzes", scheduler.EveryTick(), scheduler.NewQuizAssignmentLinkJob(quizService))
+		sched.Register("observerAlerts", scheduler.EveryTick(), observerAlertService.EvaluateAll)
 
 		schedCtx, schedCancel := context.WithCancel(context.Background())
 		defer schedCancel()

@@ -13,6 +13,7 @@ import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
 import { SubmissionBody as RichOrPlainText } from '../components/SafeHTML';
 import { toEditorHTML, richValueOrEmpty } from '../utils/richContent';
 import { htmlPreview, looksLikeHTML } from '../utils/html';
+import { clickableProps } from '../utils/a11y';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -65,7 +66,7 @@ const CalendarGrid = ({ events, currentDate, onEventClick, onDayClick }) => {
             <div
               key={cell.key}
               className="border-b border-e border-border-subtle min-h-[5rem] p-1 hover:bg-brand-50 cursor-pointer transition-colors"
-              onClick={() => onDayClick && onDayClick(cell.day)}
+              {...clickableProps(() => onDayClick && onDayClick(cell.day))}
             >
               <div className="flex items-center justify-between mb-0.5">
                 <span

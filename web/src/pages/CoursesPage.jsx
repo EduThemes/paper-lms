@@ -14,17 +14,22 @@
 
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, BookOpen, Users } from 'lucide-react';
+import { Plus, BookOpen, Users, Star } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
 import Page from '../components/Page';
 import { useCoursesAll, useCreateCourse } from '../services/apiQueries';
+import { learnerApi, useDashboardCards, useLearnerMutation } from '../services/api_learner';
 
 const CoursesPage = () => {
   const { user } = useAuth();
   const query = useCoursesAll(1, 100);
   const createCourse = useCreateCourse();
   const [showCreate, setShowCreate] = useState(false);
+  // G145: star a course to put it on the dashboard (favorites).
+  const cards = useDashboardCards(true);
+  const favoriteById = new Map((cards.data || []).map((c) => [c.id, c.isFavorited]));
+  const toggleFavorite = useLearnerMutation(({ id, fav }) => learnerApi.setFavorite(id, fav));
 
   const canCreate = user?.role === 'admin' || user?.role === 'teacher';
 
@@ -125,10 +130,21 @@ const CoursesPage = () => {
             ) : (
               <div className="bg-surface-0 rounded-lg shadow divide-y">
                 {courses.map((course) => (
+                <div key={course.id} className="flex items-center">
+                {favoriteById.has(course.id) && (
+                  <button
+                    type="button"
+                    onClick={() => toggleFavorite.mutate({ id: course.id, fav: !favoriteById.get(course.id) })}
+                    aria-pressed={!!favoriteById.get(course.id)}
+                    aria-label={`${favoriteById.get(course.id) ? 'Remove' : 'Add'} ${course.name} ${favoriteById.get(course.id) ? 'from' : 'to'} dashboard favorites`}
+                    className="ms-3 rounded p-1 text-text-secondary hover:bg-surface-1"
+                  >
+                    <Star className={`w-4 h-4 ${favoriteById.get(course.id) ? 'fill-amber-400 text-amber-500' : ''}`} aria-hidden="true" />
+                  </button>
+                )}
                 <Link
-                  key={course.id}
                   to={`/courses/${course.id}`}
-                  className="flex items-center justify-between p-4 hover:bg-surface-1"
+                  className="flex flex-1 items-center justify-between p-4 hover:bg-surface-1"
                 >
                   <div className="flex items-center gap-3">
                     <BookOpen className="w-5 h-5 text-brand-500" />
@@ -153,6 +169,7 @@ const CoursesPage = () => {
                     {course.workflow_state}
                   </span>
                 </Link>
+                </div>
                 ))}
               </div>
             )}

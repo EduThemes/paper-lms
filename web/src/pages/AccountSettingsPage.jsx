@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
+import TimeZoneSelect from '../components/learner/TimeZoneSelect';
 
 const TABS = [
   { id: 'profile', label: 'Profile', icon: User },
@@ -97,14 +98,9 @@ function ProfileTab({ user, onSaved }) {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Time zone</label>
-            <input
-              type="text"
-              value={timeZone}
-              onChange={(e) => setTimeZone(e.target.value)}
-              placeholder="America/Chicago"
-              className="w-full rounded-md border border-border-default bg-surface-0 px-3 py-2 text-sm"
-            />
+            <label htmlFor="profile-time-zone" className="block text-sm font-medium mb-1">Time zone</label>
+            <TimeZoneSelect id="profile-time-zone" value={timeZone} onChange={setTimeZone} />
+            <p className="mt-1 text-xs text-text-secondary">Due dates are shown and entered in this time zone.</p>
           </div>
         </div>
         <button
@@ -124,6 +120,12 @@ function ProfileTab({ user, onSaved }) {
         <h3 className="text-sm font-semibold uppercase tracking-wider text-text-secondary">
           Preferences
         </h3>
+        <LinkCard
+          to="/profile"
+          icon={User}
+          title="Public profile"
+          description="Pronouns, a short bio, links and your profile picture."
+        />
         <LinkCard
           to="/settings/language"
           icon={Globe}

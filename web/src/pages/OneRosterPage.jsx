@@ -3,6 +3,7 @@ import { RefreshCw, Plus, Trash2, Edit3, AlertTriangle, X, Check, Clock, Loader2
 import Layout from '../components/Layout';
 import { getCSRFToken } from '../services/api';
 import useAccountId from '../hooks/useAccountId';
+import { clickableProps } from '../utils/a11y';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 const getHeaders = () => ({
@@ -580,7 +581,7 @@ const OneRosterPage = () => {
               {/* Connection header row */}
               <div
                 className="px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-surface-1"
-                onClick={() => handleSelectConnection(conn)}
+                {...clickableProps(() => handleSelectConnection(conn))}
               >
                 <div className="flex items-center gap-4 flex-1 min-w-0">
                   <div className="flex-shrink-0">
