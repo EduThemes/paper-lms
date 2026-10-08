@@ -371,6 +371,9 @@ func (s *PlannerService) Items(ctx context.Context, userID, accountID uint, q Pl
 		}
 		item.Completed = status.Submitted || status.Excused || status.Graded
 		mergeOverride(&item, overrideMap)
+		if sub != nil {
+			completeIfTurnedInAfterOverride(&item, overrideMap, sub.SubmittedAt)
+		}
 		items = append(items, item)
 	}
 
@@ -414,6 +417,9 @@ func (s *PlannerService) Items(ctx context.Context, userID, accountID uint, q Pl
 			Completed: done,
 		}
 		mergeOverride(&item, overrideMap)
+		if done {
+			completeIfTurnedInAfterOverride(&item, overrideMap, qs.FinishedAt)
+		}
 		items = append(items, item)
 	}
 
@@ -708,6 +714,27 @@ func (s *PlannerService) ListOverrides(ctx context.Context, userID uint) ([]mode
 	return s.overrideRepo.ListByUserID(ctx, userID)
 }
 
+// UpsertOverride sets the caller's override for one plannable. Only the
+// flags that are given change: dismissing an item from the missing list
+// must not clear its "done" mark, and checking it off must not undo a
+// dismissal.
+func (s *PlannerService) UpsertOverride(ctx context.Context, userID uint, plannableType string, plannableID uint, markedComplete, dismissed *bool) (*models.PlannerOverride, error) {
+	o := &models.PlannerOverride{UserID: userID, PlannableType: plannableType, PlannableID: plannableID}
+	if existing, err := s.overrideRepo.FindByUserAndPlannable(ctx, userID, plannableType, plannableID); err == nil && existing != nil {
+		o.MarkedComplete, o.Dismissed = existing.MarkedComplete, existing.Dismissed
+	}
+	if markedComplete != nil {
+		o.MarkedComplete = *markedComplete
+	}
+	if dismissed != nil {
+		o.Dismissed = *dismissed
+	}
+	if err := s.CreateOrUpdateOverride(ctx, o); err != nil {
+		return nil, err
+	}
+	return o, nil
+}
+
 // CreateOrUpdateOverride upserts the caller's override for one plannable.
 func (s *PlannerService) CreateOrUpdateOverride(ctx context.Context, override *models.PlannerOverride) error {
 	if override.PlannableType == "" {
@@ -777,6 +804,22 @@ func mergeOverride(item *PlannerItem, overrideMap map[string]*models.PlannerOver
 			Dismissed:      o.Dismissed,
 		}
 		item.Completed = o.MarkedComplete
+	}
+}
+
+// completeIfTurnedInAfterOverride marks graded work done when the student
+// turned it in after their last override change. Canvas does the same when
+// a submission is saved (it completes the planner override), so an item
+// left unchecked or dismissed from the missing list does not stay "not
+// done" once the work is actually submitted.
+func completeIfTurnedInAfterOverride(item *PlannerItem, overrideMap map[string]*models.PlannerOverride, turnedInAt *time.Time) {
+	if item.PlannerOverride == nil || item.PlannerOverride.MarkedComplete || turnedInAt == nil {
+		return
+	}
+	o := overrideMap[overrideKey(item.PlannableType, item.PlannableID)]
+	if o != nil && turnedInAt.After(o.UpdatedAt) {
+		item.Completed = true
+		item.PlannerOverride.MarkedComplete = true
 	}
 }
 

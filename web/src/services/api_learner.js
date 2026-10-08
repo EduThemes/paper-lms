@@ -29,12 +29,14 @@ export const learnerApi = {
   createPlannerNote: (note) => send('POST', '/planner_notes', note),
   updatePlannerNote: (id, note) => send('PUT', `/planner_notes/${id}`, note),
   deletePlannerNote: (id) => send('DELETE', `/planner_notes/${id}`),
+  // Only the flags given are sent; the server keeps the other one as is
+  // (dismissing from the missing list must not clear a "done" mark).
   setPlannerOverride: ({ plannableType, plannableId, markedComplete, dismissed }) =>
     send('POST', '/planner/overrides', {
       plannable_type: plannableType,
       plannable_id: plannableId,
-      marked_complete: !!markedComplete,
-      dismissed: !!dismissed,
+      ...(markedComplete === undefined ? {} : { marked_complete: !!markedComplete }),
+      ...(dismissed === undefined ? {} : { dismissed: !!dismissed }),
     }),
 
   // Dashboard

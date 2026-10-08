@@ -543,6 +543,77 @@ func TestLearnerObserverAlerts(t *testing.T) {
 	assert.Len(t, decodeList(t, data), 0)
 }
 
+// G149: a grade entered under a manual post policy alerts when it is
+// posted, even though it was graded long before the scan's high-water mark.
+func TestLearnerObserverAlerts_ManualPostAlertsWhenPosted(t *testing.T) {
+	f := newLearnerFixture(t)
+	resp, data := f.do("POST", "/observer_alert_thresholds", lnParent, 1, map[string]any{
+		"threshold": map[string]any{"user_id": lnStudent, "alert_type": "assignment_grade_low", "threshold": 70},
+	}, "")
+	require.Equal(t, 201, resp.StatusCode, string(data))
+
+	quiz := f.assignment(lnCourse, "Unit quiz", nil, 10, nil)
+	sub := f.grade(quiz.ID, lnStudent, 3, false)
+	require.NoError(t, f.g.Model(sub).Update("graded_at", time.Now().Add(-2*time.Hour)).Error)
+	require.NoError(t, f.alert.EvaluateAll(context.Background()))
+	_, data = f.do("GET", "/users/self/observer_alerts", lnParent, 1, nil, "")
+	assert.Len(t, decodeList(t, data), 0, "hidden grade: no alert yet")
+
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, f.g.Model(sub).Update("posted_at", time.Now()).Error)
+	require.NoError(t, f.alert.EvaluateAll(context.Background()))
+	_, data = f.do("GET", "/users/self/observer_alerts", lnParent, 1, nil, "")
+	alerts := decodeList(t, data)
+	require.Len(t, alerts, 1, "posting the grade raises the alert")
+	assert.Equal(t, "assignment_grade_low", alerts[0]["alert_type"])
+}
+
+// G144: an override only changes the flags it is given, and work turned in
+// after the student unchecked or dismissed it counts as done again.
+func TestLearnerPlanner_OverrideFlagsAndLaterSubmission(t *testing.T) {
+	f := newLearnerFixture(t)
+	now := time.Now()
+	essay := f.assignment(lnCourse, "Essay", ptrTime(now.Add(24*time.Hour)), 10, nil)
+
+	resp, data := f.do("POST", "/planner/overrides", lnStudent, 1, map[string]any{
+		"plannable_type": "assignment", "plannable_id": essay.ID, "marked_complete": true,
+	}, "")
+	require.Equal(t, 201, resp.StatusCode, string(data))
+	resp, data = f.do("POST", "/planner/overrides", lnStudent, 1, map[string]any{
+		"plannable_type": "assignment", "plannable_id": essay.ID, "dismissed": true,
+	}, "")
+	require.Equal(t, 201, resp.StatusCode, string(data))
+	o := decodeMap(t, data)
+	assert.Equal(t, true, o["marked_complete"], "dismissing keeps the done mark")
+	assert.Equal(t, true, o["dismissed"])
+
+	resp, data = f.do("POST", "/planner/overrides", lnStudent, 1, map[string]any{
+		"plannable_type": "assignment", "plannable_id": essay.ID, "marked_complete": false,
+	}, "")
+	require.Equal(t, 201, resp.StatusCode, string(data))
+	o = decodeMap(t, data)
+	assert.Equal(t, false, o["marked_complete"])
+	assert.Equal(t, true, o["dismissed"], "unchecking keeps the dismissal")
+
+	itemFor := func() map[string]any {
+		_, data := f.do("GET", "/planner/items", lnStudent, 1, nil, "")
+		for _, it := range decodeList(t, data) {
+			if it["plannable_type"] == "assignment" && it["plannable_id"] == float64(essay.ID) {
+				return it
+			}
+		}
+		t.Fatalf("essay not on the planner: %s", data)
+		return nil
+	}
+	assert.Equal(t, false, itemFor()["completed"], "explicitly not done")
+
+	time.Sleep(10 * time.Millisecond)
+	submitted := time.Now()
+	require.NoError(t, f.g.Create(&models.Submission{AssignmentID: essay.ID, UserID: lnStudent, SubmittedAt: &submitted,
+		WorkflowState: models.SubmissionSubmitted}).Error)
+	assert.Equal(t, true, itemFor()["completed"], "turned in after the override: done")
+}
+
 // G161: profile fields, link validation, visibility and avatar upload.
 func TestLearnerProfile(t *testing.T) {
 	f := newLearnerFixture(t)

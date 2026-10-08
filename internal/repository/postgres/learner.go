@@ -214,11 +214,15 @@ func (r *learnerRepo) RecentlyPostedSubmissions(ctx context.Context, userID uint
 	if len(courseIDs) == 0 {
 		return out, nil
 	}
+	// The student learns of a grade when it is posted, so the later of
+	// graded_at / posted_at is the event time (GREATEST skips NULLs). A
+	// grade entered under a manual post policy and posted hours later must
+	// still count as new when it is posted.
 	err := r.db.WithContext(ctx).
 		Where("user_id = ? AND posted_at IS NOT NULL AND (score IS NOT NULL OR excused = TRUE)", userID).
-		Where("COALESCE(graded_at, posted_at) >= ?", since).
+		Where("GREATEST(graded_at, posted_at) >= ?", since).
 		Where("assignment_id IN (SELECT id FROM assignments WHERE course_id IN ? AND workflow_state <> ?)", courseIDs, models.AssignmentDeleted).
-		Order("COALESCE(graded_at, posted_at) DESC").Limit(100).Find(&out).Error
+		Order("GREATEST(graded_at, posted_at) DESC").Limit(100).Find(&out).Error
 	return out, err
 }
 

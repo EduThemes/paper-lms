@@ -84,7 +84,8 @@ describe('DashboardPage', () => {
     const box = await screen.findByRole('checkbox', { name: /Mark done: Fractions worksheet/ });
     fireEvent.click(box);
     await waitFor(() => expect(posted).toHaveBeenCalledWith({
-      plannable_type: 'assignment', plannable_id: 7, marked_complete: true, dismissed: false,
+      // Only the flag being changed: a dismissal stays as it was.
+      plannable_type: 'assignment', plannable_id: 7, marked_complete: true,
     }));
     expect(screen.getByText('1 due this week')).toBeInTheDocument();
   });

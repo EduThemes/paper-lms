@@ -257,7 +257,8 @@ func (h *LearnerHandler) ListPlannerOverrides(c *fiber.Ctx) error {
 	return c.JSON(out)
 }
 
-// CreatePlannerOverride handles POST /planner/overrides (upsert by plannable).
+// CreatePlannerOverride handles POST /planner/overrides (upsert by
+// plannable). Flags left out of the body keep their stored value.
 func (h *LearnerHandler) CreatePlannerOverride(c *fiber.Ctx) error {
 	userID, err := getUserID(c)
 	if err != nil {
@@ -266,17 +267,14 @@ func (h *LearnerHandler) CreatePlannerOverride(c *fiber.Ctx) error {
 	var in struct {
 		PlannableType  string `json:"plannable_type"`
 		PlannableID    uint   `json:"plannable_id"`
-		MarkedComplete bool   `json:"marked_complete"`
-		Dismissed      bool   `json:"dismissed"`
+		MarkedComplete *bool  `json:"marked_complete"`
+		Dismissed      *bool  `json:"dismissed"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
-	o := &models.PlannerOverride{
-		UserID: userID, PlannableType: in.PlannableType, PlannableID: in.PlannableID,
-		MarkedComplete: in.MarkedComplete, Dismissed: in.Dismissed,
-	}
-	if err := h.planner.CreateOrUpdateOverride(c.Context(), o); err != nil {
+	o, err := h.planner.UpsertOverride(c.Context(), userID, in.PlannableType, in.PlannableID, in.MarkedComplete, in.Dismissed)
+	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 	return c.Status(fiber.StatusCreated).JSON(plannerOverrideJSON(o))
