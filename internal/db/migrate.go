@@ -174,3 +174,33 @@ func MigrateUp(db *gorm.DB) error {
 	}
 	return nil
 }
+
+// MigrateTo migrates up or down to exactly the given version. Migration
+// numbers are not contiguous (parallel lanes reserve blocks), so tests
+// that roll back to a version must use this rather than counting steps.
+func MigrateTo(db *gorm.DB, version uint) error {
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get sql.DB: %w", err)
+	}
+	subFS, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to create sub filesystem: %w", err)
+	}
+	source, err := iofs.New(subFS, ".")
+	if err != nil {
+		return fmt.Errorf("failed to create migration source: %w", err)
+	}
+	driver, err := postgres.WithInstance(sqlDB, &postgres.Config{})
+	if err != nil {
+		return fmt.Errorf("failed to create migration driver: %w", err)
+	}
+	m, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	if err != nil {
+		return fmt.Errorf("failed to create migrator: %w", err)
+	}
+	if err := m.Migrate(version); err != nil && err != migrate.ErrNoChange {
+		return err
+	}
+	return nil
+}

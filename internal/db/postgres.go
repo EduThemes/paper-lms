@@ -230,6 +230,10 @@ func allAutoMigrateModels() []interface{} {
 		&models.QuizItemBankItem{},
 		&models.QuizStimulus{},
 		&models.QuizQuestionOutcomeAlignment{},
+		// Quiz lifecycle: moderation, submission event log, regrades (000099-000101).
+		&models.QuizExtension{},
+		&models.QuizSubmissionEvent{},
+		&models.QuizQuestionRegrade{},
 		// Phase 6 Wave 1: gamification foundations (migrations 000032-000035).
 		// All indexes for these tables live in the SQL chain, not the GORM tags,
 		// because the migrations use DESC ordering and partial WHERE clauses
