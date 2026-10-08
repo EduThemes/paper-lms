@@ -99,6 +99,36 @@ func MigrateDown(db *gorm.DB, steps int) error {
 	return m.Steps(-steps)
 }
 
+// MigrateTo migrates up or down to exactly the given version. Unlike
+// MigrateDown's step count it is correct when the chain has gaps in its
+// numbering (parallel branches reserve number blocks).
+func MigrateTo(db *gorm.DB, version uint) error {
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get sql.DB: %w", err)
+	}
+	subFS, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to create sub filesystem: %w", err)
+	}
+	source, err := iofs.New(subFS, ".")
+	if err != nil {
+		return fmt.Errorf("failed to create migration source: %w", err)
+	}
+	driver, err := postgres.WithInstance(sqlDB, &postgres.Config{})
+	if err != nil {
+		return fmt.Errorf("failed to create migration driver: %w", err)
+	}
+	m, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	if err != nil {
+		return fmt.Errorf("failed to create migrator: %w", err)
+	}
+	if err := m.Migrate(version); err != nil && err != migrate.ErrNoChange {
+		return err
+	}
+	return nil
+}
+
 // MigrateVersion returns the current migration version.
 func MigrateVersion(db *gorm.DB) (uint, bool, error) {
 	sqlDB, err := db.DB()

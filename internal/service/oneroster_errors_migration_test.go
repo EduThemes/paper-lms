@@ -33,7 +33,7 @@ func TestMigration000073_IdempotentOnBigintColumn(t *testing.T) {
 	latest := version()
 
 	// Roll back to 72: the column is text again.
-	require.NoError(t, db.MigrateDown(g, int(latest-72)))
+	require.NoError(t, db.MigrateTo(g, 72))
 	require.Equal(t, uint(72), version())
 	assert.Equal(t, "text", dataType())
 
@@ -44,7 +44,7 @@ func TestMigration000073_IdempotentOnBigintColumn(t *testing.T) {
 	assert.Equal(t, "bigint", dataType())
 
 	// The legacy text column still converts, with an oversized number -> 0.
-	require.NoError(t, db.MigrateDown(g, int(latest-72)))
+	require.NoError(t, db.MigrateTo(g, 72))
 	require.NoError(t, g.Exec(`INSERT INTO one_roster_sync_logs (connection_id, sync_type, status, errors) VALUES (1, 'full', 'failed', '123456789012345678901234')`).Error)
 	require.NoError(t, db.MigrateUp(g))
 	assert.Equal(t, "bigint", dataType())
