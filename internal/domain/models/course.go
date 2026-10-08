@@ -21,4 +21,8 @@ type Course struct {
 	NavigationTabs    string         `json:"navigation_tabs" gorm:"type:text"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
+
+	// HideFinalGrades hides course totals from students (Canvas
+	// courses.hide_final_grades).
+	HideFinalGrades bool `json:"hide_final_grades" gorm:"default:false"`
 }

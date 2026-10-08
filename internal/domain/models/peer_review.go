@@ -13,4 +13,8 @@ type PeerReview struct {
 	Comments      string    `json:"comments"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+
+	// RubricData holds a rubric-based peer assessment:
+	// {criterion_id: {points, comments}} (JSON text).
+	RubricData *string `json:"rubric_data" gorm:"type:text"`
 }
