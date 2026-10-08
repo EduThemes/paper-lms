@@ -8,6 +8,7 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import QuizzesSubNav from '../components/quiz/QuizzesSubNav';
 import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
+import { clearRceDraft } from '../components/rce/rceDrafts';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { ALL_TYPES as QUESTION_TYPES, defaultAnswersForType, parseAnswers, stringifyAnswers } from '../components/quiz/itemTypes/types';
@@ -28,7 +29,12 @@ const emptyAnswer = () => ({
   comments: '',
 });
 
-const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId, stimuli = [] }) => {
+// Draft keys are scoped to the quiz so a question draft never surfaces in a
+// different quiz, and are cleared once the save lands (B103).
+const questionDraftKey = (courseId, quizId, question, index) =>
+  `quiz-question-${courseId}-${quizId}-${question.id || `new-${index}`}-text`;
+
+const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId, quizId, stimuli = [] }) => {
   const [expanded, setExpanded] = useState(true);
   const [answers, setAnswers] = useState([]);
 
@@ -177,7 +183,7 @@ const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId,
               placeholder="Enter the question..."
               minHeight="100px"
               courseId={courseId}
-              autoSaveKey={`quiz-question-${courseId}-${question.id || `new-${index}`}-text`}
+              autoSaveKey={questionDraftKey(courseId, quizId, question, index)}
             />
           </div>
 
@@ -458,6 +464,7 @@ const QuizEditorPage = () => {
         published: quizForm.published,
       };
       const updated = await api.updateQuiz(courseId, quizId, payload);
+      clearRceDraft(`quiz-${courseId}-${quizId || 'new'}-description`);
       setQuiz(updated);
       setIsDirty(false);
       setMessage('Quiz settings saved.');
@@ -521,6 +528,7 @@ const QuizEditorPage = () => {
           stimulus_id: updated.stimulus_id || null,
         };
         await api.updateQuizQuestion(courseId, quizId, updated.id, payload);
+        clearRceDraft(questionDraftKey(courseId, quizId, updated));
       } catch (err) {
         setMessage('Error saving question: ' + err.message);
       }
@@ -913,6 +921,7 @@ const QuizEditorPage = () => {
                 onDelete={() => handleDeleteQuestion(q.id)}
                 groups={groups}
                 courseId={courseId}
+                quizId={quizId}
                 stimuli={stimuli}
               />
             ))}

@@ -197,6 +197,7 @@ const App = () => {
           <Route path="pages" element={<PagesPage />} />
           <Route path="pages/:slug" element={<PageDetailPage />} />
           <Route path="quizzes" element={<QuizzesPage />} />
+          <Route path="quizzes/:quizId" element={<Navigate to="take" replace />} />
           <Route path="quizzes/:quizId/take" element={<QuizTakePage />} />
           <Route path="quizzes/:quizId/edit" element={<QuizEditorPage />} />
           <Route path="quizzes/:quizId/submissions/:submissionId/review" element={<QuizReviewPage />} />

@@ -6,6 +6,7 @@ import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
+import { clearRceDraft } from '../components/rce/rceDrafts';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -85,6 +86,7 @@ const AssignmentsPage = () => {
         payload.group_category_id = Number(newAssignment.group_category_id);
       }
       const created = await api.createAssignment(courseId, payload);
+      clearRceDraft(`assignment-${courseId}-new-description`);
       setAssignments((prev) => [...prev, created]);
       setNewAssignment({ name: '', description: '', points_possible: 100, due_at: '', submission_types: ['online_text_entry'], anonymous_grading: false, post_policy: 'automatic', is_group_assignment: false, group_category_id: '' });
       setShowCreate(false);

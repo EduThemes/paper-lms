@@ -6,6 +6,7 @@ import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
+import { clearRceDraft } from '../components/rce/rceDrafts';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -55,6 +56,7 @@ const DiscussionsPage = () => {
       } else {
         await api.createDiscussionTopic(courseId, formData);
       }
+      clearRceDraft(`discussion-${courseId}-${editingId || 'new'}-message`);
       resetForm();
       setShowForm(false);
       setLoading(true);

@@ -6,6 +6,7 @@ import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
+import { clearRceDraft } from '../components/rce/rceDrafts';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -44,6 +45,7 @@ const PagesPage = () => {
         body: newPage.body,
         published: newPage.published,
       });
+      clearRceDraft(`page-${courseId}-new-body`);
       setPages((prev) => [created, ...prev]);
       setNewPage({ title: '', body: '', published: true });
       setShowCreate(false);

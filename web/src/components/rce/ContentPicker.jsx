@@ -21,42 +21,66 @@ const TYPES = [
   { key: 'files', label: 'Files' },
 ];
 
-/** Map type → API call + result-shaping. Resilient to either {data:[]} or [] returns. */
-async function loadType(type, courseId) {
-  const unwrap = (r) => (Array.isArray(r) ? r : (r?.data ?? []));
+const PICKER_PER_PAGE = 100;
+const PICKER_MAX_PAGES = 20;
+
+/**
+ * Fetch every page of a paginated list endpoint. The list APIs default to 10
+ * rows per page and the picker filters client-side, so loading only the first
+ * page hid everything past item 10 (B106). Resilient to either {data:[]} or
+ * [] returns; follows the Link rel="next" header, or keeps going while full
+ * pages come back.
+ */
+export async function fetchAllPages(fetchPage) {
+  const all = [];
+  for (let page = 1; page <= PICKER_MAX_PAGES; page += 1) {
+    const r = await fetchPage(page, PICKER_PER_PAGE);
+    const rows = Array.isArray(r) ? r : (r?.data ?? []);
+    all.push(...rows);
+    const hasNext = Boolean(r?.pagination?.next) || rows.length === PICKER_PER_PAGE;
+    if (!hasNext || rows.length === 0) break;
+  }
+  return all;
+}
+
+/** Map type → API call + result-shaping. */
+export async function loadType(type, courseId) {
   switch (type) {
     case 'pages': {
-      const r = await api.getPages(courseId);
-      return unwrap(r).map((p) => ({
+      const r = await fetchAllPages((page, per) => api.getPages(courseId, page, per));
+      return r.map((p) => ({
         id: p.page_id || p.url || p.id,
         label: p.title || p.url || `Page ${p.id}`,
         href: `/courses/${courseId}/pages/${p.url || p.page_id || p.id}`,
       }));
     }
     case 'assignments': {
-      const r = await api.getAssignments(courseId);
-      return unwrap(r).map((a) => ({
+      const r = await fetchAllPages((page, per) => api.getAssignments(courseId, page, per));
+      return r.map((a) => ({
         id: a.id, label: a.name || `Assignment ${a.id}`,
         href: `/courses/${courseId}/assignments/${a.id}`,
       }));
     }
     case 'modules': {
-      const r = await api.getModules(courseId);
-      return unwrap(r).map((m) => ({
+      const r = await fetchAllPages((page, per) => api.getModules(courseId, page, per, false));
+      return r.map((m) => ({
         id: m.id, label: m.name || `Module ${m.id}`,
         href: `/courses/${courseId}/modules#module-${m.id}`,
       }));
     }
     case 'quizzes': {
-      const r = await api.getQuizzes(courseId);
-      return unwrap(r).map((q) => ({
+      const r = await fetchAllPages((page, per) => api.getQuizzes(courseId, page, per));
+      // Canvas-style quiz URL; App.jsx routes quizzes/:quizId to the quiz
+      // landing (take) page, so the link works for students and imported
+      // Canvas links resolve too (B106).
+      return r.map((q) => ({
         id: q.id, label: q.title || `Quiz ${q.id}`,
         href: `/courses/${courseId}/quizzes/${q.id}`,
       }));
     }
     case 'files': {
-      const r = await api.getCourseFiles(courseId);
-      return unwrap(r).map((f) => ({
+      const r = await fetchAllPages((page, per) => api.getCourseFiles(courseId, page, per));
+      return r.map((f) => ({
         id: f.id, label: f.display_name || f.filename || `File ${f.id}`,
         href: api.getFileDownloadUrl(f.id),
       }));
