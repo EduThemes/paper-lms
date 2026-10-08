@@ -17,6 +17,13 @@ func NewQuestionBankRepository(db *gorm.DB) repository.QuestionBankRepository {
 }
 
 func (r *questionBankRepo) Create(ctx context.Context, qb *models.QuestionBank) error {
+	// A bank belongs to its course's account (used for account sharing).
+	if qb.AccountID == nil && qb.CourseID != 0 {
+		var accountID uint
+		if err := r.db.WithContext(ctx).Raw("SELECT account_id FROM courses WHERE id = ?", qb.CourseID).Scan(&accountID).Error; err == nil && accountID != 0 {
+			qb.AccountID = &accountID
+		}
+	}
 	return r.db.WithContext(ctx).Create(qb).Error
 }
 

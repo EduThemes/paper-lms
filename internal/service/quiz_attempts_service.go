@@ -158,7 +158,7 @@ func (s *QuizService) generateSelectedQuestions(ctx context.Context, quizID uint
 					quizLoaded = true
 				}
 				bank, bErr := s.questionBankRepo.FindByID(ctx, *group.QuestionBankID)
-				bankOK = bErr == nil && bank != nil && bank.CourseID == quizCourseID && bank.WorkflowState != "deleted"
+				bankOK = bErr == nil && bankUsableInCourse(ctx, s.questionBankRepo, bank, quizCourseID)
 			}
 			if bankOK {
 				if entries, err := s.bankEntryRepo.ListByBankID(ctx, *group.QuestionBankID); err == nil {
@@ -244,6 +244,9 @@ func (s *QuizService) materializeBankEntry(ctx context.Context, quizID uint, gro
 		QuestionText:        entry.QuestionText,
 		PointsPossible:      &pts,
 		Answers:             entry.Answers,
+		CorrectComments:     entry.CorrectComments,
+		IncorrectComments:   entry.IncorrectComments,
+		NeutralComments:     entry.NeutralComments,
 		WorkflowState:       "active",
 	}
 	if q.QuestionText == "" {

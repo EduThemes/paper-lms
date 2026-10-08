@@ -13,6 +13,11 @@ func (r *Router) registerQuizItemsRoutes(protected fiber.Router, enrolled, instr
 	// Formula (calculated) question preview: sample variable sets + answers.
 	protected.Post("/courses/:course_id/quizzes/:quiz_id/formula_preview", instructor, r.QuizQuestionHandler.FormulaPreview)
 
+	// Question banks (single bank system): copy an own/shared bank into
+	// the course, or draw N random questions into a quiz.
+	protected.Post("/courses/:course_id/question_banks/:bank_id/copy", instructor, r.QuestionBankHandler.CopyBank)
+	protected.Post("/courses/:course_id/question_banks/:bank_id/random_draw", instructor, r.QuestionBankHandler.RandomDraw)
+
 	// Item analysis + CSV reports (instructor only).
 	protected.Get("/courses/:course_id/quizzes/:quiz_id/item_analysis", instructor, r.QuizStatisticsHandler.GetItemAnalysis)
 	protected.Get("/courses/:course_id/quizzes/:quiz_id/item_analysis.csv", instructor, r.QuizStatisticsHandler.ItemAnalysisCSV)

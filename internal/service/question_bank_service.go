@@ -80,6 +80,9 @@ func (s *QuestionBankService) UpdateQuestion(ctx context.Context, id uint, entry
 	existing.Answers = entry.Answers
 	existing.Feedback = entry.Feedback
 	existing.Position = entry.Position
+	existing.CorrectComments = entry.CorrectComments
+	existing.IncorrectComments = entry.IncorrectComments
+	existing.NeutralComments = entry.NeutralComments
 	if err := s.entryRepo.Update(ctx, existing); err != nil {
 		return nil, err
 	}
