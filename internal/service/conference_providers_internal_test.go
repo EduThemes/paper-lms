@@ -347,3 +347,26 @@ func TestConferenceProviders(t *testing.T) {
 	assert.True(t, got[1].Configured)
 	assert.True(t, got[1].SupportsRecording)
 }
+
+// A tenant that configures another tenant's Zoom account and client ids
+// with a wrong secret must not reuse the token cached for the real
+// credentials: the cache is keyed on the secret too.
+func TestZoom_TokenCacheIsKeyedOnTheSecret(t *testing.T) {
+	svc := NewConferenceService(nil, nil)
+	fake := useFakeZoom(svc)
+	good := zoomConfig{AccountID: "acct-1", ClientID: "client-id", ClientSecret: "client-secret", HostUser: "host@example.com"}
+	tok, err := svc.zoomToken(context.Background(), good)
+	require.NoError(t, err)
+	assert.Equal(t, "tok-1", tok)
+
+	forged := good
+	forged.ClientSecret = "guessed"
+	_, err = svc.zoomToken(context.Background(), forged)
+	require.Error(t, err, "a wrong secret goes to Zoom and is refused")
+	assert.Equal(t, 1, fake.tokenCalls)
+
+	tok, err = svc.zoomToken(context.Background(), good)
+	require.NoError(t, err)
+	assert.Equal(t, "tok-1", tok)
+	assert.Equal(t, 1, fake.tokenCalls, "the real credentials still hit the cache")
+}

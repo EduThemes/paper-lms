@@ -76,16 +76,21 @@ func (h *ConferenceHandler) loadConference(c *fiber.Ctx, manage bool) (*models.C
 	if err != nil {
 		return nil, true, responses.NotFound(c, "conference")
 	}
-	if conference.ContextType == "Course" {
-		var aerr error
-		if manage {
-			aerr = h.authz.RequireCourseInstructor(c, conference.ContextID)
-		} else {
-			aerr = h.authz.RequireCourseEnrolled(c, conference.ContextID)
-		}
-		if authzDenied(c, aerr) {
-			return nil, true, aerr
-		}
+	// Only course conferences are reachable through the API. Group and
+	// account conferences have no routes or role gate (group spaces are
+	// deferred), so they are default-denied rather than open to every
+	// user of the tenant.
+	if conference.ContextType != "Course" {
+		return nil, true, responses.NotFound(c, "conference")
+	}
+	var aerr error
+	if manage {
+		aerr = h.authz.RequireCourseInstructor(c, conference.ContextID)
+	} else {
+		aerr = h.authz.RequireCourseEnrolled(c, conference.ContextID)
+	}
+	if authzDenied(c, aerr) {
+		return nil, true, aerr
 	}
 	return conference, false, nil
 }

@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,7 +40,14 @@ type zoomConfig struct {
 	HostUser     string
 }
 
-func (c zoomConfig) cacheKey() string { return c.AccountID + "\x00" + c.ClientID }
+// cacheKey identifies the credentials a cached token was issued for. It
+// includes a digest of the client secret: the account and client ids are
+// not secret, so a tenant that configured another tenant's ids with a
+// wrong secret must not be handed that tenant's cached token.
+func (c zoomConfig) cacheKey() string {
+	sum := sha256.Sum256([]byte(c.AccountID + "\x00" + c.ClientID + "\x00" + c.ClientSecret))
+	return hex.EncodeToString(sum[:])
+}
 
 // resolveZoom returns the Zoom config for the caller's tenant, or
 // ok=false when Zoom is not configured.
