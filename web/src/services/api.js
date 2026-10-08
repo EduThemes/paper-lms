@@ -2605,7 +2605,7 @@ export const api = {
   toggleCommonsFavorite: (id) =>
     request(`/commons/${id}/favorite`, { method: 'POST' }),
   importCommons: (id, courseId) =>
-    request(`/commons/${id}/import?course_id=${courseId}`, { method: 'POST' }),
+    request(`/courses/${courseId}/commons/${id}/import`, { method: 'POST' }),
   publishCommons: (courseId, body) =>
     request(`/courses/${courseId}/commons/publish`, {
       method: 'POST',

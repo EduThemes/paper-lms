@@ -86,7 +86,7 @@ func (r *Router) registerP3FeatureRoutes(protected fiber.Router, admin, enrolled
 	protected.Get("/commons", r.CommonsHandler.Browse)
 	protected.Get("/commons/:id", r.CommonsHandler.Get)
 	protected.Post("/commons/:id/favorite", r.CommonsHandler.Favorite)
-	protected.Post("/commons/:id/import", r.CommonsHandler.Import)
+	protected.Post("/courses/:course_id/commons/:id/import", instructor, r.CommonsHandler.Import)
 	protected.Post("/courses/:course_id/commons/publish", instructor, r.CommonsHandler.Publish)
 
 	// AI Assist proxy for RCE V2 toolbar (Anthropic Messages API).

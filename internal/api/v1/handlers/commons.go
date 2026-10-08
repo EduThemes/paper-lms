@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
@@ -211,7 +212,7 @@ func (h *CommonsHandler) Publish(c *fiber.Ctx) error {
 
 	userID, _ := c.Locals("user_id").(uint)
 
-	item, err := h.commonsService.Publish(c.Context(), userID, uint(courseID), service.CommonsPublishOptions{
+	item, err := h.commonsService.Publish(c.Context(), userID, uint(courseID), callerAccountID(c), service.CommonsPublishOptions{
 		ResourceType: input.ResourceType,
 		ResourceID:   input.ResourceID,
 		Title:        input.Title,
@@ -222,33 +223,40 @@ func (h *CommonsHandler) Publish(c *fiber.Ctx) error {
 		ThumbnailURL: input.ThumbnailURL,
 		Visibility:   input.Visibility,
 	})
+	if errors.Is(err, service.ErrCommonsNotFound) {
+		// B038: a resource_id outside this course/tenant is a 404, not
+		// a snapshot of someone else's content.
+		return responses.NotFound(c, "resource")
+	}
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 	return c.Status(fiber.StatusCreated).JSON(sharedContentToJSON(item, false))
 }
 
-// Import handles POST /api/v1/commons/:id/import?course_id=NN.
+// Import handles POST /api/v1/courses/:course_id/commons/:id/import.
+//
+// B036: the target course is the URL's :course_id, which the route's
+// instructor middleware has already authorized (teacher/TA of that
+// course, or admin). The pre-fix route took course_id from the query or
+// body with no course-level gate at all, so any authenticated user could
+// write content into any course. The service additionally resolves both
+// the Commons item and the course under the caller's tenant.
 func (h *CommonsHandler) Import(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil || courseID <= 0 {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	id, err := c.ParamsInt("id")
-	if err != nil {
+	if err != nil || id <= 0 {
 		return responses.BadRequest(c, "Invalid commons ID")
-	}
-	courseID := c.QueryInt("course_id")
-	if courseID <= 0 {
-		// Allow course_id in the JSON body too.
-		var body struct {
-			CourseID uint `json:"course_id"`
-		}
-		_ = c.BodyParser(&body)
-		courseID = int(body.CourseID)
-	}
-	if courseID <= 0 {
-		return responses.BadRequest(c, "course_id is required")
 	}
 	userID, _ := c.Locals("user_id").(uint)
 
 	result, err := h.commonsService.Import(c.Context(), userID, uint(courseID), uint(id), callerAccountID(c))
+	if errors.Is(err, service.ErrCommonsNotFound) {
+		return responses.NotFound(c, "commons item")
+	}
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
