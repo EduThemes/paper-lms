@@ -15,6 +15,7 @@ import { SubmissionBody } from '../components/SafeHTML';
 import RichContentEditor from '../components/RichContentEditor';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
+import AssignmentExternalToolPanel, { assignmentUsesExternalTool } from '../components/lti/AssignmentExternalToolPanel';
 
 function toLocalDatetimeValue(date) {
   const y = date.getFullYear();
@@ -617,6 +618,10 @@ const AssignmentPage = () => {
         </div>
       )}
 
+      {assignment && (
+        <AssignmentExternalToolPanel courseId={courseId} assignment={assignment} isTeacher={Boolean(isTeacher)} />
+      )}
+
       {/* Section Date Overrides (teacher only) */}
       {isTeacher && overrides.length > 0 && (
         <div className="bg-surface-0 rounded-lg shadow p-4 mb-6">
@@ -763,6 +768,8 @@ const AssignmentPage = () => {
               ? assignment.submission_types
               : String(assignment.submission_types || '').split(',').map(t => t.trim());
             const isOnPaperOrNone = types.every(t => t === 'on_paper' || t === 'none' || t === '');
+            // External tool assignments are submitted inside the tool (above).
+            if (assignmentUsesExternalTool(assignment)) return null;
             if (isOnPaperOrNone) {
               return (
                 <div className="bg-surface-0 rounded-lg shadow p-6 text-center text-text-tertiary">

@@ -35,6 +35,10 @@ export function getModuleItemLink(item, courseId) {
       return id ? `/courses/${courseId}/discussions/${id}` : null;
     case 'ExternalUrl':
       return item.url || null;
+    case 'ExternalTool':
+    case 'ContextExternalTool':
+      // LTI tool item (G131): launched by the course tool page.
+      return id ? `/courses/${courseId}/external_tools/${id}?module_item_id=${item.id}` : null;
     case 'File':
     case 'Attachment':
       // Imported files: the download endpoint enforces enrollment.

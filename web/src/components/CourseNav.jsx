@@ -5,6 +5,7 @@ import { useCourseUI } from '../contexts/CourseUIContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useClickOutside } from '../hooks/useClickOutside';
 import useCourseStaffRole from '../hooks/useCourseStaffRole';
+import useLtiCourseNavTabs from '../hooks/useLtiCourseNavTabs';
 
 // Complete map of tab id -> path/label for all available tabs
 const TAB_REGISTRY = {
@@ -80,6 +81,8 @@ const CourseNav = () => {
   // roster rows for the caller, so teacher tabs vanished in any course
   // where the teacher's enrollment was not among the first ten.
   const staffRole = useCourseStaffRole(courseId);
+  // LTI tools with a course_navigation placement add their own tabs (G131).
+  const ltiTabs = useLtiCourseNavTabs(courseId);
 
   // Close the "More" dropdown on outside click / Escape. Hook must sit above
   // the conditional `return null` paths below to keep hook order stable.
@@ -133,6 +136,8 @@ const CourseNav = () => {
         return { path, label: reg.label };
       });
   }
+
+  visibleTabs = [...visibleTabs, ...ltiTabs];
 
   // Split into primary tabs and "more" tabs
   const primaryTabs = visibleTabs.slice(0, PRIMARY_TAB_COUNT);

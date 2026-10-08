@@ -38,6 +38,8 @@ import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import ModuleSettingsModal from '../components/ModuleSettingsModal';
+import ModuleExternalToolFields from '../components/lti/ModuleExternalToolFields';
+import { ltiApi } from '../services/api_lti';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -65,6 +67,8 @@ const ITEM_ICONS = {
   Quiz: HelpCircle,
   Discussion: MessageSquare,
   ExternalUrl: ExternalLink,
+  ExternalTool: ExternalLink,
+  ContextExternalTool: ExternalLink,
   SubHeader: Minus,
   File: Paperclip,
   Announcement: Megaphone,
@@ -77,6 +81,7 @@ const ITEM_TYPE_OPTIONS = [
   { value: 'Page', label: 'Page' },
   { value: 'Discussion', label: 'Discussion' },
   { value: 'ExternalUrl', label: 'External URL' },
+  { value: 'ExternalTool', label: 'External Tool' },
 ];
 
 const MAX_INDENT = 5;
@@ -647,15 +652,31 @@ const ModulesPage = () => {
     return () => { cancelled = true; };
   }, [addingItemTo, newItem.type, courseId]);
 
-  const canSubmitNewItem = itemNeedsContent(newItem.type)
-    ? (newItem.content_id && newItem.content_id !== NEW_CONTENT) || !!newItem.title.trim()
-    : !!newItem.title.trim();
+  const canSubmitNewItem = newItem.type === 'ExternalTool'
+    ? !!newItem.tool_id
+    : itemNeedsContent(newItem.type)
+      ? (newItem.content_id && newItem.content_id !== NEW_CONTENT) || !!newItem.title.trim()
+      : !!newItem.title.trim();
 
   const handleAddItem = async (e, moduleId) => {
     e.preventDefault();
     if (!canSubmitNewItem) return;
     setCreating(true);
     try {
+      if (newItem.type === 'ExternalTool') {
+        // G131: LTI tool items go through the LTI endpoint (resource link).
+        await ltiApi.createModuleToolItem(courseId, moduleId, {
+          tool_id: Number(newItem.tool_id),
+          title: newItem.title,
+          url: newItem.external_url,
+          new_tab: newItem.new_tab,
+          position: (modules.find(m => m.id === moduleId)?.items?.length || 0) + 1,
+        });
+        setAddingItemTo(null);
+        setNewItem({ title: '', type: 'SubHeader', external_url: '', new_tab: false, content_id: '' });
+        await fetchModules();
+        return;
+      }
       const itemPayload = await buildModuleItemPayload(api, courseId, {
         title: newItem.title,
         type: newItem.type,
@@ -1136,6 +1157,18 @@ const ModulesPage = () => {
                                         New tab
                                       </label>
                                     </div>
+                                  )}
+                                  {newItem.type === 'ExternalTool' && (
+                                    <ModuleExternalToolFields
+                                      courseId={courseId}
+                                      moduleId={module.id}
+                                      value={newItem}
+                                      onChange={setNewItem}
+                                      onDeepLinked={() => {
+                                        setAddingItemTo(null);
+                                        fetchModules();
+                                      }}
+                                    />
                                   )}
                                   <div className="flex items-center gap-2 justify-end">
                                     <Button
