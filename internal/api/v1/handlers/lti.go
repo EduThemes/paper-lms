@@ -396,7 +396,10 @@ func (h *LTIHandler) LaunchDirect(c *fiber.Ctx) error {
 	if _, err := rand.Read(nonceBytes[:]); err != nil {
 		return responses.InternalError(c, "Could not build launch page")
 	}
-	cspNonce := base64.StdEncoding.EncodeToString(nonceBytes[:])
+	// URL-safe alphabet (valid CSP base64-value): html/template would
+	// entity-escape a '+' in the nonce attribute, leaving the page's
+	// literal nonce different from the header's.
+	cspNonce := base64.RawURLEncoding.EncodeToString(nonceBytes[:])
 
 	// SECURITY (F-056): redirect_uri was validated against the tool's
 	// registered URIs in the service; html/template escapes it anyway.
