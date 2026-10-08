@@ -264,7 +264,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Post("/courses", admin, r.CourseHandler.CreateCourse)
 	protected.Get("/courses/:id", enrolled, r.CourseHandler.GetCourse)
 	protected.Put("/courses/:id", instructor, r.CourseHandler.UpdateCourse)
-	protected.Delete("/courses/:id", instructor, r.CourseHandler.DeleteCourse)
+	protected.Delete("/courses/:id", r.PermMiddleware.RequireCourseRole("TeacherEnrollment"), r.CourseHandler.DeleteCourse) // B178: TAs can't delete a course
 
 	// External Tools (view: enrolled; manage: instructor)
 	protected.Get("/courses/:course_id/external_tools", enrolled, r.ExternalToolHandler.ListExternalTools)
@@ -281,6 +281,8 @@ func (r *Router) Register(app *fiber.App) {
 	// Enrollments (view: enrolled; create: instructor)
 	protected.Get("/courses/:course_id/enrollments", enrolled, r.EnrollmentHandler.ListEnrollments)
 	protected.Post("/courses/:course_id/enrollments", instructor, r.EnrollmentHandler.CreateEnrollment)
+	protected.Get("/courses/:course_id/enrollments/self", enrolled, r.EnrollmentHandler.MyCourseEnrollments)
+	protected.Get("/courses/:course_id/enrollable_users", instructor, r.EnrollmentHandler.SearchEnrollableUsers)
 
 	// Modules (view: enrolled; manage: instructor)
 	protected.Get("/courses/:course_id/modules", enrolled, r.ModuleHandler.ListModules)
@@ -703,9 +705,11 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Delete("/users/self/communication_channels/:id", r.NotificationDeliveryHandler.DeleteChannel)
 
 	// Audit Logs (course: instructor; account: admin)
-	protected.Get("/courses/:course_id/audit_log", instructor, r.AuditHandler.GetCourseAuditLog)
+	// B179: the course activity trail is teacher/admin only (no TAs), and
+	// IP address / user agent are admin-only inside the handler.
+	protected.Get("/courses/:course_id/audit_log", r.PermMiddleware.RequireCourseRole("TeacherEnrollment"), r.AuditHandler.GetCourseAuditLog)
 	protected.Get("/courses/:course_id/grade_change_log", instructor, r.AuditHandler.GetCourseGradeChangeLog)
-	protected.Get("/courses/:course_id/audit_log.csv", instructor, r.AuditHandler.ExportCourseAuditLogCSV)
+	protected.Get("/courses/:course_id/audit_log.csv", r.PermMiddleware.RequireCourseRole("TeacherEnrollment"), r.AuditHandler.ExportCourseAuditLogCSV)
 	protected.Get("/courses/:course_id/grade_change_log.csv", instructor, r.AuditHandler.ExportCourseGradeChangeLogCSV)
 	protected.Get("/accounts/:account_id/audit_log", admin, r.AuditHandler.GetAccountAuditLog)
 	protected.Get("/admin/audit_log/summary", admin, r.AuditHandler.GetAuditLogSummary)

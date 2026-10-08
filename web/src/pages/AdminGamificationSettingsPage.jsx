@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Save } from 'lucide-react';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
+import useAccountId from '../hooks/useAccountId';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getCurrentAccountId } from '../services/currentAccount';
+
+// The tenant comes from the signed-in user (useAccountId), never a constant.
 
 // Tenant mode is the single knob that drives the gamification RenderPolicy
 // (see internal/service/gamification/render_policy.go): leaderboard visibility,
@@ -20,6 +22,7 @@ const TENANT_MODE_OPTIONS = [
 ];
 
 const AdminGamificationSettingsPage = () => {
+  const ACCOUNT_ID = useAccountId();
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -31,7 +34,7 @@ const AdminGamificationSettingsPage = () => {
     let cancelled = false;
     const load = async () => {
       try {
-        const a = await api.getAccount(getCurrentAccountId());
+        const a = await api.getAccount(ACCOUNT_ID);
         if (cancelled) return;
         setAccount(a);
         setTenantMode(a.tenant_mode || 'higher_ed');
@@ -41,9 +44,9 @@ const AdminGamificationSettingsPage = () => {
         if (!cancelled) setLoading(false);
       }
     };
-    load();
+    if (ACCOUNT_ID) load();
     return () => { cancelled = true; };
-  }, []);
+  }, [ACCOUNT_ID]);
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -51,7 +54,7 @@ const AdminGamificationSettingsPage = () => {
     setError(null);
     setStatusMsg('');
     try {
-      const updated = await api.updateAccount(getCurrentAccountId(), {
+      const updated = await api.updateAccount(ACCOUNT_ID, {
         tenant_mode: tenantMode,
       });
       setAccount(updated);

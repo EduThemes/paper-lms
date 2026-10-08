@@ -50,3 +50,40 @@ func TestExportEnrollmentsCSV_RejectsCrossTenant(t *testing.T) {
 	resp := testutil.MakeRequest(app, http.MethodGet, "/accounts/2/sis_exports/enrollments.csv", nil)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
+
+// B070: custom roles list/create trusted the URL :account_id, so the
+// admin UI's hardcoded account 1 read and wrote tenant 1's roles.
+func TestCustomRolesListCreate_RejectCrossTenant(t *testing.T) {
+	h := handlers.NewCustomRoleHandler(nil) // guard runs before the service
+	app := testutil.SetupTestApp()
+	app.Get("/accounts/:account_id/roles", sisAdminAuthStub(5), h.ListRoles)
+	app.Post("/accounts/:account_id/roles", sisAdminAuthStub(5), h.CreateRole)
+
+	resp := testutil.MakeRequest(app, http.MethodGet, "/accounts/1/roles", nil)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp = testutil.MakeRequest(app, http.MethodPost, "/accounts/1/roles",
+		testutil.JSONBody(map[string]any{"role": map[string]any{"name": "Helper", "base_role_type": "ta"}}))
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+// B065: the import endpoints trusted the URL :account_id too — an admin of
+// account 1 could run an import into, list, or read batches of account 2.
+// The guard runs before the service, so a nil service proves ordering.
+func TestSISImportEndpoints_RejectCrossTenant(t *testing.T) {
+	h := handlers.NewSISImportHandler(nil)
+	app := testutil.SetupTestApp()
+	app.Post("/accounts/:account_id/sis_imports", sisAdminAuthStub(1), h.CreateSISImport)
+	app.Get("/accounts/:account_id/sis_imports", sisAdminAuthStub(1), h.ListSISImports)
+	app.Get("/accounts/:account_id/sis_imports/:id", sisAdminAuthStub(1), h.GetSISImport)
+	app.Get("/accounts/:account_id/sis_imports/:id/errors", sisAdminAuthStub(1), h.GetSISImportErrors)
+
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodPost, "/accounts/2/sis_imports"},
+		{http.MethodGet, "/accounts/2/sis_imports"},
+		{http.MethodGet, "/accounts/2/sis_imports/5"},
+		{http.MethodGet, "/accounts/2/sis_imports/5/errors"},
+	} {
+		resp := testutil.MakeRequest(app, tc.method, tc.path, nil)
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode, "%s %s", tc.method, tc.path)
+	}
+}

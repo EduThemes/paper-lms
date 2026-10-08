@@ -2,13 +2,15 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { RefreshCw, Plus, Trash2, Edit3, AlertTriangle, X, Check, Clock, Loader2, ChevronDown, ChevronRight, Database } from 'lucide-react';
 import Layout from '../components/Layout';
 import { getCSRFToken } from '../services/api';
-import { getCurrentAccountId } from '../services/currentAccount';
+import useAccountId from '../hooks/useAccountId';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 const getHeaders = () => ({
   'Content-Type': 'application/json',
   'X-CSRF-Token': getCSRFToken(),
 });
+
+// The tenant comes from the signed-in user (useAccountId), never a constant.
 
 const EMPTY_FORM = {
   name: '',
@@ -35,6 +37,7 @@ const SYNC_LOG_STATUS = {
 };
 
 const OneRosterPage = () => {
+  const ACCOUNT_ID = useAccountId();
   const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -55,7 +58,7 @@ const OneRosterPage = () => {
 
   const fetchConnections = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/accounts/${getCurrentAccountId()}/oneroster_connections?per_page=100`, {
+      const res = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/oneroster_connections?per_page=100`, {
         credentials: 'include', headers: getHeaders(),
       });
       if (!res.ok) throw new Error('Failed to fetch OneRoster connections');
@@ -66,12 +69,12 @@ const OneRosterPage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [ACCOUNT_ID]);
 
   const fetchSyncLogs = useCallback(async (connectionId) => {
     setSyncLogsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/accounts/${getCurrentAccountId()}/oneroster_connections/${connectionId}/sync_logs?per_page=20`, {
+      const res = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/oneroster_connections/${connectionId}/sync_logs?per_page=20`, {
         credentials: 'include', headers: getHeaders(),
       });
       if (!res.ok) throw new Error('Failed to fetch sync logs');
@@ -82,11 +85,11 @@ const OneRosterPage = () => {
     } finally {
       setSyncLogsLoading(false);
     }
-  }, []);
+  }, [ACCOUNT_ID]);
 
   const pollSyncStatus = useCallback(async (connectionId) => {
     try {
-      const res = await fetch(`${API_URL}/accounts/${getCurrentAccountId()}/oneroster_connections/${connectionId}/sync_logs?per_page=1`, {
+      const res = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/oneroster_connections/${connectionId}/sync_logs?per_page=1`, {
         credentials: 'include', headers: getHeaders(),
       });
       if (!res.ok) return;
@@ -107,16 +110,16 @@ const OneRosterPage = () => {
     } catch {
       // Ignore polling errors
     }
-  }, [fetchConnections, fetchSyncLogs, selectedConnection]);
+  }, [ACCOUNT_ID, fetchConnections, fetchSyncLogs, selectedConnection]);
 
   useEffect(() => {
-    fetchConnections();
+    if (ACCOUNT_ID) fetchConnections();
     return () => {
       if (pollRef.current) {
         clearInterval(pollRef.current);
       }
     };
-  }, [fetchConnections]);
+  }, [ACCOUNT_ID, fetchConnections]);
 
   const resetForm = () => {
     setFormData({ ...EMPTY_FORM });
@@ -156,13 +159,13 @@ const OneRosterPage = () => {
         if (!updateBody.client_secret) {
           delete updateBody.client_secret;
         }
-        res = await fetch(`${API_URL}/accounts/${getCurrentAccountId()}/oneroster_connections/${editingId}`, {
+        res = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/oneroster_connections/${editingId}`, {
           method: 'PUT',
           credentials: 'include', headers: getHeaders(),
           body: JSON.stringify(updateBody),
         });
       } else {
-        res = await fetch(`${API_URL}/accounts/${getCurrentAccountId()}/oneroster_connections`, {
+        res = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/oneroster_connections`, {
           method: 'POST',
           credentials: 'include', headers: getHeaders(),
           body: JSON.stringify(body),
@@ -188,7 +191,7 @@ const OneRosterPage = () => {
     setDeleting(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/accounts/${getCurrentAccountId()}/oneroster_connections/${id}`, {
+      const res = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/oneroster_connections/${id}`, {
         method: 'DELETE',
         credentials: 'include', headers: getHeaders(),
       });
@@ -212,7 +215,7 @@ const OneRosterPage = () => {
     setError(null);
     setSuccess(null);
     try {
-      const res = await fetch(`${API_URL}/accounts/${getCurrentAccountId()}/oneroster_connections/${id}/test`, {
+      const res = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/oneroster_connections/${id}/test`, {
         method: 'POST',
         credentials: 'include', headers: getHeaders(),
       });
@@ -236,7 +239,7 @@ const OneRosterPage = () => {
     setSuccess(null);
     try {
       const endpoint = type === 'incremental' ? 'sync_incremental' : 'sync';
-      const res = await fetch(`${API_URL}/accounts/${getCurrentAccountId()}/oneroster_connections/${id}/${endpoint}`, {
+      const res = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/oneroster_connections/${id}/${endpoint}`, {
         method: 'POST',
         credentials: 'include', headers: getHeaders(),
       });

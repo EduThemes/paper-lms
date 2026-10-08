@@ -2,9 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Upload, Download, AlertCircle, CheckCircle, Clock, RefreshCw, X, ChevronDown, FileText } from 'lucide-react';
 import Layout from '../components/Layout';
 import { getCSRFToken } from '../services/api';
-import { getCurrentAccountId } from '../services/currentAccount';
+import useAccountId from '../hooks/useAccountId';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
+// The tenant comes from the signed-in user (useAccountId), never a constant.
 
 const apiFetch = (url, options = {}) => fetch(url, {
   ...options,
@@ -13,6 +14,7 @@ const apiFetch = (url, options = {}) => fetch(url, {
 });
 
 const SISImportPage = () => {
+  const ACCOUNT_ID = useAccountId();
   const [activeTab, setActiveTab] = useState('import');
   const [importType, setImportType] = useState('users');
   const [file, setFile] = useState(null);
@@ -27,7 +29,7 @@ const SISImportPage = () => {
 
   const fetchBatches = useCallback(async () => {
     try {
-      const response = await apiFetch(`${API_URL}/accounts/${getCurrentAccountId()}/sis_imports?page=1&per_page=50`);
+      const response = await apiFetch(`${API_URL}/accounts/${ACCOUNT_ID}/sis_imports?page=1&per_page=50`);
       if (!response.ok) throw new Error('Failed to fetch import history');
       const data = await response.json();
       setBatches(Array.isArray(data) ? data : []);
@@ -36,11 +38,11 @@ const SISImportPage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [ACCOUNT_ID]);
 
   useEffect(() => {
-    fetchBatches();
-  }, [fetchBatches]);
+    if (ACCOUNT_ID) fetchBatches();
+  }, [ACCOUNT_ID, fetchBatches]);
 
   const handleUpload = async (e) => {
     e.preventDefault();
@@ -58,7 +60,7 @@ const SISImportPage = () => {
       formData.append('import_type', importType);
       formData.append('attachment', file);
 
-      const response = await fetch(`${API_URL}/accounts/${getCurrentAccountId()}/sis_imports`, {
+      const response = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/sis_imports`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'X-CSRF-Token': getCSRFToken() },
@@ -90,7 +92,7 @@ const SISImportPage = () => {
     setBatchErrors([]);
 
     try {
-      const response = await apiFetch(`${API_URL}/accounts/${getCurrentAccountId()}/sis_imports/${batch.id}/errors`);
+      const response = await apiFetch(`${API_URL}/accounts/${ACCOUNT_ID}/sis_imports/${batch.id}/errors`);
       if (!response.ok) throw new Error('Failed to fetch errors');
       const data = await response.json();
       setBatchErrors(Array.isArray(data) ? data : []);
@@ -102,7 +104,7 @@ const SISImportPage = () => {
   };
 
   const handleExport = (type) => {
-    const url = `${API_URL}/accounts/${getCurrentAccountId()}/sis_exports/${type}.csv`;
+    const url = `${API_URL}/accounts/${ACCOUNT_ID}/sis_exports/${type}.csv`;
     fetch(url, { credentials: 'include' })
       .then((res) => {
         if (!res.ok) throw new Error('Export failed');

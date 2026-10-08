@@ -4,7 +4,7 @@ import { Plus, Trash2, Edit2, Calendar, ChevronDown, ChevronRight } from 'lucide
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
-import { getCurrentAccountId } from '../services/currentAccount';
+import useAccountId from '../hooks/useAccountId';
 
 const GradingPeriodsPage = () => {
   const { t } = useTranslation();
@@ -18,7 +18,7 @@ const GradingPeriodsPage = () => {
   const [showCreatePeriod, setShowCreatePeriod] = useState(null);
   const [newPeriod, setNewPeriod] = useState({ title: '', start_date: '', end_date: '' });
 
-  const accountId = getCurrentAccountId();
+  const accountId = useAccountId();
 
   const fetchGroups = async () => {
     try {
@@ -40,7 +40,8 @@ const GradingPeriodsPage = () => {
     }
   };
 
-  useEffect(() => { fetchGroups(); }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (accountId) fetchGroups(); }, [accountId]);
 
   const toggleGroup = (groupId) => {
     setExpandedGroups(prev => {

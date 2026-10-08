@@ -19,6 +19,7 @@ func AllModels() []interface{} {
 		&Course{},
 		&CourseSection{},
 		&Enrollment{},
+		&ObserverLink{},
 		&ContextModule{},
 		&ContentTag{},
 		&WikiPage{},

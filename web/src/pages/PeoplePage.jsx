@@ -32,7 +32,8 @@ const PeoplePage = () => {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
-  const [addForm, setAddForm] = useState({ user_id: '', type: 'StudentEnrollment' });
+  const [addForm, setAddForm] = useState({ user_id: '', type: 'StudentEnrollment', course_section_id: '' });
+  const [sections, setSections] = useState([]);
   const [adding, setAdding] = useState(false);
   const [filter, setFilter] = useState('all');
   const [userSearch, setUserSearch] = useState('');
@@ -47,7 +48,9 @@ const PeoplePage = () => {
     setError(null);
     setLoading(true);
     try {
-      const result = await api.getEnrollments(courseId, 1, 200);
+      // Every page of the roster: a single per_page=200 request was
+      // capped at 100 by the server and hid the rest of a large course.
+      const result = await api.getAllEnrollments(courseId);
       setEnrollments(result.data || []);
     } catch (err) {
       setError(err.message);
@@ -60,9 +63,22 @@ const PeoplePage = () => {
     fetchEnrollments();
   }, [courseId]);
 
-  // Debounced user search
+  // Sections for the Add People form (staff only).
   useEffect(() => {
-    if (userSearch.length < 2) {
+    if (!isTeacher || !showAddForm) return;
+    let cancelled = false;
+    api.getSections(courseId, 1, 100)
+      .then((result) => { if (!cancelled) setSections(result?.data || []); })
+      .catch(() => { if (!cancelled) setSections([]); });
+    return () => { cancelled = true; };
+  }, [courseId, isTeacher, showAddForm]);
+
+  // Debounced lookup for Add People. GET /users is admin-only, so
+  // teachers got a swallowed 403 and "No users found" for everyone
+  // (B073); the course-scoped endpoint matches an exact email, login ID
+  // or SIS ID inside the course's tenant, like Canvas's Add People.
+  useEffect(() => {
+    if (userSearch.trim().length < 3) {
       setUserResults([]);
       setShowUserDropdown(false);
       return;
@@ -70,8 +86,7 @@ const PeoplePage = () => {
     const timer = setTimeout(async () => {
       setUserSearching(true);
       try {
-        const result = await api.searchUsers(userSearch);
-        const users = result.data || result || [];
+        const users = await api.searchEnrollableUsers(courseId, userSearch.trim());
         // Filter out users already enrolled
         const enrolledIds = new Set(enrollments.map((e) => e.user_id || e.user?.id));
         setUserResults(users.filter((u) => !enrolledIds.has(u.id)));
@@ -83,7 +98,7 @@ const PeoplePage = () => {
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [userSearch, enrollments]);
+  }, [userSearch, enrollments, courseId]);
 
   const selectUser = (u) => {
     setSelectedUser(u);
@@ -109,13 +124,14 @@ const PeoplePage = () => {
         user_id: parseInt(addForm.user_id, 10),
         type: addForm.type,
         enrollment_state: 'active',
+        ...(addForm.course_section_id ? { course_section_id: parseInt(addForm.course_section_id, 10) } : {}),
       });
       setShowAddForm(false);
-      setAddForm({ user_id: '', type: 'StudentEnrollment' });
+      setAddForm({ user_id: '', type: 'StudentEnrollment', course_section_id: '' });
       setSelectedUser(null);
       setUserSearch('');
       // Refresh
-      const result = await api.getEnrollments(courseId, 1, 200);
+      const result = await api.getAllEnrollments(courseId);
       setEnrollments(result.data || []);
     } catch (err) {
       setError(err.message);
@@ -233,7 +249,7 @@ const PeoplePage = () => {
                       onChange={(e) => setUserSearch(e.target.value)}
                       onFocus={() => userResults.length > 0 && setShowUserDropdown(true)}
                       onBlur={() => setTimeout(() => setShowUserDropdown(false), 200)}
-                      placeholder="Search by name or email..."
+                      placeholder="Email, login ID or SIS ID"
                       className="w-full ps-9 pe-3 border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                     />
                   </div>
@@ -280,6 +296,22 @@ const PeoplePage = () => {
                 <option value="ObserverEnrollment">Observer</option>
               </select>
             </div>
+            {sections.length > 0 && (
+              <div>
+                <label htmlFor="add-person-section" className="block text-sm font-medium text-text-secondary mb-1">Section</label>
+                <select
+                  id="add-person-section"
+                  value={addForm.course_section_id}
+                  onChange={(e) => setAddForm({ ...addForm, course_section_id: e.target.value })}
+                  className="border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                >
+                  <option value="">Default section</option>
+                  {sections.map((s) => (
+                    <option key={s.id} value={String(s.id)}>{s.name || `Section ${s.id}`}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <button
               type="submit"
               disabled={adding || !addForm.user_id}

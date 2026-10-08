@@ -213,7 +213,11 @@ func (s *AuditService) GetActivitySummary(ctx context.Context, accountID *uint, 
 }
 
 // ExportAuditLogCSV exports audit log entries matching the filter as CSV bytes.
-func (s *AuditService) ExportAuditLogCSV(ctx context.Context, filter postgres.AuditLogFilter) ([]byte, error) {
+// ExportAuditLogCSV renders the filtered audit log as CSV. includeNetwork
+// gates the IP Address / User Agent columns' values: they identify
+// individual users' devices and are only for admins (Canvas restricts
+// audit data to admins); for anyone else the cells are left blank.
+func (s *AuditService) ExportAuditLogCSV(ctx context.Context, filter postgres.AuditLogFilter, includeNetwork bool) ([]byte, error) {
 	logs, err := s.auditLogRepo.ListAllByFilter(ctx, filter)
 	if err != nil {
 		return nil, err
@@ -242,6 +246,10 @@ func (s *AuditService) ExportAuditLogCSV(ctx context.Context, filter postgres.Au
 		if log.RealUserID != nil {
 			realUserID = fmt.Sprintf("%d", *log.RealUserID)
 		}
+		ipAddress, userAgent := log.IPAddress, log.UserAgent
+		if !includeNetwork {
+			ipAddress, userAgent = "", ""
+		}
 
 		row := []string{
 			fmt.Sprintf("%d", log.ID),
@@ -254,8 +262,8 @@ func (s *AuditService) ExportAuditLogCSV(ctx context.Context, filter postgres.Au
 			fmt.Sprintf("%d", log.ContextID),
 			log.Action,
 			log.Payload,
-			log.IPAddress,
-			log.UserAgent,
+			ipAddress,
+			userAgent,
 			log.CreatedAt.Format(time.RFC3339),
 		}
 		if err := writeCSVRow(writer, row); err != nil {

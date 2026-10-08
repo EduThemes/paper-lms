@@ -2,9 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { KeyRound, Plus, Trash2, Copy, Check, AlertTriangle, X, ToggleLeft, ToggleRight, Eye, EyeOff } from 'lucide-react';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
-import { getCurrentAccountId } from '../services/currentAccount';
+import useAccountId from '../hooks/useAccountId';
+
+// The tenant comes from the signed-in user (useAccountId), never a constant.
 
 const DeveloperKeysPage = () => {
+  const ACCOUNT_ID = useAccountId();
   const [keys, setKeys] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -18,18 +21,18 @@ const DeveloperKeysPage = () => {
 
   const fetchKeys = useCallback(async () => {
     try {
-      const { data } = await api.getDeveloperKeys(getCurrentAccountId(), 1, 100);
+      const { data } = await api.getDeveloperKeys(ACCOUNT_ID, 1, 100);
       setKeys(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [ACCOUNT_ID]);
 
   useEffect(() => {
-    fetchKeys();
-  }, [fetchKeys]);
+    if (ACCOUNT_ID) fetchKeys();
+  }, [ACCOUNT_ID, fetchKeys]);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -62,7 +65,7 @@ const DeveloperKeysPage = () => {
     );
 
     try {
-      const data = await api.createDeveloperKey(getCurrentAccountId(), developerKey);
+      const data = await api.createDeveloperKey(ACCOUNT_ID, developerKey);
       setNewKeyData(data);
       setShowForm(false);
       fetchKeys();
@@ -93,7 +96,7 @@ const DeveloperKeysPage = () => {
     setError(null);
     const newState = key.workflow_state === 'active' ? 'inactive' : 'active';
     try {
-      await api.updateDeveloperKey(getCurrentAccountId(), key.id, { workflow_state: newState });
+      await api.updateDeveloperKey(ACCOUNT_ID, key.id, { workflow_state: newState });
       fetchKeys();
     } catch (err) {
       setError(err.message);
@@ -106,7 +109,7 @@ const DeveloperKeysPage = () => {
     setDeleting(true);
     setError(null);
     try {
-      await api.deleteDeveloperKey(getCurrentAccountId(), keyId);
+      await api.deleteDeveloperKey(ACCOUNT_ID, keyId);
       setDeleteConfirm(null);
       fetchKeys();
     } catch (err) {

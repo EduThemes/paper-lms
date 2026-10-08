@@ -351,7 +351,7 @@ func main() {
 	// Initialize services
 	userService := service.NewUserService(userRepo)
 	courseService := service.NewCourseService(courseRepo, enrollmentRepo, sectionRepo)
-	enrollmentService := service.NewEnrollmentService(enrollmentRepo)
+	enrollmentService := service.NewEnrollmentService(enrollmentRepo).SetTenantRepos(userRepo, courseRepo, sectionRepo)
 	contentViewService := service.NewContentViewService(contentViewRepo)
 	moduleService := service.NewModuleService(moduleRepo, moduleItemRepo, service.WithPrerequisiteRepo(modulePrerequisiteRepo))
 	pageService := service.NewPageService(pageRepo)
@@ -471,7 +471,7 @@ func main() {
 	collaborationService := service.NewCollaborationService(collaborationRepo)
 	conferenceService := service.NewConferenceService(conferenceRepo, conferenceParticipantRepo)
 	analyticsService := service.NewAnalyticsService(pageViewRepo, submissionRepo, enrollmentRepo, assignmentRepo)
-	observerService := service.NewObserverService(enrollmentRepo, courseRepo, userRepo)
+	observerService := service.NewObserverService(enrollmentRepo, courseRepo, userRepo).SetObserverLinkStore(postgres.NewObserverLinkRepository(database))
 	observerService.SetOverviewDeps(
 		assignmentRepo,
 		submissionRepo,
@@ -1167,6 +1167,7 @@ func main() {
 		weeklyJob, dailyJob := scheduler.NewDigestJobs(notificationDeliveryService)
 		sched.Register("weeklyDigest", scheduler.WeeklyAt(time.Monday, 7), weeklyJob)
 		sched.Register("dailyDigest", scheduler.DailyAt(7), dailyJob)
+		sched.Register("onerosterAutoSync", scheduler.EveryTick(), scheduler.NewOneRosterAutoSyncJob(onerosterService))
 
 		schedCtx, schedCancel := context.WithCancel(context.Background())
 		defer schedCancel()

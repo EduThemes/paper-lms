@@ -10,6 +10,7 @@ import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
 import RichContentViewer from '../components/RichContentViewer';
 import { clearRceDraft } from '../components/rce/rceDrafts';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
+import useIsTeacher from '../hooks/useIsTeacher';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -42,7 +43,7 @@ const AnnouncementsPage = () => {
   });
 
   const [userNames, setUserNames] = useState({});
-  const [isInstructor, setIsInstructor] = useState(false);
+  const isInstructor = useIsTeacher(courseId) === true;
   const { issues: crossCourseIssues, checkAndSave, dismiss: dismissCrossCourse, confirm: confirmCrossCourse } = useCrossCourseCheck(courseId);
 
   const fetchAnnouncements = async () => {
@@ -58,36 +59,27 @@ const AnnouncementsPage = () => {
 
   useEffect(() => {
     fetchAnnouncements();
-    // Detect teacher role via enrollment (not user.role which is global)
-    if (courseId && user) {
-      api.getEnrollments(courseId, 1, 200)
-        .then((result) => {
-          const enrollments = result.data || [];
-          const myEnrollment = enrollments.find(e =>
-            e.user_id === user.id || e.user?.id === user.id
-          );
-          const teacherRole =
-            user.role === 'admin' ||
-            myEnrollment?.type === 'TeacherEnrollment' ||
-            myEnrollment?.type === 'TaEnrollment' ||
-            myEnrollment?.role === 'TeacherEnrollment' ||
-            myEnrollment?.role === 'TaEnrollment';
-          setIsInstructor(teacherRole);
-          // Build user name map for read receipts
-          if (teacherRole) {
-            const names = {};
-            for (const e of (result.data || [])) {
-              const uid = e.user_id || e.user?.id;
-              if (uid) {
-                names[uid] = e.user?.name || e.user?.display_name || `User #${uid}`;
-              }
-            }
-            setUserNames(names);
-          }
-        })
-        .catch(() => {});
-    }
   }, [courseId]);
+
+  // Build the user name map for read receipts (staff only). The caller's
+  // role comes from useIsTeacher (B072): scanning the first roster page
+  // for the caller's own row missed late-created teacher enrollments in
+  // courses larger than the server's 100-row page cap.
+  useEffect(() => {
+    if (!courseId || !user || !isInstructor) return;
+    api.getAllEnrollments(courseId)
+      .then((result) => {
+        const names = {};
+        for (const e of (result.data || [])) {
+          const uid = e.user_id || e.user?.id;
+          if (uid) {
+            names[uid] = e.user?.name || e.user?.display_name || `User #${uid}`;
+          }
+        }
+        setUserNames(names);
+      })
+      .catch(() => {});
+  }, [courseId, user, isInstructor]);
 
   const resetForm = () => {
     setFormData({

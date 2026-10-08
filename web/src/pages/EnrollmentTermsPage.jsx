@@ -3,7 +3,8 @@ import { Calendar, Plus, Edit2, Trash2, Clock, CheckCircle } from 'lucide-react'
 import { api, getCSRFToken } from '../services/api';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
-import { getCurrentAccountId } from '../services/currentAccount';
+import useAccountId from '../hooks/useAccountId';
+import { isoToDateTimeLocal, dateTimeLocalToISO } from '../utils/datetimeLocal';
 
 const EnrollmentTermsPage = () => {
   const { user } = useAuth();
@@ -23,7 +24,7 @@ const EnrollmentTermsPage = () => {
     grading_period_group_id: '',
   });
 
-  const accountId = getCurrentAccountId();
+  const accountId = useAccountId();
 
   const fetchTerms = async () => {
     try {
@@ -55,9 +56,11 @@ const EnrollmentTermsPage = () => {
   };
 
   useEffect(() => {
+    if (!accountId) return;
     fetchTerms();
     fetchCurrentTerm();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]);
 
   const resetForm = () => {
     setFormData({ name: '', sis_term_id: '', start_at: '', end_at: '', grading_period_group_id: '' });
@@ -69,12 +72,17 @@ const EnrollmentTermsPage = () => {
     e.preventDefault();
     setError(null);
 
+    // datetime-local values are local wall-clock times; convert through
+    // Date so the stored instant matches what the admin picked (B176).
+    // When editing, a cleared field is sent as '' so the server clears it.
+    const startISO = dateTimeLocalToISO(formData.start_at);
+    const endISO = dateTimeLocalToISO(formData.end_at);
     const payload = {
       enrollment_term: {
         name: formData.name,
         sis_term_id: formData.sis_term_id,
-        ...(formData.start_at ? { start_at: new Date(formData.start_at).toISOString() } : {}),
-        ...(formData.end_at ? { end_at: new Date(formData.end_at).toISOString() } : {}),
+        ...(startISO || editingTerm ? { start_at: startISO } : {}),
+        ...(endISO || editingTerm ? { end_at: endISO } : {}),
         ...(formData.grading_period_group_id ? { grading_period_group_id: parseInt(formData.grading_period_group_id, 10) } : {}),
       },
     };
@@ -113,8 +121,8 @@ const EnrollmentTermsPage = () => {
     setFormData({
       name: term.name || '',
       sis_term_id: term.sis_term_id || '',
-      start_at: term.start_at ? term.start_at.slice(0, 16) : '',
-      end_at: term.end_at ? term.end_at.slice(0, 16) : '',
+      start_at: isoToDateTimeLocal(term.start_at),
+      end_at: isoToDateTimeLocal(term.end_at),
       grading_period_group_id: term.grading_period_group_id ? String(term.grading_period_group_id) : '',
     });
     setShowForm(true);

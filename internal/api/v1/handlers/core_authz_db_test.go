@@ -114,11 +114,11 @@ func TestEnrollmentTerms_CrossTenantTermIsNotFound(t *testing.T) {
 	g := coreScratchDB(t)
 	ctx := context.Background()
 	termRepo := postgres.NewEnrollmentTermRepository(g)
-	foreign := &models.EnrollmentTerm{AccountID: 1, Name: "Fall (account 1)", SISTermID: "term-a"}
+	foreign := &models.EnrollmentTerm{AccountID: 1, Name: "Fall (account 1)", SISTermID: strPtrCore("term-a")}
 	if err := termRepo.Create(ctx, foreign); err != nil {
 		t.Fatalf("seed term: %v", err)
 	}
-	own := &models.EnrollmentTerm{AccountID: 2, Name: "Fall (account 2)", SISTermID: "term-b"}
+	own := &models.EnrollmentTerm{AccountID: 2, Name: "Fall (account 2)", SISTermID: strPtrCore("term-b")}
 	if err := termRepo.Create(ctx, own); err != nil {
 		t.Fatalf("seed term: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestEnrollmentTerms_CrossTenantTermIsNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, testutil.MakeRequest(app, http.MethodPut, foreignPath, body).StatusCode)
 	assert.Equal(t, http.StatusNotFound, testutil.MakeRequest(app, http.MethodDelete, foreignPath, nil).StatusCode)
 
-	after, err := termRepo.FindByID(ctx, foreign.ID)
+	after, err := termRepo.FindByID(ctx, foreign.ID, 1)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -211,3 +211,5 @@ func TestAuditLog_MasqueradeAttributionAndTextPayload(t *testing.T) {
 	}
 	assert.Contains(t, row.Payload, "POST /api/v1/x")
 }
+
+func strPtrCore(s string) *string { return &s }

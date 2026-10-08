@@ -15,6 +15,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/auth/initialpassword"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
+	"github.com/EduThemes/paper-lms/internal/repository/postgres"
 	"github.com/EduThemes/paper-lms/internal/security"
 	"gorm.io/gorm"
 )
@@ -148,7 +149,7 @@ func (s *OneRosterService) SyncFull(ctx context.Context, connectionID, accountID
 		StartedAt:    &now,
 	}
 	if err := s.syncLogRepo.Create(ctx, syncLog); err != nil {
-		return nil, err
+		return nil, s.releaseSyncStart(ctx, conn, err)
 	}
 
 	// Run the sync
@@ -187,12 +188,69 @@ func (s *OneRosterService) SyncIncremental(ctx context.Context, connectionID, ac
 		StartedAt:    &now,
 	}
 	if err := s.syncLogRepo.Create(ctx, syncLog); err != nil {
-		return nil, err
+		return nil, s.releaseSyncStart(ctx, conn, err)
 	}
 
 	s.runSync(ctx, conn, syncLog, filter)
 
 	return syncLog, nil
+}
+
+// releaseSyncStart undoes the "syncing" mark when a sync fails before
+// runSync (whose deferred block normally clears it) gets to run. Without
+// it the connection stayed "syncing" forever: every later manual sync
+// was refused as "already in progress" and auto-sync never found it due.
+func (s *OneRosterService) releaseSyncStart(ctx context.Context, conn *models.OneRosterConnection, cause error) error {
+	conn.SyncStatus = "error"
+	conn.LastSyncError = fmt.Sprintf("could not start sync: %v", cause)
+	_ = s.connRepo.Update(ctx, conn)
+	return cause
+}
+
+// autoSyncDue reports whether an auto-sync connection is due at now: it
+// has never synced, or its last sync is at least AutoSyncInterval hours
+// old (default 24). A connection already syncing is never due.
+func autoSyncDue(conn *models.OneRosterConnection, now time.Time) bool {
+	if conn.SyncStatus == "syncing" {
+		return false
+	}
+	if conn.LastSyncAt == nil {
+		return true
+	}
+	interval := conn.AutoSyncInterval
+	if interval < 1 {
+		interval = 24
+	}
+	return now.Sub(*conn.LastSyncAt) >= time.Duration(interval)*time.Hour
+}
+
+// RunDueAutoSyncs runs a full sync for every auto_sync connection whose
+// interval has elapsed (B173: the auto-sync toggle previously did
+// nothing — no job ever read it). Full, not incremental, so the opt-in
+// deprovision passes see the whole roster. The scheduler calls this
+// hourly; one failing connection does not stop the others.
+func (s *OneRosterService) RunDueAutoSyncs(ctx context.Context, now time.Time) (int, error) {
+	conns, err := s.connRepo.ListAutoSync(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("listing auto-sync connections: %w", err)
+	}
+	ran := 0
+	var errs []string
+	for i := range conns {
+		conn := &conns[i]
+		if !autoSyncDue(conn, now) {
+			continue
+		}
+		if _, err := s.SyncFull(ctx, conn.ID, conn.AccountID); err != nil {
+			errs = append(errs, fmt.Sprintf("connection %d: %v", conn.ID, err))
+			continue
+		}
+		ran++
+	}
+	if len(errs) > 0 {
+		return ran, fmt.Errorf("auto-sync errors: %s", strings.Join(errs, "; "))
+	}
+	return ran, nil
 }
 
 func (s *OneRosterService) GetSyncLogs(ctx context.Context, connectionID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.OneRosterSyncLog], error) {
@@ -236,6 +294,9 @@ type onerosterUser struct {
 	Role         string              `json:"role"` // student, teacher, administrator, etc.
 	UserIDs      []onerosterUserID   `json:"userIds,omitempty"`
 	Orgs         []onerosterOrgRef   `json:"orgs,omitempty"`
+	// Agents links students and their parents/guardians (OneRoster 1.1
+	// users.agents); each side lists the other.
+	Agents []onerosterOrgRef `json:"agents,omitempty"`
 }
 
 type onerosterUserID struct {
@@ -543,10 +604,22 @@ func (s *OneRosterService) runSync(ctx context.Context, conn *models.OneRosterCo
 	if err != nil {
 		errDetails = append(errDetails, fmt.Sprintf("enrollments fetch failed: %v", err))
 	} else {
-		created, updated, errs := s.syncEnrollments(ctx, enrollments)
-		syncLog.EnrollmentsCreated = created
-		syncLog.EnrollmentsUpdated = updated
-		errDetails = append(errDetails, errs...)
+		res := s.syncEnrollments(ctx, conn.AccountID, enrollments)
+		syncLog.EnrollmentsCreated = res.created
+		syncLog.EnrollmentsUpdated = res.updated
+		errDetails = append(errDetails, res.errs...)
+
+		// Enrollments the full roster no longer lists are dropped
+		// (B174) under the same opt-in, full-sync-only and
+		// circuit-breaker guardrails as the user deprovision pass.
+		if conn.DeprovisionEnabled && syncLog.SyncType == "full" {
+			removed, abortReason, errs := s.removeAbsentEnrollments(ctx, conn.AccountID, res.present)
+			syncLog.EnrollmentsUpdated += removed
+			errDetails = append(errDetails, errs...)
+			if abortReason != "" {
+				syncLog.DeprovisionAbortedReason = abortReason
+			}
+		}
 	}
 
 	// 6. Deprovision pass — opt-in, FULL syncs only (an incremental
@@ -558,7 +631,11 @@ func (s *OneRosterService) runSync(ctx context.Context, conn *models.OneRosterCo
 		if err != nil {
 			errDetails = append(errDetails, fmt.Sprintf("deprovision pass failed: %v", err))
 		} else if result.Aborted {
-			syncLog.DeprovisionAbortedReason = result.AbortReason
+			if syncLog.DeprovisionAbortedReason != "" {
+				syncLog.DeprovisionAbortedReason = result.AbortReason + "; " + syncLog.DeprovisionAbortedReason
+			} else {
+				syncLog.DeprovisionAbortedReason = result.AbortReason
+			}
 		} else {
 			syncLog.UsersDeprovisioned = len(result.ToSuspend)
 			syncLog.UsersReactivated = len(result.ToReactivate)
@@ -627,13 +704,18 @@ func (s *OneRosterService) syncUsers(ctx context.Context, accountID uint, users 
 		role := mapOneRosterRole(orUser.Role)
 
 		existing, _ := s.userRepo.FindBySISUserID(ctx, sisID)
+		if existing != nil && existing.AccountID != accountID {
+			// SIS ids are deployment-wide; never touch another tenant's user.
+			errs = append(errs, fmt.Sprintf("user %s belongs to another account", orUser.SourcedID))
+			continue
+		}
 		if existing != nil {
-			// Update existing user
+			// Update existing user. Role is deliberately NOT synced: the
+			// account-level role is managed in Paper (B074).
 			existing.Name = name
 			existing.SortableName = orUser.FamilyName + ", " + orUser.GivenName
 			existing.ShortName = orUser.GivenName
 			existing.Email = email
-			existing.Role = role
 			if err := s.userRepo.Update(ctx, existing); err != nil {
 				errs = append(errs, fmt.Sprintf("failed to update user %s: %v", orUser.SourcedID, err))
 			} else {
@@ -684,7 +766,63 @@ func (s *OneRosterService) syncUsers(ctx context.Context, accountID uint, users 
 		}
 	}
 
+	errs = append(errs, s.syncGuardianLinks(ctx, accountID, users)...)
+
 	return created, updated, errs
+}
+
+// syncGuardianLinks turns the roster's student <-> parent/guardian
+// agents relationships into durable ObserverLinks (B174), so a guardian
+// is linked to their child and observes the child's classes. Linking
+// mirrors the child's current enrollments immediately; later changes
+// follow through Enrollment.AfterSave.
+func (s *OneRosterService) syncGuardianLinks(ctx context.Context, accountID uint, users []onerosterUser) []string {
+	type pair struct{ guardian, student string }
+	var pairs []pair
+	for _, u := range users {
+		if u.Status == "tobedeleted" || len(u.Agents) == 0 {
+			continue
+		}
+		role := strings.ToLower(u.Role)
+		for _, a := range u.Agents {
+			switch {
+			case role == "student":
+				pairs = append(pairs, pair{guardian: a.SourcedID, student: u.SourcedID})
+			case isOneRosterGuardianRole(role):
+				pairs = append(pairs, pair{guardian: u.SourcedID, student: a.SourcedID})
+			}
+		}
+	}
+	if len(pairs) == 0 || s.db == nil {
+		return nil
+	}
+
+	links := postgres.NewObserverLinkRepository(s.db)
+	seen := map[pair]bool{}
+	var errs []string
+	for _, p := range pairs {
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		guardian := s.findOneRosterUser(ctx, accountID, p.guardian)
+		student := s.findOneRosterUser(ctx, accountID, p.student)
+		if guardian == nil || student == nil {
+			// The other side may arrive in a later page or sync.
+			continue
+		}
+		created, err := links.Activate(ctx, guardian.ID, student.ID, accountID)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("failed to link guardian %s to student %s: %v", p.guardian, p.student, err))
+			continue
+		}
+		if created {
+			if err := links.SyncStudent(ctx, student.ID); err != nil {
+				errs = append(errs, fmt.Sprintf("failed to sync guardian %s access: %v", p.guardian, err))
+			}
+		}
+	}
+	return errs
 }
 
 func (s *OneRosterService) syncClasses(ctx context.Context, accountID uint, classes []onerosterClass) (int, int, []string) {
@@ -703,6 +841,11 @@ func (s *OneRosterService) syncClasses(ctx context.Context, accountID uint, clas
 		}
 
 		existing, _ := s.courseRepo.FindBySISCourseID(ctx, sisCourseID)
+		if existing != nil && existing.AccountID != accountID {
+			// SIS ids are deployment-wide; never touch another tenant's course.
+			errs = append(errs, fmt.Sprintf("class %s belongs to another account", class.SourcedID))
+			continue
+		}
 		if existing != nil {
 			existing.Name = class.Title
 			existing.CourseCode = courseCode
@@ -740,76 +883,245 @@ func (s *OneRosterService) syncClasses(ctx context.Context, accountID uint, clas
 	return created, updated, errs
 }
 
-func (s *OneRosterService) syncEnrollments(ctx context.Context, enrollments []onerosterEnrollment) (int, int, []string) {
-	var created, updated int
-	var errs []string
+// onerosterEnrollmentKey identifies a roster enrollment once resolved
+// to Paper ids.
+type onerosterEnrollmentKey struct {
+	userID, courseID uint
+	enrollType       string
+}
+
+// onerosterEnrollmentSyncResult carries the counters and the set of
+// enrollments the roster asserts, for the absence pass.
+type onerosterEnrollmentSyncResult struct {
+	created, updated int
+	errs             []string
+	present          map[onerosterEnrollmentKey]bool
+}
+
+// findOneRosterUser / findOneRosterCourse resolve a sourcedId inside the
+// connection's account only; SIS ids are deployment-wide, so a match in
+// another tenant is treated as "not found".
+func (s *OneRosterService) findOneRosterUser(ctx context.Context, accountID uint, sourcedID string) *models.User {
+	u, _ := s.userRepo.FindBySISUserID(ctx, onerosterSISPrefix+sourcedID)
+	if u == nil || u.AccountID != accountID {
+		return nil
+	}
+	return u
+}
+
+func (s *OneRosterService) findOneRosterCourse(ctx context.Context, accountID uint, sourcedID string) *models.Course {
+	c, _ := s.courseRepo.FindBySISCourseID(ctx, onerosterSISPrefix+sourcedID)
+	if c == nil || c.AccountID != accountID {
+		return nil
+	}
+	return c
+}
+
+// findRosterEnrollment returns the enrollment a roster row maps onto, in
+// any workflow state: the same-type row if there is one (preferring a
+// non-deleted row), otherwise — for a role change — any non-observer
+// row of the user in the course.
+func (s *OneRosterService) findRosterEnrollment(ctx context.Context, userID, courseID uint, enrollType string) *models.Enrollment {
+	var e models.Enrollment
+	err := s.db.WithContext(ctx).
+		Where("user_id = ? AND course_id = ? AND type = ? AND associated_user_id IS NULL", userID, courseID, enrollType).
+		Order("(workflow_state = 'deleted') ASC, id ASC").First(&e).Error
+	if err == nil {
+		return &e
+	}
+	err = s.db.WithContext(ctx).
+		Where("user_id = ? AND course_id = ? AND type <> ?", userID, courseID, "ObserverEnrollment").
+		Order("(workflow_state = 'deleted') ASC, id ASC").First(&e).Error
+	if err == nil {
+		return &e
+	}
+	return nil
+}
+
+func isOneRosterGuardianRole(role string) bool {
+	switch strings.ToLower(role) {
+	case "guardian", "parent", "relative":
+		return true
+	}
+	return false
+}
+
+func (s *OneRosterService) syncEnrollments(ctx context.Context, accountID uint, enrollments []onerosterEnrollment) onerosterEnrollmentSyncResult {
+	res := onerosterEnrollmentSyncResult{present: map[onerosterEnrollmentKey]bool{}}
+
+	// Guardians are handled after students: their observer enrollments
+	// hang off the child's StudentEnrollment (see syncGuardianEnrollment).
+	var guardians []onerosterEnrollment
 
 	for _, orEnroll := range enrollments {
-		if orEnroll.Status == "tobedeleted" {
+		if isOneRosterGuardianRole(orEnroll.Role) {
+			guardians = append(guardians, orEnroll)
 			continue
 		}
 
-		// Look up user by SIS ID
-		userSISID := "oneroster:" + orEnroll.User.SourcedID
-		user, _ := s.userRepo.FindBySISUserID(ctx, userSISID)
+		user := s.findOneRosterUser(ctx, accountID, orEnroll.User.SourcedID)
 		if user == nil {
-			errs = append(errs, fmt.Sprintf("user not found for enrollment %s (user: %s)", orEnroll.SourcedID, orEnroll.User.SourcedID))
+			res.errs = append(res.errs, fmt.Sprintf("user not found for enrollment %s (user: %s)", orEnroll.SourcedID, orEnroll.User.SourcedID))
 			continue
 		}
-
-		// Look up course by SIS ID
-		courseSISID := "oneroster:" + orEnroll.Class.SourcedID
-		course, _ := s.courseRepo.FindBySISCourseID(ctx, courseSISID)
+		course := s.findOneRosterCourse(ctx, accountID, orEnroll.Class.SourcedID)
 		if course == nil {
-			errs = append(errs, fmt.Sprintf("course not found for enrollment %s (class: %s)", orEnroll.SourcedID, orEnroll.Class.SourcedID))
+			res.errs = append(res.errs, fmt.Sprintf("course not found for enrollment %s (class: %s)", orEnroll.SourcedID, orEnroll.Class.SourcedID))
 			continue
 		}
 
 		enrollType := mapOneRosterEnrollmentRole(orEnroll.Role)
+		existing := s.findRosterEnrollment(ctx, user.ID, course.ID, enrollType)
 
-		existing, _ := s.enrollmentRepo.FindByUserAndCourse(ctx, user.ID, course.ID, 0)
-		if existing != nil {
-			if existing.Type != enrollType {
-				existing.Type = enrollType
-				existing.Role = enrollType
+		// The SIS marked the enrollment for removal (e.g. the student
+		// switched class periods): drop it. Saving through the repo
+		// lets Enrollment.AfterSave drop linked observers' access too.
+		if orEnroll.Status == "tobedeleted" {
+			if existing != nil && existing.Type == enrollType && existing.WorkflowState != models.EnrollmentDeleted {
+				existing.WorkflowState = models.EnrollmentDeleted
 				if err := s.enrollmentRepo.Update(ctx, existing); err != nil {
-					errs = append(errs, fmt.Sprintf("failed to update enrollment %s: %v", orEnroll.SourcedID, err))
+					res.errs = append(res.errs, fmt.Sprintf("failed to remove enrollment %s: %v", orEnroll.SourcedID, err))
 				} else {
-					updated++
+					res.updated++
 				}
 			}
+			continue
+		}
+
+		res.present[onerosterEnrollmentKey{user.ID, course.ID, enrollType}] = true
+
+		if existing != nil {
+			if existing.Type != enrollType || existing.WorkflowState != models.EnrollmentActive {
+				existing.Type = enrollType
+				existing.Role = enrollType
+				existing.WorkflowState = models.EnrollmentActive
+				if err := s.enrollmentRepo.Update(ctx, existing); err != nil {
+					res.errs = append(res.errs, fmt.Sprintf("failed to update enrollment %s: %v", orEnroll.SourcedID, err))
+				} else {
+					res.updated++
+				}
+			}
+			continue
+		}
+
+		newEnroll := &models.Enrollment{
+			UserID:        user.ID,
+			CourseID:      course.ID,
+			Type:          enrollType,
+			Role:          enrollType,
+			WorkflowState: models.EnrollmentActive,
+		}
+		if err := s.enrollmentRepo.Create(ctx, newEnroll); err != nil {
+			res.errs = append(res.errs, fmt.Sprintf("failed to create enrollment %s: %v", orEnroll.SourcedID, err))
 		} else {
-			newEnroll := &models.Enrollment{
-				UserID:        user.ID,
-				CourseID:      course.ID,
-				Type:          enrollType,
-				Role:          enrollType,
-				WorkflowState: models.EnrollmentActive,
-			}
-			if err := s.enrollmentRepo.Create(ctx, newEnroll); err != nil {
-				errs = append(errs, fmt.Sprintf("failed to create enrollment %s: %v", orEnroll.SourcedID, err))
-			} else {
-				created++
-			}
+			res.created++
 		}
 	}
 
-	return created, updated, errs
+	for _, g := range guardians {
+		if g.Status == "tobedeleted" {
+			// Guardian access follows the child's enrollment and the
+			// guardian link; nothing to do per class.
+			continue
+		}
+		if err := s.syncGuardianEnrollment(ctx, accountID, g); err != nil {
+			res.errs = append(res.errs, err.Error())
+		}
+	}
+
+	return res
+}
+
+// syncGuardianEnrollment gives a guardian observer access to a class
+// through the child they are linked to (users' agents relationship,
+// stored as ObserverLinks by syncUsers). Previously the guardian got an
+// ObserverEnrollment with no AssociatedUserID, i.e. no link to any
+// child. Now each linked child enrolled in the class gets an associated
+// observer enrollment via the same mirror Enrollment.AfterSave uses.
+func (s *OneRosterService) syncGuardianEnrollment(ctx context.Context, accountID uint, g onerosterEnrollment) error {
+	guardian := s.findOneRosterUser(ctx, accountID, g.User.SourcedID)
+	if guardian == nil {
+		return fmt.Errorf("user not found for enrollment %s (user: %s)", g.SourcedID, g.User.SourcedID)
+	}
+	course := s.findOneRosterCourse(ctx, accountID, g.Class.SourcedID)
+	if course == nil {
+		return fmt.Errorf("course not found for enrollment %s (class: %s)", g.SourcedID, g.Class.SourcedID)
+	}
+
+	var students []models.Enrollment
+	if err := s.db.WithContext(ctx).
+		Where("course_id = ? AND type = ? AND user_id IN (SELECT student_id FROM observer_links WHERE observer_id = ? AND workflow_state = ?)",
+			course.ID, "StudentEnrollment", guardian.ID, models.ObserverLinkActive).
+		Find(&students).Error; err != nil {
+		return fmt.Errorf("failed to resolve students for guardian enrollment %s: %v", g.SourcedID, err)
+	}
+	if len(students) == 0 {
+		return fmt.Errorf("guardian enrollment %s: guardian %s has no linked student in class %s", g.SourcedID, g.User.SourcedID, g.Class.SourcedID)
+	}
+	for i := range students {
+		if err := models.SyncObserverEnrollmentsForStudent(s.db.WithContext(ctx), &students[i]); err != nil {
+			return fmt.Errorf("failed to sync guardian enrollment %s: %v", g.SourcedID, err)
+		}
+	}
+	return nil
+}
+
+// removeAbsentEnrollments is the enrollment half of roster-driven
+// deprovisioning (B174): on a full sync with deprovisioning enabled, an
+// active enrollment of a OneRoster-managed user in a OneRoster-managed
+// course that the roster no longer lists is dropped. Observer
+// enrollments are skipped (they follow the child). The same circuit
+// breaker as the user pass guards against a truncated roster.
+func (s *OneRosterService) removeAbsentEnrollments(ctx context.Context, accountID uint, present map[onerosterEnrollmentKey]bool) (removed int, abortReason string, errs []string) {
+	var managed []models.Enrollment
+	if err := s.db.WithContext(ctx).
+		Where("workflow_state = ? AND type <> ?", models.EnrollmentActive, "ObserverEnrollment").
+		Where("course_id IN (SELECT id FROM courses WHERE account_id = ? AND sis_course_id LIKE ?)", accountID, sisManagedPattern).
+		Where("user_id IN (SELECT id FROM users WHERE account_id = ? AND sis_user_id LIKE ?)", accountID, sisManagedPattern).
+		Find(&managed).Error; err != nil {
+		return 0, "", []string{fmt.Sprintf("listing managed enrollments: %v", err)}
+	}
+
+	var absent []models.Enrollment
+	for _, e := range managed {
+		if !present[onerosterEnrollmentKey{e.UserID, e.CourseID, e.Type}] {
+			absent = append(absent, e)
+		}
+	}
+
+	switch {
+	case len(present) == 0 && len(managed) > 0:
+		return 0, fmt.Sprintf("refusing to remove enrollments against an empty enrollment roster (%d managed enrollments)", len(managed)), nil
+	case len(absent) > deprovisionThreshold(len(managed)):
+		return 0, fmt.Sprintf("refusing to remove %d of %d managed enrollments (threshold %d): the roster fetch may be incomplete",
+			len(absent), len(managed), deprovisionThreshold(len(managed))), nil
+	}
+
+	for i := range absent {
+		absent[i].WorkflowState = models.EnrollmentDeleted
+		if err := s.enrollmentRepo.Update(ctx, &absent[i]); err != nil {
+			errs = append(errs, fmt.Sprintf("failed to remove absent enrollment %d: %v", absent[i].ID, err))
+			continue
+		}
+		removed++
+	}
+	return removed, "", errs
 }
 
 // ---- Role mapping ----
 
+// mapOneRosterRole returns the Paper user role a newly provisioned
+// OneRoster user starts with. It is always "user" (B074): a SIS
+// "administrator" is a principal, counselor or district staffer, not a
+// Paper tenant admin able to masquerade, edit SSO and run imports.
+// Canvas likewise never grants account-admin from roster data — account
+// admins are assigned explicitly. Course-level power for administrators
+// comes from their enrollments (see mapOneRosterEnrollmentRole). The
+// sync never rewrites an existing user's role, so a promotion or
+// demotion made in Paper survives every sync.
 func mapOneRosterRole(role string) string {
-	switch strings.ToLower(role) {
-	case "teacher", "aide":
-		return "user" // Canvas teacher role
-	case "administrator":
-		return "admin"
-	case "student":
-		return "user" // Canvas student role
-	default:
-		return "user"
-	}
+	_ = role
+	return "user"
 }
 
 func mapOneRosterEnrollmentRole(role string) string {

@@ -95,7 +95,7 @@ func (h *CanvasAliasHandler) SelfEnrollments(c *fiber.Ctx) error {
 
 	out := make([]fiber.Map, len(enrollments))
 	for i := range enrollments {
-		out[i] = enrollmentToJSON(&enrollments[i])
+		out[i] = enrollmentToJSON(&enrollments[i], true) // caller's own enrollments
 	}
 
 	return c.JSON(out)

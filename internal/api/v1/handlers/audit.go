@@ -22,6 +22,25 @@ func NewAuditHandler(auditService *service.AuditService) *AuditHandler {
 	return &AuditHandler{auditService: auditService}
 }
 
+// callerSeesAuditNetworkInfo reports whether audit rows may include the
+// actor's IP address and user agent. Those identify individual students'
+// devices; Canvas limits audit data to account admins, so course staff
+// get the activity trail without them (B179).
+func callerSeesAuditNetworkInfo(c *fiber.Ctx) bool {
+	isAdmin, _ := c.Locals("is_admin").(bool)
+	return isAdmin
+}
+
+// redactAuditNetworkInfo drops ip_address / user_agent from a serialized
+// audit row for non-admin callers.
+func redactAuditNetworkInfo(row fiber.Map, c *fiber.Ctx) fiber.Map {
+	if !callerSeesAuditNetworkInfo(c) {
+		delete(row, "ip_address")
+		delete(row, "user_agent")
+	}
+	return row
+}
+
 func auditLogToJSON(log *models.AuditLog) fiber.Map {
 	return fiber.Map{
 		"id":           log.ID,
@@ -164,7 +183,7 @@ func (h *AuditHandler) GetCourseAuditLog(c *fiber.Ctx) error {
 
 	logs := make([]fiber.Map, len(result.Items))
 	for i, log := range result.Items {
-		logs[i] = auditLogToJSON(&log)
+		logs[i] = redactAuditNetworkInfo(auditLogToJSON(&log), c)
 	}
 
 	return c.JSON(logs)
@@ -200,8 +219,13 @@ func (h *AuditHandler) GetCourseGradeChangeLog(c *fiber.Ctx) error {
 // GetAccountAuditLog handles GET /accounts/:account_id/audit_log
 func (h *AuditHandler) GetAccountAuditLog(c *fiber.Ctx) error {
 	accountID, err := c.ParamsInt("account_id")
-	if err != nil {
+	if err != nil || accountID <= 0 {
 		return responses.BadRequest(c, "Invalid account ID")
+	}
+	// The URL :account_id is caller-controlled: another tenant's audit
+	// trail (with its users' IP addresses) is a 404, super_admin excepted.
+	if assertSameTenant(c, uint(accountID)) {
+		return nil
 	}
 
 	// RequireAdmin already ties :account_id to the caller's tenant; keep
@@ -285,7 +309,7 @@ func (h *AuditHandler) ExportCourseAuditLogCSV(c *fiber.Ctx) error {
 	cid := uint(courseID)
 	filter.CourseID = &cid
 
-	csvData, err := h.auditService.ExportAuditLogCSV(c.Context(), filter)
+	csvData, err := h.auditService.ExportAuditLogCSV(c.Context(), filter, callerSeesAuditNetworkInfo(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not export audit log")
 	}

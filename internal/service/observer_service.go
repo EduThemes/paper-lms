@@ -80,10 +80,26 @@ type ObserverEnrollmentRepository interface {
 	Update(ctx context.Context, enrollment *models.Enrollment) error
 }
 
+// ObserverLinkStore persists the durable observer -> student pairing
+// (postgres.ObserverLinkRepository). Consumer-side interface, wired via
+// SetObserverLinkStore.
+type ObserverLinkStore interface {
+	Activate(ctx context.Context, observerID, studentID, accountID uint) (bool, error)
+	Deactivate(ctx context.Context, observerID, studentID uint) (bool, error)
+	IsLinked(ctx context.Context, observerID, studentID uint) (bool, error)
+	ListStudentIDs(ctx context.Context, observerID uint) ([]uint, error)
+	SyncStudent(ctx context.Context, studentID uint) error
+}
+
 type ObserverService struct {
 	enrollmentRepo ObserverEnrollmentRepository
 	courseRepo     repository.CourseRepository
 	userRepo       repository.UserRepository
+
+	// links is the durable pairing store (B177). When nil the service
+	// falls back to deriving pairings from ObserverEnrollment rows (the
+	// pre-000092 behavior), which unit tests with mock repos rely on.
+	links ObserverLinkStore
 
 	// Optional dependencies — only required for GetChildOverview. They are
 	// configured via SetOverviewDeps so the existing constructor signature
@@ -125,9 +141,19 @@ func (s *ObserverService) SetOverviewDeps(
 	s.pageRepo = pageRepo
 }
 
-// LinkObserverToStudent creates an ObserverEnrollment for each active course the
-// student is enrolled in. The AssociatedUserID on each enrollment is set to the
-// student's user ID so the observer is linked to that student.
+// SetObserverLinkStore wires the durable pairing store. Call from
+// cmd/server/main.go after constructing the service.
+func (s *ObserverService) SetObserverLinkStore(links ObserverLinkStore) *ObserverService {
+	s.links = links
+	return s
+}
+
+// LinkObserverToStudent pairs an observer with a student. With the link
+// store wired (production) the pairing is durable: it succeeds even when
+// the student has no courses yet, and the observer's ObserverEnrollments
+// then follow the student's StudentEnrollments as they are added,
+// concluded or dropped (Enrollment.AfterSave). Without it, it falls back
+// to snapshotting an ObserverEnrollment into each current course.
 func (s *ObserverService) LinkObserverToStudent(ctx context.Context, observerUserID, studentUserID uint) error {
 	// Validate that the observer user exists. Observer linking
 	// (pairing-code flow) was already tenant-validated upstream via
@@ -139,9 +165,20 @@ func (s *ObserverService) LinkObserverToStudent(ctx context.Context, observerUse
 	}
 
 	// Validate that the student user exists.
-	_, err = s.userRepo.FindByID(ctx, studentUserID, 0)
+	student, err := s.userRepo.FindByID(ctx, studentUserID, 0)
 	if err != nil {
 		return errors.New("student user not found")
+	}
+
+	if s.links != nil {
+		created, err := s.links.Activate(ctx, observerUserID, studentUserID, student.AccountID)
+		if err != nil {
+			return err
+		}
+		if !created {
+			return errors.New("observer is already linked to this student")
+		}
+		return s.links.SyncStudent(ctx, studentUserID)
 	}
 
 	// Check if the observer is already linked to this student.
@@ -190,12 +227,22 @@ func (s *ObserverService) LinkObserverToStudent(ctx context.Context, observerUse
 // UnlinkObserver removes observer enrollments for the given student by setting
 // the workflow_state to "deleted" on each matching ObserverEnrollment.
 func (s *ObserverService) UnlinkObserver(ctx context.Context, observerUserID, studentUserID uint) error {
+	found := false
+	if s.links != nil {
+		// Deactivate the durable link first so the AfterSave mirror stops
+		// re-creating observer enrollments for this pair.
+		removed, err := s.links.Deactivate(ctx, observerUserID, studentUserID)
+		if err != nil {
+			return err
+		}
+		found = removed
+	}
+
 	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
 	if err != nil {
 		return errors.New("could not fetch observer enrollments")
 	}
 
-	found := false
 	for _, e := range enrollments {
 		if e.Type != "ObserverEnrollment" {
 			continue
@@ -221,7 +268,39 @@ func (s *ObserverService) UnlinkObserver(ctx context.Context, observerUserID, st
 // ListObservedStudents returns a list of unique student user IDs the observer is
 // linked to, derived from active ObserverEnrollment records where
 // associated_user_id is not null.
+//
+// With the link store wired the durable links come first, followed by any
+// student the observer only observes through an associated enrollment
+// that has no link behind it (e.g. an enrollments.csv row with
+// associated_user_id, which Canvas scopes to that one course).
 func (s *ObserverService) ListObservedStudents(ctx context.Context, observerUserID uint) ([]uint, error) {
+	if s.links == nil {
+		return s.enrollmentObservees(ctx, observerUserID)
+	}
+	linked, err := s.links.ListStudentIDs(ctx, observerUserID)
+	if err != nil {
+		return nil, err
+	}
+	viaEnrollment, err := s.enrollmentObservees(ctx, observerUserID)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[uint]bool, len(linked))
+	for _, id := range linked {
+		seen[id] = true
+	}
+	for _, id := range viaEnrollment {
+		if !seen[id] {
+			seen[id] = true
+			linked = append(linked, id)
+		}
+	}
+	return linked, nil
+}
+
+// enrollmentObservees derives observed students from the observer's
+// active ObserverEnrollments that carry an associated student.
+func (s *ObserverService) enrollmentObservees(ctx context.Context, observerUserID uint) ([]uint, error) {
 	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
 	if err != nil {
 		return nil, errors.New("could not fetch observer enrollments")
@@ -251,7 +330,17 @@ func (s *ObserverService) ListObservedStudents(ctx context.Context, observerUser
 
 // IsObserverOf checks whether the observer has an active ObserverEnrollment
 // linked to the given student.
+//
+// With the link store wired an active link is enough; an active
+// associated ObserverEnrollment created without a link (e.g. by an SIS
+// enrollments.csv associated_user_id row) still counts, as it always has.
 func (s *ObserverService) IsObserverOf(ctx context.Context, observerUserID, studentUserID uint) (bool, error) {
+	if s.links != nil {
+		linked, err := s.links.IsLinked(ctx, observerUserID, studentUserID)
+		if err != nil || linked {
+			return linked, err
+		}
+	}
 	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
 	if err != nil {
 		return false, errors.New("could not fetch observer enrollments")
