@@ -19,6 +19,7 @@ import CurrencyPills from './gamification/CurrencyPills';
 import BrandLogo from './brand/BrandLogo';
 import UserMenu from './UserMenu';
 import useHasObservees from '../hooks/useHasObservees';
+import StudentViewBanner, { useStudentViewStatus } from './StudentViewBanner';
 
 // Nav items are built inside the component so labels translate when the
 // active language changes (useTranslation only runs in the render tree).
@@ -86,6 +87,9 @@ const isAdminRoute = (pathname) =>
 // Masquerade banner shown when an admin is acting as another user
 const MasqueradeBanner = ({ userName, onStopMasquerade, stopping }) => {
   const { t } = useTranslation();
+  // G076: a Student View session gets its own banner (reset / leave).
+  const studentViewCourse = useStudentViewStatus(true);
+  if (studentViewCourse) return <StudentViewBanner courseId={studentViewCourse} />;
   return (
     <div
       className="fixed top-0 left-0 right-0 z-[60] bg-accent-warning text-white px-4 py-2 flex items-center justify-center gap-3 shadow-md"

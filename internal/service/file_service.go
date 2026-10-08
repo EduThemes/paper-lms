@@ -73,6 +73,9 @@ type FileService struct {
 	storageBackend storage.Backend
 	storagePath    string // kept for backward compat (local path prefix)
 	maxUploadSize  int64
+	// tree backs file management, visibility and quotas (G070-G072);
+	// set with SetTreeRepository. Nil keeps the older flat behaviour.
+	tree repository.CourseFilesRepository
 }
 
 func NewFileService(folderRepo repository.FolderRepository, attachmentRepo repository.AttachmentRepository, storagePath string) *FileService {

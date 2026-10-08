@@ -21,6 +21,7 @@ const FilesPage = React.lazy(() => import('./pages/FilesPage'));
 const SISImportPage = React.lazy(() => import('./pages/SISImportPage'));
 const PagesPage = React.lazy(() => import('./pages/PagesPage'));
 const PageDetailPage = React.lazy(() => import('./pages/PageDetailPage'));
+const PageHistoryPage = React.lazy(() => import('./pages/PageHistoryPage'));
 const QuizzesPage = React.lazy(() => import('./pages/QuizzesPage'));
 const QuizTakePage = React.lazy(() => import('./pages/QuizTakePage'));
 const QuizReviewPage = React.lazy(() => import('./pages/QuizReviewPage'));
@@ -84,6 +85,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import { OAuthConsentGate, ResumePendingOAuthConsent } from './components/OAuthConsentResume';
 import SuperAdminGate from './components/SuperAdminGate';
 import { CourseUIProvider } from './contexts/CourseUIContext';
+import CourseTabGate from './components/CourseTabGate';
 import { useAuth } from './contexts/AuthContext';
 import { api } from './services/api';
 const SetupWizardPage = React.lazy(() => import('./pages/SetupWizardPage'));
@@ -187,7 +189,7 @@ const App = () => {
           path="/courses/:courseId"
           element={
             <ProtectedRoute>
-              <CourseUIProvider><Outlet /></CourseUIProvider>
+              <CourseUIProvider><CourseTabGate><Outlet /></CourseTabGate></CourseUIProvider>
             </ProtectedRoute>
           }
         >
@@ -205,6 +207,7 @@ const App = () => {
           <Route path="people" element={<PeoplePage />} />
           <Route path="pages" element={<PagesPage />} />
           <Route path="pages/:slug" element={<PageDetailPage />} />
+          <Route path="pages/:slug/revisions" element={<PageHistoryPage />} />
           <Route path="quizzes" element={<QuizzesPage />} />
           <Route path="quizzes/:quizId" element={<Navigate to="take" replace />} />
           <Route path="quizzes/:quizId/take" element={<QuizTakePage />} />

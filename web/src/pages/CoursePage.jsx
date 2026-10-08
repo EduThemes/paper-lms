@@ -36,6 +36,7 @@ import HomeEngine from '../components/home/HomeEngine';
 import K2Layout from '../components/home/K2Layout';
 import SafeHTML from '../components/SafeHTML';
 import { CourseFrontPageView, CourseAnnouncementsView } from '../components/home/CourseHomeViews';
+import CourseStaffBar from '../components/CourseStaffBar';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -933,6 +934,7 @@ const CoursePage = () => {
         />
 
         <QuickActionRow courseId={courseId} isTeacher={isTeacher} />
+        {isTeacher && <CourseStaffBar course={course} onCourseChange={(updated) => setCourse((prev) => ({ ...prev, ...updated }))} />}
 
         <CourseNav />
 

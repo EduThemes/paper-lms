@@ -22,6 +22,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import CourseStorageCard from '../components/files/CourseStorageCard';
 
 // All available CourseNav tabs in default order
 const DEFAULT_NAV_TABS = [
@@ -636,6 +637,9 @@ const CourseSettingsPage = () => {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* G072: storage use; admins set the course quota. */}
+              <CourseStorageCard courseId={courseId} course={course} onSaved={setCourse} />
             </div>
           )}
 

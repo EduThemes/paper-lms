@@ -157,6 +157,9 @@ type Router struct {
 	// routes; that helper carries the RequireSuperAdmin gate.
 	SuperAdminSettingsHandler *handlers.SuperAdminSettingsHandler
 
+	// Pages, files and course shell (routes_pages_files.go).
+	PagesFiles *PagesFilesRoutes
+
 	// Middleware
 	AuthMiddleware *middleware.AuthMiddleware
 	PermMiddleware *middleware.PermissionMiddleware
@@ -207,6 +210,7 @@ func (r *Router) Register(app *fiber.App) {
 	// route declarations on this group.
 	protected.Use(middleware.AuditWrites(r.AuditService, "http.write"))
 	r.mountModuleContentGate(protected)
+	r.registerPagesFilesRoutes(protected, enrolled, instructor) // before core routes: owns /files/quota and the nav-tab gate
 
 	// SECURITY (F-055): LTI 1.3 OIDC initiation and Launch endpoints
 	// must verify the caller IS the user being launched. The browser
@@ -333,7 +337,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Get("/courses/:course_id/pages", enrolled, r.PageHandler.ListPages)
 	protected.Post("/courses/:course_id/pages", instructor, r.PageHandler.CreatePage)
 	protected.Get("/courses/:course_id/pages/:url_or_id", enrolled, r.PageHandler.GetPage)
-	protected.Put("/courses/:course_id/pages/:url_or_id", instructor, r.PageHandler.UpdatePage)
+	protected.Put("/courses/:course_id/pages/:url_or_id", enrolled, r.PageHandler.UpdatePage) // G074: handler enforces editing_roles
 	protected.Delete("/courses/:course_id/pages/:url_or_id", instructor, r.PageHandler.DeletePage)
 	protected.Get("/courses/:course_id/front_page", enrolled, r.PageHandler.GetFrontPage)
 

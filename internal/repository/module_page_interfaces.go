@@ -64,6 +64,9 @@ type ModulePrerequisiteRepository interface {
 
 type WikiPageRevisionRepository interface {
 	Create(ctx context.Context, revision *models.WikiPageRevision) error
+	// CreateNext numbers revision as the page's next revision and stores
+	// it, retrying on a concurrent-save number collision.
+	CreateNext(ctx context.Context, revision *models.WikiPageRevision) error
 	FindByID(ctx context.Context, id uint) (*models.WikiPageRevision, error)
 	ListByPageID(ctx context.Context, pageID uint, params PaginationParams) (*PaginatedResult[models.WikiPageRevision], error)
 	GetLatestRevision(ctx context.Context, pageID uint) (*models.WikiPageRevision, error)

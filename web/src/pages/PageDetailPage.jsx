@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { FileText, ArrowLeft, Pencil, Save, X, Home } from 'lucide-react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { FileText, ArrowLeft, Pencil, Save, X, Home, History, Trash2, Eye, EyeOff, CalendarCheck } from 'lucide-react';
+import {
+  EDITING_ROLE_OPTIONS, editingRolesLabel, canDeletePage, canUnpublishPage, editFormFromPage, buildPageUpdate,
+} from '../utils/pageManagement';
 import { api } from '../services/api';
 import useIsTeacher from '../hooks/useIsTeacher';
 import useUnsavedChanges from '../hooks/useUnsavedChanges';
@@ -18,10 +21,17 @@ const PageDetailPage = () => {
   const [page, setPage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // Errors from save / publish / delete: shown inline, unlike a load
+  // error, which replaces the page with "not found".
+  const [actionError, setActionError] = useState(null);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [editForm, setEditForm] = useState({ title: '', body: '' });
+  const [editForm, setEditForm] = useState(editFormFromPage(null));
   const [isDirty, setIsDirty] = useState(false);
+  const navigate = useNavigate();
+  // G074: students may edit pages whose editing roles admit them; the
+  // server reports it as can_edit.
+  const canEdit = isTeacher || Boolean(page?.can_edit);
 
   useUnsavedChanges(isDirty);
   const { issues: crossCourseIssues, checkAndSave, dismiss: dismissCrossCourse, confirm: confirmCrossCourse } = useCrossCourseCheck(courseId);
@@ -41,17 +51,14 @@ const PageDetailPage = () => {
   }, [courseId, slug]);
 
   const startEditing = () => {
-    setEditForm({ title: page.title || '', body: page.body || '' });
+    setEditForm(editFormFromPage(page));
     setEditing(true);
   };
 
   const doSave = async () => {
     setSaving(true);
     try {
-      const saved = await api.updatePage(courseId, slug, {
-        title: editForm.title,
-        body: editForm.body,
-      });
+      const saved = await api.updatePage(courseId, slug, buildPageUpdate(editForm, { isTeacher }));
       clearRceDraft(`page-${courseId}-${slug || 'new'}-body`);
       // Show what the server stored (it sanitizes the body), not the local
       // editor HTML — otherwise anything the server drops looks saved until
@@ -62,7 +69,7 @@ const PageDetailPage = () => {
       setIsDirty(false);
       setEditing(false);
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     } finally {
       setSaving(false);
     }
@@ -76,8 +83,32 @@ const PageDetailPage = () => {
       const updated = await api.updatePage(courseId, slug, { front_page: true, published: true });
       setPage((prev) => ({ ...prev, ...(updated || {}), front_page: true }));
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTogglePublished = async () => {
+    setSaving(true);
+    try {
+      const updated = await api.updatePage(courseId, slug, { published: !page.published });
+      setPage((prev) => ({ ...prev, ...(updated || {}) }));
+    } catch (err) {
+      setActionError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm(`Delete "${page.title}"? Students will no longer see it.`)) return;
+    setSaving(true);
+    try {
+      await api.deletePage(courseId, slug);
+      navigate(`/courses/${courseId}/pages`);
+    } catch (err) {
+      setActionError(err.message);
       setSaving(false);
     }
   };
@@ -149,6 +180,33 @@ const PageDetailPage = () => {
                 autoSaveKey={`page-${courseId}-${slug || 'new'}-body`}
               />
             </div>
+            {isTeacher && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="page-editing-roles" className="block text-sm font-medium text-text-secondary mb-1">Users allowed to edit this page</label>
+                  <select
+                    id="page-editing-roles"
+                    value={editForm.editingRoles}
+                    onChange={(e) => { setEditForm({ ...editForm, editingRoles: e.target.value }); setIsDirty(true); }}
+                    className="w-full border border-border-strong rounded-md px-3 py-2 text-sm bg-surface-0"
+                  >
+                    {EDITING_ROLE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="page-todo-date" className="block text-sm font-medium text-text-secondary mb-1">Add to student to-do</label>
+                  <input
+                    id="page-todo-date"
+                    type="datetime-local"
+                    value={editForm.todoDate}
+                    onChange={(e) => { setEditForm({ ...editForm, todoDate: e.target.value }); setIsDirty(true); }}
+                    className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
+                  />
+                  <p className="text-xs text-text-tertiary mt-1">Leave empty for no to-do date.</p>
+                </div>
+              </div>
+            )}
+            {actionError && <p role="alert" className="text-sm text-accent-danger">{actionError}</p>}
           </div>
           <div className="p-4 flex justify-end space-x-3 bg-surface-1">
             <button type="button" onClick={() => { setEditing(false); setIsDirty(false); }} className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary">
@@ -174,9 +232,64 @@ const PageDetailPage = () => {
                   Last edited {new Date(page.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                 </p>
               )}
+              {page.todo_date && (
+                <p className="text-sm text-text-secondary mt-1 inline-flex items-center gap-1">
+                  <CalendarCheck className="w-4 h-4" aria-hidden="true" />
+                  To do: {new Date(page.todo_date).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                </p>
+              )}
+              {isTeacher && (
+                <p className="text-xs text-text-tertiary mt-1">Can edit: {editingRolesLabel(page.editing_roles)}</p>
+              )}
             </div>
-            {isTeacher && (
+            {!isTeacher && canEdit && (
               <div className="flex items-center gap-2">
+                <Link
+                  to={`/courses/${courseId}/pages/${slug}/revisions`}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-surface-2 text-text-secondary hover:bg-border-default"
+                >
+                  <History className="w-4 h-4" aria-hidden="true" />
+                  History
+                </Link>
+                <button
+                  onClick={startEditing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-surface-2 text-text-secondary hover:bg-border-default"
+                >
+                  <Pencil className="w-4 h-4" aria-hidden="true" />
+                  Edit
+                </button>
+              </div>
+            )}
+            {isTeacher && (
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  onClick={handleTogglePublished}
+                  disabled={saving || (page.published && !canUnpublishPage(page))}
+                  title={page.published && !canUnpublishPage(page) ? 'The front page must stay published' : undefined}
+                  aria-pressed={Boolean(page.published)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium disabled:opacity-50 ${
+                    page.published ? 'bg-accent-success/10 text-accent-success' : 'bg-surface-2 text-text-secondary hover:bg-border-default'
+                  }`}
+                >
+                  {page.published ? <Eye className="w-4 h-4" aria-hidden="true" /> : <EyeOff className="w-4 h-4" aria-hidden="true" />}
+                  {page.published ? 'Published' : 'Unpublished'}
+                </button>
+                <Link
+                  to={`/courses/${courseId}/pages/${slug}/revisions`}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-surface-2 text-text-secondary hover:bg-border-default"
+                >
+                  <History className="w-4 h-4" aria-hidden="true" />
+                  History
+                </Link>
+                <button
+                  onClick={handleDelete}
+                  disabled={saving || !canDeletePage(page)}
+                  title={!canDeletePage(page) ? 'Choose another front page before deleting this one' : undefined}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-surface-2 text-accent-danger hover:bg-border-default disabled:opacity-50"
+                >
+                  <Trash2 className="w-4 h-4" aria-hidden="true" />
+                  Delete
+                </button>
                 {page.front_page ? (
                   <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-brand-50 text-brand-700">
                     <Home className="w-3 h-3" aria-hidden="true" />
@@ -202,6 +315,7 @@ const PageDetailPage = () => {
               </div>
             )}
           </div>
+          {actionError && <p role="alert" className="px-6 pt-4 text-sm text-accent-danger">{actionError}</p>}
           <div className="p-6">
             {page.body ? (
               <RichContentViewer content={page.body} />

@@ -6,6 +6,8 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import { useAuth } from '../contexts/AuthContext';
 import SafeHTML from '../components/SafeHTML';
+import SyllabusBodyEditor from '../components/SyllabusBodyEditor';
+import useIsTeacher from '../hooks/useIsTeacher';
 
 const GROUP_COLORS = {
   '#3b82f6': { bg: 'bg-brand-100', text: 'text-brand-800', border: 'border-brand-300', dot: 'bg-brand-500' },
@@ -222,6 +224,7 @@ const FILTER_OPTIONS = [
 const SyllabusPage = () => {
   const { courseId } = useParams();
   const { user } = useAuth();
+  const isTeacher = useIsTeacher(courseId);
   const [syllabusData, setSyllabusData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -342,6 +345,16 @@ const SyllabusPage = () => {
               <SafeHTML
                 className="prose prose-sm max-w-none text-text-secondary prose-headings:text-text-primary prose-a:text-brand-600"
                 html={course.syllabus_body}
+              />
+            </div>
+          )}
+          {/* G075: staff edit the description in the rich content editor. */}
+          {isTeacher && (
+            <div className="px-6 py-4 sm:px-8 border-t border-border-subtle">
+              <SyllabusBodyEditor
+                courseId={courseId}
+                body={course.syllabus_body}
+                onSaved={(html) => setSyllabusData((prev) => ({ ...prev, course: { ...prev.course, syllabus_body: html } }))}
               />
             </div>
           )}

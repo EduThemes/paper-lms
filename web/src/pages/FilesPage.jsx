@@ -1,163 +1,120 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Folder, File, Upload, Trash2, ChevronRight, Plus, X } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  Folder, File, Upload, Trash2, ChevronRight, Plus, X, Settings, Lock, EyeOff, Eye, Clock, HardDrive,
+} from 'lucide-react';
 import { api } from '../services/api';
+import { pagesFilesApi } from '../services/api_pages_files';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import ListPager from '../components/ListPager';
 import { Skeleton } from '@/components/ui/skeleton';
+import FileSettingsDialog from '../components/files/FileSettingsDialog';
+import FolderSettingsDialog from '../components/files/FolderSettingsDialog';
+import { buildFolderTree, folderPath, formatBytes, quotaSummary, fileStatus } from '../utils/fileTree';
 
 const FILES_PER_PAGE = 50;
 
-function formatFileSize(bytes) {
-  if (bytes === 0) return '0 Bytes';
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+const STATUS_STYLE = {
+  unpublished: 'text-text-tertiary bg-surface-2',
+  scheduled: 'text-accent-warning bg-accent-warning/10',
+  closed: 'text-text-tertiary bg-surface-2',
+  hidden: 'text-brand-700 bg-brand-50',
+  published: 'text-accent-success bg-accent-success/10',
+};
+
+const STATUS_ICON = { unpublished: EyeOff, scheduled: Clock, closed: Lock, hidden: EyeOff, published: Eye };
+
+function QuotaBar({ quota }) {
+  const s = quotaSummary(quota);
+  if (!s) return null;
+  return (
+    <div className="flex items-center gap-3 text-xs text-text-tertiary" aria-label="Course storage">
+      <HardDrive className="w-4 h-4" aria-hidden="true" />
+      <div className="w-40 h-2 rounded-full bg-surface-2 overflow-hidden" role="progressbar" aria-valuenow={s.pct} aria-valuemin={0} aria-valuemax={100} aria-label="Storage used">
+        <div className={`h-full ${s.nearlyFull ? 'bg-accent-danger' : 'bg-brand-500'}`} style={{ width: `${s.pct}%` }} />
+      </div>
+      <span>{s.used} of {s.total} used</span>
+    </div>
+  );
 }
 
+// FilesPage: the course file manager (G070-G072). Folders form a tree
+// under the course's root folder; teachers upload into, create, rename,
+// move, publish / hide and delete folders and files, set availability
+// dates and usage rights, and replace a file's content in place.
+// Students see only what is published and not hidden.
 const FilesPage = () => {
   const { courseId } = useParams();
   const isTeacher = useIsTeacher(courseId);
+  const queryClient = useQueryClient();
   const [currentFolderId, setCurrentFolderId] = useState(null);
-  const [folders, setFolders] = useState([]);
-  const [files, setFiles] = useState([]);
-  const [breadcrumbs, setBreadcrumbs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [filePage, setFilePage] = useState(1);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
-  const [uploading, setUploading] = useState(false);
-  // B148: files are paginated server-side; page through them instead of
-  // silently showing only the first page.
-  const [filePage, setFilePage] = useState(1);
-  const [filePagination, setFilePagination] = useState({});
+  const [editingFile, setEditingFile] = useState(null);
+  const [editingFolder, setEditingFolder] = useState(null);
+  const [actionError, setActionError] = useState(null);
 
-  const fetchContents = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
+  const treeKey = ['courses', String(courseId), 'folders', 'tree'];
+  const filesKey = ['courses', String(courseId), 'files'];
+  const foldersQuery = useQuery({ queryKey: treeKey, queryFn: () => pagesFilesApi.listCourseFolderTree(courseId) });
+  const filesQuery = useQuery({
+    queryKey: [...filesKey, currentFolderId ?? 'root', filePage],
+    queryFn: () => pagesFilesApi.listFolderFiles(courseId, currentFolderId, filePage, FILES_PER_PAGE),
+    // Keep the old listing on screen while the next folder loads.
+    placeholderData: (previous) => previous,
+  });
+  const quotaQuery = useQuery({
+    queryKey: [...filesKey, 'quota'],
+    queryFn: () => pagesFilesApi.getCourseQuota(courseId),
+    enabled: isTeacher === true,
+  });
 
-      let folderResult;
-      let fileResult;
+  const tree = useMemo(() => buildFolderTree(foldersQuery.data || []), [foldersQuery.data]);
+  const breadcrumbs = folderPath(tree, currentFolderId);
+  const subfolders = tree.childrenOf(currentFolderId);
+  const files = filesQuery.data?.data || [];
 
-      if (currentFolderId) {
-        const [subfolders, folderFiles] = await Promise.all([
-          api.getSubfolders(currentFolderId),
-          api.getFolderFiles(currentFolderId, filePage, FILES_PER_PAGE),
-        ]);
-        folderResult = subfolders;
-        fileResult = folderFiles;
-      } else {
-        const [courseFolders, courseFiles] = await Promise.all([
-          api.getCourseFolders(courseId),
-          api.getCourseFiles(courseId, filePage, FILES_PER_PAGE),
-        ]);
-        folderResult = courseFolders;
-        fileResult = courseFiles;
-      }
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: treeKey });
+    queryClient.invalidateQueries({ queryKey: filesKey });
+  };
+  const onError = (err) => setActionError(err.message);
+  const mutationOpts = (extra = {}) => ({ onSuccess: () => { setActionError(null); refresh(); extra.onSuccess?.(); }, onError });
 
-      setFolders(folderResult.data || []);
-      setFiles(fileResult.data || []);
-      setFilePagination(fileResult.pagination || {});
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [courseId, currentFolderId, filePage]);
+  const upload = useMutation({ mutationFn: (file) => api.uploadCourseFile(courseId, file, currentFolderId), ...mutationOpts() });
+  const createFolder = useMutation({
+    mutationFn: (name) => api.createCourseFolder(courseId, { name, parent_folder_id: currentFolderId || null }),
+    ...mutationOpts({ onSuccess: () => { setNewFolderName(''); setShowNewFolder(false); } }),
+  });
+  const updateFile = useMutation({
+    mutationFn: ({ id, fields }) => pagesFilesApi.updateFile(courseId, id, fields),
+    ...mutationOpts({ onSuccess: () => setEditingFile(null) }),
+  });
+  const replaceFile = useMutation({
+    mutationFn: ({ id, file }) => pagesFilesApi.replaceFile(courseId, id, file),
+    ...mutationOpts({ onSuccess: () => setEditingFile(null) }),
+  });
+  const deleteFile = useMutation({ mutationFn: (id) => api.deleteFile(courseId, id), ...mutationOpts() });
+  const updateFolder = useMutation({
+    mutationFn: ({ id, fields }) => pagesFilesApi.updateFolder(id, fields),
+    ...mutationOpts({ onSuccess: () => setEditingFolder(null) }),
+  });
+  const deleteFolder = useMutation({
+    mutationFn: (id) => api.deleteFolder(id),
+    ...mutationOpts({ onSuccess: () => setCurrentFolderId(null) }),
+  });
 
-  // A different folder starts at its first page.
-  const openFolder = (folderId) => {
+  const openFolder = (id) => {
     setFilePage(1);
-    setCurrentFolderId(folderId);
+    setCurrentFolderId(id);
   };
 
-  useEffect(() => {
-    fetchContents();
-  }, [fetchContents]);
-
-  const navigateToFolder = async (folderId, folderName) => {
-    if (folderId === null) {
-      setBreadcrumbs([]);
-      openFolder(null);
-      return;
-    }
-
-    setBreadcrumbs(prev => [...prev, { id: folderId, name: folderName }]);
-    openFolder(folderId);
-  };
-
-  const navigateToBreadcrumb = (index) => {
-    if (index === -1) {
-      setBreadcrumbs([]);
-      openFolder(null);
-      return;
-    }
-
-    const crumb = breadcrumbs[index];
-    setBreadcrumbs(breadcrumbs.slice(0, index + 1));
-    openFolder(crumb.id);
-  };
-
-  const handleCreateFolder = async (e) => {
-    e.preventDefault();
-    if (!newFolderName.trim()) return;
-
-    try {
-      await api.createCourseFolder(courseId, {
-        name: newFolderName.trim(),
-        parent_folder_id: currentFolderId || null,
-      });
-      setNewFolderName('');
-      setShowNewFolder(false);
-      fetchContents();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const handleUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    try {
-      setUploading(true);
-      setError(null);
-      // B138: upload into the folder being viewed.
-      await api.uploadCourseFile(courseId, file, currentFolderId);
-      e.target.value = '';
-      fetchContents();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleDeleteFile = async (fileId) => {
-    if (!window.confirm('Are you sure you want to delete this file?')) return;
-
-    try {
-      await api.deleteFile(courseId, fileId);
-      fetchContents();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const handleDeleteFolder = async (folderId) => {
-    if (!window.confirm('Are you sure you want to delete this folder?')) return;
-
-    try {
-      await api.deleteFolder(folderId);
-      fetchContents();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
+  const loading = foldersQuery.isLoading || filesQuery.isLoading;
+  const loadError = foldersQuery.error || filesQuery.error;
 
   if (loading) {
     return (
@@ -177,161 +134,188 @@ const FilesPage = () => {
   return (
     <Layout>
       <CourseNav />
-      <div className="mb-6">
-        <Link to={`/courses/${courseId}`} className="text-brand-600 hover:underline text-sm">&larr; Back to Course</Link>
-        <h2 className="text-2xl font-bold text-text-primary mt-2">Files</h2>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <Link to={`/courses/${courseId}`} className="text-brand-600 hover:underline text-sm">&larr; Back to Course</Link>
+          <h2 className="text-2xl font-bold text-text-primary mt-2">Files</h2>
+        </div>
+        {isTeacher && <QuotaBar quota={quotaQuery.data} />}
       </div>
 
-      {error && (
-        <div className="bg-accent-danger/10 border border-accent-danger/30 text-accent-danger px-4 py-3 rounded mb-4">
-          {error}
+      {(loadError || actionError) && (
+        <div role="alert" className="bg-accent-danger/10 border border-accent-danger/30 text-accent-danger px-4 py-3 rounded mb-4">
+          {actionError || loadError.message}
         </div>
       )}
 
-      {/* Breadcrumbs */}
-      <div className="flex items-center space-x-1 text-sm text-text-secondary mb-4">
-        <button
-          onClick={() => navigateToBreadcrumb(-1)}
-          className="hover:text-brand-600 font-medium"
-        >
-          Files
-        </button>
-        {breadcrumbs.map((crumb, index) => (
+      <nav aria-label="Folder path" className="flex items-center flex-wrap gap-1 text-sm text-text-secondary mb-4">
+        <button onClick={() => openFolder(null)} className="hover:text-brand-600 font-medium">Files</button>
+        {breadcrumbs.map((crumb) => (
           <React.Fragment key={crumb.id}>
-            <ChevronRight className="w-4 h-4 text-text-disabled" />
-            <button
-              onClick={() => navigateToBreadcrumb(index)}
-              className="hover:text-brand-600 font-medium"
-            >
-              {crumb.name}
-            </button>
+            <ChevronRight className="w-4 h-4 text-text-disabled" aria-hidden="true" />
+            <button onClick={() => openFolder(crumb.id)} className="hover:text-brand-600 font-medium">{crumb.name}</button>
           </React.Fragment>
         ))}
-      </div>
+      </nav>
 
-      {/* Actions bar */}
       {isTeacher && (
-        <div className="flex items-center space-x-3 mb-4">
+        <div className="flex items-center gap-3 mb-4">
           <button
             onClick={() => setShowNewFolder(true)}
-            className="inline-flex items-center space-x-1 bg-surface-0 border border-border-strong text-text-secondary px-3 py-2 rounded-md hover:bg-surface-1 text-sm font-medium shadow-sm"
+            className="inline-flex items-center gap-1 bg-surface-0 border border-border-strong text-text-secondary px-3 py-2 rounded-md hover:bg-surface-1 text-sm font-medium shadow-sm"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4" aria-hidden="true" />
             <span>New Folder</span>
           </button>
-          <label className="inline-flex items-center space-x-1 bg-brand-600 text-white px-3 py-2 rounded-md hover:bg-brand-700 text-sm font-medium shadow-sm cursor-pointer">
-            <Upload className="w-4 h-4" />
-            <span>{uploading ? 'Uploading...' : 'Upload File'}</span>
+          <label className="inline-flex items-center gap-1 bg-brand-600 text-white px-3 py-2 rounded-md hover:bg-brand-700 text-sm font-medium shadow-sm cursor-pointer">
+            <Upload className="w-4 h-4" aria-hidden="true" />
+            <span>{upload.isPending ? 'Uploading...' : 'Upload File'}</span>
             <input
               type="file"
               className="hidden"
-              onChange={handleUpload}
-              disabled={uploading}
+              disabled={upload.isPending}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ''; }}
             />
           </label>
         </div>
       )}
 
-      {/* New folder form */}
       {showNewFolder && (
         <div className="bg-surface-0 rounded-lg shadow p-4 mb-4">
-          <form onSubmit={handleCreateFolder} className="flex items-center space-x-3">
-            <Folder className="w-5 h-5 text-text-disabled" />
+          <form
+            onSubmit={(e) => { e.preventDefault(); if (newFolderName.trim()) createFolder.mutate(newFolderName.trim()); }}
+            className="flex items-center gap-3"
+          >
+            <Folder className="w-5 h-5 text-text-disabled" aria-hidden="true" />
             <input
               type="text"
+              aria-label="Folder name"
               value={newFolderName}
               onChange={(e) => setNewFolderName(e.target.value)}
               placeholder="Folder name"
               className="flex-1 border border-border-strong rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
               autoFocus
             />
-            <button
-              type="submit"
-              className="bg-brand-600 text-white px-3 py-1.5 rounded-md text-sm hover:bg-brand-700"
-            >
-              Create
-            </button>
-            <button
-              type="button"
-              onClick={() => { setShowNewFolder(false); setNewFolderName(''); }}
-              className="text-text-disabled hover:text-text-secondary"
-            >
+            <button type="submit" className="bg-brand-600 text-white px-3 py-1.5 rounded-md text-sm hover:bg-brand-700">Create</button>
+            <button type="button" aria-label="Cancel" onClick={() => { setShowNewFolder(false); setNewFolderName(''); }} className="text-text-disabled hover:text-text-secondary">
               <X className="w-5 h-5" />
             </button>
           </form>
         </div>
       )}
 
-      {/* Content list */}
       <div className="bg-surface-0 rounded-lg shadow">
-        {folders.length === 0 && files.length === 0 ? (
+        {subfolders.length === 0 && files.length === 0 ? (
           <div className="p-6 text-center text-text-tertiary">No files or folders yet.</div>
         ) : (
-          <div className="divide-y">
-            {/* Folders */}
-            {folders.map((folder) => (
-              <div
-                key={`folder-${folder.id}`}
-                className="flex items-center justify-between px-4 py-3 hover:bg-surface-1"
-              >
-                <button
-                  onClick={() => navigateToFolder(folder.id, folder.name)}
-                  className="flex items-center space-x-3 flex-1 text-left"
-                >
-                  <Folder className="w-5 h-5 text-brand-500" />
+          <ul className="divide-y">
+            {subfolders.map((folder) => (
+              <li key={`folder-${folder.id}`} className="flex items-center justify-between px-4 py-3 hover:bg-surface-1">
+                <button onClick={() => openFolder(folder.id)} className="flex items-center gap-3 flex-1 text-left">
+                  <Folder className="w-5 h-5 text-brand-500" aria-hidden="true" />
                   <span className="text-sm font-medium text-text-primary">{folder.name}</span>
+                  {isTeacher && folder.locked && <span className="text-xs px-2 py-0.5 rounded-full text-text-tertiary bg-surface-2">Unpublished</span>}
+                  {isTeacher && folder.hidden && <span className="text-xs px-2 py-0.5 rounded-full text-brand-700 bg-brand-50">Hidden</span>}
                 </button>
                 {isTeacher && (
-                  <button
-                    onClick={() => handleDeleteFolder(folder.id)}
-                    className="text-text-disabled hover:text-accent-danger p-1"
-                    title="Delete folder"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            ))}
-
-            {/* Files */}
-            {files.map((file) => (
-              <div
-                key={`file-${file.id}`}
-                className="flex items-center justify-between px-4 py-3 hover:bg-surface-1"
-              >
-                <div className="flex items-center space-x-3 flex-1">
-                  <File className="w-5 h-5 text-text-disabled" />
-                  <div>
-                    <p className="text-sm font-medium text-text-primary">{file.display_name}</p>
-                    <p className="text-xs text-text-tertiary">
-                      {formatFileSize(file.size)} &middot; {file.content_type}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <a
-                    href={file.url}
-                    className="text-brand-600 hover:text-brand-800 text-sm font-medium"
-                    download
-                  >
-                    Download
-                  </a>
-                  {isTeacher && (
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setEditingFolder(folder)} className="text-text-disabled hover:text-text-secondary p-1" aria-label={`Settings for folder ${folder.name}`}>
+                      <Settings className="w-4 h-4" />
+                    </button>
                     <button
-                      onClick={() => handleDeleteFile(file.id)}
+                      onClick={() => { if (window.confirm(`Delete "${folder.name}" and everything in it?`)) deleteFolder.mutate(folder.id); }}
                       className="text-text-disabled hover:text-accent-danger p-1"
-                      title="Delete file"
+                      aria-label={`Delete folder ${folder.name}`}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
-                  )}
-                </div>
-              </div>
+                  </div>
+                )}
+              </li>
             ))}
-          </div>
+
+            {files.map((file) => {
+              const status = fileStatus(file);
+              const StatusIcon = STATUS_ICON[status.kind];
+              const learnerLocked = !isTeacher && file.locked_for_user;
+              return (
+                <li key={`file-${file.id}`} className="flex items-center justify-between px-4 py-3 hover:bg-surface-1">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    {learnerLocked ? <Lock className="w-5 h-5 text-text-disabled" aria-hidden="true" /> : <File className="w-5 h-5 text-text-disabled" aria-hidden="true" />}
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-text-primary truncate">{file.display_name}</p>
+                      <p className="text-xs text-text-tertiary">
+                        {formatBytes(file.size)} &middot; {file.content_type}
+                        {file.usage_rights && <> &middot; {file.usage_rights.license || file.usage_rights.use_justification.replace(/_/g, ' ')}</>}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {(isTeacher || learnerLocked) && (
+                      <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${STATUS_STYLE[status.kind]}`}>
+                        <StatusIcon className="w-3 h-3" aria-hidden="true" /> {status.label}
+                      </span>
+                    )}
+                    {isTeacher && (
+                      <button
+                        onClick={() => updateFile.mutate({ id: file.id, fields: { locked: !file.locked } })}
+                        className="text-xs text-text-secondary hover:text-brand-600"
+                        aria-label={`${file.locked ? 'Publish' : 'Unpublish'} ${file.display_name}`}
+                      >
+                        {file.locked ? 'Publish' : 'Unpublish'}
+                      </button>
+                    )}
+                    {!learnerLocked && (
+                      <a href={file.url} className="text-brand-600 hover:text-brand-800 text-sm font-medium" download>Download</a>
+                    )}
+                    {isTeacher && (
+                      <>
+                        <button onClick={() => setEditingFile(file)} className="text-text-disabled hover:text-text-secondary p-1" aria-label={`Settings for ${file.display_name}`}>
+                          <Settings className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => { if (window.confirm('Are you sure you want to delete this file?')) deleteFile.mutate(file.id); }}
+                          className="text-text-disabled hover:text-accent-danger p-1"
+                          aria-label={`Delete ${file.display_name}`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </div>
-      <ListPager page={filePage} pagination={filePagination} onPageChange={setFilePage} label="Files pagination" />
+      <ListPager page={filePage} pagination={filesQuery.data?.pagination || {}} onPageChange={setFilePage} label="Files pagination" />
+
+      {editingFile && (
+        <FileSettingsDialog
+          key={editingFile.id}
+          file={editingFile}
+          tree={tree}
+          open
+          onOpenChange={(open) => { if (!open) setEditingFile(null); }}
+          onSave={(fields) => updateFile.mutate({ id: editingFile.id, fields })}
+          onReplace={(file) => replaceFile.mutate({ id: editingFile.id, file })}
+          saving={updateFile.isPending || replaceFile.isPending}
+          error={actionError}
+        />
+      )}
+      {editingFolder && (
+        <FolderSettingsDialog
+          key={editingFolder.id}
+          folder={editingFolder}
+          tree={tree}
+          open
+          onOpenChange={(open) => { if (!open) setEditingFolder(null); }}
+          onSave={(fields) => updateFolder.mutate({ id: editingFolder.id, fields })}
+          saving={updateFolder.isPending}
+          error={actionError}
+        />
+      )}
     </Layout>
   );
 };

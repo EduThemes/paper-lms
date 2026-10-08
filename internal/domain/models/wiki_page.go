@@ -15,6 +15,10 @@ type WikiPage struct {
 	WebsiteMode   bool      `json:"website_mode" gorm:"default:false"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+
+	// TodoDate puts an ungraded page on learners' to-do lists for that
+	// date (Canvas wiki_pages.todo_date). Migration 000113.
+	TodoDate *time.Time `json:"todo_date"`
 }
 
 func (WikiPage) TableName() string {

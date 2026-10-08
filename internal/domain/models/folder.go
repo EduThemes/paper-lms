@@ -13,6 +13,12 @@ type Folder struct {
 	WorkflowState  string    `json:"workflow_state" gorm:"not null;default:'visible'"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+
+	// Locked = unpublished, Hidden = left out of learner listings
+	// (Canvas folders.locked / hidden; migration 000114). Both apply to
+	// everything inside the folder.
+	Locked bool `json:"locked" gorm:"not null;default:false"`
+	Hidden bool `json:"hidden" gorm:"not null;default:false"`
 }
 
 func (Folder) TableName() string {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import PagesPage from '../PagesPage';
 import { api } from '../../services/api';
@@ -8,10 +8,13 @@ vi.mock('../../services/api', () => ({
   api: {
     getPages: vi.fn(),
     createPage: vi.fn(),
+    updatePage: vi.fn(),
+    deletePage: vi.fn(),
   },
 }));
 
-vi.mock('../../hooks/useIsTeacher', () => ({ default: () => false }));
+let isTeacher = false;
+vi.mock('../../hooks/useIsTeacher', () => ({ default: () => isTeacher }));
 vi.mock('../../hooks/useCrossCourseCheck', () => ({
   default: () => ({ issues: [], checkAndSave: vi.fn(), dismiss: vi.fn(), confirm: vi.fn() }),
 }));
@@ -54,5 +57,41 @@ describe('PagesPage pagination', () => {
     renderPage();
     expect(await screen.findByText('Week 1')).toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: /Pages pagination/i })).toBeNull();
+  });
+});
+
+// G074: teachers publish, unpublish and delete pages from the list; the
+// front page can be neither unpublished nor deleted.
+describe('PagesPage management', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    isTeacher = true;
+  });
+  afterEach(() => { isTeacher = false; });
+
+  test('publishes a draft and deletes a page', async () => {
+    api.getPages.mockResolvedValue({
+      data: [
+        { page_id: 1, url: 'home', title: 'Home', published: true, front_page: true },
+        { page_id: 2, url: 'draft', title: 'Draft', published: false },
+      ],
+      pagination: {},
+    });
+    api.updatePage.mockResolvedValue({ page_id: 2, url: 'draft', title: 'Draft', published: true });
+    api.deletePage.mockResolvedValue({ delete: true });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    renderPage();
+    expect(await screen.findByText('Draft')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unpublish Home' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Delete Home' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Publish Draft' }));
+    expect(api.updatePage).toHaveBeenCalledWith('3', 2, { published: true });
+    expect(await screen.findByRole('button', { name: 'Unpublish Draft' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Draft' }));
+    expect(api.deletePage).toHaveBeenCalledWith('3', 2);
+    await waitFor(() => expect(screen.queryByText('Draft')).toBeNull());
   });
 });

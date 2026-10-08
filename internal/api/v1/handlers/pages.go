@@ -3,7 +3,6 @@ package handlers
 import (
 	"log/slog"
 	"strconv"
-	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
@@ -22,6 +21,16 @@ type PageHandler struct {
 	// default: tests and the Phase 0 wiring leave it unset, and the
 	// handler quietly skips view-recording in that case.
 	contentViewService *service.ContentViewService
+
+	// revisionService records page history on create/update (G065). Nil
+	// disables history (older tests build the handler without it).
+	revisionService *service.WikiPageRevisionService
+}
+
+// SetRevisionService attaches page history recording.
+func (h *PageHandler) SetRevisionService(s *service.WikiPageRevisionService) *PageHandler {
+	h.revisionService = s
+	return h
 }
 
 func NewPageHandler(pageService *service.PageService) *PageHandler {
@@ -70,6 +79,7 @@ func pageToJSON(p *models.WikiPage) fiber.Map {
 		"public":         p.Public,
 		"website_mode":   p.WebsiteMode,
 		"published":      p.WorkflowState == "active",
+		"todo_date":      p.TodoDate,
 		"created_at":     p.CreatedAt,
 		"updated_at":     p.UpdatedAt,
 	}
@@ -134,7 +144,10 @@ func (h *PageHandler) GetPage(c *fiber.Ctx) error {
 	}
 
 	h.recordPageView(c, page)
-	return c.JSON(pageToJSON(page))
+	out := pageToJSON(page)
+	// G074: tells the client whether to offer Edit / History.
+	out["can_edit"] = canEditPage(c, page)
+	return c.JSON(out)
 }
 
 // GetFrontPage handles GET /courses/:course_id/front_page — the page a
@@ -154,183 +167,6 @@ func (h *PageHandler) GetFrontPage(c *fiber.Ctx) error {
 	}
 	h.recordPageView(c, page)
 	return c.JSON(pageToJSON(page))
-}
-
-func (h *PageHandler) CreatePage(c *fiber.Ctx) error {
-	courseID, err := c.ParamsInt("course_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid course ID")
-	}
-
-	var input struct {
-		WikiPage struct {
-			Title        string `json:"title"`
-			Body         string `json:"body"`
-			EditingRoles string `json:"editing_roles"`
-			Published    bool   `json:"published"`
-			FrontPage    bool   `json:"front_page"`
-			Public       bool   `json:"public"`
-			WebsiteMode  bool   `json:"website_mode"`
-		} `json:"wiki_page"`
-	}
-
-	if err := c.BodyParser(&input); err != nil {
-		return responses.BadRequest(c, "Invalid input")
-	}
-
-	if strings.TrimSpace(input.WikiPage.Title) == "" {
-		return responses.BadRequest(c, "Page title is required")
-	}
-
-	state := "unpublished"
-	if input.WikiPage.Published {
-		state = "active"
-	}
-
-	page := &models.WikiPage{
-		CourseID:      uint(courseID),
-		Title:         input.WikiPage.Title,
-		Body:          service.SanitizeHTML(input.WikiPage.Body),
-		EditingRoles:  input.WikiPage.EditingRoles,
-		FrontPage:     input.WikiPage.FrontPage,
-		Public:        input.WikiPage.Public,
-		WebsiteMode:   input.WikiPage.WebsiteMode,
-		WorkflowState: state,
-	}
-
-	if page.EditingRoles == "" {
-		page.EditingRoles = "teachers"
-	}
-
-	if err := h.pageService.Create(c.Context(), page); err != nil {
-		return responses.BadRequest(c, err.Error())
-	}
-	if err := h.pageService.EnsureSingleFrontPage(c.Context(), page); err != nil {
-		return responses.InternalError(c, "Could not set front page")
-	}
-
-	return c.Status(fiber.StatusCreated).JSON(pageToJSON(page))
-}
-
-func (h *PageHandler) UpdatePage(c *fiber.Ctx) error {
-	courseID, err := c.ParamsInt("course_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid course ID")
-	}
-
-	urlOrID := c.Params("url_or_id")
-
-	var page *models.WikiPage
-	if id, err := strconv.Atoi(urlOrID); err == nil {
-		page, err = h.pageService.GetByID(c.Context(), uint(id), callerAccountID(c))
-		if err != nil {
-			return responses.NotFound(c, "page")
-		}
-		// F-013 parent-tie: the numeric branch loads a page by id
-		// under the caller's tenant, which catches cross-tenant
-		// IDOR, but a teacher in course A could PUT a page id from
-		// course B in the SAME tenant. The slug branch is safe
-		// because GetByURL filters by courseID. 404 on mismatch.
-		// A deleted page is gone: the numeric branch must not let a PUT
-		// with published=true revive it (its slug may already be reused
-		// by a newer page, which would bring back duplicate slugs).
-		if page.CourseID != uint(courseID) || page.WorkflowState == "deleted" {
-			return responses.NotFound(c, "page")
-		}
-	} else {
-		page, err = h.pageService.GetByURL(c.Context(), uint(courseID), urlOrID)
-		if err != nil {
-			return responses.NotFound(c, "page")
-		}
-	}
-
-	var input struct {
-		WikiPage struct {
-			Title        *string `json:"title"`
-			Body         *string `json:"body"`
-			EditingRoles *string `json:"editing_roles"`
-			Published    *bool   `json:"published"`
-			FrontPage    *bool   `json:"front_page"`
-			Public       *bool   `json:"public"`
-			WebsiteMode  *bool   `json:"website_mode"`
-		} `json:"wiki_page"`
-	}
-
-	if err := c.BodyParser(&input); err != nil {
-		return responses.BadRequest(c, "Invalid input")
-	}
-
-	if input.WikiPage.Title != nil {
-		page.Title = *input.WikiPage.Title
-	}
-	if input.WikiPage.Body != nil {
-		page.Body = service.SanitizeHTML(*input.WikiPage.Body)
-	}
-	if input.WikiPage.EditingRoles != nil {
-		page.EditingRoles = *input.WikiPage.EditingRoles
-	}
-	if input.WikiPage.Published != nil {
-		if *input.WikiPage.Published {
-			page.WorkflowState = "active"
-		} else {
-			page.WorkflowState = "unpublished"
-		}
-	}
-	if input.WikiPage.FrontPage != nil {
-		page.FrontPage = *input.WikiPage.FrontPage
-	}
-	if input.WikiPage.Public != nil {
-		page.Public = *input.WikiPage.Public
-	}
-	if input.WikiPage.WebsiteMode != nil {
-		page.WebsiteMode = *input.WikiPage.WebsiteMode
-	}
-
-	if err := h.pageService.Update(c.Context(), page); err != nil {
-		return responses.InternalError(c, "Could not update page")
-	}
-	if input.WikiPage.FrontPage != nil && *input.WikiPage.FrontPage {
-		if err := h.pageService.EnsureSingleFrontPage(c.Context(), page); err != nil {
-			return responses.InternalError(c, "Could not set front page")
-		}
-	}
-
-	return c.JSON(pageToJSON(page))
-}
-
-func (h *PageHandler) DeletePage(c *fiber.Ctx) error {
-	courseID, err := c.ParamsInt("course_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid course ID")
-	}
-
-	urlOrID := c.Params("url_or_id")
-
-	var page *models.WikiPage
-	if id, err := strconv.Atoi(urlOrID); err == nil {
-		page, err = h.pageService.GetByID(c.Context(), uint(id), callerAccountID(c))
-		if err != nil {
-			return responses.NotFound(c, "page")
-		}
-	} else {
-		page, err = h.pageService.GetByURL(c.Context(), uint(courseID), urlOrID)
-		if err != nil {
-			return responses.NotFound(c, "page")
-		}
-	}
-
-	// F-013: parent-course tie. The numeric :url_or_id form can name a
-	// page in another course in the SAME tenant; the GetByURL form
-	// already scopes to courseID. Either way, assert before delete.
-	if page.CourseID != uint(courseID) {
-		return responses.NotFound(c, "page")
-	}
-
-	if err := h.pageService.Delete(c.Context(), page.ID); err != nil {
-		return responses.InternalError(c, "Could not delete page")
-	}
-
-	return c.JSON(fiber.Map{"delete": true})
 }
 
 func (h *PageHandler) GetPublicPage(c *fiber.Ctx) error {

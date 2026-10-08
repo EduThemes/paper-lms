@@ -85,6 +85,7 @@ func allAutoMigrateModels() []interface{} {
 		&models.ContextModule{},
 		&models.ContentTag{},
 		&models.WikiPage{},
+		&models.WikiPageRevision{},
 		&models.Assignment{},
 		&models.Quiz{},
 		&models.AssignmentGroup{},
@@ -110,6 +111,7 @@ func allAutoMigrateModels() []interface{} {
 		&models.Attachment{},
 		&models.MediaObject{},
 		&models.MediaTrack{},
+		&models.StudentViewStudent{},
 		&models.SISBatch{},
 		&models.SISBatchError{},
 		// Quiz Engine, Rubrics, Grading Periods, Overrides
