@@ -81,6 +81,7 @@ func allAutoMigrateModels() []interface{} {
 		&models.Course{},
 		&models.CourseSection{},
 		&models.Enrollment{},
+		&models.ObserverLink{},
 		&models.ContextModule{},
 		&models.ContentTag{},
 		&models.WikiPage{},

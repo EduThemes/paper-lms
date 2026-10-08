@@ -627,13 +627,18 @@ func (s *OneRosterService) syncUsers(ctx context.Context, accountID uint, users 
 		role := mapOneRosterRole(orUser.Role)
 
 		existing, _ := s.userRepo.FindBySISUserID(ctx, sisID)
+		if existing != nil && existing.AccountID != accountID {
+			// SIS ids are deployment-wide; never touch another tenant's user.
+			errs = append(errs, fmt.Sprintf("user %s belongs to another account", orUser.SourcedID))
+			continue
+		}
 		if existing != nil {
-			// Update existing user
+			// Update existing user. Role is deliberately NOT synced: the
+			// account-level role is managed in Paper (B074).
 			existing.Name = name
 			existing.SortableName = orUser.FamilyName + ", " + orUser.GivenName
 			existing.ShortName = orUser.GivenName
 			existing.Email = email
-			existing.Role = role
 			if err := s.userRepo.Update(ctx, existing); err != nil {
 				errs = append(errs, fmt.Sprintf("failed to update user %s: %v", orUser.SourcedID, err))
 			} else {
@@ -799,17 +804,18 @@ func (s *OneRosterService) syncEnrollments(ctx context.Context, enrollments []on
 
 // ---- Role mapping ----
 
+// mapOneRosterRole returns the Paper user role a newly provisioned
+// OneRoster user starts with. It is always "user" (B074): a SIS
+// "administrator" is a principal, counselor or district staffer, not a
+// Paper tenant admin able to masquerade, edit SSO and run imports.
+// Canvas likewise never grants account-admin from roster data — account
+// admins are assigned explicitly. Course-level power for administrators
+// comes from their enrollments (see mapOneRosterEnrollmentRole). The
+// sync never rewrites an existing user's role, so a promotion or
+// demotion made in Paper survives every sync.
 func mapOneRosterRole(role string) string {
-	switch strings.ToLower(role) {
-	case "teacher", "aide":
-		return "user" // Canvas teacher role
-	case "administrator":
-		return "admin"
-	case "student":
-		return "user" // Canvas student role
-	default:
-		return "user"
-	}
+	_ = role
+	return "user"
 }
 
 func mapOneRosterEnrollmentRole(role string) string {
