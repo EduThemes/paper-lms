@@ -107,7 +107,8 @@ func (r *submissionRepo) ListByUserAndCourse(ctx context.Context, userID, course
 
 	subQuery := r.db.Model(&models.Assignment{}).Select("id").Where("course_id = ? AND workflow_state != ?", courseID, "deleted")
 
-	if err := r.db.WithContext(ctx).Where("user_id = ? AND assignment_id IN (?)", userID, subQuery).Find(&submissions).Error; err != nil {
+	// Stable order: the course-submissions endpoint paginates this list.
+	if err := r.db.WithContext(ctx).Where("user_id = ? AND assignment_id IN (?)", userID, subQuery).Order("id ASC").Find(&submissions).Error; err != nil {
 		return nil, err
 	}
 	return submissions, nil

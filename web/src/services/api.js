@@ -491,6 +491,13 @@ export const api = {
     });
     return data;
   },
+  // Students upload submission files to their own space (the course files
+  // route is instructor-only); the returned id goes in file_ids.
+  uploadSubmissionFile: async (courseId, assignmentId, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return uploadFile(`/courses/${courseId}/assignments/${assignmentId}/submissions/self/files`, formData);
+  },
   gradeSubmission: async (courseId, assignmentId, userId, submission) => {
     const { data } = await request(`/courses/${courseId}/assignments/${assignmentId}/submissions/${userId}`, {
       method: 'PUT', body: JSON.stringify({ submission }),

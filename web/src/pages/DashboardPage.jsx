@@ -547,7 +547,7 @@ const DashboardPage = () => {
         const [assignResult, announcementResult, subResult] = await Promise.allSettled([
           api.getAssignments(course.id, 1, 25),
           api.getCourseAnnouncements(course.id, 1, 5),
-          api.getCourseSubmissions(course.id, 1, 25, 'self').catch(() => ({ data: [] })),
+          api.getCourseSubmissions(course.id, 1, 1000, 'self').catch(() => ({ data: [] })),
         ]);
 
         const subMap = {};
