@@ -617,14 +617,20 @@ func (s *SISImportService) processEnrollmentsCSV(ctx context.Context, batchID, a
 		}
 
 		// Optionally look up section by SIS section ID. The section must
-		// belong to the enrollment's course.
+		// belong to the enrollment's course — or have been cross-listed
+		// out of it (G108), in which case the enrollment lives in the
+		// course the section now belongs to, as in Canvas. Without this
+		// every nightly enrollments.csv row for a cross-listed section
+		// failed.
 		if sisSectionID != "" {
 			section, sectionErr := s.findSectionBySISID(ctx, sisSectionID, accountID)
-			if sectionErr != nil || section.CourseID != course.ID {
+			crosslistedOut := sectionErr == nil && section.NonxlistCourseID != nil && *section.NonxlistCourseID == course.ID
+			if sectionErr != nil || (section.CourseID != course.ID && !crosslistedOut) {
 				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("section with sis_section_id '%s' not found in course '%s'", sisSectionID, sisCourseID), "enrollments.csv")
 				continue
 			}
 			enrollment.CourseSectionID = &section.ID
+			enrollment.CourseID = section.CourseID
 		}
 
 		// Observers may name the observed student (Canvas's

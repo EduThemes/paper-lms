@@ -59,9 +59,37 @@ func TestSISImport_XlistsAndDates(t *testing.T) {
 	assert.Equal(t, bio2.ID, sec.CourseID)
 	assert.Equal(t, "Morning (renamed)", sec.Name)
 
-	// Another tenant's course can't be a cross-list target.
-	batchID := runSIS(t, svc, 1, "xlists", "xlist_course_id,section_id,status\nOTHER-1,SEC-1,active\n")
+	// The nightly enrollments.csv still names the home course: the row
+	// updates the moved enrollment in place, and a new person lands in
+	// the course the section was cross-listed into.
+	runSIS(t, svc, 1, "users", "user_id,login_id,first_name,last_name,email,status\nU-2,bea.sis,Bea,Student,bea.sis@example.test,active\n")
+	batchID := runSIS(t, svc, 1, "enrollments", "course_id,user_id,role,section_id,status\nBIO-101,U-1,student,SEC-1,active\nBIO-101,U-2,student,SEC-1,active\n")
 	errs, err := svc.GetBatchErrors(ctx, batchID, 1)
+	require.NoError(t, err)
+	assert.Empty(t, errs, "rows for a cross-listed section import cleanly")
+	var inSection []models.Enrollment
+	require.NoError(t, g.Where("course_section_id = ?", sec.ID).Order("id").Find(&inSection).Error)
+	require.Len(t, inSection, 2, "no duplicate enrollment for the re-imported row")
+	for _, row := range inSection {
+		assert.Equal(t, bio2.ID, row.CourseID)
+	}
+	// Naming the course it was cross-listed into works too...
+	batchID = runSIS(t, svc, 1, "enrollments", "course_id,user_id,role,section_id,status\nBIO-201,U-2,ta,SEC-1,active\n")
+	errs, err = svc.GetBatchErrors(ctx, batchID, 1)
+	require.NoError(t, err)
+	assert.Empty(t, errs, "the cross-listed course itself also accepts the section")
+	// ...while a course the section never belonged to is still refused.
+	runSIS(t, svc, 1, "courses", "course_id,short_name,long_name,status\nBIO-301,BIO3,Biology III,active\n")
+	batchID = runSIS(t, svc, 1, "enrollments", "course_id,user_id,role,section_id,status\nBIO-301,U-2,student,SEC-1,active\n")
+	errs, err = svc.GetBatchErrors(ctx, batchID, 1)
+	require.NoError(t, err)
+	assert.Len(t, errs, 1)
+	require.NoError(t, g.Where("course_section_id = ? AND type = ?", sec.ID, "TaEnrollment").Delete(&models.Enrollment{}).Error)
+	require.NoError(t, g.Where("course_section_id = ? AND user_id <> ?", sec.ID, e.UserID).Delete(&models.Enrollment{}).Error)
+
+	// Another tenant's course can't be a cross-list target.
+	batchID = runSIS(t, svc, 1, "xlists", "xlist_course_id,section_id,status\nOTHER-1,SEC-1,active\n")
+	errs, err = svc.GetBatchErrors(ctx, batchID, 1)
 	require.NoError(t, err)
 	assert.Len(t, errs, 1)
 
