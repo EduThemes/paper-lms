@@ -81,10 +81,13 @@ func (s *GradingService) GetGradebook(ctx context.Context, courseID uint) (*Grad
 		return nil, err
 	}
 
-	// Build student list (only students)
+	// Build student list (only students). A student enrolled in two
+	// sections holds two StudentEnrollment rows; list them once.
 	students := make([]GradebookStudent, 0)
+	seenStudent := map[uint]bool{}
 	for _, e := range enrollments.Items {
-		if e.Type == "StudentEnrollment" {
+		if e.Type == "StudentEnrollment" && !seenStudent[e.UserID] {
+			seenStudent[e.UserID] = true
 			name := ""
 			if e.User != nil {
 				name = e.User.Name

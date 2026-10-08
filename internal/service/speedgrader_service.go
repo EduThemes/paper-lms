@@ -104,9 +104,13 @@ func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, a
 	// For anonymous grading the label order must not follow enrollment
 	// order (that alone can de-anonymize), so students are shuffled
 	// deterministically per assignment before numbering.
+	// A student enrolled in two sections holds two StudentEnrollment
+	// rows; grade them once.
 	studentEnrollments := make([]models.Enrollment, 0, len(enrollments.Items))
+	seenStudent := map[uint]bool{}
 	for _, enrollment := range enrollments.Items {
-		if enrollment.Type == "StudentEnrollment" {
+		if enrollment.Type == "StudentEnrollment" && !seenStudent[enrollment.UserID] {
+			seenStudent[enrollment.UserID] = true
 			studentEnrollments = append(studentEnrollments, enrollment)
 		}
 	}
