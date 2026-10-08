@@ -597,6 +597,7 @@ type AssignmentToolView struct {
 	Title            string `json:"title"`
 	ResourceLinkUUID string `json:"resource_link_id"`
 	LineItemID       uint   `json:"line_item_id,omitempty"`
+	Published        bool   `json:"published"`
 }
 
 // GetAssignmentTool returns the assignment's external tool, or
@@ -605,11 +606,18 @@ func (s *LTIService) GetAssignmentTool(ctx context.Context, accountID, courseID,
 	if err := s.requireAdvantage(); err != nil {
 		return nil, err
 	}
+	if s.adv.AssignmentRepo == nil {
+		return nil, ErrLTILaunchNotFound
+	}
+	a, err := s.adv.AssignmentRepo.FindByID(ctx, assignmentID, accountID)
+	if err != nil || a == nil || a.CourseID != courseID || a.WorkflowState == models.AssignmentDeleted {
+		return nil, ErrLTILaunchNotFound
+	}
 	link, err := s.adv.Store.FindResourceLinkByAssignment(ctx, assignmentID, accountID)
 	if err != nil || link == nil || link.ContextID != courseID {
 		return nil, ErrLTILaunchNotFound
 	}
-	v := &AssignmentToolView{ToolID: link.ContextExternalToolID, URL: link.URL, Title: link.Title, ResourceLinkUUID: link.ResourceLinkID}
+	v := &AssignmentToolView{ToolID: link.ContextExternalToolID, URL: link.URL, Title: link.Title, ResourceLinkUUID: link.ResourceLinkID, Published: a.IsPublished()}
 	if tool, tErr := s.adv.Store.FindActiveToolForCourse(ctx, link.ContextExternalToolID, courseID, accountID); tErr == nil && tool != nil {
 		v.ToolName = tool.Name
 	}

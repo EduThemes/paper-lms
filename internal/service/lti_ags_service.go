@@ -302,6 +302,20 @@ func (s *LTIAGSService) CreateToolLineItem(ctx context.Context, courseID, accoun
 	if item.ScoreMaximum <= 0 {
 		return agsErr(ErrAGSInvalid, "scoreMaximum must be greater than 0")
 	}
+	if item.AssignmentID != nil && !s.toolOwnsAssignment(ctx, *item.AssignmentID, courseID, accountID, devKeyID) {
+		// A tool may only add a line item to an assignment that launches
+		// it; otherwise it could post grades to any assignment.
+		return agsErr(ErrAGSInvalid, "assignmentId is not an assignment of this tool")
+	}
+	if item.AssignmentID == nil && item.ResourceLinkIDStr != "" && s.store != nil {
+		// resourceLinkId of one of the tool's assignment links: the line
+		// item belongs to that assignment.
+		if link, err := s.store.FindResourceLinkByUUID(ctx, item.ResourceLinkIDStr, accountID); err == nil && link != nil &&
+			link.ContextID == courseID && link.AssignmentID != nil && s.toolOwnsAssignment(ctx, *link.AssignmentID, courseID, accountID, devKeyID) {
+			aid := *link.AssignmentID
+			item.AssignmentID = &aid
+		}
+	}
 	if item.AssignmentID == nil {
 		pts := item.ScoreMaximum
 		a := &models.Assignment{
@@ -318,6 +332,20 @@ func (s *LTIAGSService) CreateToolLineItem(ctx context.Context, courseID, accoun
 	dk := devKeyID
 	item.DeveloperKeyID = &dk
 	return s.CreateLineItem(ctx, courseID, accountID, item)
+}
+
+// toolOwnsAssignment reports whether the assignment (of the course, in
+// the tenant) launches an install of the tool's developer key.
+func (s *LTIAGSService) toolOwnsAssignment(ctx context.Context, assignmentID, courseID, accountID, devKeyID uint) bool {
+	if s.store == nil {
+		return false
+	}
+	link, err := s.store.FindResourceLinkByAssignment(ctx, assignmentID, accountID)
+	if err != nil || link == nil || link.ContextID != courseID {
+		return false
+	}
+	tool, err := s.store.FindActiveToolForCourse(ctx, link.ContextExternalToolID, courseID, accountID)
+	return err == nil && tool != nil && tool.DeveloperKeyID == devKeyID
 }
 
 // SyncToolLineItemAssignment keeps a tool-owned line item's assignment

@@ -534,6 +534,9 @@ func (h *LTIHandler) GetAssignmentExternalTool(c *fiber.Ctx) error {
 		return responses.NotFound(c, "assignment external tool")
 	}
 	if !callerIsCourseStaff(c) {
+		if !v.Published {
+			return responses.NotFound(c, "assignment external tool")
+		}
 		v.URL = ""
 	}
 	return c.JSON(v)

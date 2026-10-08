@@ -130,6 +130,9 @@ func (s *LTIService) PrepareLaunch(ctx context.Context, req LTILaunchRequest) (*
 		if link != nil && link.URL != "" {
 			target = link.URL
 		}
+	case placement == "":
+		// A plain launch of the tool (e.g. from the course's tool list)
+		// goes to its default target link URI.
 	default:
 		pc, ok := findPlacement(cfg, placement)
 		if !ok {
@@ -223,9 +226,6 @@ func (s *LTIService) resolveResourceLink(ctx context.Context, req LTILaunchReque
 	}
 
 	placement := req.Placement
-	if placement == "" {
-		placement = LTIPlacementCourseNavigation
-	}
 	if link, err := store.FindPlacementResourceLink(ctx, tool.ID, req.CourseID, placement); err == nil && link != nil {
 		return link, nil
 	}
@@ -262,7 +262,10 @@ func (s *LTIService) authorizeHintLaunch(ctx context.Context, req LTIAuthRequest
 	if devKey.ID != hint.DevKeyID {
 		return nil, ltiInvalid("lti_message_hint does not match client_id")
 	}
-	if req.RedirectURI != toolConfig.TargetLinkURI && req.RedirectURI != hint.TargetLinkURI && !DeveloperKeyAllowsRedirect(devKey, req.RedirectURI) {
+	// The id_token goes only to a registered redirect URI, or to the
+	// launch's own target link URI when it is on the tool's host.
+	targetOK := req.RedirectURI == hint.TargetLinkURI && sameHost(hint.TargetLinkURI, toolConfig.TargetLinkURI, toolConfig.Domain)
+	if req.RedirectURI != toolConfig.TargetLinkURI && !targetOK && !DeveloperKeyAllowsRedirect(devKey, req.RedirectURI) {
 		return nil, ltiInvalid("redirect_uri is not registered for this tool")
 	}
 	if _, err := s.courseRepo.FindByID(ctx, hint.CourseID, req.AccountID); err != nil {
@@ -576,6 +579,21 @@ func (s *LTIService) buildIDToken(ctx context.Context, lc launchContext) (string
 		return "", fmt.Errorf("failed to sign launch token: %w", err)
 	}
 	return signed, nil
+}
+
+// sameHost reports whether raw's host is reference's host or domain (or
+// a subdomain of domain).
+func sameHost(raw, reference, domain string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	h := strings.ToLower(u.Hostname())
+	if r, rErr := url.Parse(reference); rErr == nil && r.Host != "" && strings.ToLower(r.Hostname()) == h {
+		return true
+	}
+	d := strings.ToLower(strings.TrimSpace(domain))
+	return d != "" && (h == d || strings.HasSuffix(h, "."+d))
 }
 
 func firstNonEmpty(vals ...string) string {
