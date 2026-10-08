@@ -189,13 +189,19 @@ func (r *sisRun) importUser(row sisRow) error {
 	}
 
 	if existing != nil {
+		// The roster can't rewrite a platform super_admin's login or
+		// email (an email change is a password-reset takeover); the
+		// admin user API refuses it the same way.
+		if existing.Role == models.RoleSuperUser {
+			return rowErr("user_id '%s' is a platform administrator and can't be changed by SIS", sisUserID)
+		}
 		if name != "" {
 			existing.Name = name
 		}
 		if loginID != "" && loginID != existing.LoginID {
-			var n int64
-			r.db().Model(&models.User{}).Where("LOWER(login_id) = ? AND id <> ?", strings.ToLower(loginID), existing.ID).Count(&n)
-			if n > 0 {
+			// Unique across primary and additional logins (G115).
+			taken, err := NewAdminUserService(r.s.db).loginTaken(r.ctx, loginID, existing.ID)
+			if err != nil || taken {
 				return rowErr("login_id '%s' is already in use", loginID)
 			}
 			existing.LoginID = loginID
@@ -232,6 +238,9 @@ func (r *sisRun) importUser(row sisRow) error {
 	}
 	if loginID == "" {
 		return rowErr("login_id is required for a new user")
+	}
+	if taken, err := NewAdminUserService(r.s.db).loginTaken(r.ctx, loginID, 0); err != nil || taken {
+		return rowErr("login_id '%s' is already in use", loginID)
 	}
 	sortable := name
 	if sortableName != "" {

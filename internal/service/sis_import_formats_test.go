@@ -303,3 +303,60 @@ func TestSISImport_Diffing(t *testing.T) {
 		t.Fatalf("want aborted diff, got %q", b3.WorkflowState)
 	}
 }
+
+func TestSISImport_NeverTouchesSuperAdmin(t *testing.T) {
+	// An account admin's roster must not add a password login to, or
+	// rewrite the login/email of, a platform super_admin who lives in the
+	// tenant: either would hand the importer a super_admin sign-in.
+	g, cleanup := freshDB(t)
+	defer cleanup()
+	seedSISTenants(t, g)
+	svc := newSISServiceWithObservers(g)
+
+	startSIS(t, svc, 1, service.SISImportOptions{}, service.SISUpload{FileName: "users.csv",
+		Data: []byte("user_id,login_id,first_name,last_name,email\nOPS-1,ops.root,Ops,Root,ops@example.com\n")})
+	if err := g.Model(&models.User{}).Where("login_id = ?", "ops.root").Update("role", models.RoleSuperUser).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	b := startSIS(t, svc, 1, service.SISImportOptions{},
+		service.SISUpload{FileName: "users.csv", Data: []byte("user_id,login_id,first_name,last_name,email\nOPS-1,ops.mine,Ops,Root,attacker@example.com\n")},
+		service.SISUpload{FileName: "logins.csv", Data: []byte("user_id,login_id,authentication_provider_id,password,existing_user_id\n,backdoor,,Sup3rSecret!,OPS-1\n")},
+	)
+	if got := len(batchErrors(t, svc, b)); got != 2 {
+		t.Fatalf("want both rows refused, got %d: %v", got, batchErrors(t, svc, b))
+	}
+	var n int64
+	g.Model(&models.UserLogin{}).Where("unique_id_normalized = ?", "backdoor").Count(&n)
+	if n != 0 {
+		t.Fatal("logins.csv added a login to a super_admin")
+	}
+	var u models.User
+	g.Where("sis_user_id = ?", "OPS-1").First(&u)
+	if u.LoginID != "ops.root" || u.Email != "ops@example.com" {
+		t.Fatalf("users.csv rewrote a super_admin: %+v", u)
+	}
+}
+
+func TestSISImport_LoginIDUniqueAcrossExtraLogins(t *testing.T) {
+	g, cleanup := freshDB(t)
+	defer cleanup()
+	seedSISTenants(t, g)
+	svc := newSISServiceWithObservers(g)
+
+	startSIS(t, svc, 1, service.SISImportOptions{},
+		service.SISUpload{FileName: "users.csv", Data: []byte("user_id,login_id,first_name,last_name,email\nU-1,sam.one,Sam,One,sam@example.com\n")},
+		service.SISUpload{FileName: "logins.csv", Data: []byte("user_id,login_id,authentication_provider_id,existing_user_id\n,sam.alt,,U-1\n")},
+	)
+	// A new user can't take another user's additional login name.
+	b := startSIS(t, svc, 1, service.SISImportOptions{}, service.SISUpload{FileName: "users.csv",
+		Data: []byte("user_id,login_id,first_name,last_name,email\nU-2,sam.alt,Pat,Two,pat@example.com\n")})
+	if got := len(batchErrors(t, svc, b)); got != 1 {
+		t.Fatalf("want the colliding row refused, got %d: %v", got, batchErrors(t, svc, b))
+	}
+	var n int64
+	g.Model(&models.User{}).Where("sis_user_id = ?", "U-2").Count(&n)
+	if n != 0 {
+		t.Fatal("user created with another user's login name")
+	}
+}

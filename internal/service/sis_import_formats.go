@@ -120,6 +120,12 @@ func (r *sisRun) importLogin(row sisRow) error {
 	if err != nil {
 		return err
 	}
+	// A login with a password signs in as its user: an account admin's
+	// roster must never be able to add one to a platform super_admin (the
+	// logins API refuses it too, callerMayManageUser).
+	if user.Role == models.RoleSuperUser {
+		return rowErr("user '%s' is a platform administrator and can't be changed by SIS", loginName)
+	}
 	logins := NewUserLoginService(r.s.db)
 	in := UserLoginInput{UniqueID: &loginName}
 	if loginSIS != "" {
