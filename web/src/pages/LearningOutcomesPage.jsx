@@ -19,6 +19,7 @@ import { api } from '../services/api';
 import { fetchAllOutcomeRollups, fetchAllPages, rollupResponseToView } from '../utils/outcomeRollups';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import { clickableProps } from '../utils/a11y';
 
 const CALCULATION_METHODS = [
   { value: 'decaying_average', label: 'Decaying Average', description: 'Average of scores weighted toward recent results' },
@@ -557,7 +558,7 @@ const LearningOutcomesPage = () => {
                   {/* Group Header */}
                   <div
                     className="flex items-center justify-between px-4 py-3 bg-surface-1 cursor-pointer hover:bg-surface-2 transition-colors"
-                    onClick={() => toggleGroup(group.id)}
+                    {...clickableProps(() => toggleGroup(group.id))}
                   >
                     <div className="flex items-center space-x-3">
                       {expandedGroups[group.id] ? (
@@ -792,9 +793,9 @@ const LearningOutcomesPage = () => {
                                     ? 'bg-brand-50 border-l-4 border-l-blue-500'
                                     : 'hover:bg-surface-1 border-l-4 border-l-transparent'
                                 }`}
-                                onClick={() =>
+                                {...clickableProps(() =>
                                   setSelectedOutcome(isSelected ? null : outcome)
-                                }
+                                )}
                               >
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center space-x-3">

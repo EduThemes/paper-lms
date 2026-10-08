@@ -6,6 +6,7 @@ import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import SlotPicker from '../components/appointments/SlotPicker';
+import { clickableProps } from '../utils/a11y';
 
 const Spinner = () => (
   <svg className="h-6 w-6 animate-spin text-brand-500" viewBox="0 0 24 24" fill="none">
@@ -185,7 +186,7 @@ const AppointmentGroupsPage = () => {
             <div key={group.id} className="rounded-lg border border-border-default bg-surface-0">
               <div
                 className="flex cursor-pointer items-center justify-between p-4 hover:bg-surface-1"
-                onClick={() => toggle(group.id)}
+                {...clickableProps(() => toggle(group.id))}
               >
                 <div>
                   <div className="text-base font-medium text-text-primary">{group.title}</div>

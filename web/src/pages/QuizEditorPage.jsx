@@ -21,6 +21,7 @@ import OrderingEditor from '../components/quiz/itemTypes/OrderingEditor';
 import CategorizationEditor from '../components/quiz/itemTypes/CategorizationEditor';
 import HotSpotEditor from '../components/quiz/itemTypes/HotSpotEditor';
 import TextOnlyEditor from '../components/quiz/itemTypes/TextOnlyEditor';
+import { clickableProps } from '../utils/a11y';
 
 const emptyAnswer = () => ({
   id: `a${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -91,7 +92,7 @@ const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId,
       {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-3 bg-surface-1 rounded-t-lg cursor-pointer"
-        onClick={() => setExpanded(!expanded)}
+        {...clickableProps(() => setExpanded(!expanded))}
       >
         <div className="flex items-center gap-3">
           <GripVertical className="w-4 h-4 text-text-disabled" />

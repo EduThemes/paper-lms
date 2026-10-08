@@ -98,7 +98,7 @@ const PullToQuizModal = ({ courseId, bankId, questions, onClose, onSuccess }) =>
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+    <div aria-hidden="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
       <div
         className="bg-surface-0 rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}

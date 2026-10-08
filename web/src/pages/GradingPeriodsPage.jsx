@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
 import useAccountId from '../hooks/useAccountId';
+import { clickableProps } from '../utils/a11y';
 
 const GradingPeriodsPage = () => {
   const { t } = useTranslation();
@@ -154,7 +155,7 @@ const GradingPeriodsPage = () => {
         ) : (
           groups.map(group => (
             <div key={group.id} className="bg-surface-0 rounded-lg shadow">
-              <div className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-surface-1" onClick={() => toggleGroup(group.id)}>
+              <div className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-surface-1" {...clickableProps(() => toggleGroup(group.id))}>
                 <div className="flex items-center space-x-3">
                   {expandedGroups[group.id] ? <ChevronDown className="w-5 h-5 text-text-disabled" /> : <ChevronRight className="w-5 h-5 text-text-disabled" />}
                   <Calendar className="w-5 h-5 text-indigo-500" />

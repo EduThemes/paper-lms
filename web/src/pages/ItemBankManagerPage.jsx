@@ -9,6 +9,7 @@ import CourseNav from '../components/CourseNav';
 import QuizzesSubNav from '../components/quiz/QuizzesSubNav';
 import { TYPE_LABELS } from '../components/quiz/itemTypes/types';
 import { htmlPreview } from '../utils/html';
+import { clickableProps } from '../utils/a11y';
 
 /**
  * Item Bank Manager — list, create, rename, delete banks; view their items;
@@ -232,7 +233,7 @@ const ItemBankManagerPage = () => {
                 {banks.map(bank => (
                   <tr key={bank.id}
                       className={`border-t border-border-default cursor-pointer hover:bg-surface-1 ${selectedBank?.id === bank.id ? 'bg-brand-50/40 dark:bg-brand-500/10' : ''}`}
-                      onClick={() => setSelectedBank(bank)}>
+                      {...clickableProps(() => setSelectedBank(bank), { role: null })}>
                     <td className="px-4 py-2">
                       {editingBankId === bank.id ? (
                         <input
