@@ -199,6 +199,28 @@ func TestCanvasAPI_CourseUsers(t *testing.T) {
 		assert.NotContains(t, r, "email")
 		assert.NotContains(t, r, "sis_user_id")
 	}
+
+	// A student's search matches names only: probing a classmate's email,
+	// login or SIS id must not confirm it. Staff still match on those.
+	_, rows = capiGet(t, student, path+"?search_term=terry.capi@example")
+	assert.Empty(t, rows, "student search must not match on email/login")
+	_, rows = capiGet(t, student, path+"?search_term=T-1")
+	assert.Empty(t, rows, "student search must not match on SIS id")
+	_, rows = capiGet(t, student, path+"?search_term=teacher")
+	assert.Equal(t, []int{int(capiTeacher)}, capiIDs(rows, "id"))
+	_, rows = capiGet(t, teacher, path+"?search_term=T-1")
+	assert.Equal(t, []int{int(capiTeacher)}, capiIDs(rows, "id"))
+
+	// Classmates' last activity is staff-only.
+	_, rows = capiGet(t, student, path+"?include[]=enrollments")
+	for _, r := range rows {
+		for _, e := range r["enrollments"].([]interface{}) {
+			assert.NotContains(t, e.(map[string]interface{}), "last_activity_at")
+		}
+	}
+	_, rows = capiGet(t, teacher, path+"?include[]=enrollments")
+	require.NotEmpty(t, rows)
+	assert.Contains(t, rows[0]["enrollments"].([]interface{})[0].(map[string]interface{}), "last_activity_at")
 }
 
 func TestCanvasAPI_AccountCoursesAndUsers(t *testing.T) {

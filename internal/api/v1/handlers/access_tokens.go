@@ -107,7 +107,11 @@ func (h *AccessTokenHandler) tokenOwner(c *fiber.Ctx, allowAdmin bool, forbidden
 		case middleware.RoleAdmin:
 			callerAccount, _ := c.Locals("account_id").(uint)
 			if callerAccount != 0 {
-				if u, err := h.userRepo.FindByID(c.Context(), uint(id), callerAccount); err == nil && u != nil {
+				// A platform operator's tokens are out of an account
+				// admin's reach even when the operator's home account is
+				// this one: listing them shows the operator's integrations
+				// and deleting them cuts the operator off.
+				if u, err := h.userRepo.FindByID(c.Context(), uint(id), callerAccount); err == nil && u != nil && u.Role != middleware.RoleSuperAdmin {
 					return uint(id), false
 				}
 			}

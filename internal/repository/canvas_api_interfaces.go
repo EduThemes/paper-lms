@@ -18,6 +18,11 @@ type CourseUserFilter struct {
 	EnrollmentStates []string
 	UserIDs          []uint
 	SearchTerm       string
+	// NameSearchOnly limits SearchTerm to the user's names. Set for callers
+	// who may not see login ids, SIS ids or emails (students, observers):
+	// matching on those fields would let them confirm a classmate's email
+	// or SIS id one guess at a time.
+	NameSearchOnly bool
 	// Sort is one of "username" (default), "email", "sis_id", "id".
 	Sort string
 }

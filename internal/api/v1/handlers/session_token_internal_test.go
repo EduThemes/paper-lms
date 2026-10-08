@@ -18,6 +18,10 @@ func TestSanitizeReturnTo(t *testing.T) {
 		{"javascript:alert(1)", "", false},
 		{"courses/3", "", false},
 		{"/\\evil.example.net", "", false},
+		// Same host, but a path that would become a protocol-relative
+		// redirect to another site.
+		{"https://api.example.com//evil.example.net/x", "", false},
+		{"https://lms.example.com//evil.example.net", "", false},
 	}
 	for _, tc := range cases {
 		got, ok := sanitizeReturnTo(tc.in, "api.example.com", "https://lms.example.com")

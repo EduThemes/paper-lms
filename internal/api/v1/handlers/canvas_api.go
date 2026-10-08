@@ -65,8 +65,11 @@ func urlAccountScope(c *fiber.Ctx) (uint, bool) {
 	return uint(n), true
 }
 
-func canvasEnrollmentJSON(e *models.Enrollment) fiber.Map {
-	return fiber.Map{
+// canvasEnrollmentJSON is Canvas's Enrollment object. last_activity_at is
+// a staff-only field (Canvas shows it with the read_reports right), so a
+// student reading the roster does not learn when classmates were active.
+func canvasEnrollmentJSON(e *models.Enrollment, staff bool) fiber.Map {
+	m := fiber.Map{
 		"id":                 e.ID,
 		"course_id":          e.CourseID,
 		"course_section_id":  e.CourseSectionID,
@@ -77,8 +80,11 @@ func canvasEnrollmentJSON(e *models.Enrollment) fiber.Map {
 		"associated_user_id": e.AssociatedUserID,
 		"created_at":         e.CreatedAt,
 		"updated_at":         e.UpdatedAt,
-		"last_activity_at":   e.LastActivityAt,
 	}
+	if staff {
+		m["last_activity_at"] = e.LastActivityAt
+	}
+	return m
 }
 
 // canvasUserJSON is Canvas's User object. Login and SIS ids are only shown
@@ -161,6 +167,7 @@ func (h *CanvasAPIHandler) ListCourseUsers(c *fiber.Ctx) error {
 		EnrollmentStates: states,
 		UserIDs:          userIDs,
 		SearchTerm:       searchTerm,
+		NameSearchOnly:   !staff,
 		Sort:             sort,
 	}
 	params := middleware.GetPagination(c)
@@ -176,7 +183,7 @@ func (h *CanvasAPIHandler) ListCourseUsers(c *fiber.Ctx) error {
 		if inc["enrollments"] {
 			enr := make([]fiber.Map, len(rows[i].Enrollments))
 			for j := range rows[i].Enrollments {
-				enr[j] = canvasEnrollmentJSON(&rows[i].Enrollments[j])
+				enr[j] = canvasEnrollmentJSON(&rows[i].Enrollments[j], staff)
 			}
 			m["enrollments"] = enr
 		}

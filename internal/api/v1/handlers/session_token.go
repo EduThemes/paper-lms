@@ -67,6 +67,13 @@ func sanitizeReturnTo(raw, requestHost, frontendURL string) (string, bool) {
 	if out == "" {
 		out = "/"
 	}
+	// An absolute URL on this host can still carry a path like
+	// "//evil.example" ("https://host//evil.example"). Redirected to as is
+	// (same-origin, no frontend prefix) that is a protocol-relative URL to
+	// another site, so refuse it.
+	if strings.HasPrefix(out, "//") || strings.HasPrefix(out, "/\\") {
+		return "", false
+	}
 	if enc := q.Encode(); enc != "" {
 		out += "?" + enc
 	}

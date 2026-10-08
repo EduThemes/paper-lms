@@ -125,6 +125,13 @@ func TestOAuth2Authorize_ErrorsGoBackToTheClient(t *testing.T) {
 	u = loc(base + "&response_type=code&scope=" + url.QueryEscape("url:GET|/api/v1/courses") + "&code_challenge=" + pkceChallengeFor(pkceVerifier) + "&code_challenge_method=plain")
 	assert.Equal(t, "invalid_request", u.Query().Get("error"), "only S256 is accepted")
 
+	// prompt=none can never be satisfied silently (consent is always
+	// shown), so the client hears so on its redirect_uri.
+	u = loc(base + "&response_type=code&scope=" + url.QueryEscape("url:GET|/api/v1/courses") + "&prompt=none")
+	assert.Equal(t, "app.example.com", u.Host)
+	assert.Equal(t, "interaction_required", u.Query().Get("error"))
+	assert.Equal(t, "s9", u.Query().Get("state"))
+
 	// A valid request goes to the consent screen with the PKCE challenge.
 	u = loc(base + "&response_type=code&scopes=" + url.QueryEscape("url:GET|/api/v1/courses") + "&code_challenge=" + pkceChallengeFor(pkceVerifier) + "&code_challenge_method=S256")
 	assert.Equal(t, "lms.example.com", u.Host)
@@ -344,6 +351,7 @@ func TestAccessTokens_AdminManagesOwnTenantOnly(t *testing.T) {
 	userRepo.On("FindByID", mock.Anything, uint(99), uint(0)).Return(&models.User{ID: 99, AccountID: 1, Role: "admin"}, nil)
 	userRepo.On("FindByID", mock.Anything, uint(20), uint(1)).Return(&models.User{ID: 20, AccountID: 1}, nil)
 	userRepo.On("FindByID", mock.Anything, uint(21), uint(1)).Return(nil, assert.AnError) // another tenant's user
+	userRepo.On("FindByID", mock.Anything, uint(22), uint(1)).Return(&models.User{ID: 22, AccountID: 1, Role: "super_admin"}, nil)
 	app := patApp(tokenRepo, userRepo, 99, 1)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/users/20/tokens", nil)
@@ -373,4 +381,12 @@ func TestAccessTokens_AdminManagesOwnTenantOnly(t *testing.T) {
 	// Another tenant's user is a 404.
 	resp = testutil.MakeRequest(app, http.MethodGet, "/users/21/tokens", nil)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	// A platform operator homed in this account is out of the account
+	// admin's reach too: no listing, no revoking.
+	resp = testutil.MakeRequest(app, http.MethodGet, "/users/22/tokens", nil)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp = testutil.MakeRequest(app, http.MethodDelete, "/users/22/tokens/1", nil)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	tokenRepo.AssertNotCalled(t, "ListByUserID", mock.Anything, uint(22), mock.Anything)
 }

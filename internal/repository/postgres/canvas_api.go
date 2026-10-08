@@ -132,7 +132,11 @@ func (r *canvasAPIRepo) ListCourseUsers(ctx context.Context, courseID uint, f re
 	}
 	if term := strings.TrimSpace(f.SearchTerm); term != "" {
 		p := likePattern(term)
-		q = q.Where(`(LOWER(name) LIKE ? ESCAPE '\' OR LOWER(sortable_name) LIKE ? ESCAPE '\' OR LOWER(login_id) LIKE ? ESCAPE '\' OR LOWER(email) LIKE ? ESCAPE '\' OR LOWER(COALESCE(sis_user_id, '')) LIKE ? ESCAPE '\')`, p, p, p, p, p)
+		if f.NameSearchOnly {
+			q = q.Where(`(LOWER(name) LIKE ? ESCAPE '\' OR LOWER(sortable_name) LIKE ? ESCAPE '\' OR LOWER(COALESCE(short_name, '')) LIKE ? ESCAPE '\')`, p, p, p)
+		} else {
+			q = q.Where(`(LOWER(name) LIKE ? ESCAPE '\' OR LOWER(sortable_name) LIKE ? ESCAPE '\' OR LOWER(login_id) LIKE ? ESCAPE '\' OR LOWER(email) LIKE ? ESCAPE '\' OR LOWER(COALESCE(sis_user_id, '')) LIKE ? ESCAPE '\')`, p, p, p, p, p)
+		}
 	}
 	return canvasPaginate[models.User](q, params, userOrder(f.Sort, "asc"))
 }

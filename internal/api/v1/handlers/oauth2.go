@@ -96,9 +96,10 @@ func requestedScope(c *fiber.Ctx) string {
 // G136: once the client and redirect_uri are known good, request errors
 // go back to the client the RFC 6749 §4.1.2.1 way (error= on the
 // redirect_uri), as Canvas does: unsupported_response_type, invalid_scope
-// for a require_scopes key, and invalid_request for a malformed PKCE
-// challenge. PKCE parameters (code_challenge, code_challenge_method=S256)
-// are carried through the consent screen to the code.
+// for a require_scopes key, invalid_request for a malformed PKCE
+// challenge, and interaction_required for prompt=none. PKCE parameters
+// (code_challenge, code_challenge_method=S256) are carried through the
+// consent screen to the code.
 func (h *OAuth2Handler) Authorize(c *fiber.Ctx) error {
 	clientID := c.Query("client_id")
 	responseType := c.Query("response_type")
@@ -146,6 +147,15 @@ func (h *OAuth2Handler) Authorize(c *fiber.Ctx) error {
 	pkce := service.PKCEChallenge{Challenge: c.Query("code_challenge"), Method: c.Query("code_challenge_method")}
 	if err := pkce.Validate(); err != nil {
 		return clientErr("invalid_request", err.Error())
+	}
+	// prompt=none asks for a code without showing the user anything (a
+	// silent re-authorization, often from a hidden iframe). Paper never
+	// issues a code without the consent screen (B076), so the answer is
+	// always "interaction needed", sent back to the client as OIDC Core
+	// 3.1.2.6 describes rather than rendering the consent page where
+	// nobody will see it.
+	if c.Query("prompt") == "none" {
+		return clientErr("interaction_required", "This application must ask the user for authorization; prompt=none cannot be satisfied")
 	}
 
 	q := url.Values{}
