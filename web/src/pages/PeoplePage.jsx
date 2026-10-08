@@ -1,20 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Users, UserPlus, Search, X, Mail } from 'lucide-react';
-import { api } from '../services/api';
+import { Users, UserPlus, Search, X, Layers } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import useIsTeacher from '../hooks/useIsTeacher';
+import useCourseStaffRole from '../hooks/useCourseStaffRole';
+import { useRoster, useCourseSections, useEnrollmentAction } from '../hooks/useAdminEnrollments';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
-import { Skeleton } from '@/components/ui/skeleton';
-
-const ROLE_LABELS = {
-  TeacherEnrollment: 'Teacher',
-  TaEnrollment: 'TA',
-  StudentEnrollment: 'Student',
-  ObserverEnrollment: 'Observer',
-  DesignerEnrollment: 'Designer',
-};
+import Page from '../components/Page';
+import AddPeopleForm from '../components/enrollments/AddPeopleForm';
+import EditEnrollmentDialog from '../components/enrollments/EditEnrollmentDialog';
+import EnrollmentActionsMenu from '../components/enrollments/EnrollmentActionsMenu';
+import {
+  ROLE_LABELS,
+  ACTION_CONFIRM,
+  STATUS_FILTERS,
+  enrollmentActions,
+  enrollmentStatus,
+  sectionLabel,
+} from '../utils/enrollmentLifecycle';
 
 const ROLE_COLORS = {
   TeacherEnrollment: 'bg-brand-100 text-brand-800',
@@ -24,308 +27,161 @@ const ROLE_COLORS = {
   DesignerEnrollment: 'bg-orange-100 text-orange-800',
 };
 
+const STATUS_COLORS = {
+  active: 'bg-accent-success/20 text-accent-success',
+  invited: 'bg-accent-warning/20 text-accent-warning',
+  pending: 'bg-accent-warning/20 text-accent-warning',
+  concluded: 'bg-surface-2 text-text-secondary',
+  inactive: 'bg-surface-2 text-text-tertiary',
+  rejected: 'bg-accent-danger/10 text-accent-danger',
+};
+
+const ROLE_PRIORITY = { TeacherEnrollment: 0, TaEnrollment: 1, DesignerEnrollment: 2, StudentEnrollment: 3, ObserverEnrollment: 4 };
+const ADMIN_ROLES = new Set(['admin', 'super_admin']);
+
+/**
+ * Course People page: roster with role / status filters, Add People
+ * (direct or by invitation) and, for staff, per-person lifecycle actions
+ * — edit role, section and dates; conclude; deactivate; re-activate;
+ * remove (G105, G107, G110, G122).
+ */
 const PeoplePage = () => {
   const { courseId } = useParams();
   const { user } = useAuth();
-  const [enrollments, setEnrollments] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [search, setSearch] = useState('');
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [addForm, setAddForm] = useState({ user_id: '', type: 'StudentEnrollment', course_section_id: '' });
-  const [sections, setSections] = useState([]);
-  const [adding, setAdding] = useState(false);
-  const [filter, setFilter] = useState('all');
-  const [userSearch, setUserSearch] = useState('');
-  const [userResults, setUserResults] = useState([]);
-  const [userSearching, setUserSearching] = useState(false);
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [showUserDropdown, setShowUserDropdown] = useState(false);
-
-  const isTeacher = useIsTeacher(courseId);
-
-  const fetchEnrollments = async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      // Every page of the roster: a single per_page=200 request was
-      // capped at 100 by the server and hid the rest of a large course.
-      const result = await api.getAllEnrollments(courseId);
-      setEnrollments(result.data || []);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+  const staffRole = useCourseStaffRole(courseId);
+  const isAdmin = ADMIN_ROLES.has(user?.role);
+  const caller = {
+    userId: user?.id,
+    isAdmin,
+    isTeacher: isAdmin || Boolean(staffRole?.teacher),
+    isStaff: isAdmin || Boolean(staffRole?.staff),
   };
 
-  useEffect(() => {
-    fetchEnrollments();
-  }, [courseId]);
+  const [statusFilter, setStatusFilter] = useState('current');
+  const states = caller.isStaff ? (STATUS_FILTERS.find((f) => f.key === statusFilter)?.states || []) : [];
+  const roster = useRoster(courseId, states, { enabled: !!courseId && staffRole !== null });
+  const sectionsQuery = useCourseSections(courseId);
+  const sections = sectionsQuery.data || [];
 
-  // Sections for the Add People form (staff only).
-  useEffect(() => {
-    if (!isTeacher || !showAddForm) return;
-    let cancelled = false;
-    api.getSections(courseId, 1, 100)
-      .then((result) => { if (!cancelled) setSections(result?.data || []); })
-      .catch(() => { if (!cancelled) setSections([]); });
-    return () => { cancelled = true; };
-  }, [courseId, isTeacher, showAddForm]);
+  // The roster waits for the caller's role (it picks the state filter).
+  const pageQuery = staffRole === null ? { ...roster, isLoading: true } : roster;
 
-  // Debounced lookup for Add People. GET /users is admin-only, so
-  // teachers got a swallowed 403 and "No users found" for everyone
-  // (B073); the course-scoped endpoint matches an exact email, login ID
-  // or SIS ID inside the course's tenant, like Canvas's Add People.
-  useEffect(() => {
-    if (userSearch.trim().length < 3) {
-      setUserResults([]);
-      setShowUserDropdown(false);
+  return (
+    <Page query={pageQuery} title="People">
+      {(enrollments) => (
+        <PeopleView
+          courseId={courseId}
+          caller={caller}
+          enrollments={enrollments || []}
+          sections={sections}
+          statusFilter={statusFilter}
+          setStatusFilter={setStatusFilter}
+          isFetching={roster.isFetching}
+        />
+      )}
+    </Page>
+  );
+};
+
+function PeopleView({ courseId, caller, enrollments, sections, statusFilter, setStatusFilter, isFetching }) {
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('all');
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
+
+  const sectionsById = useMemo(() => Object.fromEntries(sections.map((s) => [s.id, s])), [sections]);
+  const enrolledUserIds = useMemo(() => new Set(enrollments.map((e) => e.user_id)), [enrollments]);
+
+  const action = useEnrollmentAction(courseId, {
+    onSuccess: (_data, vars) => {
+      setError(null);
+      setNotice(`${vars.label} done.`);
+    },
+    onError: (err) => setError(err.message),
+  });
+
+  const runAction = (enrollment, act) => {
+    if (act === 'edit') {
+      setEditing(enrollment);
       return;
     }
-    const timer = setTimeout(async () => {
-      setUserSearching(true);
-      try {
-        const users = await api.searchEnrollableUsers(courseId, userSearch.trim());
-        // Filter out users already enrolled
-        const enrolledIds = new Set(enrollments.map((e) => e.user_id || e.user?.id));
-        setUserResults(users.filter((u) => !enrolledIds.has(u.id)));
-        setShowUserDropdown(true);
-      } catch {
-        setUserResults([]);
-      } finally {
-        setUserSearching(false);
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [userSearch, enrollments, courseId]);
-
-  const selectUser = (u) => {
-    setSelectedUser(u);
-    setAddForm((prev) => ({ ...prev, user_id: String(u.id) }));
-    setUserSearch('');
-    setShowUserDropdown(false);
-    setUserResults([]);
+    // eslint-disable-next-line no-alert
+    if (ACTION_CONFIRM[act] && !window.confirm(ACTION_CONFIRM[act])) return;
+    const name = enrollment.user?.name || `User ${enrollment.user_id}`;
+    const verb = { conclude: 'Concluding', deactivate: 'Deactivating', reactivate: 'Re-activating', delete: 'Removing' }[act];
+    action.mutate({ enrollmentId: enrollment.id, action: act, label: `${verb} ${name}` });
   };
-
-  const clearSelectedUser = () => {
-    setSelectedUser(null);
-    setAddForm((prev) => ({ ...prev, user_id: '' }));
-    setUserSearch('');
-  };
-
-  const handleAddEnrollment = async (e) => {
-    e.preventDefault();
-    if (!addForm.user_id) return;
-    setAdding(true);
-    setError(null);
-    try {
-      await api.createEnrollment(courseId, {
-        user_id: parseInt(addForm.user_id, 10),
-        type: addForm.type,
-        enrollment_state: 'active',
-        ...(addForm.course_section_id ? { course_section_id: parseInt(addForm.course_section_id, 10) } : {}),
-      });
-      setShowAddForm(false);
-      setAddForm({ user_id: '', type: 'StudentEnrollment', course_section_id: '' });
-      setSelectedUser(null);
-      setUserSearch('');
-      // Refresh
-      const result = await api.getAllEnrollments(courseId);
-      setEnrollments(result.data || []);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setAdding(false);
-    }
-  };
-
-  // Group enrollments by role
-  const filtered = enrollments.filter((e) => {
-    if (e.enrollment_state === 'deleted') return false;
-    if (filter !== 'all' && e.type !== filter) return false;
-    if (search) {
-      const term = search.toLowerCase();
-      const name = (e.user?.name || e.user?.login_id || '').toLowerCase();
-      return name.includes(term);
-    }
-    return true;
-  });
-
-  // Sort: teachers first, then TAs, then students
-  const rolePriority = { TeacherEnrollment: 0, TaEnrollment: 1, StudentEnrollment: 2, ObserverEnrollment: 3, DesignerEnrollment: 4 };
-  filtered.sort((a, b) => (rolePriority[a.type] ?? 9) - (rolePriority[b.type] ?? 9));
 
   const roleCounts = {};
-  enrollments.forEach((e) => {
-    if (e.enrollment_state !== 'deleted') {
-      roleCounts[e.type] = (roleCounts[e.type] || 0) + 1;
-    }
-  });
+  enrollments.forEach((e) => { roleCounts[e.type] = (roleCounts[e.type] || 0) + 1; });
 
-  if (loading) {
-    return (
-      <Layout>
-        <CourseNav />
-        <div className="space-y-3 p-6">
-          <Skeleton className="h-9 w-48" />
-          <Skeleton className="h-12 w-full" />
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-16 w-full" />
-          ))}
-        </div>
-      </Layout>
-    );
-  }
-
-  if (error && enrollments.length === 0) {
-    return (
-      <Layout>
-        <CourseNav />
-        <div className="text-center py-12">
-          <p className="text-accent-danger mb-3">{error}</p>
-          <button onClick={fetchEnrollments} className="text-brand-600 hover:text-brand-800 text-sm font-medium">Try Again</button>
-        </div>
-      </Layout>
-    );
-  }
+  const term = search.trim().toLowerCase();
+  const filtered = enrollments
+    .filter((e) => roleFilter === 'all' || e.type === roleFilter)
+    .filter((e) => !term || `${e.user?.name || ''} ${e.user?.login_id || ''}`.toLowerCase().includes(term))
+    .sort((a, b) => (ROLE_PRIORITY[a.type] ?? 9) - (ROLE_PRIORITY[b.type] ?? 9));
 
   return (
     <Layout>
       <CourseNav />
       <div className="mb-6">
-        <Link to={`/courses/${courseId}`} className="text-brand-600 hover:underline text-sm">
-          &larr; Back to Course
-        </Link>
-        <div className="flex items-center justify-between mt-2">
+        <Link to={`/courses/${courseId}`} className="text-brand-600 hover:underline text-sm">&larr; Back to Course</Link>
+        <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
           <h2 className="text-2xl font-bold text-text-primary flex items-center gap-2">
             <Users className="w-6 h-6" />
             People
           </h2>
-          {isTeacher && (
-            <button
-              onClick={() => setShowAddForm(!showAddForm)}
-              className="inline-flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
-            >
-              {showAddForm ? <X className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
-              {showAddForm ? 'Cancel' : 'Add People'}
-            </button>
+          {caller.isStaff && (
+            <div className="flex items-center gap-2">
+              {caller.isTeacher && (
+                <Link
+                  to={`/courses/${courseId}/sections`}
+                  className="inline-flex items-center gap-2 border border-border-strong px-3 py-2 rounded-md text-sm font-medium text-text-primary hover:bg-surface-1"
+                >
+                  <Layers className="w-4 h-4" />
+                  Sections
+                </Link>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowAddForm((v) => !v)}
+                className="inline-flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+              >
+                {showAddForm ? <X className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+                {showAddForm ? 'Cancel' : 'Add People'}
+              </button>
+            </div>
           )}
         </div>
       </div>
 
       {error && (
-        <div className="bg-accent-danger/10 border border-accent-danger/30 text-accent-danger rounded-md p-3 mb-4 text-sm">
+        <div role="alert" className="bg-accent-danger/10 border border-accent-danger/30 text-accent-danger rounded-md p-3 mb-4 text-sm">
           {error}
-          <button onClick={() => setError(null)} className="ms-2 text-accent-danger hover:text-accent-danger font-bold">&times;</button>
+          <button type="button" onClick={() => setError(null)} className="ms-2 font-bold" aria-label="Dismiss">&times;</button>
+        </div>
+      )}
+      {notice && !error && (
+        <div role="status" className="bg-accent-success/10 border border-accent-success/30 text-accent-success rounded-md p-3 mb-4 text-sm">
+          {notice}
+          <button type="button" onClick={() => setNotice(null)} className="ms-2 font-bold" aria-label="Dismiss">&times;</button>
         </div>
       )}
 
-      {/* Add Enrollment Form */}
-      {showAddForm && (
-        <div className="bg-surface-0 rounded-lg shadow p-4 mb-4">
-          <form onSubmit={handleAddEnrollment} className="flex items-end gap-3">
-            <div className="flex-1 relative">
-              <label htmlFor="add-person-search" className="block text-sm font-medium text-text-secondary mb-1">Person</label>
-              {selectedUser ? (
-                <div className="flex items-center gap-2 border border-border-strong rounded-md px-3 py-2 text-sm bg-surface-1">
-                  <div className="w-6 h-6 bg-brand-100 text-brand-700 rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0">
-                    {(selectedUser.name || '?')[0].toUpperCase()}
-                  </div>
-                  <span className="text-text-primary font-medium truncate">{selectedUser.name}</span>
-                  {selectedUser.email && <span className="text-text-disabled text-xs truncate">{selectedUser.email}</span>}
-                  <button type="button" onClick={clearSelectedUser} className="ml-auto text-text-disabled hover:text-text-secondary flex-shrink-0">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div className="relative">
-                    <Search className="w-4 h-4 absolute start-3 top-1/2 -translate-y-1/2 text-text-disabled" />
-                    <input
-                      id="add-person-search"
-                      type="text"
-                      value={userSearch}
-                      onChange={(e) => setUserSearch(e.target.value)}
-                      onFocus={() => userResults.length > 0 && setShowUserDropdown(true)}
-                      onBlur={() => setTimeout(() => setShowUserDropdown(false), 200)}
-                      placeholder="Email, login ID or SIS ID"
-                      className="w-full ps-9 pe-3 border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    />
-                  </div>
-                  {showUserDropdown && (
-                    <div className="absolute z-20 top-full start-0 end-0 mt-1 bg-surface-0 border border-border-default rounded-md shadow-lg max-h-48 overflow-y-auto">
-                      {userSearching ? (
-                        <div className="px-3 py-2 text-sm text-text-tertiary">Searching...</div>
-                      ) : userResults.length === 0 ? (
-                        <div className="px-3 py-2 text-sm text-text-tertiary">No users found</div>
-                      ) : (
-                        userResults.map((u) => (
-                          <button
-                            key={u.id}
-                            type="button"
-                            onMouseDown={(e) => { e.preventDefault(); selectUser(u); }}
-                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-brand-50 text-start"
-                          >
-                            <div className="w-7 h-7 bg-border-default rounded-full flex items-center justify-center text-xs font-medium text-text-secondary flex-shrink-0">
-                              {(u.name || '?')[0].toUpperCase()}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium text-text-primary truncate">{u.name || `User ${u.id}`}</div>
-                              {u.email && <div className="text-xs text-text-tertiary truncate">{u.email}</div>}
-                            </div>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-            <div>
-              <label htmlFor="add-person-role" className="block text-sm font-medium text-text-secondary mb-1">Role</label>
-              <select
-                id="add-person-role"
-                value={addForm.type}
-                onChange={(e) => setAddForm({ ...addForm, type: e.target.value })}
-                className="border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              >
-                <option value="StudentEnrollment">Student</option>
-                <option value="TeacherEnrollment">Teacher</option>
-                <option value="TaEnrollment">TA</option>
-                <option value="ObserverEnrollment">Observer</option>
-              </select>
-            </div>
-            {sections.length > 0 && (
-              <div>
-                <label htmlFor="add-person-section" className="block text-sm font-medium text-text-secondary mb-1">Section</label>
-                <select
-                  id="add-person-section"
-                  value={addForm.course_section_id}
-                  onChange={(e) => setAddForm({ ...addForm, course_section_id: e.target.value })}
-                  className="border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                >
-                  <option value="">Default section</option>
-                  {sections.map((s) => (
-                    <option key={s.id} value={String(s.id)}>{s.name || `Section ${s.id}`}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <button
-              type="submit"
-              disabled={adding || !addForm.user_id}
-              className="bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
-            >
-              {adding ? 'Adding...' : 'Add'}
-            </button>
-          </form>
-        </div>
+      {showAddForm && caller.isStaff && (
+        <AddPeopleForm
+          courseId={courseId}
+          caller={caller}
+          sections={sections}
+          enrolledUserIds={enrolledUserIds}
+          onDone={() => { setShowAddForm(false); setNotice('Person added.'); }}
+        />
       )}
 
-      {/* Search and Filter */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="relative flex-1 max-w-xs">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="relative flex-1 min-w-[12rem] max-w-xs">
           <Search className="w-4 h-4 absolute start-3 top-1/2 -translate-y-1/2 text-text-disabled" />
           <input
             type="text"
@@ -336,30 +192,44 @@ const PeoplePage = () => {
             className="w-full ps-9 pe-3 py-2 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter by role">
           <button
-            onClick={() => setFilter('all')}
-            className={`px-3 py-1.5 text-xs font-medium rounded-full ${filter === 'all' ? 'bg-brand-100 text-brand-800' : 'bg-surface-2 text-text-secondary hover:bg-border-default'}`}
+            type="button"
+            onClick={() => setRoleFilter('all')}
+            className={`px-3 py-1.5 text-xs font-medium rounded-full ${roleFilter === 'all' ? 'bg-brand-100 text-brand-800' : 'bg-surface-2 text-text-secondary hover:bg-border-default'}`}
           >
-            All ({enrollments.filter(e => e.enrollment_state !== 'deleted').length})
+            All roles ({enrollments.length})
           </button>
           {Object.entries(roleCounts).map(([role, count]) => (
             <button
+              type="button"
               key={role}
-              onClick={() => setFilter(role)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-full ${filter === role ? ROLE_COLORS[role] || 'bg-brand-100 text-brand-800' : 'bg-surface-2 text-text-secondary hover:bg-border-default'}`}
+              onClick={() => setRoleFilter(role)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-full ${roleFilter === role ? ROLE_COLORS[role] || 'bg-brand-100 text-brand-800' : 'bg-surface-2 text-text-secondary hover:bg-border-default'}`}
             >
               {ROLE_LABELS[role] || role} ({count})
             </button>
           ))}
         </div>
+        {caller.isStaff && (
+          <div className="flex items-center gap-2 ms-auto">
+            <label htmlFor="people-status" className="text-xs text-text-tertiary">Status</label>
+            <select
+              id="people-status"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="border border-border-strong rounded-md px-2 py-1.5 text-sm"
+            >
+              {STATUS_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+            </select>
+          </div>
+        )}
       </div>
 
-      {/* People List */}
-      <div className="bg-surface-0 rounded-lg shadow overflow-hidden">
+      <div className="bg-surface-0 rounded-lg shadow overflow-hidden" aria-busy={isFetching || action.isPending}>
         {filtered.length === 0 ? (
           <div className="p-6 text-center text-text-tertiary">
-            {search ? 'No people match your search.' : 'No people enrolled.'}
+            {search ? 'No people match your search.' : 'No people here.'}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -371,55 +241,73 @@ const PeoplePage = () => {
                   <th className="text-start px-4 py-3 text-xs font-medium text-text-tertiary uppercase">Role</th>
                   <th className="text-start px-4 py-3 text-xs font-medium text-text-tertiary uppercase">Section</th>
                   <th className="text-start px-4 py-3 text-xs font-medium text-text-tertiary uppercase">Status</th>
+                  {caller.isStaff && <th className="px-4 py-3"><span className="sr-only">Actions</span></th>}
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {filtered.map((enrollment) => (
-                  <tr key={enrollment.id} className="hover:bg-surface-1">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-border-default rounded-full flex items-center justify-center text-text-tertiary text-sm font-medium flex-shrink-0">
-                          {(enrollment.user?.name || '?')[0].toUpperCase()}
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium text-text-primary">
-                            {enrollment.user?.name || `User ${enrollment.user_id}`}
+                {filtered.map((enrollment) => {
+                  const status = enrollmentStatus(enrollment);
+                  const name = enrollment.user?.name || `User ${enrollment.user_id}`;
+                  return (
+                    <tr key={enrollment.id} className="hover:bg-surface-1">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 bg-border-default rounded-full flex items-center justify-center text-text-tertiary text-sm font-medium flex-shrink-0">
+                            {(enrollment.user?.name || '?')[0].toUpperCase()}
                           </div>
-                          {enrollment.user?.email && (
-                            <div className="text-xs text-text-tertiary">{enrollment.user.email}</div>
-                          )}
+                          <div>
+                            <div className="text-sm font-medium text-text-primary">{name}</div>
+                            {enrollment.user?.email && <div className="text-xs text-text-tertiary">{enrollment.user.email}</div>}
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-text-secondary">
-                      {enrollment.user?.login_id || '-'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_COLORS[enrollment.type] || 'bg-surface-2 text-text-primary'}`}>
-                        {ROLE_LABELS[enrollment.type] || enrollment.type}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-text-secondary">
-                      {enrollment.course_section_id || '-'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        enrollment.enrollment_state === 'active' ? 'bg-accent-success/20 text-accent-success' :
-                        enrollment.enrollment_state === 'invited' ? 'bg-accent-warning/20 text-accent-warning' :
-                        'bg-surface-2 text-text-secondary'
-                      }`}>
-                        {enrollment.enrollment_state || 'active'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-text-secondary">{enrollment.user?.login_id || '-'}</td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_COLORS[enrollment.type] || 'bg-surface-2 text-text-primary'}`}>
+                          {ROLE_LABELS[enrollment.type] || enrollment.type}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-text-secondary">
+                        {sectionLabel(sectionsById, enrollment.course_section_id)}
+                        {enrollment.limit_privileges_to_course_section && (
+                          <span className="block text-xs text-text-tertiary">section only</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[status.key] || 'bg-surface-2 text-text-secondary'}`}>
+                          {status.label}
+                        </span>
+                      </td>
+                      {caller.isStaff && (
+                        <td className="px-4 py-3 text-end">
+                          <EnrollmentActionsMenu
+                            actions={enrollmentActions(enrollment, caller)}
+                            personName={name}
+                            disabled={action.isPending}
+                            onAction={(act) => runAction(enrollment, act)}
+                          />
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      {editing && (
+        <EditEnrollmentDialog
+          courseId={courseId}
+          enrollment={editing}
+          sections={sections}
+          caller={caller}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </Layout>
   );
-};
+}
 
 export default PeoplePage;
