@@ -493,6 +493,37 @@ func TestCreateMessage_NotifiesOtherParticipants(t *testing.T) {
 	}
 }
 
+// A participant outside the sender's tenant (a legacy row from before
+// recipients were tenant-checked) is never notified.
+func TestCreateMessage_DoesNotNotifyOtherTenantParticipant(t *testing.T) {
+	convRepo := new(mocks.MockConversationRepository)
+	partRepo := new(mocks.MockConversationParticipantRepository)
+	msgRepo := new(mocks.MockConversationMessageRepository)
+	userRepo, enrollRepo := commsRoles()
+	const foreignID uint = 777
+	userRepo.On("FindByID", mock.Anything, foreignID, mock.Anything).Return(nil, errFakeNotFound)
+	participants := []models.ConversationParticipant{{ConversationID: 4, UserID: commsStudentID}, {ConversationID: 4, UserID: foreignID}, {ConversationID: 4, UserID: commsTeacherID}}
+	partRepo.On("ListByConversationID", mock.Anything, uint(4)).Return(participants, nil)
+	convRepo.On("FindByID", mock.Anything, uint(4), mock.Anything).Return(&models.Conversation{ID: 4, Subject: "Question"}, nil)
+	convRepo.On("Update", mock.Anything, mock.Anything).Return(nil).Maybe()
+	msgRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.ConversationMessage")).Return(nil)
+	partRepo.On("Update", mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	h := handlers.NewConversationHandler(service.NewConversationService(convRepo, partRepo, msgRepo), service.NewUserService(userRepo), nil, enrollRepo, nil)
+	notifier := &recordingNotifier{}
+	h.SetNotifier(notifier)
+	app := commsApp(commsStudentID, 1)
+	app.Post("/conversations/:id/messages", h.CreateMessage)
+
+	resp := testutil.MakeRequest(app, http.MethodPost, "/conversations/4/messages", strings.NewReader(`{"message":"hello"}`))
+	if !assert.Equal(t, http.StatusCreated, resp.StatusCode) {
+		return
+	}
+	if assert.Len(t, notifier.calls, 1) {
+		assert.Equal(t, commsTeacherID, notifier.calls[0].userID)
+	}
+}
+
 // ===========================================================================
 // Notification channels (B168)
 // ===========================================================================

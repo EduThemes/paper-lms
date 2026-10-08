@@ -498,6 +498,13 @@ func (s *NotificationDeliveryService) SendEmail(ctx context.Context, to, subject
 		return fmt.Errorf("SMTP is not enabled")
 	}
 
+	// Subjects now carry user-controlled text (conversation subjects,
+	// announcement and topic titles). A CR/LF in a header value would let
+	// the sender inject headers or a whole forged body, so header values
+	// are flattened to one line before the message is assembled.
+	to = sanitizeEmailHeaderValue(to)
+	subject = sanitizeEmailHeaderValue(subject)
+
 	htmlBody, err := s.wrapHTMLTemplate(subject, body)
 	if err != nil {
 		return fmt.Errorf("failed to render email template: %w", err)
@@ -518,6 +525,33 @@ func (s *NotificationDeliveryService) SendEmail(ctx context.Context, to, subject
 	}
 
 	return nil
+}
+
+// buildDigestBody renders the HTML body of a digest email. Each
+// delivery's Subject is plain text (it can hold a user-written
+// conversation subject or title), so it is escaped; Body is already
+// sanitized/escaped HTML when it is queued.
+func buildDigestBody(digestType string, group []models.NotificationDelivery) string {
+	var bodyParts []string
+	bodyParts = append(bodyParts, fmt.Sprintf("<h2>Your %s Notification Digest</h2>", html.EscapeString(digestType)))
+	bodyParts = append(bodyParts, fmt.Sprintf("<p>You have %d notifications:</p><ul>", len(group)))
+	for _, d := range group {
+		bodyParts = append(bodyParts, fmt.Sprintf("<li><strong>%s</strong><br/>%s</li>", html.EscapeString(d.Subject), d.Body))
+	}
+	bodyParts = append(bodyParts, "</ul>")
+	return strings.Join(bodyParts, "\n")
+}
+
+// sanitizeEmailHeaderValue collapses CR, LF and other control characters
+// to spaces so a value cannot terminate its header line (header / body
+// injection).
+func sanitizeEmailHeaderValue(v string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' || (r < 0x20 && r != '\t') || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, v))
 }
 
 // ProcessDigests aggregates pending deliveries for the same user+channel with the specified
@@ -577,14 +611,7 @@ func (s *NotificationDeliveryService) ProcessDigests(ctx context.Context, digest
 		// Multiple notifications -- create a digest summary
 		digestLabel := strings.ToUpper(digestType[:1]) + digestType[1:]
 		subject := fmt.Sprintf("Paper LMS %s Digest — %d notifications", digestLabel, len(group))
-		var bodyParts []string
-		bodyParts = append(bodyParts, fmt.Sprintf("<h2>Your %s Notification Digest</h2>", digestType))
-		bodyParts = append(bodyParts, fmt.Sprintf("<p>You have %d notifications:</p><ul>", len(group)))
-		for _, d := range group {
-			bodyParts = append(bodyParts, fmt.Sprintf("<li><strong>%s</strong><br/>%s</li>", d.Subject, d.Body))
-		}
-		bodyParts = append(bodyParts, "</ul>")
-		digestBody := strings.Join(bodyParts, "\n")
+		digestBody := buildDigestBody(digestType, group)
 
 		var sendErr error
 		switch key.ChannelType {

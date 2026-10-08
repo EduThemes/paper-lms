@@ -179,6 +179,24 @@ func TestRecipientSearch_ScopedToSharedCourses(t *testing.T) {
 			t.Fatalf("cross-tenant user leaked into recipient search")
 		}
 	}
+
+	// A non-admin cannot search by email address: results never carry
+	// emails, so matching on them would let a student confirm who owns
+	// an address. Admins still can.
+	byEmail, err := rs.SearchRecipients(ctx, 101, 1, "john.classmate@", false, 10)
+	if err != nil {
+		t.Fatalf("email search: %v", err)
+	}
+	if len(byEmail) != 0 {
+		t.Fatalf("student email search returned %d users, want 0", len(byEmail))
+	}
+	adminByEmail, err := rs.SearchRecipients(ctx, 101, 1, "john.classmate@", true, 10)
+	if err != nil {
+		t.Fatalf("admin email search: %v", err)
+	}
+	if len(adminByEmail) != 1 || adminByEmail[0].ID != 102 {
+		t.Fatalf("admin email search = %v, want [102]", adminByEmail)
+	}
 }
 
 // B165 — concurrent reservations of the last seat must not overbook.

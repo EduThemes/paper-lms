@@ -29,8 +29,9 @@ func escapeLike(s string) string {
 }
 
 // SearchRecipients returns up to limit non-suspended users of accountID
-// (excluding the caller) whose name, sortable name or email contains term
-// (case-insensitive). Unless allInAccount is set, candidates are limited to
+// (excluding the caller) whose name or sortable name contains term
+// (case-insensitive; admins, allInAccount, also match on email). Unless
+// allInAccount is set, candidates are limited to
 // users who share an active enrollment in a course of that account with
 // the caller.
 func (r *RecipientSearchRepository) SearchRecipients(ctx context.Context, callerID, accountID uint, term string, allInAccount bool, limit int) ([]models.User, error) {
@@ -40,8 +41,17 @@ func (r *RecipientSearchRepository) SearchRecipients(ctx context.Context, caller
 	pattern := "%" + escapeLike(strings.ToLower(strings.TrimSpace(term))) + "%"
 
 	q := r.db.WithContext(ctx).Model(&models.User{}).
-		Where("users.account_id = ? AND users.id <> ? AND users.suspended = ?", accountID, callerID, false).
-		Where(`(LOWER(users.name) LIKE ? ESCAPE '\' OR LOWER(COALESCE(users.sortable_name, '')) LIKE ? ESCAPE '\' OR LOWER(users.email) LIKE ? ESCAPE '\')`, pattern, pattern, pattern)
+		Where("users.account_id = ? AND users.id <> ? AND users.suspended = ?", accountID, callerID, false)
+
+	if allInAccount {
+		// Admins may look people up by email address too.
+		q = q.Where(`(LOWER(users.name) LIKE ? ESCAPE '\' OR LOWER(COALESCE(users.sortable_name, '')) LIKE ? ESCAPE '\' OR LOWER(users.email) LIKE ? ESCAPE '\')`, pattern, pattern, pattern)
+	} else {
+		// Names only: matching on email would let a student confirm
+		// which classmate owns a given address even though results
+		// never include emails.
+		q = q.Where(`(LOWER(users.name) LIKE ? ESCAPE '\' OR LOWER(COALESCE(users.sortable_name, '')) LIKE ? ESCAPE '\')`, pattern, pattern)
+	}
 
 	if !allInAccount {
 		q = q.Where(`users.id IN (

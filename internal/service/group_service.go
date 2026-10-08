@@ -230,8 +230,13 @@ func (s *GroupService) leaveOtherGroupsInCategory(ctx context.Context, userID ui
 //   - "restricted" sets additionally require that the user shares a
 //     section with every current member of the group.
 func (s *GroupService) CheckSelfSignup(ctx context.Context, group *models.Group, userID, courseID uint) error {
+	// Deleted groups and group sets are soft-deleted rows the lookups
+	// still return; nobody can sign up for them.
+	if group.WorkflowState == "deleted" {
+		return ErrSelfSignupDisabled
+	}
 	category, err := s.catRepo.FindByID(ctx, group.GroupCategoryID, 0)
-	if err != nil || category == nil {
+	if err != nil || category == nil || category.WorkflowState == "deleted" {
 		return ErrSelfSignupDisabled
 	}
 	if category.SelfSignup != "enabled" && category.SelfSignup != "restricted" {

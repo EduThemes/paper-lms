@@ -438,6 +438,21 @@ func TestCheckSelfSignup_RestrictedRequiresCommonSection(t *testing.T) {
 	assert.NoError(t, svc.CheckSelfSignup(context.Background(), group, 52, 5))
 }
 
+func TestCheckSelfSignup_DeletedGroupOrSetRefused(t *testing.T) {
+	catRepo := new(mocks.MockGroupCategoryRepository)
+	enrollRepo := new(mocks.MockEnrollmentRepository)
+	catRepo.On("FindByID", mock.Anything, uint(7), uint(0)).Return(&models.GroupCategory{ID: 7, SelfSignup: "enabled"}, nil)
+	catRepo.On("FindByID", mock.Anything, uint(8), uint(0)).Return(&models.GroupCategory{ID: 8, SelfSignup: "enabled", WorkflowState: "deleted"}, nil)
+	enrollRepo.On("ListByUserID", mock.Anything, uint(50), uint(0)).Return([]models.Enrollment{{CourseID: 5, Type: "StudentEnrollment", WorkflowState: "active"}}, nil)
+	svc := NewGroupService(catRepo, nil, nil, enrollRepo)
+
+	assert.NoError(t, svc.CheckSelfSignup(context.Background(), &models.Group{ID: 21, GroupCategoryID: 7, WorkflowState: "available"}, 50, 5))
+	assert.ErrorIs(t, svc.CheckSelfSignup(context.Background(), &models.Group{ID: 22, GroupCategoryID: 7, WorkflowState: "deleted"}, 50, 5), ErrSelfSignupDisabled,
+		"a deleted group cannot be joined")
+	assert.ErrorIs(t, svc.CheckSelfSignup(context.Background(), &models.Group{ID: 23, GroupCategoryID: 8, WorkflowState: "available"}, 50, 5), ErrSelfSignupDisabled,
+		"a group in a deleted group set cannot be joined")
+}
+
 // ---------------------------------------------------------------------------
 // Discussion reply notifications (B055)
 // ---------------------------------------------------------------------------

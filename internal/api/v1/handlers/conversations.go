@@ -120,6 +120,14 @@ func (h *ConversationHandler) notifyNewMessage(c *fiber.Ctx, conversationID, sen
 		if p.UserID == senderID {
 			continue
 		}
+		// Defense in depth: only notify participants of the sender's
+		// tenant (conversations created before recipients were
+		// tenant-checked may hold foreign ids).
+		if h.userService != nil {
+			if u, err := h.userService.GetByID(c.Context(), p.UserID, callerAccountID(c)); err != nil || u == nil {
+				continue
+			}
+		}
 		_ = h.notifier.QueueNotification(c.Context(), p.UserID, "new_message", title, html.EscapeString(body), "Conversation", conversationID)
 	}
 }
@@ -329,6 +337,21 @@ func (h *ConversationHandler) CreateConversation(c *fiber.Ctx) error {
 						return responses.Error(c, fiber.StatusForbidden, "Direct messages between students require parental consent in this school's privacy mode.")
 					}
 				}
+			}
+		}
+	}
+
+	// Every recipient must be a user of the caller's tenant. A message
+	// now also notifies (in-app and by email) every participant, so an
+	// unchecked id would let anyone mail users of another school.
+	// Unknown / other-tenant ids are a 404, never a hint they exist.
+	if h.userService != nil {
+		for _, rid := range input.Conversation.Recipients {
+			if rid == userID {
+				continue
+			}
+			if u, err := h.userService.GetByID(c.Context(), rid, callerAccountID(c)); err != nil || u == nil {
+				return responses.NotFound(c, "recipient")
 			}
 		}
 	}
