@@ -94,6 +94,11 @@ var ErrPrivilegedAutoLink = errors.New("refusing to auto-link a privileged accou
 // is not an active provider of the verified credential's type.
 var ErrProviderMismatch = errors.New("authentication provider does not match the verified credential")
 
+// ProviderTypeSessionToken is the SSOOutcome.ProviderType of a login via a
+// single-use /login/session_token URL (G136). Like "passkey", the
+// credential already names the user (ExternalSubject = user id).
+const ProviderTypeSessionToken = "session_token"
+
 // LoginPipeline orchestrates post-credential-verification work for
 // every login path.
 type LoginPipeline struct {
@@ -223,7 +228,16 @@ func (p *LoginPipeline) Execute(ctx context.Context, outcome SSOOutcome, meta Re
 	// verification (biometric/PIN). That's already two factors by
 	// definition; we skip the per-tenant MFA gate entirely. The TOTP
 	// step would just be friction.
-	if outcome.ProviderType == "passkey" {
+	//
+	// G136 — "session_token" (Canvas GET /login/session_token) is the
+	// same shape: the single-use URL was minted by a caller holding a
+	// full-access API token for this very user, and that token was itself
+	// created inside a session that already passed the MFA gate (a PAT is
+	// created from a signed-in session; an OAuth token after consent in
+	// one). Canvas marks these logins as remember-me logins, which skip
+	// the OTP step. Suspension and parental-consent gates above still
+	// apply.
+	if outcome.ProviderType == "passkey" || outcome.ProviderType == ProviderTypeSessionToken {
 		token, err := GenerateToken(user, p.jwtSecret)
 		if err != nil {
 			return nil, err
@@ -281,7 +295,7 @@ func (p *LoginPipeline) resolveUser(ctx context.Context, outcome SSOOutcome, met
 	// resolved a credential row → user_id; the handler stashes the
 	// id as ExternalSubject. We skip the federated_identities lookup
 	// + JIT entirely (the credential IS the binding).
-	if outcome.ProviderType == "local" || outcome.ProviderType == "passkey" {
+	if outcome.ProviderType == "local" || outcome.ProviderType == "passkey" || outcome.ProviderType == ProviderTypeSessionToken {
 		var userID uint
 		if _, err := fmt.Sscanf(outcome.ExternalSubject, "%d", &userID); err != nil || userID == 0 {
 			return nil, false, errors.New("login outcome missing user id")

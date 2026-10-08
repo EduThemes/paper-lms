@@ -15,7 +15,7 @@ type AccountReport struct {
 	UserID        uint       `json:"user_id" gorm:"not null;index"` // who ran it
 	ReportType    string     `json:"report" gorm:"column:report_type;not null;index"`
 	Parameters    string     `json:"parameters" gorm:"type:jsonb;not null;default:'{}'"`
-	WorkflowState string     `json:"status" gorm:"column:workflow_state;not null;default:'created'"` // created, running, complete, error
+	WorkflowState string     `json:"status" gorm:"column:workflow_state;not null;default:'created'"` // created, running, complete, error, aborted
 	Progress      int        `json:"progress" gorm:"not null;default:0"`
 	Message       string     `json:"message" gorm:"type:text;not null;default:''"`
 	RowCount      int        `json:"row_count" gorm:"not null;default:0"`
@@ -33,6 +33,7 @@ const (
 	AccountReportRunning  = "running"
 	AccountReportComplete = "complete"
 	AccountReportError    = "error"
+	AccountReportAborted  = "aborted"
 )
 
 // BeforeCreate mirrors the SQL DEFAULTs (GORM writes an empty string for

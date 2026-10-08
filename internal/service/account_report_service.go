@@ -183,6 +183,73 @@ func (s *AccountReportService) Delete(ctx context.Context, id, accountID uint) e
 	return nil
 }
 
+// Abort stops a run of accountID that has not finished (Canvas PUT
+// .../reports/:report/:id/abort). A finished run is returned unchanged.
+func (s *AccountReportService) Abort(ctx context.Context, id, accountID uint) (*models.AccountReport, error) {
+	if err := s.db.WithContext(ctx).Model(&models.AccountReport{}).
+		Where("id = ? AND account_id = ? AND workflow_state IN ?", id, accountID,
+			[]string{models.AccountReportCreated, models.AccountReportRunning}).
+		Updates(map[string]interface{}{
+			"workflow_state": models.AccountReportAborted, "ended_at": time.Now(),
+			"message": "The report was aborted.",
+		}).Error; err != nil {
+		return nil, err
+	}
+	return s.Get(ctx, id, accountID)
+}
+
+// ParseAccountReportParams reads report parameters in either shape: this
+// API's {"entities": [...]} or Canvas's per-file flags
+// ({"users": true, "courses": "true", ...}, as JSON or form
+// parameters[users]=true), plus enrollment_term_id and include_deleted.
+func ParseAccountReportParams(raw map[string]any) (AccountReportParams, error) {
+	var p AccountReportParams
+	truthy := func(v any) bool {
+		switch t := v.(type) {
+		case bool:
+			return t
+		case string:
+			return strings.EqualFold(t, "true") || t == "1"
+		case float64:
+			return t != 0
+		}
+		return false
+	}
+	seen := map[string]bool{}
+	if list, ok := raw["entities"].([]any); ok {
+		for _, e := range list {
+			if name, ok := e.(string); ok && !seen[name] {
+				seen[name] = true
+				p.Entities = append(p.Entities, name)
+			}
+		}
+	}
+	for _, name := range provisioningEntities {
+		if v, ok := raw[name]; ok && truthy(v) && !seen[name] {
+			seen[name] = true
+			p.Entities = append(p.Entities, name)
+		}
+	}
+	switch t := raw["enrollment_term_id"].(type) {
+	case float64:
+		if t > 0 {
+			id := uint(t)
+			p.EnrollmentTermID = &id
+		}
+	case string:
+		if t != "" {
+			n, err := strconv.ParseUint(t, 10, 64)
+			if err != nil || n == 0 {
+				return p, ErrReportTermNotFound
+			}
+			id := uint(n)
+			p.EnrollmentTermID = &id
+		}
+	}
+	p.IncludeDeleted = truthy(raw["include_deleted"])
+	return p, nil
+}
+
 // run generates a report and stores the result on its row.
 func (s *AccountReportService) run(ctx context.Context, id uint) {
 	var r models.AccountReport
@@ -190,9 +257,20 @@ func (s *AccountReportService) run(ctx context.Context, id uint) {
 		return
 	}
 	now := time.Now()
-	s.db.WithContext(ctx).Model(&r).Updates(map[string]interface{}{
-		"workflow_state": models.AccountReportRunning, "started_at": now, "progress": 5,
-	})
+	// Only a run still waiting starts (an aborted one stays aborted).
+	if res := s.db.WithContext(ctx).Model(&models.AccountReport{}).
+		Where("id = ? AND workflow_state = ?", r.ID, models.AccountReportCreated).
+		Updates(map[string]interface{}{
+			"workflow_state": models.AccountReportRunning, "started_at": now, "progress": 5,
+		}); res.Error != nil || res.RowsAffected == 0 {
+		return
+	}
+	// finish records the outcome unless the run was aborted meanwhile.
+	finish := func(fields map[string]interface{}) {
+		s.db.WithContext(ctx).Model(&models.AccountReport{}).
+			Where("id = ? AND workflow_state = ?", r.ID, models.AccountReportRunning).
+			Updates(fields)
+	}
 	var params AccountReportParams
 	_ = json.Unmarshal([]byte(r.Parameters), &params)
 
@@ -200,7 +278,7 @@ func (s *AccountReportService) run(ctx context.Context, id uint) {
 	ended := time.Now()
 	if err != nil {
 		slog.Error("account report failed", "report_id", r.ID, "report", r.ReportType, "error", err)
-		s.db.WithContext(ctx).Model(&r).Updates(map[string]interface{}{
+		finish(map[string]interface{}{
 			"workflow_state": models.AccountReportError, "ended_at": ended, "progress": 100,
 			"message": "The report could not be generated.",
 		})
@@ -208,13 +286,13 @@ func (s *AccountReportService) run(ctx context.Context, id uint) {
 	}
 	name, data, err := packReportFiles(r.ReportType, r.ID, files)
 	if err != nil {
-		s.db.WithContext(ctx).Model(&r).Updates(map[string]interface{}{
+		finish(map[string]interface{}{
 			"workflow_state": models.AccountReportError, "ended_at": ended, "progress": 100,
 			"message": "The report could not be packaged.",
 		})
 		return
 	}
-	s.db.WithContext(ctx).Model(&r).Updates(map[string]interface{}{
+	finish(map[string]interface{}{
 		"workflow_state": models.AccountReportComplete, "ended_at": ended, "progress": 100,
 		"row_count": rows, "file_name": name, "file_data": data,
 		"message": fmt.Sprintf("%d row(s)", rows),

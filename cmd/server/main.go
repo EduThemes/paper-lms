@@ -841,10 +841,17 @@ func main() {
 	gradebookHandler := handlers.NewGradebookHandler(gradingService, auditService)
 	gradingStandardHandler := handlers.NewGradingStandardHandler(gradingStandardRepo)
 	developerKeyHandler := handlers.NewDeveloperKeyHandler(devKeyService)
-	accessTokenHandler := handlers.NewAccessTokenHandler(accessTokenService)
+	accessTokenHandler := handlers.NewAccessTokenHandler(accessTokenService).SetUserRepo(userRepo)
 	oauth2Handler := handlers.NewOAuth2Handler(oauth2Service, devKeyService, accessTokenService, userService)
 	oauth2Handler.SetLTIService(ltiService)
 	oauth2Handler.SetFrontendURL(cfg.FrontendURL)
+	oauth2Handler.SetTokenBlacklist(tokenBlacklist)
+	// Canvas REST API compatibility (api lane: G136/G137/G138/G143).
+	canvasAPIService := service.NewCanvasAPIService(postgres.NewCanvasAPIRepository(database))
+	canvasAPIHandler := handlers.NewCanvasAPIHandler(canvasAPIService, observerService)
+	courseHandler.SetCanvasAPI(canvasAPIService)
+	sessionTokenHandler := handlers.NewSessionTokenHandler(
+		service.NewLoginSessionTokenService(postgres.NewLoginSessionTokenRepository(database)), loginPipeline, cfg.FrontendURL)
 	externalToolHandler := handlers.NewExternalToolHandler(externalToolService, devKeyService)
 	ltiHandler := handlers.NewLTIHandler(ltiService, agsService, nrpsService, externalToolRepo, ltiConfigRepo, userRepo, accountRepo, parentalConsentRepo)
 	// handlers
@@ -1036,6 +1043,10 @@ func main() {
 		DeveloperKeyHandler: developerKeyHandler,
 		AccessTokenHandler:  accessTokenHandler,
 		OAuth2Handler:       oauth2Handler,
+
+		CanvasAPIHandler:    canvasAPIHandler,
+		SessionTokenHandler: sessionTokenHandler,
+		CanvasIDs:           middleware.CanvasIDs(canvasAPIService, userRepo),
 		ExternalToolHandler: externalToolHandler,
 		LTIHandler:          ltiHandler,
 

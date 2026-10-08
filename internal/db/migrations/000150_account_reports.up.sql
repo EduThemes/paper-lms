@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS account_reports (
     created_at timestamptz,
     updated_at timestamptz,
     PRIMARY KEY (id),
-    CONSTRAINT account_reports_workflow_state_check CHECK (workflow_state IN ('created', 'running', 'complete', 'error'))
+    CONSTRAINT account_reports_workflow_state_check CHECK (workflow_state IN ('created', 'running', 'complete', 'error', 'aborted'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_account_reports_account_id ON public.account_reports USING btree (account_id);

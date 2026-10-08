@@ -37,6 +37,8 @@ func (r *Router) registerAdminAccountsRoutes(protected fiber.Router, admin, enro
 	protected.Post("/accounts/:account_id/reports/:report", admin, h.StartReport)
 	protected.Get("/accounts/:account_id/reports/:report/:id", admin, h.GetReportRun)
 	protected.Get("/accounts/:account_id/reports/:report/:id/download", admin, h.DownloadReport)
+	protected.Get("/accounts/:account_id/reports/:report/:id/file", admin, h.DownloadReport) // Canvas file URL (G138)
+	protected.Put("/accounts/:account_id/reports/:report/:id/abort", admin, h.AbortReportRun)
 	protected.Delete("/accounts/:account_id/reports/:report/:id", admin, h.DeleteReportRun)
 
 	// Theme (G118). /brand_config is the caller's own account and is read

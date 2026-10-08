@@ -19,9 +19,12 @@ import (
 // Account reports (G117)
 // ---------------------------------------------------------------------------
 
-func accountReportJSON(r *models.AccountReport) fiber.Map {
+func accountReportJSON(c *fiber.Ctx, r *models.AccountReport) fiber.Map {
 	var params map[string]interface{}
 	_ = json.Unmarshal([]byte(r.Parameters), &params)
+	if params == nil {
+		params = map[string]interface{}{}
+	}
 	out := fiber.Map{
 		"id":           r.ID,
 		"report":       r.ReportType,
@@ -36,8 +39,37 @@ func accountReportJSON(r *models.AccountReport) fiber.Map {
 		"ended_at":     r.EndedAt,
 		"file_name":    r.FileName,
 		"downloadable": r.WorkflowState == models.AccountReportComplete,
+		// Canvas Account Reports API fields (G138).
+		"file_url":   nil,
+		"attachment": nil,
+	}
+	if r.StartedAt != nil && r.EndedAt != nil {
+		out["run_time"] = r.EndedAt.Sub(*r.StartedAt).Seconds()
+	}
+	if r.WorkflowState == models.AccountReportComplete && r.FileName != "" {
+		url := fmt.Sprintf("%s/api/v1/accounts/%d/reports/%s/%d/file", c.BaseURL(), r.AccountID, r.ReportType, r.ID)
+		out["file_url"] = url
+		att := fiber.Map{
+			"display_name": r.FileName,
+			"filename":     r.FileName,
+			"content-type": reportContentType(r.FileName),
+			"url":          url,
+		}
+		if len(r.FileData) > 0 { // listings omit the file data
+			att["size"] = len(r.FileData)
+		}
+		out["attachment"] = att
 	}
 	return out
+}
+
+// reportContentType is a report file's media type (a zip when it bundles
+// several CSVs).
+func reportContentType(name string) string {
+	if strings.HasSuffix(name, ".zip") {
+		return "application/zip"
+	}
+	return "text/csv; charset=utf-8"
 }
 
 // ListReports handles GET /accounts/:account_id/reports: every report type
@@ -54,7 +86,7 @@ func (h *AdminAccountsHandler) ListReports(c *fiber.Ctx) error {
 	last := map[string]fiber.Map{}
 	for i := range runs {
 		if _, ok := last[runs[i].ReportType]; !ok {
-			last[runs[i].ReportType] = accountReportJSON(&runs[i])
+			last[runs[i].ReportType] = accountReportJSON(c, &runs[i])
 		}
 	}
 	defs := service.AccountReportDefinitions()
@@ -77,7 +109,7 @@ func (h *AdminAccountsHandler) ListReportRuns(c *fiber.Ctx) error {
 	}
 	out := make([]fiber.Map, len(runs))
 	for i := range runs {
-		out[i] = accountReportJSON(&runs[i])
+		out[i] = accountReportJSON(c, &runs[i])
 	}
 	return c.JSON(out)
 }
@@ -88,16 +120,16 @@ func (h *AdminAccountsHandler) StartReport(c *fiber.Ctx) error {
 	if wrote {
 		return nil
 	}
-	var body struct {
-		Parameters service.AccountReportParams `json:"parameters"`
+	raw, err := reportParamsFromRequest(c)
+	if err != nil {
+		return responses.BadRequest(c, "Invalid input")
 	}
-	if len(c.Body()) > 0 {
-		if err := c.BodyParser(&body); err != nil {
-			return responses.BadRequest(c, "Invalid input")
-		}
+	params, err := service.ParseAccountReportParams(raw)
+	if err != nil {
+		return responses.BadRequest(c, err.Error())
 	}
 	userID, _ := c.Locals("user_id").(uint)
-	r, err := h.reports.Start(c.Context(), accountID, userID, c.Params("report"), body.Parameters)
+	r, err := h.reports.Start(c.Context(), accountID, userID, c.Params("report"), params)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrUnknownReport):
@@ -107,7 +139,7 @@ func (h *AdminAccountsHandler) StartReport(c *fiber.Ctx) error {
 		}
 		return responses.InternalError(c, "Could not start the report")
 	}
-	return c.Status(fiber.StatusCreated).JSON(accountReportJSON(r))
+	return c.Status(fiber.StatusCreated).JSON(accountReportJSON(c, r))
 }
 
 func (h *AdminAccountsHandler) reportRun(c *fiber.Ctx) (*models.AccountReport, bool) {
@@ -134,7 +166,7 @@ func (h *AdminAccountsHandler) GetReportRun(c *fiber.Ctx) error {
 	if wrote {
 		return nil
 	}
-	return c.JSON(accountReportJSON(r))
+	return c.JSON(accountReportJSON(c, r))
 }
 
 // DownloadReport handles GET /accounts/:account_id/reports/:report/:id/download.
@@ -146,15 +178,53 @@ func (h *AdminAccountsHandler) DownloadReport(c *fiber.Ctx) error {
 	if r.WorkflowState != models.AccountReportComplete || len(r.FileData) == 0 {
 		return responses.NotFound(c, "report file")
 	}
-	ct := "text/csv; charset=utf-8"
-	if strings.HasSuffix(r.FileName, ".zip") {
-		ct = "application/zip"
-	}
-	c.Set("Content-Type", ct)
+	c.Set("Content-Type", reportContentType(r.FileName))
 	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", r.FileName))
 	c.Set("X-Content-Type-Options", "nosniff")
 	c.Set("Cache-Control", "private, no-store")
 	return c.Send(r.FileData)
+}
+
+// reportParamsFromRequest reads a report's parameters from a JSON body
+// ({"parameters": {...}}) or a form body (Canvas parameters[users]=true).
+func reportParamsFromRequest(c *fiber.Ctx) (map[string]any, error) {
+	params := map[string]any{}
+	if len(c.Body()) == 0 {
+		return params, nil
+	}
+	if strings.HasPrefix(string(c.Request().Header.ContentType()), fiber.MIMEApplicationJSON) {
+		var body struct {
+			Parameters map[string]any `json:"parameters"`
+		}
+		if err := json.Unmarshal(c.Body(), &body); err != nil {
+			return nil, err
+		}
+		if body.Parameters != nil {
+			params = body.Parameters
+		}
+		return params, nil
+	}
+	c.Request().PostArgs().VisitAll(func(k, v []byte) {
+		key := string(k)
+		if strings.HasPrefix(key, "parameters[") && strings.HasSuffix(key, "]") {
+			params[strings.TrimSuffix(strings.TrimPrefix(key, "parameters["), "]")] = string(v)
+		}
+	})
+	return params, nil
+}
+
+// AbortReportRun handles PUT /accounts/:account_id/reports/:report/:id/abort
+// (Canvas): a run that has not finished is marked aborted.
+func (h *AdminAccountsHandler) AbortReportRun(c *fiber.Ctx) error {
+	r, wrote := h.reportRun(c)
+	if wrote {
+		return nil
+	}
+	out, err := h.reports.Abort(c.Context(), r.ID, r.AccountID)
+	if err != nil {
+		return responses.InternalError(c, "Could not abort the report")
+	}
+	return c.JSON(accountReportJSON(c, out))
 }
 
 // DeleteReportRun handles DELETE /accounts/:account_id/reports/:report/:id.

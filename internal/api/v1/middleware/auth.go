@@ -192,7 +192,10 @@ func (m *AuthMiddleware) Protected() fiber.Handler {
 				// method+route pairs its Canvas-format scopes name
 				// ("url:GET|/api/v1/courses/:course_id/assignments").
 				// Canvas answers an out-of-scope call with this 401.
+				// Canvas always allows a scoped token to log itself out
+				// (DELETE /login/oauth2/token), whatever its scopes (G136).
 				if scopes, enforced := service.TokenScopeRestriction(accessToken); enforced &&
+					!service.ScopeAlwaysAllowed(c.Path()) &&
 					!service.ScopeAllowsRequest(scopes, c.Method(), c.Path()) {
 					return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 						"errors": []fiber.Map{{"message": "Insufficient scopes on access token"}},

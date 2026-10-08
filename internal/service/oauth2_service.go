@@ -3,9 +3,13 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"sync"
 	"time"
 
@@ -73,6 +77,57 @@ func (s *OAuth2Service) ResolveClientForUser(ctx context.Context, clientID, redi
 // for tokens. Callers MUST only invoke this after the user explicitly
 // consented (POST /login/oauth2/auth) — never from a GET (B076).
 func (s *OAuth2Service) GenerateAuthorizationCode(ctx context.Context, userID, userAccountID uint, clientID string, redirectURI string, scopes []string) (string, error) {
+	return s.GenerateAuthorizationCodePKCE(ctx, userID, userAccountID, clientID, redirectURI, scopes, PKCEChallenge{})
+}
+
+// PKCEChallenge is the RFC 7636 code challenge a client sent with its
+// authorization request. The zero value means no PKCE.
+type PKCEChallenge struct {
+	Challenge string
+	Method    string
+}
+
+// PKCEMethodS256 is the only PKCE method accepted (as in Canvas): "plain"
+// offers no protection against an intercepted code.
+const PKCEMethodS256 = "S256"
+
+// pkceChallengePattern is RFC 7636's code_challenge: the base64url
+// (unpadded) SHA-256 of the verifier, 43 characters.
+var pkceChallengePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+
+// pkceVerifierPattern is RFC 7636 section 4.1's code_verifier alphabet and length.
+var pkceVerifierPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`)
+
+// ErrPKCEInvalid is returned for a malformed or unsupported PKCE request.
+var ErrPKCEInvalid = errors.New("invalid PKCE code_challenge: send a 43-character base64url S256 challenge with code_challenge_method=S256")
+
+// Validate checks a PKCE challenge. The zero value is valid (no PKCE).
+func (p PKCEChallenge) Validate() error {
+	if p.Challenge == "" && p.Method == "" {
+		return nil
+	}
+	if p.Method != PKCEMethodS256 || !pkceChallengePattern.MatchString(p.Challenge) {
+		return ErrPKCEInvalid
+	}
+	return nil
+}
+
+// PKCEVerifies reports whether verifier hashes to challenge (S256).
+func PKCEVerifies(challenge, verifier string) bool {
+	if !pkceVerifierPattern.MatchString(verifier) {
+		return false
+	}
+	sum := sha256.Sum256([]byte(verifier))
+	expected := base64.RawURLEncoding.EncodeToString(sum[:])
+	return subtle.ConstantTimeCompare([]byte(expected), []byte(challenge)) == 1
+}
+
+// GenerateAuthorizationCodePKCE is GenerateAuthorizationCode with an
+// optional PKCE challenge stored alongside the code (G136).
+func (s *OAuth2Service) GenerateAuthorizationCodePKCE(ctx context.Context, userID, userAccountID uint, clientID string, redirectURI string, scopes []string, pkce PKCEChallenge) (string, error) {
+	if err := pkce.Validate(); err != nil {
+		return "", err
+	}
 	devKey, err := s.ResolveClientForUser(ctx, clientID, redirectURI, userAccountID)
 	if err != nil {
 		return "", err
@@ -108,6 +163,11 @@ func (s *OAuth2Service) GenerateAuthorizationCode(ctx context.Context, userID, u
 		Scopes:         ScopesToJSON(scopes),
 		ExpiresAt:      time.Now().Add(authorizationCodeTTL),
 	}
+	if pkce.Challenge != "" {
+		challenge, method := pkce.Challenge, pkce.Method
+		row.CodeChallenge = &challenge
+		row.CodeChallengeMethod = &method
+	}
 	if err := s.codes.Create(ctx, row); err != nil {
 		return "", errors.New("failed to store authorization code")
 	}
@@ -120,6 +180,21 @@ func (s *OAuth2Service) GenerateAuthorizationCode(ctx context.Context, userID, u
 // is consumed (single-use). Returns the token model, raw access token, and
 // raw refresh token.
 func (s *OAuth2Service) ExchangeCode(ctx context.Context, code string, clientID string, clientSecret string, redirectURI string) (*models.AccessToken, string, string, error) {
+	return s.ExchangeCodePKCE(ctx, code, clientID, clientSecret, redirectURI, "")
+}
+
+// ErrOAuthInvalidClient is returned when the client cannot be
+// authenticated (unknown client, wrong secret, or a missing secret
+// without PKCE). Handlers map it to OAuth's invalid_client.
+var ErrOAuthInvalidClient = errors.New("invalid client credentials")
+
+// ExchangeCodePKCE exchanges an authorization code, enforcing PKCE (G136):
+//
+//   - a code issued with a code_challenge can only be redeemed with the
+//     matching code_verifier (RFC 7636 section 4.6), and
+//   - such a client may omit client_secret (a public client, e.g. a
+//     native or single-page app). Without PKCE the secret is required.
+func (s *OAuth2Service) ExchangeCodePKCE(ctx context.Context, code string, clientID string, clientSecret string, redirectURI string, codeVerifier string) (*models.AccessToken, string, string, error) {
 	// Look up and consume the authorization code
 	ac, err := s.codes.Consume(ctx, hashToken(code))
 	if err != nil || ac == nil {
@@ -147,8 +222,21 @@ func (s *OAuth2Service) ExchangeCode(ctx context.Context, code string, clientID 
 		return nil, "", "", errors.New("invalid client_id")
 	}
 
-	if !VerifyClientSecret(devKey, clientSecret) {
-		return nil, "", "", errors.New("invalid client_secret")
+	usedPKCE := false
+	if ac.CodeChallenge != nil && *ac.CodeChallenge != "" {
+		if codeVerifier == "" || !PKCEVerifies(*ac.CodeChallenge, codeVerifier) {
+			return nil, "", "", errors.New("invalid code_verifier")
+		}
+		usedPKCE = true
+	} else if codeVerifier != "" {
+		// A verifier for a code issued without a challenge proves nothing.
+		return nil, "", "", errors.New("code_verifier sent for a code issued without code_challenge")
+	}
+
+	if clientSecret != "" || !usedPKCE {
+		if !VerifyClientSecret(devKey, clientSecret) {
+			return nil, "", "", ErrOAuthInvalidClient
+		}
 	}
 
 	if devKey.WorkflowState != "active" {

@@ -25,6 +25,9 @@ type CourseHandler struct {
 	// quotas (optional, G072/G120) backs storage_quota_mb; see
 	// SetStorageQuotas.
 	quotas CourseStorageQuotas
+	// canvasAPI adds Canvas course fields / include[] (G137); see
+	// canvas_course_includes.go. Nil leaves the JSON as is.
+	canvasAPI *service.CanvasAPIService
 }
 
 // SetUserRepo wires the user repository used for the admin check on
@@ -134,6 +137,7 @@ func (h *CourseHandler) ListCourses(c *fiber.Ctx) error {
 		cj["total_students"] = studentCounts[course.ID]
 		courses[i] = cj
 	}
+	h.applyCourseIncludes(c, items, courses)
 
 	return c.JSON(courses)
 }
@@ -149,7 +153,9 @@ func (h *CourseHandler) GetCourse(c *fiber.Ctx) error {
 		return responses.NotFound(c, "course")
 	}
 
-	return c.JSON(h.courseJSONWithQuota(c, course.ID, courseToJSON(course)))
+	out := h.courseJSONWithQuota(c, course.ID, courseToJSON(course))
+	h.applyCourseIncludes(c, []models.Course{*course}, []fiber.Map{out})
+	return c.JSON(out)
 }
 
 type createCourseRequest struct {

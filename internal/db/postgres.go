@@ -103,6 +103,8 @@ func allAutoMigrateModels() []interface{} {
 		&models.Nonce{},
 		&models.OAuthAuthorizationCode{},
 		&models.LTIPlatformKey{},
+		&models.LoginSessionToken{},
+		&models.AccountReport{},
 		// Discussions, Files, SIS
 		&models.DiscussionTopic{},
 		&models.DiscussionEntry{},
@@ -116,7 +118,6 @@ func allAutoMigrateModels() []interface{} {
 		&models.SISBatchError{},
 		&models.SISBatchFile{},
 		&models.UserLogin{},
-		&models.AccountReport{},
 		&models.BrandConfig{},
 		&models.StorageQuota{},
 		// Quiz Engine, Rubrics, Grading Periods, Overrides

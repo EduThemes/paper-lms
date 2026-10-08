@@ -76,7 +76,9 @@ func (r *accessTokenRepo) ListByUserID(ctx context.Context, userID uint, params 
 	query.Count(&count)
 
 	offset := (params.Page - 1) * params.PerPage
-	if err := query.Offset(offset).Limit(params.PerPage).Order("id ASC").Find(&tokens).Error; err != nil {
+	// DeveloperKey is preloaded so token listings can name the OAuth
+	// application a token was issued to (G143).
+	if err := query.Offset(offset).Limit(params.PerPage).Order("id ASC").Preload("DeveloperKey").Find(&tokens).Error; err != nil {
 		return nil, err
 	}
 

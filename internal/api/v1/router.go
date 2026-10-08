@@ -166,6 +166,12 @@ type Router struct {
 	PagesFiles *PagesFilesRoutes
 	// AdminAccountsHandler — account administration lane (routes_admin_accounts.go).
 	AdminAccountsHandler *handlers.AdminAccountsHandler
+	// Canvas REST API compatibility (api lane: G136/G137/G138/G143).
+	// CanvasIDs is middleware.CanvasIDs(...); nil disables the rewrite.
+	// Account reports (G117/G138) are served by AdminAccountsHandler.
+	CanvasAPIHandler    *handlers.CanvasAPIHandler
+	SessionTokenHandler *handlers.SessionTokenHandler
+	CanvasIDs           fiber.Handler
 
 	// Middleware
 	AuthMiddleware *middleware.AuthMiddleware
@@ -217,6 +223,7 @@ func (r *Router) Register(app *fiber.App) {
 	// (~333 of them) without per-route plumbing. MUST sit before any
 	// route declarations on this group.
 	protected.Use(middleware.AuditWrites(r.AuditService, "http.write"))
+	r.useCanvasIDs(protected)
 	if r.BlueprintLockGuard != nil {
 		protected.Use(r.BlueprintLockGuard) // blueprint locks in associated courses (G069)
 	}
@@ -880,4 +887,5 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerAdminEnrollmentRoutes(protected, instructor)
 	r.registerAdminAccountsRoutes(protected, admin, enrolled, instructor)
 	r.registerLTIRoutes(protected, admin, enrolled, instructor)
+	r.registerAPICompatRoutes(app, protected, authLimit, admin, enrolled, selfOrAdmin)
 }
