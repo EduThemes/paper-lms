@@ -65,6 +65,7 @@ export const pagesFilesApi = {
   enterStudentView: (courseId) => data(api.request(`/courses/${courseId}/student_view`, { method: 'POST' })),
   resetStudentView: (courseId) => data(api.request(`/courses/${courseId}/student_view`, { method: 'DELETE' })),
   leaveStudentView: () => data(api.request('/masquerade', { method: 'DELETE' })),
+  getStudentViewStatus: () => data(api.request('/users/self/student_view')),
 };
 
 export default pagesFilesApi;
