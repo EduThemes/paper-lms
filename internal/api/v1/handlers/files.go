@@ -325,6 +325,13 @@ func (h *FileHandler) canReadContextFiles(c *fiber.Ctx, contextType string, cont
 	isAdmin, _ := c.Locals("is_admin").(bool)
 	switch contextType {
 	case "Course":
+		// Same-tenant admins manage every course without an enrollment
+		// (the attachment/folder was already loaded under the caller's
+		// tenant); without this an admin browsing a course's Files got
+		// a 404 on every folder listing.
+		if isAdmin {
+			return true
+		}
 		enrollment, _ := h.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, contextID, callerAccountID(c))
 		return enrollment != nil && enrollment.WorkflowState == "active"
 	case "User":

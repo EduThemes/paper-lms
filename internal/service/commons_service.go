@@ -278,19 +278,22 @@ func (s *CommonsService) snapshotModuleContent(ctx context.Context, course *mode
 			seen[key] = true
 			switch normalizeModuleContentType(it.ContentType) {
 			case "Assignment":
-				if a, err := s.assignmentRepo.FindByID(ctx, *it.ContentID, acct); err == nil && a != nil && a.CourseID == course.ID {
+				// Deleted content stays out of the snapshot even when a
+				// live module item still points at it (FindByID does not
+				// filter deleted rows); its item is then skipped on import.
+				if a, err := s.assignmentRepo.FindByID(ctx, *it.ContentID, acct); err == nil && a != nil && a.CourseID == course.ID && a.WorkflowState != models.AssignmentDeleted {
 					assignments = append(assignments, *a)
 				}
 			case "WikiPage":
-				if p, err := s.pageRepo.FindByID(ctx, *it.ContentID, acct); err == nil && p != nil && p.CourseID == course.ID {
+				if p, err := s.pageRepo.FindByID(ctx, *it.ContentID, acct); err == nil && p != nil && p.CourseID == course.ID && p.WorkflowState != "deleted" {
 					pages = append(pages, *p)
 				}
 			case "Quiz":
-				if q, err := s.quizRepo.FindByID(ctx, *it.ContentID, acct); err == nil && q != nil && q.CourseID == course.ID {
+				if q, err := s.quizRepo.FindByID(ctx, *it.ContentID, acct); err == nil && q != nil && q.CourseID == course.ID && q.WorkflowState != "deleted" {
 					quizzes = append(quizzes, s.snapshotQuiz(ctx, q))
 				}
 			case "DiscussionTopic":
-				if d, err := s.discussionRepo.FindByID(ctx, *it.ContentID, acct); err == nil && d != nil && d.CourseID == course.ID {
+				if d, err := s.discussionRepo.FindByID(ctx, *it.ContentID, acct); err == nil && d != nil && d.CourseID == course.ID && d.WorkflowState != "deleted" {
 					discussions = append(discussions, *d)
 				}
 			}

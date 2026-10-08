@@ -480,7 +480,9 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 			}
 		}
 
-		pages, _ := s.pageRepo.ListByCourseID(ctx, courseID, listParams)
+		// Observers see only published pages (B045): the unfiltered list
+		// leaked draft page titles into the observer activity feed.
+		pages, _ := s.pageRepo.ListPublishedByCourseID(ctx, courseID, listParams)
 		if pages != nil {
 			for _, p := range pages.Items {
 				activity = append(activity, ActivityItem{

@@ -231,7 +231,10 @@ func (h *PageHandler) UpdatePage(c *fiber.Ctx) error {
 		// IDOR, but a teacher in course A could PUT a page id from
 		// course B in the SAME tenant. The slug branch is safe
 		// because GetByURL filters by courseID. 404 on mismatch.
-		if page.CourseID != uint(courseID) {
+		// A deleted page is gone: the numeric branch must not let a PUT
+		// with published=true revive it (its slug may already be reused
+		// by a newer page, which would bring back duplicate slugs).
+		if page.CourseID != uint(courseID) || page.WorkflowState == "deleted" {
 			return responses.NotFound(c, "page")
 		}
 	} else {
