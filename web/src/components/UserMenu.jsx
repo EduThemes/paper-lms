@@ -14,6 +14,7 @@ export default function UserMenu({ user, onLogout }) {
   useClickOutside(wrapperRef, close);
 
   const items = [
+    { to: '/profile', icon: User, label: 'Profile' },
     { to: '/profile/settings', icon: Settings, label: 'Account settings' },
     { to: '/profile/settings?tab=password', icon: KeyRound, label: 'Change password' },
     { to: '/profile/settings?tab=security', icon: ShieldCheck, label: 'Two-factor & passkeys' },
