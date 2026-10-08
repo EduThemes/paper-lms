@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import useScrollToHash from '../hooks/useScrollToHash';
 import { useAuth } from '../contexts/AuthContext';
 import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
 import RichContentViewer from '../components/RichContentViewer';
@@ -20,6 +21,8 @@ const AnnouncementsPage = () => {
   const { user } = useAuth();
   const [announcements, setAnnouncements] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Editor links to #announcement-N land on the announcement (G011).
+  useScrollToHash(!loading);
   const [error, setError] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -432,6 +435,7 @@ const AnnouncementsPage = () => {
           announcements.map((announcement) => (
             <article
               key={announcement.id}
+              id={`announcement-${announcement.id}`}
               className={`rounded-lg shadow ${getPriorityStyles(announcement.priority)} relative`}
               aria-label={`Announcement: ${announcement.title}`}
             >
