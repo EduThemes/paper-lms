@@ -67,6 +67,20 @@ func NewBlueprintLockGuard(d BlueprintLockGuardDeps) fiber.Handler {
 		if bm := reBlueprintBulkDates.FindStringSubmatch(c.Path()); bm != nil && method == fiber.MethodPost {
 			return guardBulkDates(c, d, bm[1])
 		}
+		if sm := reBlueprintCourseDateShift.FindStringSubmatch(c.Path()); sm != nil && method == fiber.MethodPost {
+			// Shifting every date of the course moves locked dates too.
+			if courseID64, err := strconv.ParseUint(sm[1], 10, 64); err == nil {
+				courseID := uint(courseID64)
+				if locked := bulkDateLockedCopies(c, d, courseID); locked != nil && guardCallerIsCourseStaff(c, d, courseID) {
+					return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+						"errors":            []fiber.Map{{"message": locked.Error()}},
+						"locked_attributes": locked.Attributes,
+						"blueprint_locked":  true,
+					})
+				}
+			}
+			return c.Next()
+		}
 		m := reBlueprintGuardedPath.FindStringSubmatch(c.Path())
 		if m == nil {
 			return c.Next()
@@ -121,6 +135,10 @@ func NewBlueprintLockGuard(d BlueprintLockGuardDeps) fiber.Handler {
 // reBlueprintBulkDates matches the bulk assignment-date editor, which
 // writes due/availability dates of many assignments at once.
 var reBlueprintBulkDates = regexp.MustCompile(`(?i)^/api/v1/courses/(\d+)/assignments/bulk_update_dates/?$`)
+
+// reBlueprintCourseDateShift matches the whole-course date shift, which
+// moves every assignment's dates.
+var reBlueprintCourseDateShift = regexp.MustCompile(`(?i)^/api/v1/courses/(\d+)/date_shift/?$`)
 
 // guardBulkDates applies the date locks to every assignment a bulk
 // date update touches.

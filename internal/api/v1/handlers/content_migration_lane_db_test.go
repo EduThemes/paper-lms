@@ -304,6 +304,7 @@ func TestBlueprintLockGuard_RefusesLockedEditsInChildCourses(t *testing.T) {
 		app.Put("/api/v1/courses/:course_id/pages/:url_or_id", ok)
 		app.Post("/api/v1/courses/:course_id/quizzes/:quiz_id/questions", ok)
 		app.Post("/api/v1/courses/:course_id/assignments/bulk_update_dates", ok)
+		app.Post("/api/v1/courses/:course_id/date_shift", ok)
 		app.Get("/api/v1/courses/:course_id/assignments/:id", ok)
 		return app
 	}
@@ -379,6 +380,10 @@ func TestBlueprintLockGuard_RefusesLockedEditsInChildCourses(t *testing.T) {
 	resp = testutil.MakeRequest(app, http.MethodPost, fmt.Sprintf("/api/v1/courses/%d/quizzes/%d/questions", child.ID, childQ.Items[0].ID), testutil.JSONBody(map[string]any{"question": map[string]any{"question_text": "New?"}}))
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 
+	// No date lock yet: a whole-course date shift passes.
+	resp = testutil.MakeRequest(app, http.MethodPost, fmt.Sprintf("/api/v1/courses/%d/date_shift", child.ID), testutil.JSONBody(map[string]any{"day_shift": 7}))
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
 	// Bulk date edits honor date locks.
 	require.NoError(t, svc.SetItemRestrictions(ctx, tmpl, 1, "Assignment", essay.ID, &service.BlueprintRestrictions{DueDates: true}))
 	bulk := fmt.Sprintf("/api/v1/courses/%d/assignments/bulk_update_dates", child.ID)
@@ -391,6 +396,9 @@ func TestBlueprintLockGuard_RefusesLockedEditsInChildCourses(t *testing.T) {
 	bulkResp, err := app.Test(bulkReq, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, bulkResp.StatusCode, "a body the guard cannot read is refused while a date lock exists")
+	// Shifting the whole course would move the locked dates as well.
+	resp = testutil.MakeRequest(app, http.MethodPost, fmt.Sprintf("/api/v1/courses/%d/date_shift", child.ID), testutil.JSONBody(map[string]any{"day_shift": 7}))
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	resp = testutil.MakeRequest(app, http.MethodPost, bulk, testutil.JSONBody(map[string]any{"updates": []map[string]any{{"assignment_id": copyA.ID, "due_at": nil}}}))
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	// Content is no longer locked for it: a rename passes.
