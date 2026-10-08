@@ -484,8 +484,8 @@ func (s *LTIService) OpenIDConfiguration() map[string]interface{} {
 			"product_family_code": "paper-lms",
 			"version":             "1.0.0",
 			"messages_supported": []map[string]interface{}{
-				{"type": LTIMessageResourceLink, "placements": []string{LTIPlacementCourseNavigation, LTIPlacementAccountNavigation}},
-				{"type": LTIMessageDeepLinking, "placements": []string{LTIPlacementEditorButton, LTIPlacementAssignmentSelection, LTIPlacementLinkSelection, LTIPlacementModuleIndexMenu}},
+				{"type": LTIMessageResourceLink, "placements": []string{LTIPlacementCourseNavigation}},
+				{"type": LTIMessageDeepLinking, "placements": []string{LTIPlacementEditorButton, LTIPlacementAssignmentSelection, LTIPlacementLinkSelection, LTIPlacementModuleIndexMenu, LTIPlacementHomeworkSubmission}},
 			},
 			"variables": SupportedLTIVariables(),
 		},
