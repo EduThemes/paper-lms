@@ -842,6 +842,15 @@ func main() {
 	fileHandler.SetAuthorizer(authz)
 	folderHandler := handlers.NewFolderHandler(fileService, authz)
 	sectionHandler = handlers.NewSectionHandler(sectionRepo, authz)
+	// admin-enrollments lane: enrollment lifecycle + invitations, multiple
+	// enrollments per course, section management and cross-listing.
+	enrollmentAdminRepo := postgres.NewEnrollmentAdminRepository(database)
+	enrollmentLifecycleService := service.NewEnrollmentLifecycleService(enrollmentAdminRepo, sectionRepo).SetNotifier(notificationService.CreateNotification)
+	enrollmentService.SetLifecycle(enrollmentLifecycleService)
+	enrollmentHandler.SetLifecycle(enrollmentLifecycleService)
+	sectionService := service.NewSectionService(postgres.NewSectionAdminRepository(database), enrollmentAdminRepo, courseRepo)
+	sectionHandler.SetSectionService(sectionService)
+	sisImportService.SetSectionService(sectionService)
 	sisImportHandler := handlers.NewSISImportHandler(sisImportService)
 	// handlers
 	quizHandler := handlers.NewQuizHandler(quizRepo)

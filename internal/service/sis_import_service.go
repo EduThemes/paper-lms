@@ -24,6 +24,8 @@ type SISImportService struct {
 	sectionRepo    repository.SectionRepository
 	enrollmentRepo repository.EnrollmentRepository
 	db             *gorm.DB
+	// sectionService (SetSectionService) applies xlists.csv rows.
+	sectionService *SectionService
 }
 
 func NewSISImportService(
@@ -120,6 +122,8 @@ func (s *SISImportService) ProcessImport(ctx context.Context, batchID uint, csvT
 		processErr = s.processSectionsCSV(ctx, batchID, accountID, csvReader)
 	case "enrollments":
 		processErr = s.processEnrollmentsCSV(ctx, batchID, accountID, csvReader)
+	case "xlists":
+		processErr = s.processXlistsCSV(ctx, batchID, accountID, csvReader)
 	default:
 		processErr = fmt.Errorf("unknown import type: %s", csvType)
 	}
@@ -457,13 +461,29 @@ func (s *SISImportService) processSectionsCSV(ctx context.Context, batchID, acco
 			continue
 		}
 
+		startAt, endAt, dateErr := sisDates(record, colIndex)
+		if dateErr != nil {
+			s.recordError(ctx, batchID, rowNum, dateErr.Error(), "sections.csv")
+			continue
+		}
+
 		if existingSection != nil {
 			// Update existing section
 			if name != "" {
 				existingSection.Name = name
 			}
-			existingSection.CourseID = course.ID
+			if existingSection.NonxlistCourseID != nil {
+				// Cross-listed (xlists.csv / UI): the SIS course is the
+				// home course; the section stays where it was cross-listed.
+				existingSection.NonxlistCourseID = &course.ID
+				if existingSection.CourseID == course.ID {
+					existingSection.NonxlistCourseID = nil
+				}
+			} else {
+				existingSection.CourseID = course.ID
+			}
 			existingSection.WorkflowState = workflowState
+			applySISSectionDates(existingSection, startAt, endAt)
 			if err := s.db.WithContext(ctx).Save(existingSection).Error; err != nil {
 				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to update section: %v", err), "sections.csv")
 				continue
@@ -479,6 +499,7 @@ func (s *SISImportService) processSectionsCSV(ctx context.Context, batchID, acco
 				SISSectionID:  &sisSectionID,
 				WorkflowState: workflowState,
 			}
+			applySISSectionDates(section, startAt, endAt)
 			if err := s.sectionRepo.Create(ctx, section); err != nil {
 				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to create section: %v", err), "sections.csv")
 				continue
@@ -577,12 +598,22 @@ func (s *SISImportService) processEnrollmentsCSV(ctx context.Context, batchID, a
 			continue
 		}
 
+		startAt, endAt, dateErr := sisDates(record, colIndex)
+		if dateErr != nil {
+			s.recordError(ctx, batchID, rowNum, dateErr.Error(), "enrollments.csv")
+			continue
+		}
+		limitSection := strings.EqualFold(getColumn(record, colIndex, "limit_section_privileges"), "true")
+
 		enrollment := &models.Enrollment{
-			UserID:        user.ID,
-			CourseID:      course.ID,
-			Type:          enrollmentType,
-			Role:          roleName,
-			WorkflowState: workflowState,
+			UserID:                         user.ID,
+			CourseID:                       course.ID,
+			Type:                           enrollmentType,
+			Role:                           roleName,
+			WorkflowState:                  workflowState,
+			StartAt:                        startAt,
+			EndAt:                          endAt,
+			LimitPrivilegesToCourseSection: limitSection,
 		}
 
 		// Optionally look up section by SIS section ID. The section must
@@ -621,6 +652,15 @@ func (s *SISImportService) processEnrollmentsCSV(ctx context.Context, batchID, a
 			existingEnrollment.Role = roleName
 			if enrollment.CourseSectionID != nil {
 				existingEnrollment.CourseSectionID = enrollment.CourseSectionID
+			}
+			if _, ok := colIndex["start_date"]; ok {
+				existingEnrollment.StartAt = startAt
+			}
+			if _, ok := colIndex["end_date"]; ok {
+				existingEnrollment.EndAt = endAt
+			}
+			if _, ok := colIndex["limit_section_privileges"]; ok {
+				existingEnrollment.LimitPrivilegesToCourseSection = limitSection
 			}
 			if err := s.enrollmentRepo.Update(ctx, existingEnrollment); err != nil {
 				s.recordError(ctx, batchID, rowNum, fmt.Sprintf("failed to update enrollment: %v", err), "enrollments.csv")

@@ -42,7 +42,7 @@ func (h *SISImportHandler) CreateSISImport(c *fiber.Ctx) error {
 
 	importType := c.FormValue("import_type")
 	if importType == "" {
-		return responses.BadRequest(c, "import_type is required (users, courses, sections, enrollments)")
+		return responses.BadRequest(c, "import_type is required (users, courses, sections, enrollments, xlists)")
 	}
 
 	fileHeader, err := c.FormFile("attachment")
