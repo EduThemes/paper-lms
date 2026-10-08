@@ -59,6 +59,7 @@ func courseToJSON(c *models.Course) fiber.Map {
 		"is_public":      c.IsPublic,
 		"ui_mode":                          c.UIMode,
 		"apply_assignment_group_weights":   c.ApplyGroupWeights,
+		"hide_final_grades":                c.HideFinalGrades,
 		"navigation_tabs":                  navTabs,
 		"created_at":                       c.CreatedAt,
 	}
@@ -226,6 +227,7 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 			UIMode            *string          `json:"ui_mode"`
 			WorkflowState     *string          `json:"workflow_state"`
 			ApplyGroupWeights *bool            `json:"apply_assignment_group_weights"`
+			HideFinalGrades   *bool            `json:"hide_final_grades"`
 			NavigationTabs    *json.RawMessage `json:"navigation_tabs"`
 		} `json:"course"`
 	}
@@ -278,6 +280,9 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 	}
 	if input.Course.ApplyGroupWeights != nil {
 		course.ApplyGroupWeights = *input.Course.ApplyGroupWeights
+	}
+	if input.Course.HideFinalGrades != nil {
+		course.HideFinalGrades = *input.Course.HideFinalGrades
 	}
 	if input.Course.NavigationTabs != nil {
 		course.NavigationTabs = string(*input.Course.NavigationTabs)
