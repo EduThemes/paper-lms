@@ -4,7 +4,7 @@ import { ChevronDown, Home, CheckSquare, BarChart2 } from 'lucide-react';
 import { useCourseUI } from '../contexts/CourseUIContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useClickOutside } from '../hooks/useClickOutside';
-import useIsTeacher from '../hooks/useIsTeacher';
+import useCourseStaffRole from '../hooks/useCourseStaffRole';
 
 // Complete map of tab id -> path/label for all available tabs
 const TAB_REGISTRY = {
@@ -47,6 +47,10 @@ const TEACHER_ONLY_TAB_IDS = new Set([
   'analytics', 'audit_log', 'content_import', 'external_tools', 'settings',
 ]);
 
+// Tabs whose routes exclude TAs (RequireCourseRole("TeacherEnrollment"),
+// B179): shown to teachers and admins only.
+const TEACHER_EXCLUSIVE_TAB_IDS = new Set(['audit_log']);
+
 // Default tab order (used when no customization exists)
 const DEFAULT_PRIMARY_IDS = ['home', 'announcements', 'assignments', 'modules', 'grades', 'people'];
 const DEFAULT_MORE_IDS = [
@@ -75,7 +79,7 @@ const CourseNav = () => {
   // The caller's own course role (B072). This used to scan the first 10
   // roster rows for the caller, so teacher tabs vanished in any course
   // where the teacher's enrollment was not among the first ten.
-  const isTeacherInCourse = useIsTeacher(courseId);
+  const staffRole = useCourseStaffRole(courseId);
 
   // Close the "More" dropdown on outside click / Escape. Hook must sit above
   // the conditional `return null` paths below to keep hook order stable.
@@ -87,7 +91,13 @@ const CourseNav = () => {
   // K-2 mode: no course navigation at all
   if (isK2) return null;
 
-  const isTeacher = Boolean(user) && isTeacherInCourse === true;
+  const isTeacher = Boolean(user) && staffRole?.staff === true;
+  const isCourseTeacher = Boolean(user) && staffRole?.teacher === true;
+  const tabAllowed = (id) => {
+    if (!isTeacher && TEACHER_ONLY_TAB_IDS.has(id)) return false;
+    if (!isCourseTeacher && TEACHER_EXCLUSIVE_TAB_IDS.has(id)) return false;
+    return true;
+  };
   const gradesPath = isTeacher ? '/gradebook' : '/grades';
   const simplifiedTabs = getSimplifiedTabs(gradesPath);
 
@@ -101,7 +111,7 @@ const CourseNav = () => {
       .sort((a, b) => a.position - b.position)
       .filter(t => {
         if (t.hidden) return false;
-        if (!isTeacher && TEACHER_ONLY_TAB_IDS.has(t.id)) return false;
+        if (!tabAllowed(t.id)) return false;
         return TAB_REGISTRY[t.id] != null;
       })
       .map(t => {
@@ -114,7 +124,7 @@ const CourseNav = () => {
     const allDefaultIds = [...DEFAULT_PRIMARY_IDS, ...DEFAULT_MORE_IDS];
     visibleTabs = allDefaultIds
       .filter(id => {
-        if (!isTeacher && TEACHER_ONLY_TAB_IDS.has(id)) return false;
+        if (!tabAllowed(id)) return false;
         return TAB_REGISTRY[id] != null;
       })
       .map(id => {

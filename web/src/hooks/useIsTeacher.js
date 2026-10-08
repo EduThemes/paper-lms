@@ -1,9 +1,4 @@
-import { useState, useEffect } from 'react';
-import { useAuth } from '../contexts/AuthContext';
-import { api } from '../services/api';
-
-const STAFF_TYPES = new Set(['TeacherEnrollment', 'TaEnrollment']);
-const ADMIN_ROLES = new Set(['admin', 'super_admin']);
+import useCourseStaffRole from './useCourseStaffRole';
 
 /**
  * Hook to detect if the current user is a teacher/TA/admin in a course.
@@ -15,36 +10,13 @@ const ADMIN_ROLES = new Set(['admin', 'super_admin']);
  * server), so a teacher whose enrollment was created after 100 students
  * lost every editing control; super_admin was also not recognised.
  *
+ * TAs count as staff here. For the few teacher-only actions use
+ * useCourseStaffRole(courseId)?.teacher.
+ *
  * @param {string|number} courseId
  * @returns {boolean|null}
  */
 export default function useIsTeacher(courseId) {
-  const { user } = useAuth();
-  const [isTeacher, setIsTeacher] = useState(null);
-
-  useEffect(() => {
-    if (!courseId || !user) return undefined;
-    if (ADMIN_ROLES.has(user.role)) {
-      setIsTeacher(true);
-      return undefined;
-    }
-    let cancelled = false;
-    Promise.resolve()
-      .then(() => api.getMyCourseEnrollments(courseId))
-      .then((result) => {
-        if (cancelled) return;
-        const mine = result?.enrollments || [];
-        setIsTeacher(
-          Boolean(result?.is_admin) ||
-          mine.some((e) => (e.enrollment_state ?? 'active') === 'active' &&
-            (STAFF_TYPES.has(e.type) || STAFF_TYPES.has(e.role))),
-        );
-      })
-      .catch(() => {
-        if (!cancelled) setIsTeacher(false);
-      });
-    return () => { cancelled = true; };
-  }, [courseId, user]);
-
-  return isTeacher;
+  const role = useCourseStaffRole(courseId);
+  return role == null ? null : role.staff;
 }
