@@ -20,6 +20,13 @@ import RichContentEditorV2 from '../RichContentEditorV2';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
+// jsdom has no layout: ProseMirror measures a Range when it scrolls the
+// selection into view after an insert.
+if (typeof Range !== 'undefined' && !Range.prototype.getClientRects) {
+  Range.prototype.getClientRects = () => [];
+  Range.prototype.getBoundingClientRect = () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 });
+}
+
 let root;
 let container;
 let latest;
@@ -162,6 +169,40 @@ describe('RichContentEditorV2 pasted images (G006)', () => {
     });
     expect(uploadCourseFileWithProgress).not.toHaveBeenCalled();
     expect(container.querySelector('[role="alert"]').textContent).toMatch(/only be uploaded inside a course/);
+  });
+
+  it('pastes copied Office content as content, not as its image rendering', () => {
+    const editor = mount('<p>x</p>', 5);
+    const file = new File([new Uint8Array([1])], 'image.png', { type: 'image/png' });
+    const word = '<html xmlns:o="urn:schemas-microsoft-com:office:office"><body><p class=MsoNormal>Week 1 reading</p></body></html>';
+    const excel = '<meta name=ProgId content=Excel.Sheet><table><tr><td>1</td></tr></table>';
+    const plainHtml = '<p>Copied paragraph</p>';
+    [word, excel, plainHtml].forEach((html) => {
+      const event = { clipboardData: { files: [file], getData: (t) => (t === 'text/html' ? html : '') }, preventDefault: vi.fn() };
+      const handled = editor.view.someProp('handlePaste', (f) => f(editor.view, event));
+      expect(handled).toBeFalsy();
+      expect(event.preventDefault).not.toHaveBeenCalled();
+    });
+    expect(uploadCourseFileWithProgress).not.toHaveBeenCalled();
+  });
+
+  it('still uploads a copied image whose HTML is only the <img>', async () => {
+    uploadCourseFileWithProgress.mockResolvedValue({ id: 43 });
+    const editor = mount('<p>x</p>', 5);
+    const file = new File([new Uint8Array([1])], 'photo.png', { type: 'image/png' });
+    const html = '<meta charset="utf-8"><img src="https://example.com/photo.png" alt="">';
+    let handled;
+    await act(async () => {
+      handled = editor.view.someProp('handlePaste', (f) => f(editor.view, {
+        clipboardData: { files: [file], getData: (t) => (t === 'text/html' ? html : '') },
+        preventDefault() {},
+      }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(handled).toBe(true);
+    expect(uploadCourseFileWithProgress).toHaveBeenCalled();
+    expect(editor.getHTML()).toContain('src="/api/v1/files/43/download"');
   });
 
   it('lets plain-text paste through to the editor', () => {

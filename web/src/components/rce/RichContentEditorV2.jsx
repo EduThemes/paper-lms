@@ -17,7 +17,7 @@ import KeyboardShortcutsDialog from './KeyboardShortcutsDialog';
 import { buildRceExtensions } from './extensions';
 import { checkDocument } from './a11yRules';
 import { countWords } from './findReplace';
-import { prepareEditorHtml, formatHtml, cleanPastedHtml } from './contentTransforms';
+import { prepareEditorHtml, formatHtml, cleanPastedHtml, pastedHtmlHasContent } from './contentTransforms';
 import { readRceDraft, scheduleRceDraftWrite, cancelRceDraftWrite, clearRceDraft } from './rceDrafts';
 import { normalizeHTML, plainTextToHtml } from '../../utils/html';
 
@@ -113,6 +113,9 @@ export default function RichContentEditorV2({
       handlePaste: (view, event) => {
         const files = Array.from(event.clipboardData?.files || []).filter(isImageFile);
         if (files.length === 0) return false;
+        // Office apps add an image rendering of copied text/tables; paste
+        // the content, not a picture of it.
+        if (pastedHtmlHasContent(event.clipboardData?.getData?.('text/html'))) return false;
         event.preventDefault();
         uploadImagesRef.current?.(files, null);
         return true;

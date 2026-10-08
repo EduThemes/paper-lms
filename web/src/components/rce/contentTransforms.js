@@ -89,6 +89,28 @@ export function cleanPastedHtml(html) {
 }
 
 /**
+ * Whether pasted HTML carries real content (text, a table, Office markup)
+ * rather than just wrapping a copied image.
+ *
+ * Word, Excel, PowerPoint and OneNote put an image rendering of the
+ * selection on the clipboard next to the HTML. Treating that paste as an
+ * image upload replaced a pasted table or paragraph with a screenshot of
+ * it; Canvas hands such pastes to the editor for the same reason. A copied
+ * image (a browser's "Copy image") comes with HTML holding only an <img>,
+ * so it is still uploaded.
+ */
+export function pastedHtmlHasContent(html) {
+  if (!html || !html.trim()) return false;
+  if (/urn:schemas-microsoft-com:office|ProgId["']?\s+content=["']?(Word|Excel|PowerPoint|OneNote)/i.test(html)) return true;
+  if (typeof document === 'undefined') return true;
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  tpl.content.querySelectorAll('style, script, meta, title, link').forEach((el) => el.remove());
+  if (tpl.content.querySelector('table, ul, ol, h1, h2, h3, h4, h5, h6')) return true;
+  return (tpl.content.textContent || '').replace(/ /g, ' ').trim().length > 0;
+}
+
+/**
  * Pretty-print editor HTML for the source view: each block element starts on
  * its own line, nested blocks are indented, and a block that holds only
  * inline content stays on one line. Text and inline markup are never split,
