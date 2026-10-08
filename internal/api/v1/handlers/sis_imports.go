@@ -19,10 +19,25 @@ func NewSISImportHandler(sisService *service.SISImportService) *SISImportHandler
 	return &SISImportHandler{sisService: sisService}
 }
 
-func (h *SISImportHandler) CreateSISImport(c *fiber.Ctx) error {
+// sisAccountScope parses :account_id and enforces it is the caller's own
+// tenant (super_admin excepted). wrote=true means a 400/404 was written
+// and the caller MUST short-circuit.
+func sisAccountScope(c *fiber.Ctx) (uint, bool) {
 	accountID, err := c.ParamsInt("account_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
+	if err != nil || accountID <= 0 {
+		_ = responses.BadRequest(c, "Invalid account ID")
+		return 0, true
+	}
+	if assertSameTenant(c, uint(accountID)) {
+		return 0, true
+	}
+	return uint(accountID), false
+}
+
+func (h *SISImportHandler) CreateSISImport(c *fiber.Ctx) error {
+	accountID, wrote := sisAccountScope(c)
+	if wrote {
+		return nil
 	}
 
 	importType := c.FormValue("import_type")
@@ -47,7 +62,7 @@ func (h *SISImportHandler) CreateSISImport(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not read uploaded file")
 	}
 
-	batch, err := h.sisService.CreateBatch(c.Context(), uint(accountID))
+	batch, err := h.sisService.CreateBatch(c.Context(), accountID)
 	if err != nil {
 		return responses.InternalError(c, "Could not create SIS batch")
 	}
@@ -56,7 +71,9 @@ func (h *SISImportHandler) CreateSISImport(c *fiber.Ctx) error {
 	processErr := h.sisService.ProcessImport(c.Context(), batch.ID, importType, &buf)
 
 	// Reload batch to get final state
-	batch, _ = h.sisService.GetBatch(c.Context(), batch.ID)
+	if reloaded, err := h.sisService.GetBatch(c.Context(), batch.ID, accountID); err == nil {
+		batch = reloaded
+	}
 
 	if processErr != nil {
 		return c.Status(fiber.StatusOK).JSON(sisBatchToJSON(batch))
@@ -66,14 +83,14 @@ func (h *SISImportHandler) CreateSISImport(c *fiber.Ctx) error {
 }
 
 func (h *SISImportHandler) ListSISImports(c *fiber.Ctx) error {
-	accountID, err := c.ParamsInt("account_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
+	accountID, wrote := sisAccountScope(c)
+	if wrote {
+		return nil
 	}
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.sisService.ListBatches(c.Context(), uint(accountID), params)
+	result, err := h.sisService.ListBatches(c.Context(), accountID, params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch SIS imports")
 	}
@@ -89,9 +106,9 @@ func (h *SISImportHandler) ListSISImports(c *fiber.Ctx) error {
 }
 
 func (h *SISImportHandler) GetSISImport(c *fiber.Ctx) error {
-	_, err := c.ParamsInt("account_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
+	accountID, wrote := sisAccountScope(c)
+	if wrote {
+		return nil
 	}
 
 	id, err := c.ParamsInt("id")
@@ -99,7 +116,9 @@ func (h *SISImportHandler) GetSISImport(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid SIS import ID")
 	}
 
-	batch, err := h.sisService.GetBatch(c.Context(), uint(id))
+	// Tied to the URL account (already checked against the caller's
+	// tenant): another tenant's batch id is an indistinguishable 404.
+	batch, err := h.sisService.GetBatch(c.Context(), uint(id), accountID)
 	if err != nil {
 		return responses.NotFound(c, "SIS import")
 	}
@@ -108,9 +127,9 @@ func (h *SISImportHandler) GetSISImport(c *fiber.Ctx) error {
 }
 
 func (h *SISImportHandler) GetSISImportErrors(c *fiber.Ctx) error {
-	_, err := c.ParamsInt("account_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
+	accountID, wrote := sisAccountScope(c)
+	if wrote {
+		return nil
 	}
 
 	id, err := c.ParamsInt("id")
@@ -118,9 +137,9 @@ func (h *SISImportHandler) GetSISImportErrors(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid SIS import ID")
 	}
 
-	errors, err := h.sisService.GetBatchErrors(c.Context(), uint(id))
+	errors, err := h.sisService.GetBatchErrors(c.Context(), uint(id), accountID)
 	if err != nil {
-		return responses.InternalError(c, "Could not fetch SIS import errors")
+		return responses.NotFound(c, "SIS import")
 	}
 
 	result := make([]fiber.Map, len(errors))
