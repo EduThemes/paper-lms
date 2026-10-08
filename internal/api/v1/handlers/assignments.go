@@ -26,6 +26,39 @@ func NewAssignmentHandler(assignmentService *service.AssignmentService) *Assignm
 	return &AssignmentHandler{assignmentService: assignmentService}
 }
 
+// studentDates returns the calling student's effective dates per
+// assignment of the course (G019): an assignment that is only visible to
+// overrides is absent unless an override applies to the student. ok is
+// false (no filtering) for staff, observers and other roles, or when the
+// grading-policy service is not wired.
+func (h *AssignmentHandler) studentDates(c *fiber.Ctx, courseID uint) (map[uint]service.EffectiveDueDate, bool) {
+	if h.gradingPolicy == nil || callerIsCourseStaff(c) {
+		return nil, false
+	}
+	if et, _ := c.Locals("enrollment_type").(string); et != "StudentEnrollment" {
+		return nil, false
+	}
+	callerID, _ := c.Locals("user_id").(uint)
+	course, err := h.gradingPolicy.Repo().FindCourse(c.Context(), courseID)
+	if err != nil || course == nil || course.AccountID != callerAccountID(c) {
+		return nil, false
+	}
+	dates, err := h.gradingPolicy.StudentAssignmentDates(c.Context(), course, callerID)
+	if err != nil {
+		return nil, false
+	}
+	return dates, true
+}
+
+// withStudentDates is the assignment JSON with the student's own
+// effective dates (override and accommodation applied), as Canvas returns
+// due_at / unlock_at / lock_at for the current user.
+func withStudentDates(a *models.Assignment, d service.EffectiveDueDate) fiber.Map {
+	m := assignmentToJSON(a)
+	m["due_at"], m["unlock_at"], m["lock_at"] = d.DueAt, d.UnlockAt, d.LockAt
+	return m
+}
+
 func assignmentToJSON(a *models.Assignment) fiber.Map {
 	return fiber.Map{
 		"id":                   a.ID,
@@ -72,9 +105,19 @@ func (h *AssignmentHandler) ListAssignments(c *fiber.Ctx) error {
 
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
 
-	assignments := make([]fiber.Map, len(result.Items))
-	for i, a := range result.Items {
-		assignments[i] = assignmentToJSON(&a)
+	// G019: a student does not see assignments that are not assigned to
+	// them, and sees their own dates on the ones that are.
+	dates, filtered := h.studentDates(c, uint(courseID))
+	assignments := make([]fiber.Map, 0, len(result.Items))
+	for i := range result.Items {
+		a := &result.Items[i]
+		if !filtered {
+			assignments = append(assignments, assignmentToJSON(a))
+			continue
+		}
+		if d, ok := dates[a.ID]; ok {
+			assignments = append(assignments, withStudentDates(a, d))
+		}
 	}
 
 	return c.JSON(assignments)
@@ -99,6 +142,14 @@ func (h *AssignmentHandler) GetAssignment(c *fiber.Ctx) error {
 	if assignment.CourseID != uint(courseID) || assignment.WorkflowState == models.AssignmentDeleted ||
 		(!callerIsCourseStaff(c) && !assignment.IsPublished()) {
 		return responses.NotFound(c, "assignment")
+	}
+	// G019: an assignment not assigned to the calling student is a 404.
+	if dates, filtered := h.studentDates(c, uint(courseID)); filtered {
+		d, ok := dates[assignment.ID]
+		if !ok {
+			return responses.NotFound(c, "assignment")
+		}
+		return c.JSON(withStudentDates(assignment, d))
 	}
 
 	return c.JSON(assignmentToJSON(assignment))
@@ -159,6 +210,11 @@ func (h *AssignmentHandler) CreateAssignment(c *fiber.Ctx) error {
 	}
 	if msg := h.validateGradingFields(c, uint(courseID), input.Assignment.GradingType, postPolicy, input.Assignment.GradingStandardID); msg != "" {
 		return responses.BadRequest(c, msg)
+	}
+	if input.Assignment.AnonymousGrading {
+		// Canvas: anonymous assignments always post manually, whatever
+		// post_policy was sent, so no grade shows before the reveal.
+		postPolicy = "manual"
 	}
 
 	assignment := &models.Assignment{
@@ -362,6 +418,10 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 	}
 	if msg := h.validateGradingFields(c, assignment.CourseID, gradingTypeIn, postPolicyIn, input.Assignment.GradingStandardID); msg != "" {
 		return responses.BadRequest(c, msg)
+	}
+	if assignment.AnonymousGrading {
+		// G018: anonymous assignments always post manually (Canvas).
+		assignment.PostPolicy = "manual"
 	}
 
 	if err := h.assignmentService.Update(c.Context(), assignment); err != nil {

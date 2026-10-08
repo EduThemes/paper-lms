@@ -259,6 +259,11 @@ func (s *GradingPolicyService) CourseGrades(ctx context.Context, course *models.
 			ApplyGroupWeights: course.ApplyGroupWeights, Unassigned: unassigned,
 			PeriodOf: periodOf, Periods: d.periods, WeightedPeriods: out.WeightedGradingPeriods,
 		})
+		if opts.PostedOnly && len(d.periods) > 0 && !out.DisplayTotalsAllPeriods {
+			// G025: with "Display totals for All Grading Periods" off,
+			// students see per-period grades only (Canvas).
+			res.ScoreSet = ScoreSet{Groups: res.Groups}
+		}
 		sg := StudentCourseGrade{UserID: uid, CourseGradeResult: res, Unassigned: unassignedList}
 		if sg.Unassigned == nil {
 			sg.Unassigned = []uint{}
@@ -530,17 +535,26 @@ func (s *GradingPolicyService) refresh(ctx context.Context, course *models.Cours
 	for _, id := range assignmentIDs {
 		want[id] = true
 	}
-	var policy *models.LatePolicy
-	if applyMissing {
-		policy, _ = s.repo.FindLatePolicy(ctx, course.ID)
+	// The late policy re-derives late deductions after date changes and
+	// drives the missing policy.
+	policy, err := s.repo.FindLatePolicy(ctx, course.ID)
+	if err != nil {
+		return 0, err
 	}
-	var scheme *GradingScheme
 	now := s.now()
 	changed := 0
 	for i := range d.assignments {
 		a := &d.assignments[i]
 		if len(want) > 0 && !want[a.ID] {
 			continue
+		}
+		// The scheme is per assignment (an assignment may pick its own).
+		var scheme *GradingScheme
+		schemeFor := func() *GradingScheme {
+			if scheme == nil {
+				scheme = ResolveGradingScheme(ctx, s.standards, course, a)
+			}
+			return scheme
 		}
 		subs, err := s.repo.ListAssignmentSubmissions(ctx, a.ID)
 		if err != nil {
@@ -566,12 +580,16 @@ func (s *GradingPolicyService) refresh(ctx context.Context, course *models.Cours
 				}
 				changed++
 			}
+			// G022: a graded submission's late deduction follows its
+			// effective due date (and the current late policy), as Canvas
+			// re-applies the late policy when due dates change. Closed
+			// grading periods are left alone.
+			if !inClosedPeriod(dd) && s.reapplyLateDeduction(ctx, a, sub, policy, due, schemeFor) {
+				changed++
+			}
 			if applyMissing && t.Missing && sub.Score == nil && a.IsPublished() {
 				if points, ok := MissingPoints(policy, a); ok && !inClosedPeriod(dd) {
-					if scheme == nil {
-						scheme = ResolveGradingScheme(ctx, s.standards, course, a)
-					}
-					s.applyMissingRow(ctx, a, sub, scheme, points, now)
+					s.applyMissingRow(ctx, a, sub, schemeFor(), points, now)
 					changed++
 				}
 			}
@@ -589,18 +607,23 @@ func (s *GradingPolicyService) refresh(ctx context.Context, course *models.Cours
 			}
 			row := &models.Submission{AssignmentID: a.ID, UserID: uid, WorkflowState: models.SubmissionUnsubmitted,
 				CachedDueDate: dd.DueAt, Missing: true}
+			scored := false
 			if points, ok := MissingPoints(policy, a); ok {
-				if scheme == nil {
-					scheme = ResolveGradingScheme(ctx, s.standards, course, a)
-				}
-				applyMissingScore(a, scheme, row, points, now)
+				applyMissingScore(a, schemeFor(), row, points, now)
+				scored = true
 			}
 			if err := s.repo.CreateSubmission(ctx, row); err != nil {
 				return changed, err
 			}
 			changed++
-			if row.ID != 0 && row.PostedAt != nil && s.submissions != nil {
-				s.submissions.FirePosted(row.ID)
+			if row.ID != 0 && s.submissions != nil {
+				if scored {
+					// Missing-policy scores are grade changes too (G028).
+					s.submissions.logGradeChange(ctx, a, row, 0, nil, nil)
+				}
+				if row.PostedAt != nil {
+					s.submissions.FirePosted(row.ID)
+				}
 			}
 		}
 	}
@@ -608,6 +631,43 @@ func (s *GradingPolicyService) refresh(ctx context.Context, course *models.Cours
 }
 
 func inClosedPeriod(dd EffectiveDueDate) bool { return dd.InClosedGradingPeriod }
+
+// reapplyLateDeduction recomputes a graded submission's late deduction
+// from its entered score against dueAt and the course late policy, and
+// saves the new score when it changed. Missing-policy scores (no grader)
+// and excused work are left alone. Returns whether the row changed.
+func (s *GradingPolicyService) reapplyLateDeduction(ctx context.Context, a *models.Assignment, sub *models.Submission, policy *models.LatePolicy,
+	dueAt *time.Time, schemeFor func() *GradingScheme) bool {
+	if s.submissions == nil || sub.Excused || sub.EnteredScore == nil || sub.Score == nil || sub.GraderID == nil {
+		return false
+	}
+	deducted := LateDeductionFor(policy, a, sub, *sub.EnteredScore, dueAt)
+	current := 0.0
+	if sub.PointsDeducted != nil {
+		current = *sub.PointsDeducted
+	}
+	if math.Abs(deducted-current) < 1e-9 {
+		return false
+	}
+	oldGrade, oldScore := sub.Grade, sub.Score
+	final := *sub.EnteredScore - deducted
+	grade := FormatGrade(a, schemeFor(), final, "")
+	sub.Score = &final
+	sub.Grade = &grade
+	if deducted > 0 {
+		d := deducted
+		sub.PointsDeducted = &d
+	} else {
+		sub.PointsDeducted = nil
+	}
+	if err := s.submissions.submissionRepo.Update(ctx, sub); err != nil {
+		return false
+	}
+	s.submissions.recordAttemptGrade(ctx, sub)
+	s.submissions.logGradeChange(ctx, a, sub, 0, oldGrade, oldScore)
+	s.submissions.fireIfPosted(sub)
+	return true
+}
 
 // applyMissingRow scores an existing missing submission per the policy.
 func (s *GradingPolicyService) applyMissingRow(ctx context.Context, a *models.Assignment, sub *models.Submission, scheme *GradingScheme, points float64, now time.Time) {

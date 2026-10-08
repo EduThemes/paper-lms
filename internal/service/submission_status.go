@@ -102,6 +102,41 @@ func ComputeTardiness(a *models.Assignment, sub *models.Submission, dueAt *time.
 	return t
 }
 
+// LateDeductionFor is the late-policy deduction for an entered score
+// given the student's effective due date: the bulk twin of
+// SubmissionService.latePointsDeducted, used when due dates or the late
+// policy change after grading (Canvas LatePolicyApplicator). A manual
+// "late" status uses the seconds-late override; none / extended /
+// missing take no deduction; otherwise lateness is submitted_at past the
+// effective due date.
+func LateDeductionFor(policy *models.LatePolicy, a *models.Assignment, sub *models.Submission, entered float64, dueAt *time.Time) float64 {
+	if policy == nil || a == nil || sub == nil || sub.Excused {
+		return 0
+	}
+	gradingType := a.GradingType
+	if gradingType == "" {
+		gradingType = "points"
+	}
+	if !pointDeductibleGradingTypes[gradingType] || a.PointsPossible == nil || *a.PointsPossible <= 0 {
+		return 0
+	}
+	possible := *a.PointsPossible
+	if sub.LatePolicyStatus != nil {
+		if *sub.LatePolicyStatus != models.LatePolicyStatusLate || sub.SecondsLateOverride == nil || *sub.SecondsLateOverride <= 0 {
+			return 0
+		}
+		return LatePointsDeducted(policy, entered, possible, time.Duration(*sub.SecondsLateOverride)*time.Second)
+	}
+	if sub.SubmittedAt == nil || dueAt == nil {
+		return 0
+	}
+	lateFor := sub.SubmittedAt.Sub(*dueAt)
+	if lateFor <= 0 {
+		return 0
+	}
+	return LatePointsDeducted(policy, entered, possible, lateFor)
+}
+
 // MissingPoints is Canvas LatePolicy#points_for_missing.
 func MissingPoints(policy *models.LatePolicy, a *models.Assignment) (float64, bool) {
 	if policy == nil || !policy.MissingSubmissionDeductionEnabled || a == nil {

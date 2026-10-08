@@ -1445,14 +1445,21 @@ const GradebookPage = () => {
               score: saved.score ?? null,
               grade: saved.grade ?? null,
               entered_score: saved.entered_score ?? null,
+              // Letter / percent / pass-fail cells show the entered grade
+              // (G023), and the post state follows posted_at (G018).
+              entered_grade: saved.entered_grade ?? null,
               points_deducted: saved.points_deducted ?? null,
               excused: saved.excused ?? old.excused,
+              posted_at: saved.posted_at !== undefined ? saved.posted_at : old.posted_at,
+              late: saved.late ?? old.late,
+              missing: saved.missing ?? old.missing,
               workflow_state: saved.workflow_state,
             }
           : {
               ...old,
               score: score == null ? null : parseFloat(score),
               grade: score == null ? null : String(score),
+              entered_grade: score == null ? null : String(score),
               entered_score: score == null ? null : parseFloat(score),
               points_deducted: null,
               workflow_state: score != null ? 'graded' : old.submitted_at ? 'submitted' : 'unsubmitted',

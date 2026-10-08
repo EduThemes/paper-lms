@@ -140,7 +140,17 @@ const StudentGradesPage = () => {
             gradingPolicyApi.getAssignmentDates(courseId, isObserverView ? targetUserId : undefined),
           ]);
           setServerGrade((gradeRes?.students || [])[0] || null);
-          setGradingPeriods(Array.isArray(gradeRes?.grading_periods) ? gradeRes.grading_periods : []);
+          const periods = Array.isArray(gradeRes?.grading_periods) ? gradeRes.grading_periods : [];
+          setGradingPeriods(periods);
+          // G025: without "Display totals for All Grading Periods" there
+          // is no all-periods total for a student, so start on the
+          // current period's grade.
+          const totalsAllowed = !!gradeRes?.display_totals_for_all_grading_periods;
+          if (periods.length > 0 && !totalsAllowed) {
+            const now = Date.now();
+            const current = periods.find((p) => new Date(p.start_date).getTime() <= now && now <= new Date(p.end_date).getTime());
+            setPeriodFilter(String((current || periods[periods.length - 1]).id));
+          }
           setMyDates(datesRes?.assignments || null);
         } catch {
           setServerGrade(null);

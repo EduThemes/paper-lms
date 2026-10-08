@@ -212,14 +212,31 @@ func (r *gradingPolicyRepo) UpdateSubmissionStatus(ctx context.Context, sub *mod
 		}).Error
 }
 
+// ListAssignmentsDueBetween also picks up assignments that come due in
+// the window for a student with an extra-day accommodation (G040): their
+// effective due date is the base or override date plus the extension, so
+// the missing job would otherwise never see them once the base date fell
+// out of its lookback.
 func (r *gradingPolicyRepo) ListAssignmentsDueBetween(ctx context.Context, from, to time.Time) ([]models.Assignment, error) {
 	var out []models.Assignment
 	err := r.db.WithContext(ctx).
 		Where("workflow_state = ?", models.AssignmentPublished).
 		Where("course_id IN (SELECT id FROM courses WHERE workflow_state NOT IN ?)",
 			[]string{string(models.CourseDeleted), string(models.CourseCompleted)}).
-		Where("(due_at BETWEEN ? AND ?) OR id IN (SELECT assignment_id FROM assignment_overrides WHERE workflow_state <> ? AND due_at BETWEEN ? AND ?)",
-			from, to, "deleted", from, to).
+		Where(`((assignments.due_at BETWEEN ? AND ?)
+			OR assignments.id IN (SELECT assignment_id FROM assignment_overrides WHERE workflow_state <> ? AND due_at BETWEEN ? AND ?)
+			OR EXISTS (
+				SELECT 1 FROM student_accommodations sa
+				JOIN enrollments e ON e.user_id = sa.user_id AND e.course_id = assignments.course_id
+					AND e.type = 'StudentEnrollment' AND e.workflow_state NOT IN ('deleted', 'rejected')
+				WHERE sa.status = 'active' AND sa.extra_days > 0
+					AND (sa.course_id IS NULL OR sa.course_id = assignments.course_id)
+					AND sa.effective_from <= ? AND (sa.effective_until IS NULL OR sa.effective_until >= ?)
+					AND ((assignments.due_at + sa.extra_days * interval '1 day') BETWEEN ? AND ?
+						OR EXISTS (SELECT 1 FROM assignment_overrides ao
+							WHERE ao.assignment_id = assignments.id AND ao.workflow_state <> 'deleted'
+								AND (ao.due_at + sa.extra_days * interval '1 day') BETWEEN ? AND ?))))`,
+			from, to, "deleted", from, to, to, to, from, to, from, to).
 		Order("id ASC").Find(&out).Error
 	return out, err
 }

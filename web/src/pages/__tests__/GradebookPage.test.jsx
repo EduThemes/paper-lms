@@ -14,6 +14,7 @@ vi.mock('../../services/api', () => ({
     getGradingStandards: vi.fn(),
     getGradebook: vi.fn(),
     getCourseSubmissions: vi.fn(),
+    gradeSubmission: vi.fn(),
   },
 }));
 
@@ -46,8 +47,13 @@ vi.mock('../../components/CourseNav', () => ({
   default: () => <nav data-testid="course-nav" />,
 }));
 
+// Clicking the stub "types" a B (letter-grade tests below).
 vi.mock('../../components/GradeInput', () => ({
-  default: ({ value }) => <span data-testid="grade-input">{value}</span>,
+  default: ({ value, onSave }) => (
+    <span data-testid="grade-input" onClick={() => onSave?.('B')}>
+      {value}
+    </span>
+  ),
 }));
 
 // react-window's Grid renders a virtualized canvas — replace it with a flat
@@ -195,5 +201,31 @@ describe('GradebookPage', () => {
     const select = await screen.findByLabelText('Grading period');
     fireEvent.change(select, { target: { value: '50' } });
     expect(await screen.findByText('(90.0%)')).toBeInTheDocument();
+  });
+
+  // G023: a letter-graded cell shows the grade the server stored after a
+  // save, not the previous entered grade.
+  test('a saved letter grade replaces the cell grade', async () => {
+    api.getCourse.mockResolvedValue({ id: 1, name: 'Calculus I' });
+    api.getAssignments.mockResolvedValue({
+      data: [{ id: 100, name: 'Essay', points_possible: 10, grading_type: 'letter_grade' }],
+    });
+    api.getAllEnrollments.mockResolvedValue({
+      data: [{ user_id: 7, type: 'StudentEnrollment', user: { id: 7, name: 'Jane Doe', sortable_name: 'Doe, Jane' } }],
+    });
+    api.getAssignmentGroups.mockResolvedValue({ data: [] });
+    api.getGradebook.mockResolvedValue({
+      submissions: { 7: { 100: { score: 7.5, grade: 'C', entered_grade: 'C', entered_score: 7.5, workflow_state: 'graded' } } },
+    });
+    api.gradeSubmission.mockResolvedValue({
+      score: 8.9, grade: 'B', entered_grade: 'B', entered_score: 8.9, workflow_state: 'graded', posted_at: '2026-01-15T00:00:00Z',
+    });
+
+    renderPage();
+    const cell = await screen.findByTestId('grade-input');
+    expect(cell).toHaveTextContent('C');
+    fireEvent.click(cell);
+    await waitFor(() => expect(screen.getByTestId('grade-input')).toHaveTextContent('B'));
+    expect(api.gradeSubmission).toHaveBeenCalledWith('1', 100, 7, { posted_grade: 'B' });
   });
 });

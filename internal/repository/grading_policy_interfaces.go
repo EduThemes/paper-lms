@@ -54,7 +54,8 @@ type GradingPolicyRepository interface {
 	UpdateSubmissionStatus(ctx context.Context, sub *models.Submission) error
 	// ListAssignmentsDueBetween returns published assignments of active
 	// courses whose own due date, or an active override's, falls in
-	// [from, to].
+	// [from, to] — for some student, once extra-day accommodations are
+	// added.
 	ListAssignmentsDueBetween(ctx context.Context, from, to time.Time) ([]models.Assignment, error)
 	FindCourse(ctx context.Context, courseID uint) (*models.Course, error)
 	FindLatePolicy(ctx context.Context, courseID uint) (*models.LatePolicy, error)
