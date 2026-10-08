@@ -22,6 +22,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import CourseDateAccessCard from '../components/enrollments/CourseDateAccessCard';
 
 // All available CourseNav tabs in default order
 const DEFAULT_NAV_TABS = [
@@ -566,6 +567,9 @@ const CourseSettingsPage = () => {
                         </TooltipContent>
                       </Tooltip>
                     </div>
+                  </div>
+                  <div className="mt-4">
+                    <CourseDateAccessCard courseId={courseId} course={course} />
                   </div>
                 </CardContent>
               </Card>

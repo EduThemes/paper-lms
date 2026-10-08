@@ -10,6 +10,7 @@ const StudentGradesPage = React.lazy(() => import('./pages/StudentGradesPage'));
 const ContentImportPage = React.lazy(() => import('./pages/ContentImportPage'));
 const ModulesPage = React.lazy(() => import('./pages/ModulesPage'));
 const PeoplePage = React.lazy(() => import('./pages/PeoplePage'));
+const CourseSectionsPage = React.lazy(() => import('./pages/CourseSectionsPage'));
 const AccessTokensPage = React.lazy(() => import('./pages/AccessTokensPage'));
 const DeveloperKeysPage = React.lazy(() => import('./pages/DeveloperKeysPage'));
 const OAuthConsentPage = React.lazy(() => import('./pages/OAuthConsentPage'));
@@ -199,6 +200,7 @@ const App = () => {
           <Route path="grades" element={<StudentGradesPage />} />
           <Route path="modules" element={<ModulesPage />} />
           <Route path="people" element={<PeoplePage />} />
+          <Route path="sections" element={<CourseSectionsPage />} />
           <Route path="pages" element={<PagesPage />} />
           <Route path="pages/:slug" element={<PageDetailPage />} />
           <Route path="quizzes" element={<QuizzesPage />} />
