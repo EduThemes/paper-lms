@@ -3,6 +3,9 @@ package htmlsanitize
 import (
 	"strings"
 	"testing"
+
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 // TestSanitize_PreservesEditorFormatting is the B102 regression: formatting the
@@ -123,5 +126,38 @@ func TestSanitize_Idempotent(t *testing.T) {
 	first := Sanitize(in)
 	if second := Sanitize(first); first != second {
 		t.Errorf("not idempotent\nfirst:  %q\nsecond: %q", first, second)
+	}
+}
+
+// TestPlainText_InertWhenEmbeddedAsHTML backs the claim that PlainText output
+// can be written raw into an HTML document (the exported portfolio site/PDF
+// embeds portfolio section content verbatim): whatever the input, parsing the
+// output as an HTML fragment yields text only, never an element or comment.
+func TestPlainText_InertWhenEmbeddedAsHTML(t *testing.T) {
+	inputs := []string{
+		`<img src=x onerror=alert(1)>`,
+		`&lt;img src=x onerror=alert(1)&gt;`,
+		`&amp;lt;script&amp;gt;alert(1)&amp;lt;/script&amp;gt;`,
+		`<scr<script>ipt>alert(1)</scr</script>ipt>`,
+		`<<img src=x onerror=alert(1)>img src=x onerror=alert(1)>`,
+		`<!-- x --><svg/onload=alert(1)>`,
+		`a < b and c > d, Don't & "quote"`,
+		`<a href="javascript:alert(1)">x</a>`,
+		"line one\n<b>line two</b>",
+		`&#60;img src=x onerror=alert(1)&#62;`,
+		`&#x3C;iframe src=//evil&#x3E;`,
+	}
+	ctx := &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div}
+	for _, in := range inputs {
+		out := PlainText(in)
+		nodes, err := html.ParseFragment(strings.NewReader(out), ctx)
+		if err != nil {
+			t.Fatalf("parse %q: %v", out, err)
+		}
+		for _, n := range nodes {
+			if n.Type != html.TextNode {
+				t.Errorf("PlainText(%q) = %q parses to a non-text node %q", in, out, n.Data)
+			}
+		}
 	}
 }

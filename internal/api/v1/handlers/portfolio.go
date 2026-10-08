@@ -398,9 +398,12 @@ func (h *PortfolioHandler) AddSection(c *fiber.Ctx) error {
 		PortfolioID: portfolio.ID,
 		Title:       input.Section.Title,
 		SectionType: input.Section.SectionType,
-		// Rich HTML, rendered raw into the exported portfolio site/PDF —
-		// sanitize on write (the locked rich-content rule) to close stored XSS.
-		Content:   service.SanitizeHTML(input.Section.Content),
+		// Typed in a textarea and rendered as text by the portfolio pages,
+		// so it is plain text (B005): the HTML sanitizer entity-encoded it
+		// and the public page showed "Don&#39;t". The plain-text sanitizer
+		// leaves no markup at all, so the raw embed in the exported
+		// site/PDF (generateStaticHTML) stays free of stored XSS.
+		Content:   service.SanitizePlainText(input.Section.Content),
 		Layout:    input.Section.Layout,
 		IsVisible: isVisible,
 	}
@@ -457,8 +460,8 @@ func (h *PortfolioHandler) UpdateSection(c *fiber.Ctx) error {
 		section.SectionType = *input.Section.SectionType
 	}
 	if input.Section.Content != nil {
-		// Sanitize on update too — see AddSection. Closes stored XSS.
-		section.Content = service.SanitizeHTML(*input.Section.Content)
+		// Sanitize on update too — see AddSection (plain text, no markup).
+		section.Content = service.SanitizePlainText(*input.Section.Content)
 	}
 	if input.Section.Layout != nil {
 		section.Layout = *input.Section.Layout
