@@ -9,6 +9,7 @@ import CourseNav from '../components/CourseNav';
 import QuizzesSubNav from '../components/quiz/QuizzesSubNav';
 import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
 import { clearRceDraft } from '../components/rce/rceDrafts';
+import { toEditorHTML, richValueOrEmpty } from '../utils/richContent';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { ALL_TYPES as QUESTION_TYPES, defaultAnswersForType, parseAnswers, stringifyAnswers, computeQuizPointsPossible } from '../components/quiz/itemTypes/types';
@@ -37,6 +38,9 @@ const questionDraftKey = (courseId, quizId, question, index) =>
 const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId, quizId, stimuli = [] }) => {
   const [expanded, setExpanded] = useState(true);
   const [answers, setAnswers] = useState([]);
+  // The feedback editors mount only while their section is open: three
+  // rich content editors per question would be heavy on long quizzes.
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -347,41 +351,29 @@ const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId,
           )}
           {qType === 'text_only' && <TextOnlyEditor />}
 
-          {/* Feedback */}
-          <details className="text-sm">
+          {/* Feedback: rich content, as Canvas's answer comments (G010) */}
+          <details className="text-sm" onToggle={(e) => setFeedbackOpen(e.currentTarget.open)}>
             <summary className="cursor-pointer text-text-tertiary hover:text-text-secondary text-xs">Feedback (optional)</summary>
-            <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs text-text-tertiary mb-1">Correct feedback</label>
-                <input
-                  type="text"
-                  value={question.correct_comments || ''}
-                  onChange={(e) => updateField('correct_comments', e.target.value)}
-                  className="w-full border border-border-strong rounded px-2 py-1 text-xs"
-                  placeholder="Shown when correct..."
-                />
+            {feedbackOpen && (
+              <div className="mt-2 space-y-3">
+                {[
+                  ['correct_comments', 'Correct feedback', 'Shown when correct...'],
+                  ['incorrect_comments', 'Incorrect feedback', 'Shown when incorrect...'],
+                  ['neutral_comments', 'Neutral feedback', 'Shown to everyone...'],
+                ].map(([field, label, placeholder]) => (
+                  <div key={field}>
+                    <label className="block text-xs text-text-tertiary mb-1">{label}</label>
+                    <RichContentEditorV2
+                      value={toEditorHTML(question[field] || '')}
+                      onChange={(html) => updateField(field, richValueOrEmpty(html))}
+                      placeholder={placeholder}
+                      courseId={courseId}
+                      aiAssist={false}
+                    />
+                  </div>
+                ))}
               </div>
-              <div>
-                <label className="block text-xs text-text-tertiary mb-1">Incorrect feedback</label>
-                <input
-                  type="text"
-                  value={question.incorrect_comments || ''}
-                  onChange={(e) => updateField('incorrect_comments', e.target.value)}
-                  className="w-full border border-border-strong rounded px-2 py-1 text-xs"
-                  placeholder="Shown when incorrect..."
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-text-tertiary mb-1">Neutral feedback</label>
-                <input
-                  type="text"
-                  value={question.neutral_comments || ''}
-                  onChange={(e) => updateField('neutral_comments', e.target.value)}
-                  className="w-full border border-border-strong rounded px-2 py-1 text-xs"
-                  placeholder="Shown to everyone..."
-                />
-              </div>
-            </div>
+            )}
           </details>
         </div>
       )}

@@ -5,6 +5,9 @@ import { api } from '../services/api';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
+import { SubmissionBody as RichOrPlainText } from '../components/SafeHTML';
+import { toEditorHTML, richValueOrEmpty, hasRichContent } from '../utils/richContent';
 
 const QUESTION_TYPES = [
   { value: 'multiple_choice', label: 'Multiple Choice' },
@@ -218,8 +221,14 @@ const PullToQuizModal = ({ courseId, bankId, questions, onClose, onSuccess }) =>
 // ---------------------------------------------------------------------------
 // Question Form
 // ---------------------------------------------------------------------------
-const QuestionForm = ({ initial, onSave, onCancel, saving }) => {
-  const [form, setForm] = useState(() => initial || emptyQuestion());
+const QuestionForm = ({ initial, onSave, onCancel, saving, courseId }) => {
+  // Question text and feedback are rich content (G010); older entries may
+  // hold plain text, which the editor receives as paragraphs.
+  const [form, setForm] = useState(() => {
+    const base = initial || emptyQuestion();
+    return { ...base, question_text: toEditorHTML(base.question_text), feedback: toEditorHTML(base.feedback) };
+  });
+  const [textError, setTextError] = useState(null);
 
   const update = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
 
@@ -257,8 +266,14 @@ const QuestionForm = ({ initial, onSave, onCancel, saving }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (!hasRichContent(form.question_text)) {
+      setTextError('Enter the question text.');
+      return;
+    }
+    setTextError(null);
     onSave({
       ...form,
+      feedback: richValueOrEmpty(form.feedback),
       points_possible: Number(form.points_possible) || 0,
       answers: form.answers || [],
     });
@@ -325,16 +340,14 @@ const QuestionForm = ({ initial, onSave, onCancel, saving }) => {
       </div>
 
       <div>
-        <label htmlFor="q-text" className="block text-sm font-medium text-text-secondary mb-1">Question Text</label>
-        <textarea
-          id="q-text"
-          required
-          rows={3}
+        <span className="block text-sm font-medium text-text-secondary mb-1">Question Text</span>
+        <RichContentEditorV2
           value={form.question_text}
-          onChange={(e) => update('question_text', e.target.value)}
-          className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
+          onChange={(html) => update('question_text', html)}
           placeholder="Enter the question text..."
+          courseId={courseId}
         />
+        {textError && <p role="alert" className="mt-1 text-xs text-accent-danger">{textError}</p>}
       </div>
 
       {/* Answers section for MC / TF */}
@@ -390,14 +403,13 @@ const QuestionForm = ({ initial, onSave, onCancel, saving }) => {
       )}
 
       <div>
-        <label htmlFor="q-feedback" className="block text-sm font-medium text-text-secondary mb-1">Feedback (optional)</label>
-        <textarea
-          id="q-feedback"
-          rows={2}
+        <span className="block text-sm font-medium text-text-secondary mb-1">Feedback (optional)</span>
+        <RichContentEditorV2
           value={form.feedback || ''}
-          onChange={(e) => update('feedback', e.target.value)}
-          className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
+          onChange={(html) => update('feedback', html)}
           placeholder="Shown to student after grading..."
+          courseId={courseId}
+          aiAssist={false}
         />
       </div>
 
@@ -648,6 +660,7 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate }) => {
                               feedback: q.feedback || '',
                             }}
                             onSave={handleUpdateQuestion}
+                            courseId={courseId}
                             onCancel={() => setEditingQuestionId(null)}
                             saving={savingQuestion}
                           />
@@ -666,7 +679,7 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate }) => {
                                 {q.points_possible ?? 0} pt{(q.points_possible ?? 0) !== 1 ? 's' : ''}
                               </span>
                             </div>
-                            <p className="text-sm text-text-secondary mt-1 line-clamp-2">{q.question_text}</p>
+                            <RichOrPlainText className="text-sm text-text-secondary mt-1 line-clamp-2" body={q.question_text} />
                             {/* Show answers for MC / TF in read-only view */}
                             {(q.question_type === 'multiple_choice' || q.question_type === 'true_false') &&
                               Array.isArray(q.answers) && q.answers.length > 0 && (
@@ -682,7 +695,9 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate }) => {
                                 </div>
                               )}
                             {q.feedback && (
-                              <p className="text-xs text-text-disabled mt-1 italic">Feedback: {q.feedback}</p>
+                              <div className="text-xs text-text-disabled mt-1 italic">
+                                Feedback: <RichOrPlainText className="inline-block align-top" body={q.feedback} />
+                              </div>
                             )}
                           </div>
                           {isTeacher && (
@@ -714,6 +729,7 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate }) => {
                   <div className="mt-4">
                     {showAddQuestion ? (
                       <QuestionForm
+                        courseId={courseId}
                         onSave={handleAddQuestion}
                         onCancel={() => setShowAddQuestion(false)}
                         saving={savingQuestion}

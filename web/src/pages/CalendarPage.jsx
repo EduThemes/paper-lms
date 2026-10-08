@@ -9,6 +9,10 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fetchAllPages } from '../utils/fetchAllPages';
+import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
+import { SubmissionBody as RichOrPlainText } from '../components/SafeHTML';
+import { toEditorHTML, richValueOrEmpty } from '../utils/richContent';
+import { htmlPreview, looksLikeHTML } from '../utils/html';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -208,7 +212,8 @@ const CalendarPage = () => {
     };
     setFormData({
       title: event.title || '',
-      description: event.description || '',
+      // Descriptions are rich content now (G010); older ones are plain text.
+      description: toEditorHTML(event.description || ''),
       start_at: formatDateTime(event.start_at),
       end_at: formatDateTime(event.end_at),
       all_day: event.all_day || false,
@@ -226,7 +231,7 @@ const CalendarPage = () => {
     try {
       const payload = {
         title: formData.title,
-        description: formData.description,
+        description: richValueOrEmpty(formData.description),
         start_at: formData.start_at ? new Date(formData.start_at).toISOString() : null,
         end_at: formData.end_at ? new Date(formData.end_at).toISOString() : null,
         all_day: formData.all_day,
@@ -407,11 +412,12 @@ const CalendarPage = () => {
             </div>
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-1">Description</label>
-              <textarea
+              <RichContentEditorV2
+                key={editingEvent ? `event-${editingEvent.id}` : 'event-new'}
                 value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                rows={3}
+                onChange={(html) => setFormData((prev) => ({ ...prev, description: html }))}
+                placeholder="Details, links, files…"
+                courseId={courseId}
               />
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -507,7 +513,7 @@ const CalendarPage = () => {
                 <p className="text-sm text-text-tertiary mt-1">{selectedEvent.location_name}</p>
               )}
               {selectedEvent.description && (
-                <p className="text-sm text-text-secondary mt-2">{selectedEvent.description}</p>
+                <RichOrPlainText className="text-sm text-text-secondary mt-2 prose prose-sm max-w-none" body={selectedEvent.description} />
               )}
             </div>
             <button
@@ -648,7 +654,7 @@ const CalendarPage = () => {
                               )}
                             </div>
                             {event.description && (
-                              <div className="text-xs text-text-disabled mt-0.5 truncate">{event.description}</div>
+                              <div className="text-xs text-text-disabled mt-0.5 truncate">{looksLikeHTML(event.description) ? htmlPreview(event.description, 160) : event.description}</div>
                             )}
                           </div>
                         </div>
