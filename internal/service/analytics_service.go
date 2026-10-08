@@ -133,13 +133,10 @@ func (s *AnalyticsService) GetStudentSummaries(ctx context.Context, courseID uin
 
 		userID := enrollment.UserID
 
-		// Get page view count and interaction seconds for this student in this course.
-		// Tenant scope is enforced upstream by GetStudentSummaries' callerAccountID.
-		pageViewResult, _ := s.pageViewRepo.ListByUserID(ctx, userID, 0, repository.PaginationParams{Page: 1, PerPage: 1})
-		var pageViewCount int64
-		if pageViewResult != nil {
-			pageViewCount = pageViewResult.TotalCount
-		}
+		// Get page view count and interaction seconds for this student in
+		// this course. B209: the count used to be the student's site-wide
+		// total (ListByUserID), identical in every course they take.
+		pageViewCount, _ := s.pageViewRepo.CountByUserAndContext(ctx, userID, "Course", courseID)
 
 		interactionSeconds, _ := s.pageViewRepo.SumInteractionByUserAndContext(ctx, userID, "Course", courseID)
 

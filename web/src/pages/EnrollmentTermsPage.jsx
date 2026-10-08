@@ -3,6 +3,7 @@ import { Calendar, Plus, Edit2, Trash2, Clock, CheckCircle } from 'lucide-react'
 import { api, getCSRFToken } from '../services/api';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
+import { datetimeLocalToISO, isoToDatetimeLocal } from '../utils/datetimeLocal';
 
 const EnrollmentTermsPage = () => {
   const { user } = useAuth();
@@ -72,8 +73,8 @@ const EnrollmentTermsPage = () => {
       enrollment_term: {
         name: formData.name,
         sis_term_id: formData.sis_term_id,
-        ...(formData.start_at ? { start_at: new Date(formData.start_at).toISOString() } : {}),
-        ...(formData.end_at ? { end_at: new Date(formData.end_at).toISOString() } : {}),
+        ...(formData.start_at ? { start_at: datetimeLocalToISO(formData.start_at) } : {}),
+        ...(formData.end_at ? { end_at: datetimeLocalToISO(formData.end_at) } : {}),
         ...(formData.grading_period_group_id ? { grading_period_group_id: parseInt(formData.grading_period_group_id, 10) } : {}),
       },
     };
@@ -112,8 +113,8 @@ const EnrollmentTermsPage = () => {
     setFormData({
       name: term.name || '',
       sis_term_id: term.sis_term_id || '',
-      start_at: term.start_at ? term.start_at.slice(0, 16) : '',
-      end_at: term.end_at ? term.end_at.slice(0, 16) : '',
+      start_at: isoToDatetimeLocal(term.start_at),
+      end_at: isoToDatetimeLocal(term.end_at),
       grading_period_group_id: term.grading_period_group_id ? String(term.grading_period_group_id) : '',
     });
     setShowForm(true);

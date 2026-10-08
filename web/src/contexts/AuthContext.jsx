@@ -1,20 +1,37 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import i18n from 'i18next';
 import { api } from '../services/api';
+import { pickLocale } from '../utils/localePreference';
 
 const AuthContext = createContext(null);
 
-// Apply the account's default_locale only if the user has NOT made an explicit choice
-// (localStorage 'paperlms_locale' / legacy 'i18nextLng' takes priority over the account default).
+// Apply the signed-in user's locale. Priority (see pickLocale): the user's
+// saved profile locale (B210 — it was saved in Account Settings but never
+// applied, so it did not follow the user to other devices), then an
+// explicit choice made on this device (localStorage 'paperlms_locale'),
+// then the account's default_locale.
+const readDeviceLocale = () => {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage.getItem('paperlms_locale') : null;
+  } catch {
+    return null;
+  }
+};
+
 const applyAccountDefaultLocale = (data) => {
   if (!data) return;
-  const explicit = typeof localStorage !== 'undefined'
-    ? (localStorage.getItem('paperlms_locale') || localStorage.getItem('i18nextLng'))
-    : null;
-  if (explicit) return;
-  const acctLocale = data?.account?.default_locale || data?.account_default_locale;
-  if (acctLocale && acctLocale !== i18n.language) {
-    i18n.changeLanguage(acctLocale);
+  const locale = pickLocale({
+    userLocale: data.locale,
+    deviceLocale: readDeviceLocale(),
+    accountLocale: data?.account?.default_locale || data?.account_default_locale,
+  });
+  if (!locale) return;
+  if (data.locale && locale === pickLocale({ userLocale: data.locale })) {
+    // Keep this device in sync with the profile choice.
+    try { localStorage.setItem('paperlms_locale', locale); } catch { /* ignore */ }
+  }
+  if (locale !== i18n.language) {
+    i18n.changeLanguage(locale);
   }
 };
 
@@ -125,6 +142,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const data = await api.getSelf();
       setUser(data);
+      applyAccountDefaultLocale(data);
       return data;
     } catch {
       setUser(null);
@@ -138,6 +156,10 @@ export const AuthProvider = ({ children }) => {
     </AuthContext.Provider>
   );
 };
+
+// useOptionalAuth returns the auth context, or null outside an AuthProvider
+// (for components that also render standalone, e.g. in isolated tests).
+export const useOptionalAuth = () => useContext(AuthContext);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
