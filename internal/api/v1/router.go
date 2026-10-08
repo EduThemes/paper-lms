@@ -381,7 +381,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Get("/courses/:course_id/discussion_topics/:topic_id/entries", enrolled, r.DiscussionEntryHandler.ListEntries)
 	protected.Post("/courses/:course_id/discussion_topics/:topic_id/entries", enrolled, r.DiscussionEntryHandler.CreateEntry)
 	protected.Put("/courses/:course_id/discussion_topics/:topic_id/entries/:id", enrolled, r.DiscussionEntryHandler.UpdateEntry)
-	protected.Delete("/courses/:course_id/discussion_topics/:topic_id/entries/:id", instructor, r.DiscussionEntryHandler.DeleteEntry)
+	protected.Delete("/courses/:course_id/discussion_topics/:topic_id/entries/:id", enrolled, r.DiscussionEntryHandler.DeleteEntry) // author or staff; enforced in handler
 	protected.Get("/courses/:course_id/discussion_topics/:topic_id/entries/:entry_id/replies", enrolled, r.DiscussionEntryHandler.ListReplies)
 	protected.Post("/courses/:course_id/discussion_topics/:topic_id/entries/:entry_id/replies", enrolled, r.DiscussionEntryHandler.CreateReply)
 	protected.Post("/courses/:course_id/discussion_topics/:topic_id/entries/:entry_id/rating", enrolled, r.DiscussionEntryHandler.RateEntry)

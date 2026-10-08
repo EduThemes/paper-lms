@@ -9,6 +9,12 @@ import (
 	"github.com/EduThemes/paper-lms/internal/repository"
 )
 
+// ErrDiscussionInvalidRating is returned when a rating other than 0
+// (unlike) or 1 (like) is submitted. Canvas's rate_entry API accepts
+// only those two values; anything else let a single user inflate a
+// post's rating_sum arbitrarily.
+var ErrDiscussionInvalidRating = errors.New("rating must be 0 or 1")
+
 // ratingRepoWithSum extends the base interface with aggregation support.
 // The postgres implementation provides this method on the concrete type.
 type ratingRepoWithSum interface {
@@ -69,7 +75,7 @@ func (s *DiscussionService) CreateTopic(ctx context.Context, topic *models.Discu
 		return errors.New("discussion topic title is required")
 	}
 	if topic.WorkflowState == "" {
-		topic.WorkflowState = "active"
+		topic.WorkflowState = models.DiscussionTopicActive
 	}
 	if topic.DiscussionType == "" {
 		topic.DiscussionType = "side_comment"
@@ -86,6 +92,9 @@ func (s *DiscussionService) UpdateTopic(ctx context.Context, topic *models.Discu
 	return s.topicRepo.Update(ctx, topic)
 }
 
+// DeleteTopic soft-deletes a topic by id. The repo UPDATE is keyed on id
+// only, so callers MUST have already verified the topic belongs to the
+// caller's tenant and course (see handlers.requireTopicInCourse).
 func (s *DiscussionService) DeleteTopic(ctx context.Context, id uint) error {
 	return s.topicRepo.Delete(ctx, id)
 }
@@ -110,39 +119,43 @@ func (s *DiscussionService) CreateEntry(ctx context.Context, entry *models.Discu
 	return nil
 }
 
-func (s *DiscussionService) GetEntry(ctx context.Context, id uint) (*models.DiscussionEntry, error) {
-	return s.entryRepo.FindByID(ctx, id, 0)
+// GetEntry loads an entry scoped to accountID (entry → topic → course →
+// account). Handler-layer callers MUST pass callerAccountID(c).
+func (s *DiscussionService) GetEntry(ctx context.Context, id, accountID uint) (*models.DiscussionEntry, error) {
+	return s.entryRepo.FindByID(ctx, id, accountID)
 }
 
 func (s *DiscussionService) UpdateEntry(ctx context.Context, entry *models.DiscussionEntry) error {
 	return s.entryRepo.Update(ctx, entry)
 }
 
+// DeleteEntry soft-deletes an entry by id. Callers MUST have verified
+// the entry belongs to the topic/course/tenant first.
 func (s *DiscussionService) DeleteEntry(ctx context.Context, id uint) error {
 	return s.entryRepo.Delete(ctx, id)
 }
 
-func (s *DiscussionService) ListEntries(ctx context.Context, topicID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionEntry], error) {
-	return s.entryRepo.ListByTopicID(ctx, topicID, 0, params)
+func (s *DiscussionService) ListEntries(ctx context.Context, topicID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionEntry], error) {
+	return s.entryRepo.ListByTopicID(ctx, topicID, accountID, params)
 }
 
-func (s *DiscussionService) ListReplies(ctx context.Context, entryID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionEntry], error) {
-	return s.entryRepo.ListReplies(ctx, entryID, 0, params)
+func (s *DiscussionService) ListReplies(ctx context.Context, entryID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionEntry], error) {
+	return s.entryRepo.ListReplies(ctx, entryID, accountID, params)
 }
 
 // Full view with nested tree
 
 type EntryView struct {
-	ID                uint       `json:"id"`
-	DiscussionTopicID uint       `json:"discussion_topic_id"`
-	UserID            uint       `json:"user_id"`
-	ParentID          *uint      `json:"parent_id"`
-	Message           string     `json:"message"`
-	RatingCount       int        `json:"rating_count"`
-	RatingSum         int        `json:"rating_sum"`
-	WorkflowState     string     `json:"workflow_state"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	ID                uint        `json:"id"`
+	DiscussionTopicID uint        `json:"discussion_topic_id"`
+	UserID            uint        `json:"user_id"`
+	ParentID          *uint       `json:"parent_id"`
+	Message           string      `json:"message"`
+	RatingCount       int         `json:"rating_count"`
+	RatingSum         int         `json:"rating_sum"`
+	WorkflowState     string      `json:"workflow_state"`
+	CreatedAt         time.Time   `json:"created_at"`
+	UpdatedAt         time.Time   `json:"updated_at"`
 	Replies           []EntryView `json:"replies"`
 }
 
@@ -151,18 +164,16 @@ type DiscussionFullView struct {
 	Entries []EntryView             `json:"entries"`
 }
 
-func (s *DiscussionService) GetFullView(ctx context.Context, topicID uint) (*DiscussionFullView, error) {
-	topic, err := s.topicRepo.FindByID(ctx, topicID, 0)
+// GetFullView returns the threaded view of a topic the caller has already
+// resolved (tenant + course verified by the handler). Entries are loaded
+// with the same accountID scope as a second line of defense.
+func (s *DiscussionService) GetFullView(ctx context.Context, topic *models.DiscussionTopic, accountID uint) (*DiscussionFullView, error) {
+	allEntries, err := s.entryRepo.ListAllByTopicIDIncludingDeleted(ctx, topic.ID, accountID)
 	if err != nil {
 		return nil, err
 	}
 
-	allEntries, err := s.entryRepo.ListAllByTopicID(ctx, topicID, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	rootEntries := buildTree(allEntries)
+	rootEntries := buildTree(visibleThreadEntries(allEntries))
 
 	return &DiscussionFullView{
 		Topic:   topic,
@@ -171,11 +182,8 @@ func (s *DiscussionService) GetFullView(ctx context.Context, topicID uint) (*Dis
 }
 
 func buildTree(entries []models.DiscussionEntry) []EntryView {
-	viewMap := make(map[uint]*EntryView, len(entries))
-
-	// First pass: create all views
-	for _, e := range entries {
-		view := &EntryView{
+	return assembleThread(entries, func(e models.DiscussionEntry) EntryView {
+		return EntryView{
 			ID:                e.ID,
 			DiscussionTopicID: e.DiscussionTopicID,
 			UserID:            e.UserID,
@@ -188,40 +196,132 @@ func buildTree(entries []models.DiscussionEntry) []EntryView {
 			UpdatedAt:         e.UpdatedAt,
 			Replies:           []EntryView{},
 		}
-		viewMap[e.ID] = view
+	}, func(parent *EntryView, replies []EntryView) {
+		parent.Replies = replies
+	})
+}
+
+// discussionEntryDeleted is the soft-delete workflow_state on entries.
+const discussionEntryDeleted = "deleted"
+
+// visibleThreadEntries filters a topic's full entry list (soft-deleted
+// rows included) down to what a thread view renders: every live entry,
+// plus each deleted entry that still has a live descendant. Those are
+// kept as placeholders with the message blanked, so their replies stay
+// nested under them instead of being promoted to top-level posts (the
+// Canvas "This entry has been deleted" behavior). Deleted entries with
+// no live descendants are dropped.
+func visibleThreadEntries(all []models.DiscussionEntry) []models.DiscussionEntry {
+	index := make(map[uint]int, len(all))
+	for i, e := range all {
+		index[e.ID] = i
 	}
 
-	// Second pass: link children to parents
-	var roots []*EntryView
-	for _, e := range entries {
-		view := viewMap[e.ID]
-		if e.ParentID == nil {
-			roots = append(roots, view)
-		} else if parent, ok := viewMap[*e.ParentID]; ok {
-			parent.Replies = append(parent.Replies, *view)
-		} else {
-			roots = append(roots, view)
+	hasLiveDescendant := make(map[uint]bool)
+	for _, e := range all {
+		if e.WorkflowState == discussionEntryDeleted {
+			continue
+		}
+		// Walk up the ancestor chain. The step bound guards against a
+		// malformed parent cycle.
+		parent := e.ParentID
+		for steps := 0; parent != nil && steps < len(all); steps++ {
+			if hasLiveDescendant[*parent] {
+				break
+			}
+			hasLiveDescendant[*parent] = true
+			i, ok := index[*parent]
+			if !ok {
+				break
+			}
+			parent = all[i].ParentID
 		}
 	}
 
-	// Convert pointers to values for root entries
-	result := make([]EntryView, 0, len(roots))
+	out := make([]models.DiscussionEntry, 0, len(all))
+	for _, e := range all {
+		if e.WorkflowState != discussionEntryDeleted {
+			out = append(out, e)
+			continue
+		}
+		if hasLiveDescendant[e.ID] {
+			placeholder := e
+			placeholder.Message = ""
+			placeholder.RatingCount = 0
+			placeholder.RatingSum = 0
+			out = append(out, placeholder)
+		}
+	}
+	return out
+}
+
+// assembleThread nests entries under their parents. Children are
+// attached recursively (not copied into the parent while the child is
+// still being filled in), so replies at any depth are kept. An entry
+// whose parent is absent from the list is treated as a root.
+func assembleThread[T any](entries []models.DiscussionEntry, mk func(models.DiscussionEntry) T, setReplies func(parent *T, replies []T)) []T {
+	present := make(map[uint]bool, len(entries))
+	for _, e := range entries {
+		present[e.ID] = true
+	}
+
+	children := make(map[uint][]models.DiscussionEntry)
+	var roots []models.DiscussionEntry
+	for _, e := range entries {
+		if e.ParentID != nil && *e.ParentID != e.ID && present[*e.ParentID] {
+			children[*e.ParentID] = append(children[*e.ParentID], e)
+		} else {
+			roots = append(roots, e)
+		}
+	}
+
+	visited := make(map[uint]bool, len(entries))
+	var build func(e models.DiscussionEntry) T
+	build = func(e models.DiscussionEntry) T {
+		visited[e.ID] = true
+		view := mk(e)
+		kids := children[e.ID]
+		replies := make([]T, 0, len(kids))
+		for _, k := range kids {
+			if visited[k.ID] {
+				continue
+			}
+			replies = append(replies, build(k))
+		}
+		setReplies(&view, replies)
+		return view
+	}
+
+	result := make([]T, 0, len(roots))
 	for _, r := range roots {
-		result = append(result, *r)
+		result = append(result, build(r))
 	}
 	return result
 }
 
 // Rating
 
+// RateEntry sets (rating=1) or clears (rating=0) the user's like on an
+// entry and recomputes the entry's rating_count / rating_sum. Callers
+// MUST have verified the entry is in a topic the user can see and that
+// the topic allows the user to rate (allow_rating / only_graders_can_rate).
 func (s *DiscussionService) RateEntry(ctx context.Context, entryID uint, userID uint, rating int) error {
-	r := &models.DiscussionEntryRating{
-		DiscussionEntryID: entryID,
-		UserID:            userID,
-		Rating:            rating,
-	}
-	if err := s.ratingRepo.Upsert(ctx, r); err != nil {
-		return err
+	switch rating {
+	case 0:
+		if err := s.ratingRepo.Delete(ctx, entryID, userID); err != nil {
+			return err
+		}
+	case 1:
+		r := &models.DiscussionEntryRating{
+			DiscussionEntryID: entryID,
+			UserID:            userID,
+			Rating:            rating,
+		}
+		if err := s.ratingRepo.Upsert(ctx, r); err != nil {
+			return err
+		}
+	default:
+		return ErrDiscussionInvalidRating
 	}
 
 	// Recalculate entry rating_count and rating_sum
@@ -230,6 +330,8 @@ func (s *DiscussionService) RateEntry(ctx context.Context, entryID uint, userID 
 		return err
 	}
 
+	// accountID=0: internal hop; the handler already resolved this entry
+	// with the caller's tenant scope.
 	entry, err := s.entryRepo.FindByID(ctx, entryID, 0)
 	if err != nil {
 		return err

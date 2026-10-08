@@ -29,6 +29,11 @@ type DiscussionEntryRepository interface {
 	ListByTopicID(ctx context.Context, topicID, accountID uint, params PaginationParams) (*PaginatedResult[models.DiscussionEntry], error)
 	ListReplies(ctx context.Context, entryID, accountID uint, params PaginationParams) (*PaginatedResult[models.DiscussionEntry], error)
 	ListAllByTopicID(ctx context.Context, topicID, accountID uint) ([]models.DiscussionEntry, error)
+	// ListAllByTopicIDIncludingDeleted returns every entry on the topic,
+	// soft-deleted ones included, so thread views can keep a "deleted"
+	// placeholder where a removed parent was instead of promoting its
+	// replies to top-level posts (Canvas parity).
+	ListAllByTopicIDIncludingDeleted(ctx context.Context, topicID, accountID uint) ([]models.DiscussionEntry, error)
 }
 
 type DiscussionEntryRatingRepository interface {

@@ -67,14 +67,9 @@ func (h *DiscussionHandler) ListTopics(c *fiber.Ctx) error {
 }
 
 func (h *DiscussionHandler) GetTopic(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("topic_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid topic ID")
-	}
-
-	topic, err := h.discussionService.GetTopic(c.Context(), uint(id), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "discussion topic")
+	topic, wrote := requireTopicInCourse(c, h.discussionService)
+	if wrote {
+		return nil
 	}
 
 	return c.JSON(topicToJSON(topic))
@@ -140,14 +135,11 @@ func (h *DiscussionHandler) CreateTopic(c *fiber.Ctx) error {
 }
 
 func (h *DiscussionHandler) UpdateTopic(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("topic_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid topic ID")
-	}
-
-	topic, err := h.discussionService.GetTopic(c.Context(), uint(id), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "discussion topic")
+	// Tenant + F-013 course parent tie: a teacher of course A must not be
+	// able to rewrite a topic in course B by addressing it by id.
+	topic, wrote := requireTopicInCourse(c, h.discussionService)
+	if wrote {
+		return nil
 	}
 
 	var input struct {
@@ -220,12 +212,14 @@ func (h *DiscussionHandler) UpdateTopic(c *fiber.Ctx) error {
 }
 
 func (h *DiscussionHandler) DeleteTopic(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("topic_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid topic ID")
+	// The repo soft-delete is keyed on id only, so the topic MUST be
+	// resolved inside the caller's tenant and this course first.
+	topic, wrote := requireTopicInCourse(c, h.discussionService)
+	if wrote {
+		return nil
 	}
 
-	if err := h.discussionService.DeleteTopic(c.Context(), uint(id)); err != nil {
+	if err := h.discussionService.DeleteTopic(c.Context(), topic.ID); err != nil {
 		return responses.InternalError(c, "Could not delete discussion topic")
 	}
 
@@ -233,14 +227,14 @@ func (h *DiscussionHandler) DeleteTopic(c *fiber.Ctx) error {
 }
 
 func (h *DiscussionHandler) GetFullView(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("topic_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid topic ID")
+	topic, wrote := requireTopicInCourse(c, h.discussionService)
+	if wrote {
+		return nil
 	}
 
-	view, err := h.discussionService.GetFullView(c.Context(), uint(id))
+	view, err := h.discussionService.GetFullView(c.Context(), topic, callerAccountID(c))
 	if err != nil {
-		return responses.NotFound(c, "discussion topic")
+		return responses.InternalError(c, "Could not load discussion")
 	}
 
 	return c.JSON(fiber.Map{
