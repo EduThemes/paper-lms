@@ -9,7 +9,7 @@ import { latexOfMathElement } from '../../../utils/mathRender';
  * Equations used to be inserted as plain `\(latex\)` text: they showed as
  * raw LaTeX while editing and could not be reopened in the equation editor.
  * This node renders the equation with KaTeX inside the editor; clicking it
- * (or Enter on it) dispatches an `rce-math-edit` event on the editor DOM,
+ * (or Enter on it) dispatches a bubbling `rce-math-edit` event,
  * which the toolbar answers by reopening MathInputDialog with the LaTeX.
  *
  * Stored as <span class="math-tex" data-latex="...">\(...\)</span>, which
@@ -102,7 +102,8 @@ export const MathInline = Node.create({
         e.preventDefault();
         if (!editor.isEditable) return;
         const pos = typeof getPos === 'function' ? getPos() : null;
-        editor.view.dom.dispatchEvent(new CustomEvent(MATH_EDIT_EVENT, {
+        dom.dispatchEvent(new CustomEvent(MATH_EDIT_EVENT, {
+          bubbles: true,
           detail: { pos, latex: current.attrs.latex },
         }));
       };

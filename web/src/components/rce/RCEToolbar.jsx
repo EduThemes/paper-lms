@@ -58,15 +58,18 @@ export default function RCEToolbar({ editor, courseId }) {
   const [mathEdit, setMathEdit] = useState(null);
   const toolbarRef = useRef(null);
 
+  // Clicking an equation node bubbles MATH_EDIT_EVENT up from the editor
+  // DOM. Listen on this editor's wrapper (the toolbar's parent) rather than
+  // editor.view, which throws until the editor view is mounted.
   useEffect(() => {
-    const dom = editor?.view?.dom;
-    if (!dom) return undefined;
+    const wrapper = toolbarRef.current?.parentElement;
+    if (!wrapper) return undefined;
     const onEdit = (e) => {
       setMathEdit(e.detail || null);
       setShowMath(true);
     };
-    dom.addEventListener(MATH_EDIT_EVENT, onEdit);
-    return () => dom.removeEventListener(MATH_EDIT_EVENT, onEdit);
+    wrapper.addEventListener(MATH_EDIT_EVENT, onEdit);
+    return () => wrapper.removeEventListener(MATH_EDIT_EVENT, onEdit);
   }, [editor]);
 
   /** Arrow-key navigation across toolbar buttons (a11y). */
