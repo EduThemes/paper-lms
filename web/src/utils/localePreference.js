@@ -19,3 +19,26 @@ const normalize = (locale) => {
 export function pickLocale({ userLocale, deviceLocale, accountLocale } = {}) {
   return normalize(userLocale) || normalize(deviceLocale) || normalize(accountLocale);
 }
+
+/**
+ * Applies the signed-in user's locale (see pickLocale) to i18n.
+ *
+ * It only reads the device choice; it never writes the profile locale into
+ * it. The device key records an explicit choice made on this device, and
+ * copying a profile locale there would outlive the session: after an admin
+ * masquerades as a Spanish-speaking student and stops, or a Spanish-speaking
+ * user signs out of a shared computer, the next user without a profile
+ * locale would be left in Spanish.
+ */
+export function applyUserLocale(user, { i18n, deviceLocale } = {}) {
+  if (!user || !i18n) return null;
+  const locale = pickLocale({
+    userLocale: user.locale,
+    deviceLocale,
+    accountLocale: user?.account?.default_locale || user?.account_default_locale,
+  });
+  if (locale && locale !== i18n.language) {
+    i18n.changeLanguage(locale);
+  }
+  return locale;
+}

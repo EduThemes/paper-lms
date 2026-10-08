@@ -1,7 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import i18n from 'i18next';
 import { api } from '../services/api';
-import { pickLocale } from '../utils/localePreference';
+import { applyUserLocale } from '../utils/localePreference';
 
 const AuthContext = createContext(null);
 
@@ -19,20 +19,7 @@ const readDeviceLocale = () => {
 };
 
 const applyAccountDefaultLocale = (data) => {
-  if (!data) return;
-  const locale = pickLocale({
-    userLocale: data.locale,
-    deviceLocale: readDeviceLocale(),
-    accountLocale: data?.account?.default_locale || data?.account_default_locale,
-  });
-  if (!locale) return;
-  if (data.locale && locale === pickLocale({ userLocale: data.locale })) {
-    // Keep this device in sync with the profile choice.
-    try { localStorage.setItem('paperlms_locale', locale); } catch { /* ignore */ }
-  }
-  if (locale !== i18n.language) {
-    i18n.changeLanguage(locale);
-  }
+  applyUserLocale(data, { i18n, deviceLocale: readDeviceLocale() });
 };
 
 export const AuthProvider = ({ children }) => {
