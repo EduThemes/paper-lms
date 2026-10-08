@@ -117,17 +117,41 @@ func (s *PortfolioService) UserNames(ctx context.Context, ids []uint) map[uint]s
 	return names
 }
 
+// PortfolioUploadURL is the owner/tenant download route of an uploaded
+// artifact file (the public view rewrites it to the slug-scoped route).
+func PortfolioUploadURL(portfolioID, attachmentID uint) string {
+	return fmt.Sprintf("/api/v1/portfolios/%d/files/%d", portfolioID, attachmentID)
+}
+
 // PortfolioHasUpload reports whether an artifact of the portfolio was
-// created by the upload endpoint from the given attachment.
-func (s *PortfolioService) PortfolioHasUpload(ctx context.Context, portfolioID, attachmentID uint) bool {
+// created by the upload endpoint from the given attachment. visibleOnly
+// (public viewers) ignores artifacts in a hidden section, so a hidden
+// section's files cannot be downloaded by guessing their id.
+func (s *PortfolioService) PortfolioHasUpload(ctx context.Context, portfolioID, attachmentID uint, visibleOnly bool) bool {
 	res, err := s.artifactRepo.ListByPortfolioID(ctx, portfolioID, repository.PaginationParams{Page: 1, PerPage: 1000})
 	if err != nil || res == nil {
 		return false
 	}
-	for _, a := range res.Items {
-		if a.SourceType == "upload" && a.SourceID != nil && *a.SourceID == attachmentID {
-			return true
+	hidden := map[uint]bool{}
+	if visibleOnly {
+		sections, err := s.sectionRepo.ListByPortfolioID(ctx, portfolioID)
+		if err != nil {
+			return false
 		}
+		for _, sec := range sections {
+			if !sec.IsVisible {
+				hidden[sec.ID] = true
+			}
+		}
+	}
+	for _, a := range res.Items {
+		if a.SourceType != "upload" || a.SourceID == nil || *a.SourceID != attachmentID {
+			continue
+		}
+		if a.SectionID != nil && hidden[*a.SectionID] {
+			continue
+		}
+		return true
 	}
 	return false
 }
@@ -286,6 +310,11 @@ func (s *PortfolioService) DuplicatePortfolio(ctx context.Context, id, accountID
 			} else {
 				art.SectionID = nil
 			}
+		}
+		// An uploaded file's link names its portfolio; point the copy at the
+		// duplicate so it keeps working once the original is deleted.
+		if art.SourceType == "upload" && art.SourceID != nil {
+			art.ContentURL = PortfolioUploadURL(dup.ID, *art.SourceID)
 		}
 		art.CreatedAt, art.UpdatedAt = time.Time{}, time.Time{}
 		if err := s.artifactRepo.Create(ctx, &art); err != nil {

@@ -386,7 +386,19 @@ func (h *PortfolioHandler) GetPortfolio(c *fiber.Ctx) error {
 	if wrote {
 		return err
 	}
-	return c.JSON(h.portfolioDetailJSON(c, portfolio, false))
+	// A non-owner reading a public portfolio gets the public view: hidden
+	// sections (and their artifacts) stay private, exactly as on
+	// /portfolios/public/:slug.
+	return c.JSON(h.portfolioDetailJSON(c, portfolio, viewsAsPublic(c, portfolio)))
+}
+
+// viewsAsPublic reports whether the caller was let in only because the
+// portfolio is published and public (they are not its owner), so they get
+// the public view of it. Owners always see everything; an admin reading
+// someone else's private portfolio passed RequireOwnerOrAdmin and sees it all.
+func viewsAsPublic(c *fiber.Ctx, p *models.Portfolio) bool {
+	callerID, _ := c.Locals("user_id").(uint)
+	return callerID != p.UserID && isPubliclyVisible(p)
 }
 
 func (h *PortfolioHandler) UpdatePortfolio(c *fiber.Ctx) error {
@@ -845,7 +857,7 @@ func (h *PortfolioHandler) UploadArtifactFile(c *fiber.Ctx) error {
 		Title:         title,
 		Description:   service.SanitizeHTML(c.FormValue("description")),
 		ArtifactType:  artifactType,
-		ContentURL:    fmt.Sprintf("/api/v1/portfolios/%d/files/%d", portfolio.ID, attachment.ID),
+		ContentURL:    service.PortfolioUploadURL(portfolio.ID, attachment.ID),
 		SourceType:    "upload",
 		SourceID:      &attachmentID,
 		FileType:      strings.TrimPrefix(strings.ToLower(filepath.Ext(fileHeader.Filename)), "."),
@@ -866,7 +878,7 @@ func (h *PortfolioHandler) DownloadArtifactFile(c *fiber.Ctx) error {
 	if wrote {
 		return err
 	}
-	return h.streamPortfolioFile(c, portfolio, callerAccountID(c))
+	return h.streamPortfolioFile(c, portfolio, callerAccountID(c), viewsAsPublic(c, portfolio))
 }
 
 // DownloadPublicArtifactFile handles GET /portfolios/public/:slug/files/:file_id
@@ -876,12 +888,16 @@ func (h *PortfolioHandler) DownloadPublicArtifactFile(c *fiber.Ctx) error {
 	if !ok {
 		return responses.NotFound(c, "file")
 	}
-	return h.streamPortfolioFile(c, portfolio, 0)
+	// accountID=0: anonymous route with no tenant Locals. The attachment is
+	// served only when it belongs to this published portfolio's owner and
+	// backs one of its visible artifacts (checked in streamPortfolioFile).
+	return h.streamPortfolioFile(c, portfolio, 0, true)
 }
 
 // streamPortfolioFile serves an attachment only when an artifact of this
-// portfolio was created from it by the upload endpoint.
-func (h *PortfolioHandler) streamPortfolioFile(c *fiber.Ctx, portfolio *models.Portfolio, accountID uint) error {
+// portfolio was created from it by the upload endpoint. visibleOnly (public
+// viewers) also requires that artifact to be outside any hidden section.
+func (h *PortfolioHandler) streamPortfolioFile(c *fiber.Ctx, portfolio *models.Portfolio, accountID uint, visibleOnly bool) error {
 	if h.fileService == nil {
 		return responses.NotFound(c, "file")
 	}
@@ -889,7 +905,7 @@ func (h *PortfolioHandler) streamPortfolioFile(c *fiber.Ctx, portfolio *models.P
 	if err != nil || fileID <= 0 {
 		return responses.BadRequest(c, "Invalid file ID")
 	}
-	if !h.portfolioService.PortfolioHasUpload(c.Context(), portfolio.ID, uint(fileID)) {
+	if !h.portfolioService.PortfolioHasUpload(c.Context(), portfolio.ID, uint(fileID), visibleOnly) {
 		return responses.NotFound(c, "file")
 	}
 	attachment, err := h.fileService.GetAttachment(c.Context(), uint(fileID), accountID)
