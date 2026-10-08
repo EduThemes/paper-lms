@@ -1265,8 +1265,8 @@ export const api = {
     });
     return data;
   },
-  getOutcomeRollups: async (courseId) => {
-    const { data } = await request(`/courses/${courseId}/outcome_rollups`);
+  getOutcomeRollups: async (courseId, page = 1, perPage = 100) => {
+    const { data } = await request(`/courses/${courseId}/outcome_rollups?page=${page}&per_page=${perPage}`);
     return data;
   },
 

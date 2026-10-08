@@ -16,7 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { api } from '../services/api';
-import { rollupResponseToView } from '../utils/outcomeRollups';
+import { fetchAllOutcomeRollups, fetchAllPages, rollupResponseToView } from '../utils/outcomeRollups';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 
@@ -219,11 +219,15 @@ const LearningOutcomesPage = () => {
     if (!showRollup && !rollupData) {
       setRollupLoading(true);
       try {
-        const [result, enrollmentResult] = await Promise.all([
-          api.getOutcomeRollups(courseId),
-          api.getEnrollments(courseId, 1, 200).catch(() => null),
+        // Rollups and enrollments are both paginated: read every page so a
+        // class larger than one page is shown in full, with names.
+        const [result, enrollmentPages] = await Promise.all([
+          fetchAllOutcomeRollups((page, perPage) => api.getOutcomeRollups(courseId, page, perPage)),
+          fetchAllPages((page, perPage) => api.getEnrollments(courseId, page, perPage), (r) => r?.data)
+            .catch(() => []),
         ]);
-        setRollupData(rollupResponseToView(result, enrollmentResult?.data || []));
+        const enrollments = enrollmentPages.flatMap((p) => (Array.isArray(p?.data) ? p.data : []));
+        setRollupData(rollupResponseToView(result, enrollments));
       } catch (err) {
         setError('Could not load outcome rollup: ' + err.message);
       } finally {
