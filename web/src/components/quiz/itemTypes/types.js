@@ -7,6 +7,8 @@ export const LEGACY_TYPES = [
   { value: 'short_answer', label: 'Short Answer' },
   { value: 'essay', label: 'Essay' },
   { value: 'numerical_question', label: 'Numerical' },
+  { value: 'matching', label: 'Matching' },
+  { value: 'fill_in_multiple_blanks', label: 'Fill in Multiple Blanks' },
 ];
 
 export const NEW_TYPES = [
@@ -29,6 +31,8 @@ export const AUTO_GRADED_TYPES = new Set([
   'true_false',
   'short_answer',
   'numerical_question',
+  'matching',
+  'fill_in_multiple_blanks',
   'multiple_answer',
   'multiple_dropdown',
   'fill_in_the_blank',
@@ -77,8 +81,20 @@ export function defaultAnswersForType(type) {
         { id: makeId('a'), text: '', weight: 0 },
       ];
     case 'short_answer':
-    case 'numerical_question':
       return [{ id: makeId('a'), text: '', weight: 100 }];
+    case 'numerical_question':
+      // Canvas numerical shape: exact (with margin), range or precision.
+      return [{ id: makeId('a'), numerical_answer_type: 'exact_answer', exact: '', margin: '', weight: 100 }];
+    case 'matching':
+      // Left → right pairs; right_id names the correct right-hand option.
+      return [
+        { id: makeId('m'), left: '', right: '', right_id: makeId('r'), weight: 100 },
+        { id: makeId('m'), left: '', right: '', right_id: makeId('r'), weight: 100 },
+      ];
+    case 'fill_in_multiple_blanks':
+      // One entry per accepted answer per blank; blanks come from the
+      // [tokens] the author types in the question text.
+      return [];
     case 'multiple_answer':
       return [
         { id: makeId('a'), text: '', weight: 100 },

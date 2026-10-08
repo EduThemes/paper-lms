@@ -2558,13 +2558,6 @@ export const api = {
     return data || [];
   },
 
-  // Item analysis — no dedicated backend endpoint yet. ItemAnalysisPage falls
-  // back to client-side aggregation over submissions; returning null here makes
-  // the fallback path engage cleanly without a 404 round-trip.
-  getQuizItemAnalysis: async (_courseId, _quizId) => {
-    return null;
-  },
-
   // Module Prerequisites
   getModulePrerequisites: async (courseId, moduleId) => {
     const { data } = await request(`/courses/${courseId}/modules/${moduleId}/prerequisites`);

@@ -38,6 +38,13 @@ type Quiz struct {
 	// OneTimeResults: a student sees an attempt's results once, then they
 	// are hidden (Canvas one_time_results).
 	OneTimeResults bool `json:"one_time_results" gorm:"not null;default:false"`
+
+	// Quiz-items lane (migration 000103): Canvas access code (sealed with
+	// secretbox — never serialized), IP filter (comma-separated IPs /
+	// CIDRs) and anonymous survey submissions.
+	AccessCodeEncrypted  []byte `json:"-" gorm:"column:access_code_encrypted"`
+	IPFilter             string `json:"ip_filter" gorm:"column:ip_filter;type:text"`
+	AnonymousSubmissions bool   `json:"anonymous_submissions" gorm:"column:anonymous_submissions;not null;default:false"`
 }
 
 // Quiz types (Canvas quiz_type).

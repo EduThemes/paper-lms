@@ -7,11 +7,14 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
 
 type QuizStatisticsHandler struct {
-	quizService *service.QuizService
+	quizService  *service.QuizService
+	userRepo     repository.UserRepository // student-analysis CSV names (quiz_item_analysis.go)
+	auditService *service.AuditService
 }
 
 func NewQuizStatisticsHandler(quizService *service.QuizService) *QuizStatisticsHandler {

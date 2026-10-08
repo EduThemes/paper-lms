@@ -30,6 +30,11 @@ type QuizSubmission struct {
 	// results; with one_time_results the results close a short while
 	// after that first view.
 	ResultsSeenAt *time.Time `json:"results_seen_at"`
+
+	// ReadQuestions is a JSON array of question ids the student has moved
+	// past on a one-question-at-a-time + can't-go-back quiz (migration
+	// 000103). Answers to these questions are refused.
+	ReadQuestions string `json:"-" gorm:"column:read_questions;type:text"`
 }
 
 // Quiz submission workflow states.

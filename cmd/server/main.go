@@ -57,6 +57,7 @@ func main() {
 		}
 		log.Printf("warning: encryption keys unavailable (%v) — MFA, OIDC client secrets, and passkeys will fail; set MFA_ENCRYPTION_KEY before exercising those flows", err)
 	}
+	service.SetQuizSecretSealer(auth.Encrypt) // imported quiz access codes
 
 	// Configure structured logging
 	logLevel := slog.LevelInfo
@@ -924,6 +925,8 @@ func main() {
 	questionBankHandler := handlers.NewQuestionBankHandler(questionBankService)
 	quizQuestionGroupHandler := handlers.NewQuizQuestionGroupHandler(quizService)
 	quizStatisticsHandler := handlers.NewQuizStatisticsHandler(quizService)
+	quizStatisticsHandler.SetUserRepo(userRepo)
+	quizStatisticsHandler.SetAuditService(auditService)
 	setupHandler := handlers.NewSetupHandler(userService, accountRepo, userRepo, database, cfg.JWTSecret, cfg.Environment, cfg.SetupBootstrapToken)
 
 	// Super-Admin Settings Engine handler. settingsService is

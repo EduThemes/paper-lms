@@ -18,7 +18,7 @@ describe('QuizzesSubNav', () => {
   it('renders the three core tabs', () => {
     renderAt('/courses/1/quizzes');
     expect(screen.getByText('Quizzes')).toBeInTheDocument();
-    expect(screen.getByText('Item Banks')).toBeInTheDocument();
+    expect(screen.getByText('Question Banks')).toBeInTheDocument();
     expect(screen.getByText('Stimuli')).toBeInTheDocument();
     expect(screen.queryByText('Item Analysis')).toBeNull();
   });
@@ -37,8 +37,9 @@ describe('QuizzesSubNav', () => {
   });
 
   it('highlights the active tab based on the current pathname', () => {
-    renderAt('/courses/1/item-banks');
-    const link = screen.getByText('Item Banks').closest('a');
+    renderAt('/courses/1/question_banks');
+    const link = screen.getByText('Question Banks').closest('a');
+    expect(link.getAttribute('href')).toBe('/courses/1/question_banks');
     expect(link.className).toMatch(/border-brand-600/);
   });
 });

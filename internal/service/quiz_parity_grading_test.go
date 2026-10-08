@@ -117,13 +117,15 @@ func TestParityGrading(t *testing.T) {
 			note:         "pre-fix a blank answer matched the blank key",
 		},
 		{
-			name:         "formula_variable_mode_without_value_needs_review",
+			// G051: variable formulas are now graded against the
+			// attempt's own generated values; a blank answer scores 0.
+			name:         "formula_variable_mode_blank_scores_zero",
 			questionType: "formula",
 			points:       2.0,
 			answersJSON:  `[{"id":"f","text":"","weight":100,"formula":"x*2","variables":[{"name":"x","min":1,"max":5,"precision":0}],"tolerance":0,"answer_value":""}]`,
 			submitted:    "",
 			wantScore:    0.0,
-			wantWorkflow: "pending_review",
+			wantWorkflow: "complete",
 		},
 		// ---- B029: added short-answer alternatives (weight 0) match ----
 		{

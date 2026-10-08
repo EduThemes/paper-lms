@@ -858,6 +858,7 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerP3FeatureRoutes(protected, admin, enrolled, instructor)
 	r.registerQuizExtensionRoutes(protected, enrolled, instructor)
 	r.registerQuizEngineRoutes(protected, enrolled, instructor)
+	r.registerQuizItemsRoutes(protected, enrolled, instructor)
 	r.registerGamificationRoutes(protected, admin, instructor, selfOrAdmin)
 	r.registerSuperAdminRoutes(protected)
 	r.registerRCEMediaRoutes(protected)

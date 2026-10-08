@@ -24,6 +24,10 @@ import HotSpotEditor from '../components/quiz/itemTypes/HotSpotEditor';
 import TextOnlyEditor from '../components/quiz/itemTypes/TextOnlyEditor';
 import QuizLifecycleSettings from '../components/quiz/QuizLifecycleSettings';
 import { quizSettingsFromQuiz, quizSettingsPayload, validateQuizSettings } from '../components/quiz/quizLifecycle';
+import MatchingEditor from '../components/quiz/itemTypes/MatchingEditor';
+import FillInMultipleBlanksEditor from '../components/quiz/itemTypes/FillInMultipleBlanksEditor';
+import NumericalEditor from '../components/quiz/itemTypes/NumericalEditor';
+import QuizDeliverySettings from '../components/quiz/QuizDeliverySettings';
 
 const emptyAnswer = () => ({
   id: `a${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -304,19 +308,15 @@ const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId,
             </div>
           )}
 
-          {/* Numerical */}
+          {/* Numerical: exact (± margin), range or precision answers */}
           {qType === 'numerical_question' && (
-            <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">Expected Answer</label>
-              <input
-                type="number"
-                step="any"
-                value={answers[0]?.text || ''}
-                onChange={(e) => updateAnswers([{ ...emptyAnswer(), text: e.target.value, weight: 100 }])}
-                className="w-full border border-border-strong rounded px-3 py-2 text-sm"
-                placeholder="Enter the expected numeric answer..."
-              />
-            </div>
+            <NumericalEditor answers={answers} onChange={updateAnswers} />
+          )}
+          {qType === 'matching' && (
+            <MatchingEditor answers={answers} onChange={updateAnswers} />
+          )}
+          {qType === 'fill_in_multiple_blanks' && (
+            <FillInMultipleBlanksEditor answers={answers} onChange={updateAnswers} questionText={question.question_text} />
           )}
 
           {/* Essay - no answers needed */}
@@ -339,7 +339,7 @@ const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId,
             <FillInBlankEditor answers={answers} onChange={updateAnswers} />
           )}
           {qType === 'formula' && (
-            <FormulaEditor answers={answers} onChange={updateAnswers} />
+            <FormulaEditor answers={answers} onChange={updateAnswers} courseId={courseId} quizId={quizId} />
           )}
           {qType === 'file_upload' && <FileUploadEditor />}
           {qType === 'ordering' && (
@@ -764,6 +764,8 @@ const QuizEditorPage = () => {
         </div>
       </section>
 
+      <QuizDeliverySettings courseId={courseId} quizId={quizId} quiz={quiz} onSaved={(u) => u && setQuiz(u)} />
+
       {/* Question Groups */}
       <section className="bg-surface-0 rounded-lg shadow p-6 mb-6">
         <div className="flex items-center justify-between mb-4">
@@ -892,7 +894,7 @@ const QuizEditorPage = () => {
                 >
                   <option value="">No bank</option>
                   {questionBanks.map(b => (
-                    <option key={b.id} value={b.id}>{b.title}</option>
+                    <option key={b.id} value={b.id}>{b.title}{b.owned === false ? ' (shared)' : ''}</option>
                   ))}
                 </select>
               </div>

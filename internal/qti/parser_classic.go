@@ -79,6 +79,9 @@ type classicItem struct {
 	// linkage. Canvas always emits exactly one.
 	RespProcessing classicRespProcessing `xml:"resprocessing"`
 	Feedback       []classicFeedback     `xml:"itemfeedback"`
+	// Calculated holds a calculated_question's formula, variables and
+	// answer sets (see calculated.go).
+	Calculated *classicCalculated `xml:"itemproc_extension>calculated"`
 }
 
 type classicItemMeta struct {
@@ -369,7 +372,12 @@ func buildClassicAnswers(unifiedType string, item classicItem, points float64) (
 		return buildNumericalAnswers(item)
 
 	case UnifiedFormula:
-		// gradeFormula re-uses the numerical grader. Same shape.
+		// Canvas calculated questions carry their key in
+		// itemproc_extension (formula, variables, answer sets); Paper's
+		// own exporter writes a plain numerical key instead.
+		if answers, ok := buildFormulaAnswers(item); ok {
+			return answers, nil, nil
+		}
 		return buildNumericalAnswers(item)
 
 	case UnifiedEssay, UnifiedFileUpload, UnifiedTextOnly:

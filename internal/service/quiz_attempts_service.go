@@ -158,7 +158,7 @@ func (s *QuizService) generateSelectedQuestions(ctx context.Context, quizID uint
 					quizLoaded = true
 				}
 				bank, bErr := s.questionBankRepo.FindByID(ctx, *group.QuestionBankID)
-				bankOK = bErr == nil && bank != nil && bank.CourseID == quizCourseID && bank.WorkflowState != "deleted"
+				bankOK = bErr == nil && bankUsableInCourse(ctx, s.questionBankRepo, bank, quizCourseID)
 			}
 			if bankOK {
 				if entries, err := s.bankEntryRepo.ListByBankID(ctx, *group.QuestionBankID); err == nil {
@@ -244,6 +244,9 @@ func (s *QuizService) materializeBankEntry(ctx context.Context, quizID uint, gro
 		QuestionText:        entry.QuestionText,
 		PointsPossible:      &pts,
 		Answers:             entry.Answers,
+		CorrectComments:     entry.CorrectComments,
+		IncorrectComments:   entry.IncorrectComments,
+		NeutralComments:     entry.NeutralComments,
 		WorkflowState:       "active",
 	}
 	if q.QuestionText == "" {
@@ -464,6 +467,10 @@ func (s *QuizService) FileUploadQuestionForSubmission(ctx context.Context, submi
 		NormalizeQuizQuestionType(question.QuestionType) != "file_upload" {
 		return nil, ErrQuestionNotInSubmission
 	}
+	// Can't go back: a question the student moved past takes no new file.
+	if err := s.ensureQuestionNotLocked(ctx, submission, questionID); err != nil {
+		return nil, err
+	}
 	return question, nil
 }
 
@@ -528,6 +535,9 @@ func (s *QuizService) AnswerQuestion(ctx context.Context, submissionID, question
 	selected, hasSelected := selectedQuestionSet(submission)
 	if !questionBelongsToSubmission(submission, question, selected, hasSelected) {
 		return nil, ErrQuestionNotInSubmission
+	}
+	if err := s.ensureQuestionNotLocked(ctx, submission, questionID); err != nil {
+		return nil, err
 	}
 
 	// Attempt to find an existing answer for this question in this submission
@@ -638,6 +648,7 @@ func (s *QuizService) finalizeAttempt(ctx context.Context, submission *models.Qu
 	selected, hasSelected := selectedQuestionSet(submission)
 	groupCache := map[uint]*models.QuizQuestionGroup{}
 	seenQuestion := map[uint]bool{}
+	scored := make([]int, 0, len(answers))
 
 	for i := range answers {
 		question, qErr := s.questionRepo.FindByID(ctx, answers[i].QuestionID)
@@ -653,7 +664,7 @@ func (s *QuizService) finalizeAttempt(ctx context.Context, submission *models.Qu
 		seenQuestion[question.ID] = true
 
 		pointsPossible := s.effectiveQuestionPoints(ctx, question, groupCache)
-		points, correct, gradable := s.autoGradeWithPoints(question, answers[i].Answer, pointsPossible)
+		points, correct, gradable := s.gradeAnswerForSubmission(submission.ID, question, answers[i].Answer, pointsPossible)
 
 		if gradable {
 			answers[i].Correct = &correct
@@ -671,27 +682,33 @@ func (s *QuizService) finalizeAttempt(ctx context.Context, submission *models.Qu
 			zero := 0.0
 			answers[i].Points = &zero
 		}
-
-		_ = s.answerRepo.Update(ctx, &answers[i])
+		scored = append(scored, i)
 	}
 
-	// The quiz is needed for the lifecycle steps (graded-survey scoring,
-	// kept score, gradebook). Loaded only when the lifecycle is wired.
+	// The quiz drives survey semantics and, when the lifecycle is wired,
+	// the kept score and gradebook push. accountID 0: the submission's own
+	// quiz (tenant-checked by the handler).
 	var quiz *models.Quiz
-	if s.lifecycle != nil {
-		if q, qErr := s.quizRepo.FindByID(ctx, submission.QuizID, 0); qErr == nil {
-			quiz = q
+	if q, qErr := s.quizRepo.FindByID(ctx, submission.QuizID, 0); qErr == nil {
+		quiz = q
+	}
+
+	// Surveys have no right answers (G058): no correct/incorrect flags, a
+	// graded survey earns its full points, an ungraded one zero, and Canvas
+	// never holds a survey attempt for review (its essay answers are
+	// responses, not work to grade).
+	if quiz != nil && QuizIsSurvey(quiz) {
+		surveyAnswers := make([]models.QuizSubmissionAnswer, len(scored))
+		for k, i := range scored {
+			surveyAnswers[k] = answers[i]
+		}
+		applySurveySemantics(quiz, surveyAnswers, &totalScore, &needsReview)
+		for k, i := range scored {
+			answers[i] = surveyAnswers[k]
 		}
 	}
-	// Canvas: a graded survey always earns its full points.
-	if quiz != nil && quiz.QuizType == models.QuizTypeGradedSurvey && quiz.PointsPossible != nil {
-		totalScore = *quiz.PointsPossible
-	}
-	// Canvas never holds a survey attempt for review: its essay answers
-	// are responses, not work to grade (else a graded survey would sit in
-	// the gradebook as "needs grading" for good).
-	if quiz.IsSurvey() {
-		needsReview = false
+	for _, i := range scored {
+		_ = s.answerRepo.Update(ctx, &answers[i])
 	}
 
 	submission.FinishedAt = &finishAt
@@ -732,7 +749,7 @@ func (s *QuizService) finalizeAttempt(ctx context.Context, submission *models.Qu
 	})
 	// G041 / G044: apply the scoring policy across attempts and push the
 	// kept score to the quiz's gradebook assignment.
-	if quiz != nil {
+	if quiz != nil && s.lifecycle != nil {
 		s.refreshKeptScore(ctx, quiz, submission.UserID, 0)
 	}
 

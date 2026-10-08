@@ -29,7 +29,7 @@ func (h *QuizHandler) SetQuizService(svc *service.QuizService) *QuizHandler {
 }
 
 func quizToJSON(q *models.Quiz) fiber.Map {
-	return fiber.Map{
+	m := fiber.Map{
 		"id":               q.ID,
 		"course_id":        q.CourseID,
 		"title":            q.Title,
@@ -55,6 +55,7 @@ func quizToJSON(q *models.Quiz) fiber.Map {
 		"hide_results":                      q.HideResults,
 		"one_time_results":                  q.OneTimeResults,
 	}
+	return addQuizDeliveryJSON(m, q)
 }
 
 func scoringPolicyOrDefault(p string) string {
@@ -64,12 +65,16 @@ func scoringPolicyOrDefault(p string) string {
 	return p
 }
 
-// quizToViewerJSON adds the gradebook assignment's group for staff.
+// quizToViewerJSON serializes a quiz for the caller: staff additionally
+// see the gradebook assignment's group, the access code and the IP filter.
 func (h *QuizHandler) quizToViewerJSON(c *fiber.Ctx, q *models.Quiz) fiber.Map {
 	m := quizToJSON(q)
-	if h.quizService != nil && quizCallerIsStaff(c) {
-		if a := h.quizService.LinkedAssignment(c.Context(), q); a != nil {
-			m["assignment_group_id"] = a.AssignmentGroupID
+	if quizCallerIsStaff(c) {
+		addQuizStaffDeliveryJSON(m, q)
+		if h.quizService != nil {
+			if a := h.quizService.LinkedAssignment(c.Context(), q); a != nil {
+				m["assignment_group_id"] = a.AssignmentGroupID
+			}
 		}
 	}
 	return m
@@ -185,6 +190,9 @@ func (h *QuizHandler) CreateQuiz(c *fiber.Ctx) error {
 	if msg := input.Quiz.quizLifecycleInput.apply(quiz); msg != "" {
 		return responses.BadRequest(c, msg)
 	}
+	if applyQuizDeliveryInput(c, quiz) {
+		return nil
+	}
 	opts, wrote := h.assignmentOptions(c, input.Quiz.AssignmentGroupID, uint(courseID))
 	if wrote {
 		return nil
@@ -298,6 +306,9 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 	// Applied after the dates so the window checks see the new values.
 	if msg := input.Quiz.quizLifecycleInput.apply(quiz); msg != "" {
 		return responses.BadRequest(c, msg)
+	}
+	if applyQuizDeliveryInput(c, quiz) {
+		return nil
 	}
 	opts, wrote := h.assignmentOptions(c, input.Quiz.AssignmentGroupID, uint(courseID))
 	if wrote {
