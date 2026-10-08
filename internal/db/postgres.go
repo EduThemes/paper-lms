@@ -122,6 +122,8 @@ func allAutoMigrateModels() []interface{} {
 		&models.AssignmentOverride{},
 		&models.AssignmentOverrideStudent{},
 		&models.LatePolicy{},
+		&models.SubmissionVersion{},
+		&models.CourseScoreOverride{},
 		// Calendar, Messaging, Notifications
 		&models.CalendarEvent{},
 		&models.Conversation{},

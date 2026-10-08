@@ -19,6 +19,17 @@ type Course struct {
 	IsPublic          bool           `json:"is_public" gorm:"default:false"`
 	ApplyGroupWeights bool           `json:"apply_assignment_group_weights" gorm:"default:false"`
 	NavigationTabs    string         `json:"navigation_tabs" gorm:"type:text"`
+	// PostManually is the course default post policy: new assignments
+	// start with a manual post policy when it is set (Canvas course
+	// post_policy.post_manually).
+	PostManually bool `json:"post_manually" gorm:"default:false"`
+	// GradingStandardID selects the course grading scheme (a course- or
+	// account-owned grading_standards row). Nil falls back to the newest
+	// course scheme, then the default scale.
+	GradingStandardID *uint `json:"grading_standard_id"`
+	// GradingStandardDisabled turns letter grades off for course totals
+	// (Canvas "Enable course grading scheme" unchecked).
+	GradingStandardDisabled bool `json:"grading_standard_disabled" gorm:"default:false"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
 }

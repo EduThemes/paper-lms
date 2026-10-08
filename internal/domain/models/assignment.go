@@ -22,6 +22,12 @@ type Assignment struct {
 	PeerReviewsEnabled bool               `json:"peer_reviews_enabled" gorm:"default:false"`
 	PeerReviewCount    int                `json:"peer_review_count" gorm:"default:0"`
 	GroupCategoryID    *uint              `json:"group_category_id" gorm:"index"`
+	// OnlyVisibleToOverrides limits the assignment to the students and
+	// sections that have an override ("Assign to" without Everyone).
+	OnlyVisibleToOverrides bool `json:"only_visible_to_overrides" gorm:"default:false"`
+	// GradingStandardID is the per-assignment scheme for letter_grade /
+	// gpa_scale assignments; nil uses the course scheme.
+	GradingStandardID *uint `json:"grading_standard_id"`
 	CreatedAt          time.Time          `json:"created_at"`
 	UpdatedAt          time.Time          `json:"updated_at"`
 }
