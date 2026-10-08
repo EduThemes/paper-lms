@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -41,6 +42,21 @@ type UserHandler struct {
 
 func NewUserHandler(userService *service.UserService, jwtSecret string, environment string, tokenBlacklist *service.TokenBlacklist, auditService *service.AuditService, loginPipeline *auth.LoginPipeline) *UserHandler {
 	return &UserHandler{userService: userService, jwtSecret: jwtSecret, environment: environment, tokenBlacklist: tokenBlacklist, auditService: auditService, loginPipeline: loginPipeline}
+}
+
+// accountDefaultLocale is the tenant's default_locale, sent with the user
+// payloads so the client can fall back to it when the user has no saved
+// language and the device has no explicit choice (pickLocale). Empty when
+// the account repository is not wired or the lookup fails.
+func (h *UserHandler) accountDefaultLocale(ctx context.Context, accountID uint) string {
+	if h.accountRepo == nil || accountID == 0 {
+		return ""
+	}
+	acct, err := h.accountRepo.FindByID(ctx, accountID)
+	if err != nil || acct == nil {
+		return ""
+	}
+	return acct.DefaultLocale
 }
 
 // WithCOPPADeps wires the Phase 13.4 signup gate. Optional builder
@@ -159,6 +175,7 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 				"locale":        result.User.Locale,
 				"role":          result.User.Role,
 				"account_id":    result.User.AccountID,
+				"account_default_locale": h.accountDefaultLocale(c.Context(), result.User.AccountID),
 			},
 		}
 		if result.MustEnroll {
@@ -188,6 +205,7 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 			"locale":        user.Locale,
 			"role":          user.Role,
 			"account_id":    user.AccountID,
+			"account_default_locale": h.accountDefaultLocale(c.Context(), user.AccountID),
 		},
 	})
 }
@@ -280,6 +298,7 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 			"locale":        user.Locale,
 			"role":          user.Role,
 			"account_id":    user.AccountID,
+			"account_default_locale": h.accountDefaultLocale(c.Context(), user.AccountID),
 		},
 	})
 }
@@ -375,6 +394,7 @@ func (h *UserHandler) SetPassword(c *fiber.Ctx) error {
 			"locale":        user.Locale,
 			"role":          user.Role,
 			"account_id":    user.AccountID,
+			"account_default_locale": h.accountDefaultLocale(c.Context(), user.AccountID),
 		},
 	})
 }
@@ -692,6 +712,7 @@ func (h *UserHandler) GetSelf(c *fiber.Ctx) error {
 		"time_zone":     user.TimeZone,
 		"role":          user.Role,
 		"account_id":    user.AccountID,
+		"account_default_locale": h.accountDefaultLocale(c.Context(), user.AccountID),
 	}
 
 	// If masquerading, include masquerade info so the frontend can show the banner
@@ -813,6 +834,7 @@ func (h *UserHandler) StartMasquerade(c *fiber.Ctx) error {
 			"locale":        targetUser.Locale,
 			"role":          targetUser.Role,
 			"account_id":    targetUser.AccountID,
+			"account_default_locale": h.accountDefaultLocale(c.Context(), targetUser.AccountID),
 		},
 	})
 }
@@ -886,6 +908,7 @@ func (h *UserHandler) EndMasquerade(c *fiber.Ctx) error {
 			"locale":        adminUser.Locale,
 			"role":          adminUser.Role,
 			"account_id":    adminUser.AccountID,
+			"account_default_locale": h.accountDefaultLocale(c.Context(), adminUser.AccountID),
 		},
 	})
 }

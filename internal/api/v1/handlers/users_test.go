@@ -381,3 +381,29 @@ func TestListUsers(t *testing.T) {
 
 	mockRepo.AssertExpectations(t)
 }
+
+// F16 follow-up: the user payload carries the tenant's default_locale, so
+// a user with no saved language (and no device choice) gets the account
+// default instead of whatever the browser detected.
+func TestGetSelf_IncludesAccountDefaultLocale(t *testing.T) {
+	mockRepo := new(mocks.MockUserRepository)
+	accounts := new(mocks.MockAccountRepository)
+	handler := handlers.NewUserHandler(service.NewUserService(mockRepo), "test-jwt-secret", "test", nil, nil, nil).
+		WithCOPPADeps(accounts, nil, nil, nil)
+	app := testutil.SetupTestApp()
+	app.Get("/users/self", func(c *fiber.Ctx) error {
+		c.Locals("user_id", uint(1))
+		c.Locals("account_id", uint(3))
+		return c.Next()
+	}, handler.GetSelf)
+
+	mockRepo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(&models.User{ID: 1, AccountID: 3, Name: "Jane Doe"}, nil)
+	accounts.On("FindByID", mock.Anything, uint(3)).Return(&models.Account{ID: 3, DefaultLocale: "es"}, nil)
+
+	resp := testutil.MakeRequest(app, http.MethodGet, "/users/self", nil)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	result, err := testutil.ParseJSONMap(resp)
+	assert.NoError(t, err)
+	assert.Equal(t, "es", result["account_default_locale"])
+	assert.Equal(t, "", result["locale"])
+}
