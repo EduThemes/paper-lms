@@ -16,6 +16,7 @@ import (
 	"net/textproto"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/assert"
@@ -302,4 +303,35 @@ func TestMediaObjects_InvalidCaptionsAreRejected(t *testing.T) {
 func jsonString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// A long non-Latin title is cut to 255 bytes on a character boundary. A cut
+// in the middle of a multi-byte character is invalid UTF-8, which Postgres
+// refuses, so the upload (and rename, and caption label) failed with a 500.
+func TestMediaObjects_LongMultibyteTitleIsTruncatedSafely(t *testing.T) {
+	f := newMediaFixture(t)
+	// One ASCII byte plus 120 three-byte characters: the 255-byte cut falls
+	// in the middle of a character.
+	title := "a" + strings.Repeat("光合作用", 30)
+	resp := f.upload(t, f.teacher, "lesson.mp4", "video/mp4", fakeMP4(), map[string]string{"title": title})
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	created := decodeMap(t, resp)
+	got := created["title"].(string)
+	assert.True(t, utf8.ValidString(got), "title must stay valid UTF-8")
+	assert.LessOrEqual(t, len(got), 255)
+	assert.True(t, strings.HasPrefix(title, got))
+
+	mediaID := created["media_id"].(string)
+	resp = f.do(t, f.teacher, http.MethodPut, "/media_objects/"+mediaID, strings.NewReader(`{"title":`+jsonString("b"+title)+`}`), "application/json")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.True(t, utf8.ValidString(decodeMap(t, resp)["title"].(string)))
+
+	// Caption labels are capped at 100 bytes the same way (that cut also
+	// falls mid-character).
+	resp = f.do(t, f.teacher, http.MethodPost, "/media_objects/"+mediaID+"/media_tracks", strings.NewReader(
+		`{"locale":"zh","label":`+jsonString("b"+title)+`,"content":"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nhi\n"}`), "application/json")
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	label := decodeMap(t, resp)["label"].(string)
+	assert.True(t, utf8.ValidString(label))
+	assert.LessOrEqual(t, len(label), 100)
 }

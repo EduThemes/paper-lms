@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -129,6 +130,20 @@ func resolveMediaType(claimed string, head []byte) (string, error) {
 	return "", ErrMediaUnsupported
 }
 
+// truncateUTF8 cuts s to at most maxBytes bytes without splitting a
+// multi-byte character: a byte slice that ends mid-rune is invalid UTF-8,
+// which Postgres refuses, so a long non-Latin title failed the upload.
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	i := maxBytes
+	for i > 0 && !utf8.RuneStart(s[i]) {
+		i--
+	}
+	return s[:i]
+}
+
 func newMediaID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -156,9 +171,7 @@ func (s *MediaService) Upload(ctx context.Context, in UploadMediaInput) (*models
 	if title == "" {
 		title = base
 	}
-	if len(title) > 255 {
-		title = title[:255]
-	}
+	title = truncateUTF8(title, 255)
 
 	attachment := &models.Attachment{
 		ContextType: "User",
@@ -219,9 +232,7 @@ func (s *MediaService) Rename(ctx context.Context, mo *models.MediaObject, title
 	if title == "" {
 		return nil
 	}
-	if len(title) > 255 {
-		title = title[:255]
-	}
+	title = truncateUTF8(title, 255)
 	mo.Title = title
 	return s.media.Update(ctx, mo)
 }
@@ -285,9 +296,7 @@ func (s *MediaService) SaveTrack(ctx context.Context, mo *models.MediaObject, us
 	if label == "" {
 		label = locale
 	}
-	if len(label) > 100 {
-		label = label[:100]
-	}
+	label = truncateUTF8(label, 100)
 	t := &models.MediaTrack{
 		MediaObjectID: mo.ID,
 		AccountID:     mo.AccountID,
