@@ -52,6 +52,7 @@ const BlueprintPage = () => {
   // Migrations state
   const [migrations, setMigrations] = useState([]);
   const [syncComment, setSyncComment] = useState('');
+  const [syncSettings, setSyncSettings] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
   // General state
@@ -225,6 +226,7 @@ const BlueprintPage = () => {
           body: JSON.stringify({
             comment: syncComment,
             send_notification: false,
+            copy_settings: syncSettings,
           }),
         }
       );
@@ -605,6 +607,15 @@ const BlueprintPage = () => {
                   placeholder="Describe the changes being synced..."
                   className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                 />
+                <label className="mt-2 inline-flex items-center gap-2 text-sm text-text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={syncSettings}
+                    onChange={(e) => setSyncSettings(e.target.checked)}
+                    className="h-4 w-4 rounded border-border-strong text-brand-600 focus:ring-brand-500"
+                  />
+                  Include course settings
+                </label>
               </div>
               <button
                 type="submit"
