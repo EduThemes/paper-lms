@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -46,6 +47,37 @@ func (r *discussionTopicRepo) ListByCourseID(ctx context.Context, courseID, acco
 	var count int64
 
 	query := r.db.WithContext(ctx).Model(&models.DiscussionTopic{}).Where("course_id = ? AND workflow_state != ?", courseID, "deleted")
+	if accountID != 0 {
+		query = query.Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID)
+	}
+	query.Count(&count)
+
+	offset := (params.Page - 1) * params.PerPage
+	if err := query.Offset(offset).Limit(params.PerPage).Order("pinned DESC, created_at DESC").Find(&topics).Error; err != nil {
+		return nil, err
+	}
+
+	return &repository.PaginatedResult[models.DiscussionTopic]{
+		Items:      topics,
+		TotalCount: count,
+		Page:       params.Page,
+		PerPage:    params.PerPage,
+	}, nil
+}
+
+// ListStudentVisibleByCourseID is ListByCourseID restricted to the topics
+// a student may open (service.DiscussionTopicVisibleToStudents):
+// unpublished topics are left out, and so is any topic whose
+// delayed_post_at is still in the future; a post_delayed topic shows once
+// its delayed_post_at has passed.
+func (r *discussionTopicRepo) ListStudentVisibleByCourseID(ctx context.Context, courseID, accountID uint, now time.Time, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionTopic], error) {
+	var topics []models.DiscussionTopic
+	var count int64
+
+	query := r.db.WithContext(ctx).Model(&models.DiscussionTopic{}).
+		Where("course_id = ? AND workflow_state NOT IN ?", courseID, []string{"deleted", "unpublished"}).
+		Where("(workflow_state <> ? OR delayed_post_at IS NOT NULL)", "post_delayed").
+		Where("(delayed_post_at IS NULL OR delayed_post_at <= ?)", now)
 	if accountID != 0 {
 		query = query.Where("course_id IN (SELECT id FROM courses WHERE account_id = ?)", accountID)
 	}

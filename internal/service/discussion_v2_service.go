@@ -28,6 +28,7 @@ type EntryViewV2 struct {
 	Message           string        `json:"message"`
 	RatingCount       int           `json:"rating_count"`
 	RatingSum         int           `json:"rating_sum"`
+	Rating            int           `json:"rating"`     // the viewer's own rating: 1 = liked, 0 = not
 	ReadState         bool          `json:"read_state"` // true = read
 	EditedAt          *time.Time    `json:"edited_at"`
 	VersionCount      int           `json:"version_count"`
@@ -41,16 +42,24 @@ type EntryViewV2 struct {
 type DiscussionFullViewV2 struct {
 	Topic   *models.DiscussionTopic `json:"topic"`
 	Entries []EntryViewV2           `json:"entries"`
+	// Subscribed is the viewer's subscription state for the topic.
+	Subscribed bool `json:"subscribed"`
 }
 
 // v2RatingRepoWithSum extends the base interface with aggregation support.
 type v2RatingRepoWithSum interface {
 	repository.DiscussionEntryRatingRepository
 	SumByEntryID(ctx context.Context, entryID uint) (count int64, sum int64, err error)
+	ListUserRatingsByTopic(ctx context.Context, topicID, userID uint) (map[uint]int, error)
 }
 
 // DiscussionV2Service provides enhanced discussion functionality including
 // read/unread tracking, user profile resolution, mentions, and edit history.
+//
+// Every method that takes a topic or entry id expects the caller (the
+// handler) to have resolved that resource with the caller's tenant and
+// course scope first (see handlers.requireTopicInCourse /
+// requireEntryInTopic).
 type DiscussionV2Service struct {
 	topicRepo            repository.DiscussionTopicRepository
 	entryRepo            repository.DiscussionEntryRepository
@@ -81,106 +90,29 @@ func NewDiscussionV2Service(
 	}
 }
 
-// --- Existing methods (delegating to same repos as DiscussionService) ---
-
-func (s *DiscussionV2Service) CreateTopic(ctx context.Context, topic *models.DiscussionTopic) error {
-	if topic.Title == "" {
-		return errors.New("discussion topic title is required")
-	}
-	if topic.WorkflowState == "" {
-		topic.WorkflowState = "active"
-	}
-	if topic.DiscussionType == "" {
-		topic.DiscussionType = "side_comment"
-	}
-	return s.topicRepo.Create(ctx, topic)
+// GetTopic loads a topic scoped to accountID (topic → course → account).
+// Handler-layer callers MUST pass callerAccountID(c).
+func (s *DiscussionV2Service) GetTopic(ctx context.Context, id, accountID uint) (*models.DiscussionTopic, error) {
+	return s.topicRepo.FindByID(ctx, id, accountID)
 }
 
-func (s *DiscussionV2Service) GetTopic(ctx context.Context, id uint) (*models.DiscussionTopic, error) {
-	return s.topicRepo.FindByID(ctx, id, 0)
+// GetEntry loads an entry scoped to accountID (entry → topic → course →
+// account). Handler-layer callers MUST pass callerAccountID(c).
+func (s *DiscussionV2Service) GetEntry(ctx context.Context, id, accountID uint) (*models.DiscussionEntry, error) {
+	return s.entryRepo.FindByID(ctx, id, accountID)
 }
-
-func (s *DiscussionV2Service) UpdateTopic(ctx context.Context, topic *models.DiscussionTopic) error {
-	return s.topicRepo.Update(ctx, topic)
-}
-
-func (s *DiscussionV2Service) DeleteTopic(ctx context.Context, id uint) error {
-	return s.topicRepo.Delete(ctx, id)
-}
-
-func (s *DiscussionV2Service) ListTopics(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionTopic], error) {
-	return s.topicRepo.ListByCourseID(ctx, courseID, 0, params)
-}
-
-func (s *DiscussionV2Service) CreateEntry(ctx context.Context, entry *models.DiscussionEntry) error {
-	if entry.Message == "" {
-		return errors.New("discussion entry message is required")
-	}
-	if entry.WorkflowState == "" {
-		entry.WorkflowState = "active"
-	}
-	return s.entryRepo.Create(ctx, entry)
-}
-
-func (s *DiscussionV2Service) GetEntry(ctx context.Context, id uint) (*models.DiscussionEntry, error) {
-	return s.entryRepo.FindByID(ctx, id, 0)
-}
-
-func (s *DiscussionV2Service) UpdateEntry(ctx context.Context, entry *models.DiscussionEntry) error {
-	return s.entryRepo.Update(ctx, entry)
-}
-
-func (s *DiscussionV2Service) DeleteEntry(ctx context.Context, id uint) error {
-	return s.entryRepo.Delete(ctx, id)
-}
-
-func (s *DiscussionV2Service) ListEntries(ctx context.Context, topicID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionEntry], error) {
-	return s.entryRepo.ListByTopicID(ctx, topicID, 0, params)
-}
-
-func (s *DiscussionV2Service) ListReplies(ctx context.Context, entryID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionEntry], error) {
-	return s.entryRepo.ListReplies(ctx, entryID, 0, params)
-}
-
-func (s *DiscussionV2Service) RateEntry(ctx context.Context, entryID uint, userID uint, rating int) error {
-	r := &models.DiscussionEntryRating{
-		DiscussionEntryID: entryID,
-		UserID:            userID,
-		Rating:            rating,
-	}
-	if err := s.ratingRepo.Upsert(ctx, r); err != nil {
-		return err
-	}
-
-	count, sum, err := s.ratingRepo.SumByEntryID(ctx, entryID)
-	if err != nil {
-		return err
-	}
-
-	entry, err := s.entryRepo.FindByID(ctx, entryID, 0)
-	if err != nil {
-		return err
-	}
-
-	entry.RatingCount = int(count)
-	entry.RatingSum = int(sum)
-	return s.entryRepo.Update(ctx, entry)
-}
-
-// --- New V2 methods ---
 
 // GetFullViewWithReadState returns the full discussion tree with read/unread state per entry
-// and user profile info resolved for all participants.
-func (s *DiscussionV2Service) GetFullViewWithReadState(ctx context.Context, topicID, userID uint) (*DiscussionFullViewV2, error) {
-	topic, err := s.topicRepo.FindByID(ctx, topicID, 0)
-	if err != nil {
-		return nil, err
-	}
+// and user profile info resolved for all participants. The topic must
+// already have been resolved with the caller's tenant + course scope.
+func (s *DiscussionV2Service) GetFullViewWithReadState(ctx context.Context, topic *models.DiscussionTopic, userID, accountID uint) (*DiscussionFullViewV2, error) {
+	topicID := topic.ID
 
-	allEntries, err := s.entryRepo.ListAllByTopicID(ctx, topicID, 0)
+	allEntries, err := s.entryRepo.ListAllByTopicIDIncludingDeleted(ctx, topicID, accountID)
 	if err != nil {
 		return nil, err
 	}
+	visible := visibleThreadEntries(allEntries)
 
 	// Get unread entry IDs for the current user
 	unreadIDs, err := s.entryParticipantRepo.ListUnreadByTopic(ctx, topicID, userID)
@@ -192,9 +124,15 @@ func (s *DiscussionV2Service) GetFullViewWithReadState(ctx context.Context, topi
 		unreadSet[id] = true
 	}
 
+	// The viewer's own likes, so the UI can render liked state / unlike.
+	myRatings, err := s.ratingRepo.ListUserRatingsByTopic(ctx, topicID, userID)
+	if err != nil {
+		myRatings = map[uint]int{}
+	}
+
 	// Collect unique user IDs
 	userIDSet := make(map[uint]bool)
-	for _, e := range allEntries {
+	for _, e := range visible {
 		userIDSet[e.UserID] = true
 	}
 	var userIDs []uint
@@ -207,7 +145,7 @@ func (s *DiscussionV2Service) GetFullViewWithReadState(ctx context.Context, topi
 
 	// Get version counts for all entries
 	versionCounts := make(map[uint]int)
-	for _, e := range allEntries {
+	for _, e := range visible {
 		count, err := s.versionRepo.CountByEntryID(ctx, e.ID)
 		if err == nil {
 			versionCounts[e.ID] = int(count)
@@ -215,26 +153,24 @@ func (s *DiscussionV2Service) GetFullViewWithReadState(ctx context.Context, topi
 	}
 
 	// Build the tree
-	rootEntries := s.buildTreeV2(allEntries, unreadSet, userInfoMap, versionCounts)
+	rootEntries := s.buildTreeV2(visible, unreadSet, myRatings, userInfoMap, versionCounts)
 
 	return &DiscussionFullViewV2{
-		Topic:   topic,
-		Entries: rootEntries,
+		Topic:      topic,
+		Entries:    rootEntries,
+		Subscribed: s.isSubscribed(ctx, topic, userID, allEntries),
 	}, nil
 }
 
-func (s *DiscussionV2Service) buildTreeV2(entries []models.DiscussionEntry, unreadSet map[uint]bool, userInfoMap map[uint]UserInfo, versionCounts map[uint]int) []EntryViewV2 {
-	viewMap := make(map[uint]*EntryViewV2, len(entries))
-
-	// First pass: create all views
-	for _, e := range entries {
+func (s *DiscussionV2Service) buildTreeV2(entries []models.DiscussionEntry, unreadSet map[uint]bool, myRatings map[uint]int, userInfoMap map[uint]UserInfo, versionCounts map[uint]int) []EntryViewV2 {
+	return assembleThread(entries, func(e models.DiscussionEntry) EntryViewV2 {
 		info := userInfoMap[e.UserID]
 		var editedAt *time.Time
 		if versionCounts[e.ID] > 0 {
-			editedAt = &e.UpdatedAt
+			updatedAt := e.UpdatedAt
+			editedAt = &updatedAt
 		}
-
-		view := &EntryViewV2{
+		return EntryViewV2{
 			ID:                e.ID,
 			DiscussionTopicID: e.DiscussionTopicID,
 			UserID:            e.UserID,
@@ -244,6 +180,7 @@ func (s *DiscussionV2Service) buildTreeV2(entries []models.DiscussionEntry, unre
 			Message:           e.Message,
 			RatingCount:       e.RatingCount,
 			RatingSum:         e.RatingSum,
+			Rating:            myRatings[e.ID],
 			ReadState:         !unreadSet[e.ID], // read = not in unread set
 			EditedAt:          editedAt,
 			VersionCount:      versionCounts[e.ID],
@@ -252,28 +189,31 @@ func (s *DiscussionV2Service) buildTreeV2(entries []models.DiscussionEntry, unre
 			UpdatedAt:         e.UpdatedAt,
 			Replies:           []EntryViewV2{},
 		}
-		viewMap[e.ID] = view
-	}
+	}, func(parent *EntryViewV2, replies []EntryViewV2) {
+		parent.Replies = replies
+	})
+}
 
-	// Second pass: link children to parents
-	var roots []*EntryViewV2
+// isSubscribed mirrors Canvas DiscussionTopic#subscribed?: an explicit
+// participant row wins; without one, the topic author and anyone who
+// has posted are treated as subscribed.
+func (s *DiscussionV2Service) isSubscribed(ctx context.Context, topic *models.DiscussionTopic, userID uint, entries []models.DiscussionEntry) bool {
+	if p, err := s.topicParticipantRepo.FindByTopicAndUser(ctx, topic.ID, userID); err == nil && p != nil {
+		return p.Subscribed
+	}
+	return defaultSubscribed(topic, userID, entries)
+}
+
+func defaultSubscribed(topic *models.DiscussionTopic, userID uint, entries []models.DiscussionEntry) bool {
+	if topic.UserID == userID {
+		return true
+	}
 	for _, e := range entries {
-		view := viewMap[e.ID]
-		if e.ParentID == nil {
-			roots = append(roots, view)
-		} else if parent, ok := viewMap[*e.ParentID]; ok {
-			parent.Replies = append(parent.Replies, *view)
-		} else {
-			roots = append(roots, view)
+		if e.UserID == userID && e.WorkflowState != discussionEntryDeleted {
+			return true
 		}
 	}
-
-	// Convert pointers to values for root entries
-	result := make([]EntryViewV2, 0, len(roots))
-	for _, r := range roots {
-		result = append(result, *r)
-	}
-	return result
+	return false
 }
 
 // MarkEntryAsRead marks a single entry as read for the given user.
@@ -281,20 +221,36 @@ func (s *DiscussionV2Service) MarkEntryAsRead(ctx context.Context, entryID, user
 	return s.entryParticipantRepo.MarkAsRead(ctx, entryID, userID)
 }
 
-// MarkTopicAsRead marks all entries in a topic as read for the given user.
-func (s *DiscussionV2Service) MarkTopicAsRead(ctx context.Context, topicID, userID uint) error {
-	if err := s.entryParticipantRepo.MarkTopicAsRead(ctx, topicID, userID); err != nil {
+// MarkTopicAsRead marks all entries in a topic as read for the given user
+// and stamps last_read_at. The user's existing subscription choice (and
+// forced read state) is preserved: marking a thread read must never
+// re-subscribe someone who unsubscribed.
+func (s *DiscussionV2Service) MarkTopicAsRead(ctx context.Context, topic *models.DiscussionTopic, userID uint) error {
+	if err := s.entryParticipantRepo.MarkTopicAsRead(ctx, topic.ID, userID); err != nil {
 		return err
 	}
 
-	// Also update topic participant's last_read_at
 	now := time.Now()
-	return s.topicParticipantRepo.Upsert(ctx, &models.DiscussionTopicParticipant{
-		DiscussionTopicID: topicID,
+	participant := &models.DiscussionTopicParticipant{
+		DiscussionTopicID: topic.ID,
 		UserID:            userID,
-		Subscribed:        true,
 		LastReadAt:        &now,
-	})
+	}
+	if existing, err := s.topicParticipantRepo.FindByTopicAndUser(ctx, topic.ID, userID); err == nil && existing != nil {
+		participant.Subscribed = existing.Subscribed
+		participant.ForcedReadState = existing.ForcedReadState
+	} else {
+		// No row yet: seed it with the Canvas default rather than an
+		// unconditional "subscribed".
+		// accountID=0: internal hop; the handler resolved this topic
+		// inside the caller's tenant and course.
+		entries, lerr := s.entryRepo.ListAllByTopicID(ctx, topic.ID, 0)
+		if lerr != nil {
+			entries = nil
+		}
+		participant.Subscribed = defaultSubscribed(topic, userID, entries)
+	}
+	return s.topicParticipantRepo.Upsert(ctx, participant)
 }
 
 // GetUnreadCount returns the number of unread entries for a user in a topic.
@@ -312,35 +268,64 @@ func (s *DiscussionV2Service) GetEntryVersions(ctx context.Context, entryID uint
 	return s.versionRepo.ListByEntryID(ctx, entryID)
 }
 
-// UpdateEntryWithHistory saves the current message as a version before updating the entry.
-func (s *DiscussionV2Service) UpdateEntryWithHistory(ctx context.Context, entryID, userID uint, newMessage string) error {
+// UpdateEntryWithHistory replaces an entry's message and records the edit
+// in discussion_entry_versions, following Canvas
+// DiscussionEntry#create_discussion_entry_versions: the history holds
+// every version of the message, including the current one, each
+// attributed to the user who wrote it. On the first edit the original
+// message is stored as version 1 (by the entry author) and the new
+// message as version 2 (by the editor).
+//
+// The entry must already have been resolved with the caller's tenant,
+// course and topic scope, and the caller authorized to edit it.
+func (s *DiscussionV2Service) UpdateEntryWithHistory(ctx context.Context, entry *models.DiscussionEntry, editorID uint, newMessage string) error {
 	if newMessage == "" {
 		return errors.New("message cannot be empty")
 	}
+	if entry == nil {
+		return errors.New("entry is required")
+	}
+	if newMessage == entry.Message {
+		return nil
+	}
 
-	entry, err := s.entryRepo.FindByID(ctx, entryID, 0)
+	versions, err := s.versionRepo.ListByEntryID(ctx, entry.ID)
 	if err != nil {
 		return err
 	}
 
-	// Determine the next version number
-	currentCount, err := s.versionRepo.CountByEntryID(ctx, entryID)
-	if err != nil {
+	next := 1
+	if len(versions) > 0 {
+		next = versions[len(versions)-1].Version + 1
+	}
+
+	// Make sure the message being replaced is in the history. This is
+	// the original post on the first edit; for rows versioned under the
+	// old scheme (which stored only replaced messages) it back-fills the
+	// current text so no version is lost.
+	if len(versions) == 0 || versions[len(versions)-1].Message != entry.Message {
+		current := &models.DiscussionEntryVersion{
+			DiscussionEntryID: entry.ID,
+			UserID:            entry.UserID,
+			Message:           entry.Message,
+			Version:           next,
+		}
+		if err := s.versionRepo.Create(ctx, current); err != nil {
+			return err
+		}
+		next++
+	}
+
+	edited := &models.DiscussionEntryVersion{
+		DiscussionEntryID: entry.ID,
+		UserID:            editorID,
+		Message:           newMessage,
+		Version:           next,
+	}
+	if err := s.versionRepo.Create(ctx, edited); err != nil {
 		return err
 	}
 
-	// Save the current message as a version
-	version := &models.DiscussionEntryVersion{
-		DiscussionEntryID: entryID,
-		UserID:            entry.UserID,
-		Message:           entry.Message,
-		Version:           int(currentCount) + 1,
-	}
-	if err := s.versionRepo.Create(ctx, version); err != nil {
-		return err
-	}
-
-	// Update the entry with the new message
 	entry.Message = newMessage
 	return s.entryRepo.Update(ctx, entry)
 }
@@ -366,10 +351,9 @@ func ParseMentions(message string) []string {
 func (s *DiscussionV2Service) ResolveUserInfo(ctx context.Context, userIDs []uint) map[uint]UserInfo {
 	result := make(map[uint]UserInfo, len(userIDs))
 	for _, uid := range userIDs {
-		// Wave 2 widening: this service doesn't yet thread accountID
-		// from its handler. accountID=0 preserves the pre-widening
-		// semantics. Sprint 2.3 leftover: thread tenant context
-		// through DiscussionV2Service from the handler.
+		// accountID=0: internal hop. The user IDs come from entries /
+		// topics that the handler already resolved inside the caller's
+		// tenant and course, so the authors are known to be in scope.
 		user, err := s.userRepo.FindByID(ctx, uid, 0)
 		if err != nil {
 			result[uid] = UserInfo{ID: uid, Name: "Unknown User", AvatarURL: ""}

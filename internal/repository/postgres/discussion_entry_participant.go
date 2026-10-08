@@ -101,6 +101,9 @@ func (r *discussionEntryParticipantRepo) CountUnreadByTopic(ctx context.Context,
 	err := r.db.WithContext(ctx).
 		Model(&models.DiscussionEntry{}).
 		Where("discussion_topic_id = ? AND workflow_state != ?", topicID, "deleted").
+		// An author has read their own post (Canvas marks an entry read
+		// for its author on creation), so own entries never count.
+		Where("user_id <> ?", userID).
 		Where("id NOT IN (?)",
 			r.db.Model(&models.DiscussionEntryParticipant{}).
 				Select("discussion_entry_id").
@@ -117,6 +120,7 @@ func (r *discussionEntryParticipantRepo) ListUnreadByTopic(ctx context.Context, 
 	err := r.db.WithContext(ctx).
 		Model(&models.DiscussionEntry{}).
 		Where("discussion_topic_id = ? AND workflow_state != ?", topicID, "deleted").
+		Where("user_id <> ?", userID).
 		Where("id NOT IN (?)",
 			r.db.Model(&models.DiscussionEntryParticipant{}).
 				Select("discussion_entry_id").

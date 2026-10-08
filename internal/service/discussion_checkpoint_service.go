@@ -122,6 +122,18 @@ func (s *DiscussionCheckpointService) UpdateCheckpoint(ctx context.Context, cp *
 	return s.checkpointRepo.Update(ctx, cp)
 }
 
+// GetTopic loads the parent topic scoped to accountID. Handler-layer
+// callers MUST pass callerAccountID(c).
+func (s *DiscussionCheckpointService) GetTopic(ctx context.Context, id, accountID uint) (*models.DiscussionTopic, error) {
+	return s.topicRepo.FindByID(ctx, id, accountID)
+}
+
+// GetCheckpoint loads a checkpoint scoped to accountID (checkpoint →
+// topic → course → account).
+func (s *DiscussionCheckpointService) GetCheckpoint(ctx context.Context, id, accountID uint) (*models.DiscussionCheckpoint, error) {
+	return s.checkpointRepo.FindByID(ctx, id, accountID)
+}
+
 func (s *DiscussionCheckpointService) DeleteCheckpoint(ctx context.Context, id uint) error {
 	return s.checkpointRepo.Delete(ctx, id)
 }

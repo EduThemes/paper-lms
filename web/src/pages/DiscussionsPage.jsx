@@ -10,6 +10,7 @@ import { clearRceDraft } from '../components/rce/rceDrafts';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { fetchAllPages } from '../utils/fetchAllPages';
 
 const DiscussionsPage = () => {
   const { courseId } = useParams();
@@ -30,8 +31,10 @@ const DiscussionsPage = () => {
 
   const fetchTopics = async () => {
     try {
-      const result = await api.getDiscussionTopics(courseId);
-      setTopics(result.data || []);
+      // Walk every page (the endpoint defaults to 20 per page) so topic
+      // 21+ isn't silently dropped.
+      const all = await fetchAllPages((page) => api.getDiscussionTopics(courseId, page, 100));
+      setTopics(all);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -89,6 +92,17 @@ const DiscussionsPage = () => {
     try {
       await api.deleteDiscussionTopic(courseId, topicId);
       setLoading(true);
+      await fetchTopics();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  // Students can't open unpublished topics (e.g. ones a course copy or
+  // import created), so teachers need a way to release them.
+  const handleTogglePublished = async (topic) => {
+    try {
+      await api.updateDiscussionTopic(courseId, topic.id, { published: topic.published === false });
       await fetchTopics();
     } catch (err) {
       setError(err.message);
@@ -238,6 +252,11 @@ const DiscussionsPage = () => {
                       {topic.pinned && (
                         <Pin className="w-3.5 h-3.5 text-brand-500 flex-shrink-0" />
                       )}
+                      {topic.published === false && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-surface-2 text-text-tertiary flex-shrink-0">
+                          Unpublished
+                        </span>
+                      )}
                     </div>
                     <span className="text-xs text-text-disabled">
                       {topic.discussion_type === 'side_comment' ? 'Side Comment' : topic.discussion_type === 'threaded' ? 'Threaded' : topic.discussion_type}
@@ -250,6 +269,13 @@ const DiscussionsPage = () => {
                   </span>
                   {isTeacher && (
                     <>
+                      <button
+                        onClick={(e) => { e.preventDefault(); handleTogglePublished(topic); }}
+                        className="px-2 py-0.5 text-xs rounded border border-border-default text-text-secondary hover:text-brand-600"
+                        title={topic.published === false ? 'Publish' : 'Unpublish'}
+                      >
+                        {topic.published === false ? 'Publish' : 'Unpublish'}
+                      </button>
                       <button
                         onClick={(e) => { e.preventDefault(); handleEdit(topic); }}
                         className="p-1 text-text-disabled hover:text-brand-600 opacity-0 group-hover:opacity-100"

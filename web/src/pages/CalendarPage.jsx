@@ -8,6 +8,7 @@ import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import { Skeleton } from '@/components/ui/skeleton';
+import { fetchAllPages } from '../utils/fetchAllPages';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -131,10 +132,12 @@ const CalendarPage = () => {
   const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
-      const result = courseId
-        ? await api.getCourseCalendarEvents(courseId, 1, 100)
-        : await api.getCalendarEvents(1, 100);
-      setEvents(result.data || []);
+      // Load every page: a single 100-event page ordered by start_at made
+      // later months look empty in a busy course.
+      const all = await fetchAllPages((page) => (courseId
+        ? api.getCourseCalendarEvents(courseId, page, 100)
+        : api.getCalendarEvents(page, 100)));
+      setEvents(all);
     } catch (err) {
       setError(err.message);
     } finally {
