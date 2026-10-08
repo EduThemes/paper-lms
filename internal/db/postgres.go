@@ -135,6 +135,7 @@ func allAutoMigrateModels() []interface{} {
 		&models.Notification{},
 		// Content Migration, Learning Outcomes
 		&models.ContentMigration{},
+		&models.ContentExport{},
 		&models.LearningOutcomeGroup{},
 		&models.LearningOutcome{},
 		&models.LearningOutcomeResult{},
@@ -147,6 +148,7 @@ func allAutoMigrateModels() []interface{} {
 		&models.BlueprintSubscription{},
 		&models.BlueprintMigration{},
 		&models.BlueprintContentTag{},
+		&models.BlueprintContentLock{},
 		&models.CoursePace{},
 		&models.CoursePaceModuleItem{},
 		// Collaborations, Conferences, Analytics

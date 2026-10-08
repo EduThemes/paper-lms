@@ -17,6 +17,10 @@ type MigrationSettings struct {
 	CopyEverything     bool              `json:"copy_everything,omitempty"`
 	IncludeOnlyTypes   []string          `json:"include_only_types,omitempty"`
 	ExcludeTypes       []string          `json:"exclude_types,omitempty"`
+	// Select names individual items to copy, keyed by content type
+	// (Canvas's `select` parameter): {"assignments": [1, 2], "pages": [7]}.
+	// A selected module brings the content its items link to.
+	Select map[string][]uint `json:"select,omitempty"`
 	// LegacyString preserves any pre-typed text payloads carried over by the
 	// 000003 migration so older rows don't lose information.
 	LegacyString string `json:"legacy_string,omitempty"`
@@ -31,6 +35,16 @@ type DateShiftOptions struct {
 	NewEndDate       *time.Time        `json:"new_end_date,omitempty"`
 	DaySubstitutions map[string]string `json:"day_substitutions,omitempty"`
 	RemoveDates      bool              `json:"remove_dates,omitempty"`
+	// TimeZone is the IANA zone the shift is computed in (weekday
+	// substitutions and wall-clock times); empty means UTC.
+	TimeZone string `json:"time_zone,omitempty"`
+}
+
+// MigrationResults is the typed shape stored in ContentMigration.Results:
+// per-type counts of what the worker created plus non-fatal issues.
+type MigrationResults struct {
+	Counts   map[string]int `json:"counts,omitempty"`
+	Warnings []string       `json:"warnings,omitempty"`
 }
 
 // ContentMigration tracks the import of content packages (Common Cartridge, IMSCC, Canvas export).
@@ -47,6 +61,7 @@ type ContentMigration struct {
 	FinishedAt        *time.Time                            `json:"finished_at"`
 	ErrorMessage      string                                `json:"error_message" gorm:"type:text"`
 	Attachment        string                                `json:"attachment" gorm:"type:text"` // path to uploaded package file
+	Results           datatypes.JSONType[MigrationResults]  `json:"results" gorm:"type:jsonb"`
 	CreatedAt         time.Time                             `json:"created_at"`
 	UpdatedAt         time.Time                             `json:"updated_at"`
 }

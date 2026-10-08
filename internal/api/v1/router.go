@@ -147,6 +147,10 @@ type Router struct {
 
 	// Quiz lifecycle: manual grading, event log, moderation, regrade
 	QuizLifecycleHandler *handlers.QuizLifecycleHandler
+	// Content migration lane: course content exports and the blueprint
+	// lock guard (see routes_content_migration.go).
+	ContentExportHandler *handlers.ContentExportHandler
+	BlueprintLockGuard   fiber.Handler
 
 	// Phase 6: gamification
 	GamificationHandler *handlers.GamificationHandler
@@ -209,6 +213,9 @@ func (r *Router) Register(app *fiber.App) {
 	// (~333 of them) without per-route plumbing. MUST sit before any
 	// route declarations on this group.
 	protected.Use(middleware.AuditWrites(r.AuditService, "http.write"))
+	if r.BlueprintLockGuard != nil {
+		protected.Use(r.BlueprintLockGuard) // blueprint locks in associated courses (G069)
+	}
 	r.mountModuleContentGate(protected)
 	r.registerPagesFilesRoutes(protected, enrolled, instructor) // before core routes: owns /files/quota and the nav-tab gate
 
@@ -540,6 +547,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Put("/users/self/notification_preferences", r.NotificationHandler.UpdatePreferences)
 
 	// Content Migrations (instructor only)
+	r.registerContentMigrationRoutes(protected, instructor)
 	protected.Get("/courses/:course_id/content_migrations", instructor, r.ContentMigrationHandler.ListMigrations)
 	protected.Post("/courses/:course_id/content_migrations", middleware.ExpensiveOpRateLimit(), instructor, r.ContentMigrationHandler.CreateMigration)
 	protected.Get("/courses/:course_id/content_migrations/:id", instructor, r.ContentMigrationHandler.GetMigration)

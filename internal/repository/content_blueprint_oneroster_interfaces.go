@@ -53,6 +53,13 @@ type BlueprintContentTagRepository interface {
 	// Upsert inserts the tag or updates child_id/synced_at of the
 	// existing (template, child course, content type, source) row.
 	Upsert(ctx context.Context, tag *models.BlueprintContentTag) error
+	// ListByChildCourse returns every tag of one template in one child
+	// course (deletion sync walks it for source items that are gone).
+	ListByChildCourse(ctx context.Context, templateID, childCourseID uint) ([]models.BlueprintContentTag, error)
+	// FindByChildItem returns the tag whose copy is the given child row,
+	// or (nil, nil) — the lock guard's "is this a blueprint copy?" check.
+	FindByChildItem(ctx context.Context, childCourseID uint, contentType string, childID uint) (*models.BlueprintContentTag, error)
+	Delete(ctx context.Context, id uint) error
 }
 
 type OneRosterConnectionRepository interface {
