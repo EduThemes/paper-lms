@@ -396,3 +396,31 @@ func TestExternalTools_CreateAcceptsFormShapes(t *testing.T) {
 	}))
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
+
+// The External Tools page clears custom fields by sending null on edit;
+// that must empty the stored value (and an omitted key must keep it).
+func TestExternalTools_UpdateNullCustomFieldsClears(t *testing.T) {
+	toolRepo := new(mocks.MockContextExternalToolRepository)
+	toolRepo.On("FindByID", mock.Anything, uint(55), uint(1)).Return(&models.ContextExternalTool{
+		ID: 55, ContextType: "Course", ContextID: 10, DeveloperKeyID: 5, Name: "Tool",
+		CustomFields: `{"unit":"3"}`, WorkflowState: "active",
+	}, nil)
+	var updated []string
+	toolRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.ContextExternalTool")).
+		Run(func(args mock.Arguments) {
+			updated = append(updated, args.Get(1).(*models.ContextExternalTool).CustomFields)
+		}).Return(nil)
+	app := externalToolsApp(toolRepo, new(mocks.MockDeveloperKeyRepository), "TeacherEnrollment")
+
+	resp := testutil.MakeRequest(app, http.MethodPut, "/courses/10/external_tools/55",
+		testutil.JSONBody(map[string]interface{}{"external_tool": map[string]interface{}{"name": "Renamed"}}))
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Len(t, updated, 1)
+	assert.JSONEq(t, `{"unit":"3"}`, updated[0])
+
+	resp = testutil.MakeRequest(app, http.MethodPut, "/courses/10/external_tools/55",
+		testutil.JSONBody(map[string]interface{}{"external_tool": map[string]interface{}{"custom_fields": nil}}))
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Len(t, updated, 2)
+	assert.Equal(t, "", updated[1])
+}

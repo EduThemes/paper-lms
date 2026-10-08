@@ -102,6 +102,24 @@ describe('ExternalToolsPage (B084)', () => {
     expect(JSON.parse(textarea.value)).toEqual({ unit: '3' });
     expect(textarea.value).not.toContain('\\"');
   });
+
+  test('emptying custom fields on edit clears them instead of keeping the old value', async () => {
+    api.getExternalTools.mockResolvedValue({
+      data: [{ id: 9, name: 'Example Tool', developer_key_id: 5, custom_fields: { unit: '3' }, workflow_state: 'active' }],
+    });
+    api.updateExternalTool.mockResolvedValue({ id: 9 });
+    const { container } = renderToolsPage();
+    await waitFor(() => expect(screen.getByText('Example Tool')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTitle('Edit tool'));
+    fireEvent.change(container.querySelector('textarea[name="custom_fields"]'), { target: { value: '' } });
+    fireEvent.submit(container.querySelector('form'));
+
+    await waitFor(() => expect(api.updateExternalTool).toHaveBeenCalled());
+    const [, id, tool] = api.updateExternalTool.mock.calls[0];
+    expect(id).toBe(9);
+    expect(tool).toHaveProperty('custom_fields', null);
+  });
 });
 
 describe('OAuthConsentPage (B076)', () => {

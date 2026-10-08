@@ -73,6 +73,10 @@ const ExternalToolsPage = () => {
         setSaving(false);
         return;
       }
+    } else if (editingTool) {
+      // Emptying the box on edit clears the stored custom fields (an
+      // omitted key would leave them unchanged).
+      customFields = null;
     }
 
     // B084: the API wants a numeric developer_key_id (form inputs are
