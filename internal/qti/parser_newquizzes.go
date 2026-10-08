@@ -378,7 +378,6 @@ func nqItemToQuestion(item nqAssessmentItem, source string, position int) (Quest
 			lefts = mi.SimpleMatchSets[0].SimpleAssociableChoices
 			rights = mi.SimpleMatchSets[1].SimpleAssociableChoices
 		}
-		_ = rights
 		// Correct response is a directedPair: "leftID rightID".
 		pairs := nqDirectedPairs(item.ResponseDeclarations, mi.ResponseIdentifier)
 		answers := []map[string]interface{}{}
@@ -390,6 +389,15 @@ func nqItemToQuestion(item nqAssessmentItem, source string, position int) (Quest
 				"left":     leftLabel,
 				"right_id": rightID,
 				"weight":   100.0,
+			})
+		}
+		// The right-hand options (incl. distractors) form the pool the
+		// student chooses from; the grader skips these entries.
+		for _, r := range rights {
+			answers = append(answers, map[string]interface{}{
+				"id":       r.Identifier,
+				"text":     stripHTMLForLabel(r.Content),
+				"blank_id": "_match_options_",
 			})
 		}
 		j, _ := json.Marshal(answers)

@@ -166,6 +166,10 @@ func TestNewQuizzesItemTypes(t *testing.T) {
 					!strings.Contains(a, `"right_id":"london"`) {
 					t.Errorf("expected both pairs in %s", a)
 				}
+				// The right-hand pool must be kept so students can answer.
+				if !strings.Contains(a, `"text":"Paris"`) || !strings.Contains(a, `"_match_options_"`) {
+					t.Errorf("expected right-hand option pool in %s", a)
+				}
 			},
 		},
 		{
