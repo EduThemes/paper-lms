@@ -60,6 +60,7 @@ func courseToJSON(c *models.Course) fiber.Map {
 		"ui_mode":                          c.UIMode,
 		"apply_assignment_group_weights":   c.ApplyGroupWeights,
 		"navigation_tabs":                  navTabs,
+		"storage_quota_mb":                 storageQuotaMB(c),
 		"created_at":                       c.CreatedAt,
 	}
 }
@@ -227,6 +228,7 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 			WorkflowState     *string          `json:"workflow_state"`
 			ApplyGroupWeights *bool            `json:"apply_assignment_group_weights"`
 			NavigationTabs    *json.RawMessage `json:"navigation_tabs"`
+			StorageQuotaMB    json.RawMessage  `json:"storage_quota_mb"` // not a pointer: null must arrive as "null"
 		} `json:"course"`
 	}
 
@@ -281,6 +283,13 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 	}
 	if input.Course.NavigationTabs != nil {
 		course.NavigationTabs = string(*input.Course.NavigationTabs)
+	}
+	if len(input.Course.StorageQuotaMB) > 0 {
+		// G072: only admins set a course's storage quota (Canvas
+		// manage_storage_quotas); null resets it to the account default.
+		if wrote, qerr := applyStorageQuotaMB(c, h.userRepo, course, input.Course.StorageQuotaMB); wrote {
+			return qerr
+		}
 	}
 
 	if err := h.courseService.Update(c.Context(), course); err != nil {

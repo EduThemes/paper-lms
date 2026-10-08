@@ -13,19 +13,29 @@ import (
 // pagesFilesDeps is what the pages / files / course-shell lane needs from
 // main's dependency graph.
 type pagesFilesDeps struct {
-	database    *gorm.DB
-	pageRepo    repository.PageRepository
-	pageHandler *handlers.PageHandler
+	database       *gorm.DB
+	pageRepo       repository.PageRepository
+	courseRepo     repository.CourseRepository
+	pageHandler    *handlers.PageHandler
+	fileService    *service.FileService
+	fileHandler    *handlers.FileHandler
+	settingsLookup service.SettingsLookupFunc
 }
 
 // wirePagesFiles builds the lane's services and handlers, attaches the
 // optional hooks to the core handlers, and returns the Router block.
 func wirePagesFiles(d pagesFilesDeps) *v1.PagesFilesRoutes {
+	// Page history (G065).
 	revisionRepo := postgres.NewWikiPageRevisionRepository(d.database)
 	revisionService := service.NewWikiPageRevisionService(revisionRepo, d.pageRepo)
 	d.pageHandler.SetRevisionService(revisionService)
 
+	// File tree, visibility and quotas (G070-G072).
+	d.fileService.SetTreeRepository(postgres.NewCourseFilesRepository(d.database))
+	d.fileHandler.SetQuota(d.courseRepo, d.settingsLookup)
+
 	return &v1.PagesFilesRoutes{
-		Revisions: handlers.NewWikiPageRevisionHandler(d.pageHandler, revisionService),
+		Revisions:      handlers.NewWikiPageRevisionHandler(d.pageHandler, revisionService),
+		FileManagement: true,
 	}
 }

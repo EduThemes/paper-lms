@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
@@ -27,6 +28,10 @@ type FileHandler struct {
 	// authz supplies the DB-backed admin role and the course gate used by
 	// canReadContextFiles. Nil means no admin bypass.
 	authz *ResourceAuthorizer
+	// courseRepo + settingsLookup back course storage quotas (G072); see
+	// SetQuota. Nil leaves quotas unenforced.
+	courseRepo     repository.CourseRepository
+	settingsLookup service.SettingsLookupFunc
 }
 
 // SetAuthorizer wires the DB-backed role / course checks.
@@ -97,6 +102,12 @@ func attachmentToJSON(a *models.Attachment) fiber.Map {
 		"created_at":     a.CreatedAt,
 		"updated_at":     a.UpdatedAt,
 		"url":            fmt.Sprintf("/api/v1/files/%d/download", a.ID),
+		// G070 visibility. "locked" is Canvas's unpublished flag.
+		"locked":       a.Locked,
+		"hidden":       a.Hidden,
+		"lock_at":      a.LockAt,
+		"unlock_at":    a.UnlockAt,
+		"usage_rights": usageRightsJSON(a),
 	}
 }
 
@@ -108,7 +119,20 @@ func (h *FileHandler) ListCourseFiles(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.fileService.ListFilesByContext(c.Context(), "Course", uint(courseID), params)
+	var result *repository.PaginatedResult[models.Attachment]
+	learner := !canViewUnpublishedContent(c)
+	if h.fileService.HasTree() {
+		// G070/G071: ?folder_id=root|<id> lists one folder; learners
+		// never see unpublished or hidden files, or anything under an
+		// unpublished or hidden folder.
+		q, wrote, qerr := h.courseTreeQuery(c, uint(courseID), c.Query("folder_id"), learner)
+		if wrote {
+			return qerr
+		}
+		result, err = h.fileService.ListTreeFiles(c.Context(), q, params)
+	} else {
+		result, err = h.fileService.ListFilesByContext(c.Context(), "Course", uint(courseID), params)
+	}
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch files")
 	}
@@ -117,7 +141,7 @@ func (h *FileHandler) ListCourseFiles(c *fiber.Ctx) error {
 
 	files := make([]fiber.Map, len(result.Items))
 	for i, a := range result.Items {
-		files[i] = attachmentToJSON(&a)
+		files[i] = fileJSONForCaller(&a, learner)
 	}
 
 	return c.JSON(files)
@@ -198,6 +222,12 @@ func (h *FileHandler) UploadCourseFile(c *fiber.Ctx) error {
 	// closure) resolves storage.s3.* at account scope first, falling back to
 	// instance/env. Enables per-district S3 buckets on the upload path.
 	uploadCtx := settingsctx.WithAccountID(c.Context(), callerAccountID(c))
+
+	// G072: refuse uploads that would take the course over its quota.
+	if wrote, qerr := h.enforceCourseQuota(c, uploadCtx, uint(courseID), fileHeader.Size, 0); wrote {
+		return qerr
+	}
+
 	if err := h.fileService.UploadFile(uploadCtx, attachment, file); err != nil {
 		return responses.InternalError(c, "Could not upload file")
 	}
@@ -216,11 +246,26 @@ func (h *FileHandler) GetFile(c *fiber.Ctx) error {
 		return responses.NotFound(c, "file")
 	}
 
+	// G070: an unpublished file (or one in an unpublished folder) is
+	// invisible to learners; a date-locked one is described but marked
+	// locked_for_user.
+	learner := false
+	if attachment.ContextType == "Course" {
+		// The route carries :course_id; tie the file to it (F-013).
+		if courseID, perr := c.ParamsInt("course_id"); perr == nil && attachment.ContextID != uint(courseID) {
+			return responses.NotFound(c, "file")
+		}
+		learner = !h.managesCourseFiles(c, attachment.ContextID)
+		if learner && h.learnerCannotSeeFile(c, attachment) {
+			return responses.NotFound(c, "file")
+		}
+	}
+
 	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil && attachment.UserID != 0 && attachment.UserID != callerID {
 		_ = h.auditService.LogPIIAccess(c.Context(), callerID, attachment.UserID, "read", "file_metadata", "attachments", attachment.ID, c.IP(), c.Get("User-Agent"))
 	}
 
-	return c.JSON(attachmentToJSON(attachment))
+	return c.JSON(fileJSONForCaller(attachment, learner))
 }
 
 func (h *FileHandler) DeleteFile(c *fiber.Ctx) error {
@@ -272,6 +317,18 @@ func (h *FileHandler) DownloadFile(c *fiber.Ctx) error {
 	// (often private to members) were readable by anyone with a JWT.
 	if !h.canReadContextFiles(c, attachment.ContextType, attachment.ContextID) {
 		return responses.NotFound(c, "file")
+	}
+
+	// G070: learners can't fetch an unpublished file (or one in an
+	// unpublished folder), nor one outside its availability window.
+	// Hidden files stay downloadable by link.
+	if attachment.ContextType == "Course" && !h.managesCourseFiles(c, attachment.ContextID) {
+		if h.learnerCannotSeeFile(c, attachment) {
+			return responses.NotFound(c, "file")
+		}
+		if attachment.LockedForLearnerAt(time.Now()) {
+			return responses.Forbidden(c, "This file is locked")
+		}
 	}
 
 	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil && attachment.UserID != 0 && attachment.UserID != callerID {
@@ -399,7 +456,23 @@ func (h *FileHandler) ListFolderFiles(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.fileService.ListFilesByFolder(c.Context(), uint(folderID), params)
+	var result *repository.PaginatedResult[models.Attachment]
+	learner := folder.ContextType == "Course" && !h.managesCourseFiles(c, folder.ContextID)
+	if h.fileService.HasTree() && folder.ContextType == "Course" {
+		// G070: a learner can't browse into an unpublished or hidden
+		// folder, and sees only the published, unhidden files in it.
+		if learner {
+			if blocked, berr := h.fileService.FolderBlockedForLearner(c.Context(), folder.ID, false); berr != nil || blocked {
+				return responses.NotFound(c, "folder")
+			}
+		}
+		result, err = h.fileService.ListTreeFiles(c.Context(), repository.FileTreeQuery{
+			ContextType: folder.ContextType, ContextID: folder.ContextID,
+			Scope: repository.FolderScopeFolder, FolderID: folder.ID, LearnerView: learner,
+		}, params)
+	} else {
+		result, err = h.fileService.ListFilesByFolder(c.Context(), uint(folderID), params)
+	}
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch files")
 	}
@@ -408,7 +481,7 @@ func (h *FileHandler) ListFolderFiles(c *fiber.Ctx) error {
 
 	files := make([]fiber.Map, len(result.Items))
 	for i, a := range result.Items {
-		files[i] = attachmentToJSON(&a)
+		files[i] = fileJSONForCaller(&a, learner)
 	}
 
 	return c.JSON(files)
