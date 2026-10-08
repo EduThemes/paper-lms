@@ -109,29 +109,68 @@ func (h *GradingPeriodHandler) CreateGroup(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(gradingPeriodGroupToJSON(group))
 }
 
-func (h *GradingPeriodHandler) GetGroup(c *fiber.Ctx) error {
+// loadGroupInAccount loads the :group_id grading period group and ties it
+// to the URL :account_id and the caller's tenant. The service loads groups
+// and periods by bare id, so without this tie an admin of tenant B could
+// read, edit, close or delete tenant A's grading periods through
+// /accounts/B/grading_period_groups/<A group id>. Every miss is the same
+// 404 (existence-leak contract). Returns wrote=true after writing a
+// response; the caller MUST return nil in that case.
+func (h *GradingPeriodHandler) loadGroupInAccount(c *fiber.Ctx) (*models.GradingPeriodGroup, bool) {
+	accountID, err := c.ParamsInt("account_id")
+	if err != nil || accountID <= 0 {
+		_ = responses.BadRequest(c, "Invalid account ID")
+		return nil, true
+	}
 	groupID, err := c.ParamsInt("group_id")
 	if err != nil {
-		return responses.BadRequest(c, "Invalid group ID")
+		_ = responses.BadRequest(c, "Invalid group ID")
+		return nil, true
 	}
-
 	group, err := h.gradingPeriodService.GetGroup(c.Context(), uint(groupID))
+	if err != nil || group == nil || group.AccountID != uint(accountID) {
+		_ = responses.NotFound(c, "grading period group")
+		return nil, true
+	}
+	if assertSameTenant(c, group.AccountID) {
+		return nil, true
+	}
+	return group, false
+}
+
+// loadPeriodInGroup loads the :period_id grading period and ties it to the
+// tenant-checked :group_id group. Same wrote contract as loadGroupInAccount.
+func (h *GradingPeriodHandler) loadPeriodInGroup(c *fiber.Ctx) (*models.GradingPeriod, bool) {
+	group, wrote := h.loadGroupInAccount(c)
+	if wrote {
+		return nil, true
+	}
+	periodID, err := c.ParamsInt("period_id")
 	if err != nil {
-		return responses.NotFound(c, "grading period group")
+		_ = responses.BadRequest(c, "Invalid period ID")
+		return nil, true
+	}
+	period, err := h.gradingPeriodService.GetPeriod(c.Context(), uint(periodID))
+	if err != nil || period == nil || period.GradingPeriodGroupID != group.ID {
+		_ = responses.NotFound(c, "grading period")
+		return nil, true
+	}
+	return period, false
+}
+
+func (h *GradingPeriodHandler) GetGroup(c *fiber.Ctx) error {
+	group, wrote := h.loadGroupInAccount(c)
+	if wrote {
+		return nil
 	}
 
 	return c.JSON(gradingPeriodGroupToJSON(group))
 }
 
 func (h *GradingPeriodHandler) UpdateGroup(c *fiber.Ctx) error {
-	groupID, err := c.ParamsInt("group_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid group ID")
-	}
-
-	group, err := h.gradingPeriodService.GetGroup(c.Context(), uint(groupID))
-	if err != nil {
-		return responses.NotFound(c, "grading period group")
+	group, wrote := h.loadGroupInAccount(c)
+	if wrote {
+		return nil
 	}
 
 	var input struct {
@@ -164,12 +203,12 @@ func (h *GradingPeriodHandler) UpdateGroup(c *fiber.Ctx) error {
 }
 
 func (h *GradingPeriodHandler) DeleteGroup(c *fiber.Ctx) error {
-	groupID, err := c.ParamsInt("group_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid group ID")
+	group, wrote := h.loadGroupInAccount(c)
+	if wrote {
+		return nil
 	}
 
-	if err := h.gradingPeriodService.DeleteGroup(c.Context(), uint(groupID)); err != nil {
+	if err := h.gradingPeriodService.DeleteGroup(c.Context(), group.ID); err != nil {
 		return responses.InternalError(c, "Could not delete grading period group")
 	}
 
@@ -179,12 +218,12 @@ func (h *GradingPeriodHandler) DeleteGroup(c *fiber.Ctx) error {
 // Period handlers
 
 func (h *GradingPeriodHandler) ListPeriods(c *fiber.Ctx) error {
-	groupID, err := c.ParamsInt("group_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid group ID")
+	group, wrote := h.loadGroupInAccount(c)
+	if wrote {
+		return nil
 	}
 
-	periods, err := h.gradingPeriodService.ListPeriodsByGroup(c.Context(), uint(groupID))
+	periods, err := h.gradingPeriodService.ListPeriodsByGroup(c.Context(), group.ID)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch grading periods")
 	}
@@ -198,10 +237,11 @@ func (h *GradingPeriodHandler) ListPeriods(c *fiber.Ctx) error {
 }
 
 func (h *GradingPeriodHandler) CreatePeriod(c *fiber.Ctx) error {
-	groupID, err := c.ParamsInt("group_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid group ID")
+	group, wrote := h.loadGroupInAccount(c)
+	if wrote {
+		return nil
 	}
+	groupID := group.ID
 
 	var input struct {
 		GradingPeriod struct {
@@ -234,28 +274,18 @@ func (h *GradingPeriodHandler) CreatePeriod(c *fiber.Ctx) error {
 }
 
 func (h *GradingPeriodHandler) GetPeriod(c *fiber.Ctx) error {
-	periodID, err := c.ParamsInt("period_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid period ID")
-	}
-
-	period, err := h.gradingPeriodService.GetPeriod(c.Context(), uint(periodID))
-	if err != nil {
-		return responses.NotFound(c, "grading period")
+	period, wrote := h.loadPeriodInGroup(c)
+	if wrote {
+		return nil
 	}
 
 	return c.JSON(gradingPeriodToJSON(period))
 }
 
 func (h *GradingPeriodHandler) UpdatePeriod(c *fiber.Ctx) error {
-	periodID, err := c.ParamsInt("period_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid period ID")
-	}
-
-	period, err := h.gradingPeriodService.GetPeriod(c.Context(), uint(periodID))
-	if err != nil {
-		return responses.NotFound(c, "grading period")
+	period, wrote := h.loadPeriodInGroup(c)
+	if wrote {
+		return nil
 	}
 
 	var input struct {
@@ -300,12 +330,12 @@ func (h *GradingPeriodHandler) UpdatePeriod(c *fiber.Ctx) error {
 }
 
 func (h *GradingPeriodHandler) DeletePeriod(c *fiber.Ctx) error {
-	periodID, err := c.ParamsInt("period_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid period ID")
+	period, wrote := h.loadPeriodInGroup(c)
+	if wrote {
+		return nil
 	}
 
-	if err := h.gradingPeriodService.DeletePeriod(c.Context(), uint(periodID)); err != nil {
+	if err := h.gradingPeriodService.DeletePeriod(c.Context(), period.ID); err != nil {
 		return responses.InternalError(c, "Could not delete grading period")
 	}
 
