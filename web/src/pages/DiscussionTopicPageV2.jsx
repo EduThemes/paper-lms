@@ -19,20 +19,16 @@ import {
   Pin,
   CornerDownRight,
   History,
-  Bold,
-  Italic,
-  List,
-  ListOrdered,
-  LinkIcon,
   ArrowLeft,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
-import RichContentViewer, { sanitizeHTML } from '../components/RichContentViewer';
+import RichContentViewer from '../components/RichContentViewer';
 import { highlightMentions } from '../utils/html';
 import DiscussionCheckpointsPanel from '../components/DiscussionCheckpointsPanel';
+import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
 import {
   isEntryUnread,
   isEntryDeleted,
@@ -154,56 +150,41 @@ const UserAvatar = ({ name, avatarUrl, size = 'md' }) => {
 };
 
 // ---------------------------------------------------------------------------
-// ComposeArea - inline rich compose (toolbar + contentEditable)
+// ComposeArea - inline rich compose (the shared rich content editor)
 // ---------------------------------------------------------------------------
 
+const isBlankHtml = (html) => {
+  if (!html) return true;
+  if (/<(img|iframe|video|audio)\b/i.test(html)) return false;
+  return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim().length === 0;
+};
+
+// Replies and edits use the same rich content editor as every other
+// rich-text field (G017); this wrapper only adds the submit/cancel actions
+// and Ctrl/Cmd+Enter to submit.
 const ComposeArea = ({ initialValue = '', onSubmit, onCancel, submitLabel = 'Post', placeholder = 'Write your reply...', autoFocus = false }) => {
-  const editorRef = useRef(null);
-  const [isEmpty, setIsEmpty] = useState(!initialValue);
+  const [html, setHtml] = useState(initialValue || '');
   const [submitting, setSubmitting] = useState(false);
+  const wrapRef = useRef(null);
 
   useEffect(() => {
-    if (editorRef.current && initialValue) {
-      // Live contenteditable: sanitize before assigning or <img onerror>
-      // in the stored message runs as soon as Edit is clicked (B001).
-      editorRef.current.innerHTML = sanitizeHTML(initialValue);
-      setIsEmpty(false);
-    }
+    setHtml(initialValue || '');
   }, [initialValue]);
 
   useEffect(() => {
-    if (autoFocus && editorRef.current) {
-      editorRef.current.focus();
-    }
+    if (!autoFocus) return undefined;
+    const t = setTimeout(() => wrapRef.current?.querySelector('.ProseMirror')?.focus(), 0);
+    return () => clearTimeout(t);
   }, [autoFocus]);
 
-  const handleInput = () => {
-    const text = editorRef.current?.textContent?.trim() || '';
-    setIsEmpty(text.length === 0);
-  };
-
-  const execCommand = (command, value = null) => {
-    document.execCommand(command, false, value);
-    editorRef.current?.focus();
-  };
-
-  const handleInsertLink = () => {
-    const url = window.prompt('Enter URL:');
-    if (url) {
-      execCommand('createLink', url);
-    }
-  };
+  const isEmpty = isBlankHtml(html);
 
   const handleSubmit = async () => {
-    const html = editorRef.current?.innerHTML?.trim() || '';
-    if (!html || html === '<br>' || html === '<div><br></div>') return;
+    if (isEmpty || submitting) return;
     setSubmitting(true);
     try {
       await onSubmit(html);
-      if (editorRef.current) {
-        editorRef.current.innerHTML = '';
-        setIsEmpty(true);
-      }
+      setHtml('');
     } finally {
       setSubmitting(false);
     }
@@ -216,54 +197,12 @@ const ComposeArea = ({ initialValue = '', onSubmit, onCancel, submitLabel = 'Pos
     }
   };
 
-  const toolbarButton = (label, icon, action) => (
-    <button
-      type="button"
-      onClick={action}
-      className="p-1.5 rounded hover:bg-border-default text-text-secondary hover:text-text-primary transition-colors"
-      aria-label={label}
-      title={label}
-      tabIndex={-1}
-    >
-      {icon}
-    </button>
-  );
-
   return (
-    <div className="border border-border-strong rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-brand-500 focus-within:border-brand-500 bg-surface-0">
-      {/* Toolbar */}
-      <div className="flex items-center gap-0.5 px-2 py-1 border-b border-border-default bg-surface-1" role="toolbar" aria-label="Text formatting">
-        {toolbarButton('Bold', <Bold className="w-4 h-4" />, () => execCommand('bold'))}
-        {toolbarButton('Italic', <Italic className="w-4 h-4" />, () => execCommand('italic'))}
-        <div className="w-px h-5 bg-border-strong mx-1" aria-hidden="true" />
-        {toolbarButton('Bulleted list', <List className="w-4 h-4" />, () => execCommand('insertUnorderedList'))}
-        {toolbarButton('Numbered list', <ListOrdered className="w-4 h-4" />, () => execCommand('insertOrderedList'))}
-        <div className="w-px h-5 bg-border-strong mx-1" aria-hidden="true" />
-        {toolbarButton('Insert link', <LinkIcon className="w-4 h-4" />, handleInsertLink)}
-      </div>
-
-      {/* Editor */}
-      <div className="relative">
-        {isEmpty && (
-          <div className="absolute top-2 left-3 text-sm text-text-disabled pointer-events-none select-none" aria-hidden="true">
-            {placeholder}
-          </div>
-        )}
-        <div
-          ref={editorRef}
-          contentEditable
-          role="textbox"
-          aria-multiline="true"
-          aria-label={placeholder}
-          className="min-h-[80px] max-h-[300px] overflow-y-auto px-3 py-2 text-sm text-text-primary focus:outline-none prose prose-sm max-w-none"
-          onInput={handleInput}
-          onKeyDown={handleKeyDown}
-          suppressContentEditableWarning
-        />
-      </div>
+    <div ref={wrapRef} onKeyDown={handleKeyDown} className="rounded-lg bg-surface-0">
+      <RichContentEditorV2 value={html} onChange={setHtml} placeholder={placeholder} label={placeholder} />
 
       {/* Actions */}
-      <div className="flex items-center justify-between px-3 py-2 border-t border-border-default bg-surface-1">
+      <div className="flex items-center justify-between px-3 py-2">
         <span className="text-xs text-text-disabled">
           {navigator.platform?.includes('Mac') ? '\u2318' : 'Ctrl'}+Enter to submit
         </span>
