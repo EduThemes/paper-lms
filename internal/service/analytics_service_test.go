@@ -218,7 +218,7 @@ func TestGetCourseAssignmentStats_QuartilesAndBreakdown(t *testing.T) {
 	}
 	m.submissions.On("BulkListByCourse", mock.Anything, uint(30), mock.Anything).Return(&repository.PaginatedResult[models.Submission]{Items: subs}, nil)
 
-	stats, err := m.svc.GetCourseAssignmentStats(context.Background(), 30)
+	stats, err := m.svc.GetCourseAssignmentStats(context.Background(), 30, 0)
 	require.NoError(t, err)
 	require.Len(t, stats, 1)
 	assert.Equal(t, 5.0, stats[0]["median"])

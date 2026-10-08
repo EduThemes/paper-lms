@@ -258,12 +258,12 @@ func (b *TardinessBreakdown) add(status string) {
 // GetCourseAssignmentStats returns per-assignment statistics over the
 // course's students: score min / quartiles / median / max / average and the
 // on-time / late / missing breakdown (Canvas course analytics "assignments").
-func (s *AnalyticsService) GetCourseAssignmentStats(ctx context.Context, courseID uint) ([]map[string]interface{}, error) {
+func (s *AnalyticsService) GetCourseAssignmentStats(ctx context.Context, courseID, accountID uint) ([]map[string]interface{}, error) {
 	assignments, err := s.publishedAssignments(ctx, courseID)
 	if err != nil {
 		return nil, err
 	}
-	students, err := s.courseStudents(ctx, courseID, 0)
+	students, err := s.courseStudents(ctx, courseID, accountID)
 	if err != nil {
 		return nil, err
 	}

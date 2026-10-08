@@ -95,7 +95,7 @@ func (h *AnalyticsHandler) GetCourseAssignmentStats(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid course ID")
 	}
 
-	stats, err := h.analyticsService.GetCourseAssignmentStats(c.Context(), uint(courseID))
+	stats, err := h.analyticsService.GetCourseAssignmentStats(c.Context(), uint(courseID), callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch assignment statistics")
 	}
@@ -416,6 +416,9 @@ func (h *AnalyticsHandler) ParticipationRecorder() fiber.Handler {
 		}
 		// Copy what the goroutine needs: fasthttp reuses the request
 		// context once the handler returns.
+		// c.Method() aliases the request buffer too (Fiber is not
+		// Immutable here), so it is cloned like the paths.
+		method = strings.Clone(method)
 		path := strings.Clone(c.Path())
 		routePath := strings.Clone(c.Route().Path)
 		go func() {
