@@ -9,6 +9,7 @@ import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { fetchAllPages } from '../utils/fetchAllPages';
 
 const DiscussionsPage = () => {
   const { courseId } = useParams();
@@ -29,8 +30,10 @@ const DiscussionsPage = () => {
 
   const fetchTopics = async () => {
     try {
-      const result = await api.getDiscussionTopics(courseId);
-      setTopics(result.data || []);
+      // Walk every page (the endpoint defaults to 20 per page) so topic
+      // 21+ isn't silently dropped.
+      const all = await fetchAllPages((page) => api.getDiscussionTopics(courseId, page, 100));
+      setTopics(all);
     } catch (err) {
       setError(err.message);
     } finally {

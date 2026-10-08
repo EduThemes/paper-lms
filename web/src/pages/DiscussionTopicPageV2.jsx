@@ -32,6 +32,12 @@ import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import RichContentViewer, { sanitizeHTML } from '../components/RichContentViewer';
 import DiscussionCheckpointsPanel from '../components/DiscussionCheckpointsPanel';
+import {
+  isEntryUnread,
+  isEntryDeleted,
+  wasEntryEdited,
+  countUnreadEntries,
+} from '../utils/discussionEntries';
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -79,14 +85,7 @@ function countAllReplies(entry) {
   return count;
 }
 
-function countUnread(entries) {
-  let count = 0;
-  for (const entry of entries) {
-    if (entry.read_state === 'unread') count++;
-    if (entry.replies) count += countUnread(entry.replies);
-  }
-  return count;
-}
+const countUnread = countUnreadEntries;
 
 /** Get initials from a name string, up to 2 characters. */
 function getInitials(name) {
@@ -355,11 +354,14 @@ const VersionHistoryModal = ({ versions, onClose }) => {
           {!versions || versions.length === 0 ? (
             <p className="text-text-tertiary text-center py-8">No edit history available.</p>
           ) : (
-            versions.map((version, index) => (
+            [...versions]
+              .sort((a, b) => (b.version || 0) - (a.version || 0))
+              .map((version, index, sorted) => (
               <div key={version.id || index} className="border border-border-default rounded-lg p-4">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-text-secondary">
-                    Version {versions.length - index}
+                    Version {version.version || sorted.length - index}
+                    {index === 0 && sorted.length > 1 ? ' (current)' : ''}
                   </span>
                   <span className="text-xs text-text-tertiary" title={fullDate(version.created_at)}>
                     {relativeTime(version.created_at)}
@@ -448,6 +450,9 @@ const EntryItem = ({
   onMarkRead,
   collapsedThreads,
   toggleCollapse,
+  canRate = false,
+  canModerate = false,
+  lockedForUser = false,
 }) => {
   const [showReplyForm, setShowReplyForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
@@ -458,11 +463,17 @@ const EntryItem = ({
   const entryRef = useRef(null);
 
   const isOwnEntry = currentUserId && (entry.user_id === currentUserId || String(entry.user_id) === String(currentUserId));
-  const isUnread = entry.read_state === 'unread';
+  const isDeleted = isEntryDeleted(entry);
+  const isUnread = isEntryUnread(entry);
   const hasReplies = entry.replies && entry.replies.length > 0;
   const replyCount = countAllReplies(entry);
   const isCollapsed = collapsedThreads.has(entry.id);
-  const wasEdited = entry.version_count > 1;
+  const wasEdited = !isDeleted && wasEntryEdited(entry);
+  const liked = entry.rating === 1;
+  // Authors may change their own posts while the topic is open; course
+  // staff may moderate any post (mirrors the backend checks).
+  const canChange = !isDeleted && (canModerate || (isOwnEntry && !lockedForUser));
+  const canReply = !isDeleted && !lockedForUser;
 
   // IntersectionObserver: mark as read when scrolled into view
   useEffect(() => {
@@ -576,7 +587,9 @@ const EntryItem = ({
             </div>
 
             {/* Message body */}
-            {showEditForm ? (
+            {isDeleted ? (
+              <p className="mt-1 text-sm italic text-text-tertiary">This post has been deleted.</p>
+            ) : showEditForm ? (
               <div className="mt-2">
                 <ComposeArea
                   initialValue={entry.message}
@@ -593,21 +606,36 @@ const EntryItem = ({
 
             {/* Action bar */}
             <div className="flex flex-wrap items-center gap-x-1 gap-y-1 mt-2">
-              {/* Like */}
-              <button
-                onClick={() => onRate(entry.id)}
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
-                  entry.rating_sum > 0
-                    ? 'text-brand-600 bg-brand-50 hover:bg-brand-100'
-                    : 'text-text-tertiary hover:bg-surface-2 hover:text-brand-600'
-                }`}
-                aria-label={`Like (${entry.rating_sum || 0} likes)`}
-              >
-                <ThumbsUp className="w-3.5 h-3.5" />
-                {entry.rating_sum > 0 && <span>{entry.rating_sum}</span>}
-              </button>
+              {/* Like: a toggle of the viewer's own like (Canvas sends
+                  1 to like and 0 to unlike); only where the topic
+                  allows the viewer to rate. Otherwise show the count. */}
+              {!isDeleted && canRate && (
+                <button
+                  onClick={() => onRate(entry.id, liked ? 0 : 1)}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
+                    liked
+                      ? 'text-brand-600 bg-brand-50 hover:bg-brand-100'
+                      : 'text-text-tertiary hover:bg-surface-2 hover:text-brand-600'
+                  }`}
+                  aria-label={liked ? `Unlike (${entry.rating_sum || 0} likes)` : `Like (${entry.rating_sum || 0} likes)`}
+                  aria-pressed={liked}
+                >
+                  <ThumbsUp className="w-3.5 h-3.5" />
+                  {entry.rating_sum > 0 && <span>{entry.rating_sum}</span>}
+                </button>
+              )}
+              {!isDeleted && !canRate && entry.rating_sum > 0 && (
+                <span
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs text-text-tertiary"
+                  aria-label={`${entry.rating_sum} likes`}
+                >
+                  <ThumbsUp className="w-3.5 h-3.5" />
+                  <span>{entry.rating_sum}</span>
+                </span>
+              )}
 
               {/* Reply */}
+              {canReply && (
               <button
                 onClick={() => {
                   setShowReplyForm(!showReplyForm);
@@ -624,9 +652,10 @@ const EntryItem = ({
                 <CornerDownRight className="w-3.5 h-3.5" />
                 Reply
               </button>
+              )}
 
-              {/* Edit (own entries only) */}
-              {isOwnEntry && !showEditForm && (
+              {/* Edit (own entries, or any entry for course staff) */}
+              {canChange && !showEditForm && (
                 <button
                   onClick={() => {
                     setShowEditForm(true);
@@ -640,8 +669,8 @@ const EntryItem = ({
                 </button>
               )}
 
-              {/* Delete (own entries only) */}
-              {isOwnEntry && (
+              {/* Delete (own entries, or any entry for course staff) */}
+              {canChange && (
                 <button
                   onClick={() => setShowDeleteConfirm(true)}
                   className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs text-text-tertiary hover:bg-accent-danger/10 hover:text-accent-danger transition-colors"
@@ -712,6 +741,9 @@ const EntryItem = ({
               onMarkRead={onMarkRead}
               collapsedThreads={collapsedThreads}
               toggleCollapse={toggleCollapse}
+              canRate={canRate}
+              canModerate={canModerate}
+              lockedForUser={lockedForUser}
             />
           ))}
         </div>
@@ -818,9 +850,9 @@ const DiscussionTopicPageV2 = () => {
     await fetchData();
   }, [courseId, topicId, fetchData]);
 
-  const handleRate = useCallback(async (entryId) => {
+  const handleRate = useCallback(async (entryId, rating = 1) => {
     try {
-      await api.rateDiscussionEntry(courseId, topicId, entryId, 1);
+      await api.rateDiscussionEntry(courseId, topicId, entryId, rating);
       await fetchData();
     } catch {
       // silently fail
@@ -951,6 +983,12 @@ const DiscussionTopicPageV2 = () => {
       </Layout>
     );
   }
+
+  // Server-computed for the viewer: whether they may like posts here
+  // (allow_rating / only_graders_can_rate) and whether the topic is
+  // locked for them (staff are never locked out).
+  const canRate = topic.can_rate !== undefined ? !!topic.can_rate : !!topic.allow_rating;
+  const lockedForUser = !!topic.locked_for_user;
 
   return (
     <Layout>
@@ -1094,6 +1132,9 @@ const DiscussionTopicPageV2 = () => {
                 </span>
               )}
             </h2>
+            {lockedForUser ? (
+              <span className="text-sm text-text-tertiary">This discussion is locked.</span>
+            ) : (
             <button
               onClick={() => setShowNewEntryForm(!showNewEntryForm)}
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors"
@@ -1102,10 +1143,11 @@ const DiscussionTopicPageV2 = () => {
               <MessageSquare className="w-4 h-4" />
               New Reply
             </button>
+            )}
           </div>
 
           {/* New entry form (top) */}
-          {showNewEntryForm && (
+          {showNewEntryForm && !lockedForUser && (
             <div className="px-6 py-4 border-b border-border-default bg-brand-50/30" role="region" aria-label="New reply form">
               <ComposeArea
                 onSubmit={handleNewEntry}
@@ -1122,7 +1164,7 @@ const DiscussionTopicPageV2 = () => {
             <div className="py-16 text-center" role="status">
               <MessageSquare className="w-12 h-12 text-text-disabled mx-auto mb-3" />
               <p className="text-text-tertiary text-sm">No replies yet. Be the first to respond!</p>
-              {!showNewEntryForm && (
+              {!showNewEntryForm && !lockedForUser && (
                 <button
                   onClick={() => setShowNewEntryForm(true)}
                   className="mt-3 text-sm text-brand-600 hover:text-brand-700 font-medium"
@@ -1148,6 +1190,9 @@ const DiscussionTopicPageV2 = () => {
                   onMarkRead={handleMarkRead}
                   collapsedThreads={collapsedThreads}
                   toggleCollapse={toggleCollapse}
+                  canRate={canRate}
+                  canModerate={!!isTeacher}
+                  lockedForUser={lockedForUser}
                 />
               ))}
             </div>
@@ -1155,7 +1200,7 @@ const DiscussionTopicPageV2 = () => {
         </div>
 
         {/* Bottom compose area (shown when there are entries) */}
-        {entries.length > 0 && !showNewEntryForm && (
+        {entries.length > 0 && !showNewEntryForm && !lockedForUser && (
           <div className="bg-surface-0 rounded-xl shadow-sm border border-border-default overflow-hidden mb-6">
             <div className="px-6 py-4">
               <h3 className="font-semibold text-text-primary mb-3 flex items-center gap-2">
@@ -1182,7 +1227,7 @@ const DiscussionTopicPageV2 = () => {
 function markEntryRead(entries, entryId) {
   return entries.map((entry) => {
     if (entry.id === entryId) {
-      return { ...entry, read_state: 'read' };
+      return { ...entry, read_state: true };
     }
     if (entry.replies) {
       return { ...entry, replies: markEntryRead(entry.replies, entryId) };
@@ -1194,7 +1239,7 @@ function markEntryRead(entries, entryId) {
 function markAllEntriesRead(entries) {
   return entries.map((entry) => ({
     ...entry,
-    read_state: 'read',
+    read_state: true,
     replies: entry.replies ? markAllEntriesRead(entry.replies) : entry.replies,
   }));
 }
