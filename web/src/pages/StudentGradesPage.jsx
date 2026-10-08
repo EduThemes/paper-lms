@@ -425,6 +425,12 @@ const StudentGradesPage = () => {
               <Calculator className="w-4 h-4" />
               {whatIfMode ? 'Exit What-If' : 'What-If Grades'}
             </button>
+            <Link
+              to={`/courses/${courseId}/outcomes/mastery${observeeId ? `?observee_id=${observeeId}` : ''}`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
+            >
+              Learning Mastery
+            </Link>
           </div>
         </div>
       </div>
