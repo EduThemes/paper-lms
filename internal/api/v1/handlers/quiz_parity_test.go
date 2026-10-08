@@ -369,3 +369,40 @@ func (m *mockQuestionBankRepoNoop) ListByCourse(_ context.Context, _ uint, _ rep
 	m.called = true
 	return &repository.PaginatedResult[models.QuestionBank]{}, nil
 }
+
+// Leftover (quizzes lane): with hide_results = "always" the student's own
+// answers come back without per-answer correctness or points; the
+// teacher still sees them.
+func TestSubmissionAnswers_HideResultsAlwaysStripsCorrectness(t *testing.T) {
+	sub := &models.QuizSubmission{ID: 3, QuizID: 5, UserID: 10, WorkflowState: "complete", Attempt: 1}
+	quiz := publishedQuiz(5, 7)
+	quiz.HideResults = "always"
+	correct, pts := true, 2.0
+	answers := []models.QuizSubmissionAnswer{{ID: 1, QuizSubmissionID: 3, QuestionID: 1, Answer: "a", Correct: &correct, Points: &pts}}
+
+	app, d := quizApp("StudentEnrollment", 10)
+	d.quizRepo.On("FindByID", mock.Anything, uint(5), uint(1)).Return(quiz, nil)
+	d.sRepo.On("FindByID", mock.Anything, uint(3)).Return(sub, nil)
+	d.aRepo.On("ListBySubmissionID", mock.Anything, uint(3)).Return(answers, nil)
+	resp := testutil.MakeRequest(app, http.MethodGet, "/courses/7/quizzes/5/submissions/3/answers", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	m, err := testutil.ParseJSONMap(resp)
+	require.NoError(t, err)
+	rows := m["quiz_submission_answers"].([]interface{})
+	require.Len(t, rows, 1)
+	row := rows[0].(map[string]interface{})
+	assert.Nil(t, row["correct"])
+	assert.Nil(t, row["points"])
+	assert.Equal(t, "a", row["answer"])
+
+	teacher, d2 := quizApp("TeacherEnrollment", 2)
+	d2.quizRepo.On("FindByID", mock.Anything, uint(5), uint(1)).Return(quiz, nil)
+	d2.sRepo.On("FindByID", mock.Anything, uint(3)).Return(sub, nil)
+	d2.aRepo.On("ListBySubmissionID", mock.Anything, uint(3)).Return(answers, nil)
+	resp = testutil.MakeRequest(teacher, http.MethodGet, "/courses/7/quizzes/5/submissions/3/answers", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	m, err = testutil.ParseJSONMap(resp)
+	require.NoError(t, err)
+	row = m["quiz_submission_answers"].([]interface{})[0].(map[string]interface{})
+	assert.Equal(t, true, row["correct"])
+}

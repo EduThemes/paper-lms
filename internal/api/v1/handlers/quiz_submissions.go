@@ -312,7 +312,8 @@ func (h *QuizSubmissionHandler) GetSubmissionAnswers(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if _, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID)); wrote {
+	quiz, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID))
+	if wrote {
 		return nil
 	}
 
@@ -324,14 +325,23 @@ func (h *QuizSubmissionHandler) GetSubmissionAnswers(c *fiber.Ctx) error {
 		return responses.NotFound(c, "quiz submission")
 	}
 
-	answers, err := h.quizService.ListSubmissionAnswers(c.Context(), sub.ID, quizCallerIsStaff(c))
+	staff := quizCallerIsStaff(c)
+	answers, err := h.quizService.ListSubmissionAnswers(c.Context(), sub.ID, staff)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 
+	// Per-answer correctness and points are the attempt's results: a
+	// student (or observer) sees them only when the quiz's hide_results
+	// policy allows, as on the questions view.
+	showResults := staff || resultsVisibleAfterAttempt(quiz, sub)
 	result := make([]fiber.Map, len(answers))
 	for i := range answers {
 		result[i] = quizSubmissionAnswerToJSON(&answers[i])
+		if !showResults {
+			result[i]["correct"] = nil
+			result[i]["points"] = nil
+		}
 	}
 
 	// 13.5 PII audit — student-keyed read of a quiz attempt's answers.
@@ -344,6 +354,23 @@ func (h *QuizSubmissionHandler) GetSubmissionAnswers(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"quiz_submission_answers": result,
 	})
+}
+
+// resultsVisibleAfterAttempt reports whether a non-staff viewer may see a
+// finished attempt's per-question results (correct / points). Canvas
+// hide_results: "always" never, "until_after_last_attempt" only once the
+// last allowed attempt is used.
+func resultsVisibleAfterAttempt(quiz *models.Quiz, submission *models.QuizSubmission) bool {
+	if quiz == nil || submission == nil || submission.WorkflowState == "untaken" {
+		return false
+	}
+	switch quiz.HideResults {
+	case "always":
+		return false
+	case "until_after_last_attempt":
+		return quiz.AllowedAttempts > 0 && submission.Attempt >= quiz.AllowedAttempts
+	}
+	return true
 }
 
 // answerKeyVisibleAfterAttempt reports whether a non-staff viewer may see
