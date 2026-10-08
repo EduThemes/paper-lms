@@ -662,6 +662,8 @@ func (e *IMSCCExporter) buildQTIForQuiz(
 	if err != nil {
 		return nil, fmt.Errorf("failed to list questions: %w", err)
 	}
+	// Per-attempt bank-draw copies are not part of the authored quiz.
+	questions.Items = models.AuthoredQuizQuestions(questions.Items)
 
 	// Build metadata fields
 	metaFields := []exportQTIMetaDataField{

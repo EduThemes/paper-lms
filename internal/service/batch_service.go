@@ -294,7 +294,8 @@ func (s *BatchService) cloneQuizzes(ctx context.Context, sourceCourseID, destCou
 		if err != nil {
 			continue // skip question cloning if fetch fails
 		}
-		for _, question := range questions.Items {
+		// Per-attempt bank-draw copies stay with the source quiz.
+		for _, question := range models.AuthoredQuizQuestions(questions.Items) {
 			newQuestion := &models.QuizQuestion{
 				QuizID:            newQuiz.ID,
 				Position:          question.Position,

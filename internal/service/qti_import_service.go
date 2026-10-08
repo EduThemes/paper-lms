@@ -318,12 +318,7 @@ func (s *QTIImportService) exportLoadedQuiz(ctx context.Context, quiz *models.Qu
 	// Per-attempt copies of question-bank draws (question_bank_entry_id)
 	// are not authored questions; exporting them would turn every drawn
 	// bank entry into a standalone question on re-import.
-	authored := make([]models.QuizQuestion, 0, len(page.Items))
-	for _, q := range page.Items {
-		if q.QuestionBankEntryID == nil {
-			authored = append(authored, q)
-		}
-	}
+	authored := models.AuthoredQuizQuestions(page.Items)
 	// Collect referenced banks for self-contained export.
 	bankSeen := map[uint]bool{}
 	banks := []qti.ItemBankImport{}

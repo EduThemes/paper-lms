@@ -522,7 +522,9 @@ func applyQuestionFields(dst, src *models.QuizQuestion) {
 func (s *BlueprintService) quizChangedAt(ctx context.Context, q *models.Quiz) time.Time {
 	latest := q.UpdatedAt
 	if qs, err := s.qqRepo.ListByQuizID(ctx, q.ID, bigPage); err == nil {
-		for _, qq := range qs.Items {
+		// Bank-draw copies are written when students take the quiz; they
+		// are not authoring changes.
+		for _, qq := range models.AuthoredQuizQuestions(qs.Items) {
 			if qq.UpdatedAt.After(latest) {
 				latest = qq.UpdatedAt
 			}
@@ -597,20 +599,24 @@ func (s *BlueprintService) syncQuizzes(ctx context.Context, sourceCourseID uint,
 
 // syncQuizQuestions makes the child quiz's live questions mirror the
 // source quiz's, matching by order: existing child questions are
-// updated in place, missing ones created, surplus ones deleted.
+// updated in place, missing ones created, surplus ones deleted. Only
+// authored questions take part on either side: per-attempt bank-draw
+// copies (QuestionBankEntryID) are neither copied nor matched/deleted.
 func (s *BlueprintService) syncQuizQuestions(ctx context.Context, sourceQuizID, childQuizID uint) error {
-	srcQs, err := s.qqRepo.ListByQuizID(ctx, sourceQuizID, bigPage)
+	srcPage, err := s.qqRepo.ListByQuizID(ctx, sourceQuizID, bigPage)
 	if err != nil {
 		return err
 	}
-	childQs, err := s.qqRepo.ListByQuizID(ctx, childQuizID, bigPage)
+	childPage, err := s.qqRepo.ListByQuizID(ctx, childQuizID, bigPage)
 	if err != nil {
 		return err
 	}
-	for i := range srcQs.Items {
-		src := &srcQs.Items[i]
-		if i < len(childQs.Items) {
-			dst := childQs.Items[i]
+	srcItems := models.AuthoredQuizQuestions(srcPage.Items)
+	childItems := models.AuthoredQuizQuestions(childPage.Items)
+	for i := range srcItems {
+		src := &srcItems[i]
+		if i < len(childItems) {
+			dst := childItems[i]
 			applyQuestionFields(&dst, src)
 			if err := s.qqRepo.Update(ctx, &dst); err != nil {
 				return fmt.Errorf("update question (position %d): %w", src.Position, err)
@@ -625,8 +631,8 @@ func (s *BlueprintService) syncQuizQuestions(ctx context.Context, sourceQuizID, 
 			return fmt.Errorf("create question (position %d): %w", src.Position, err)
 		}
 	}
-	for i := len(srcQs.Items); i < len(childQs.Items); i++ {
-		if err := s.qqRepo.Delete(ctx, childQs.Items[i].ID); err != nil {
+	for i := len(srcItems); i < len(childItems); i++ {
+		if err := s.qqRepo.Delete(ctx, childItems[i].ID); err != nil {
 			return err
 		}
 	}

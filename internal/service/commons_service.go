@@ -248,7 +248,8 @@ func (s *CommonsService) snapshotQuiz(ctx context.Context, q *models.Quiz) commo
 	out := commonsQuiz{Quiz: *q}
 	if s.questionRepo != nil {
 		if qs, err := s.questionRepo.ListByQuizID(ctx, q.ID, repository.PaginationParams{Page: 1, PerPage: 10000}); err == nil {
-			out.Questions = qs.Items
+			// Bank-draw copies reference the source course's bank.
+			out.Questions = models.AuthoredQuizQuestions(qs.Items)
 		}
 	}
 	return out

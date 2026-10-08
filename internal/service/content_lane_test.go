@@ -283,3 +283,61 @@ func TestCoursePacePublish_IgnoresForeignModuleItems(t *testing.T) {
 	assignments.AssertNotCalled(t, "FindByID", mock.Anything, mock.Anything, mock.Anything)
 	assignments.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
 }
+
+// F13/F23: per-attempt bank-draw copies (question_bank_entry_id) in the
+// blueprint quiz are not synced as fixed questions, don't count as
+// unsynced changes, and the child's own copies are left alone.
+func TestBlueprintSync_SkipsBankDrawCopies(t *testing.T) {
+	g, cleanup := freshDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	bp := laneSeedCourse(t, g, 1, "BP-201")
+	child := laneSeedCourse(t, g, 1, "SEC-2")
+	quizRepo := postgres.NewQuizRepository(g)
+	qqRepo := postgres.NewQuizQuestionRepository(g)
+	svc := newLaneBlueprintService(g)
+
+	quiz := &models.Quiz{CourseID: bp.ID, Title: "Unit quiz", QuizType: "assignment", WorkflowState: "available"}
+	require.NoError(t, quizRepo.Create(ctx, quiz))
+	require.NoError(t, qqRepo.Create(ctx, &models.QuizQuestion{QuizID: quiz.ID, Position: 1, QuestionType: "essay_question", QuestionText: "Explain osmosis", WorkflowState: "active"}))
+
+	tmpl, err := svc.GetOrCreateTemplate(ctx, bp.ID)
+	require.NoError(t, err)
+	require.NoError(t, svc.ModifyAssociations(ctx, tmpl, service.BlueprintCaller{UserID: 1, AccountID: 1, IsAdmin: true}, []uint{child.ID}, nil))
+	_, err = svc.TriggerSync(ctx, tmpl.ID, 1, "initial")
+	require.NoError(t, err)
+
+	childQuizzes, err := quizRepo.ListByCourseID(ctx, child.ID, repository.PaginationParams{Page: 1, PerPage: 10})
+	require.NoError(t, err)
+	require.Len(t, childQuizzes.Items, 1)
+	childQuizID := childQuizzes.Items[0].ID
+
+	// A student attempt in the child materializes a bank draw there, and
+	// one in the blueprint materializes another draw in the source quiz.
+	childEntry, srcEntry := uint(9001), uint(9002)
+	require.NoError(t, qqRepo.Create(ctx, &models.QuizQuestion{QuizID: childQuizID, Position: 2, QuestionType: "multiple_choice_question", QuestionText: "Child draw", WorkflowState: "active", QuestionBankEntryID: &childEntry}))
+	time.Sleep(1100 * time.Millisecond)
+	require.NoError(t, qqRepo.Create(ctx, &models.QuizQuestion{QuizID: quiz.ID, Position: 2, QuestionType: "multiple_choice_question", QuestionText: "Source draw", WorkflowState: "active", QuestionBankEntryID: &srcEntry}))
+
+	changes, err := svc.GetUnsyncedChanges(ctx, tmpl.ID)
+	require.NoError(t, err)
+	assert.Empty(t, changes, "a student's bank draw is not an authoring change")
+
+	// Force a re-sync of the quiz by editing its authored question.
+	time.Sleep(1100 * time.Millisecond)
+	quiz.Description = "Updated"
+	require.NoError(t, quizRepo.Update(ctx, quiz))
+	_, err = svc.TriggerSync(ctx, tmpl.ID, 1, "edit")
+	require.NoError(t, err)
+
+	got, err := qqRepo.ListByQuizID(ctx, childQuizID, repository.PaginationParams{Page: 1, PerPage: 100})
+	require.NoError(t, err)
+	texts := map[string]bool{}
+	for _, q := range got.Items {
+		texts[q.QuestionText] = true
+	}
+	assert.True(t, texts["Explain osmosis"])
+	assert.True(t, texts["Child draw"], "the child's own bank copy must not be overwritten or deleted")
+	assert.False(t, texts["Source draw"], "the source's bank copy must not become a fixed child question")
+	assert.Len(t, got.Items, 2)
+}
