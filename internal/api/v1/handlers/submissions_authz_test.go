@@ -45,6 +45,10 @@ func setupSubmissionAuthz(callerUserID uint, enrollmentType string) (*fiber.App,
 	svc := service.NewSubmissionService(submissionRepo, assignmentRepo, enrollmentRepo, latePolicyRepo, courseRepo, gpgRepo, gpRepo, nil)
 	h := handlers.NewSubmissionHandler(svc, commentRepo, attachmentRepo, userRepo, assignmentRepo, nil, nil, nil, nil, nil)
 
+	// Assignment 1 is a published assignment of course 10 in tenant 1.
+	assignmentRepo.On("FindByID", mock.Anything, uint(1), uint(1)).
+		Return(&models.Assignment{ID: 1, CourseID: 10, WorkflowState: models.AssignmentPublished}, nil).Maybe()
+
 	app := testutil.SetupTestApp()
 	app.Use(func(c *fiber.Ctx) error {
 		c.Locals("user_id", callerUserID)
@@ -101,14 +105,9 @@ func TestGetSubmission_AllowsTeacher(t *testing.T) {
 // SEC-004: a student listing an assignment's submissions sees only their own.
 func TestListSubmissions_StudentSeesOnlyOwn(t *testing.T) {
 	app, submissionRepo := setupSubmissionAuthz(1, "StudentEnrollment")
-	submissionRepo.On("ListByAssignmentID", mock.Anything, uint(1), mock.Anything).
-		Return(&repository.PaginatedResult[models.Submission]{
-			Items: []models.Submission{
-				{ID: 1, AssignmentID: 1, UserID: 1},
-				{ID: 2, AssignmentID: 1, UserID: 2},
-			},
-			TotalCount: 2, Page: 1, PerPage: 10,
-		}, nil)
+	// A student's row is loaded directly (never by paging the class list).
+	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(1), uint(1)).
+		Return(&models.Submission{ID: 1, AssignmentID: 1, UserID: 1}, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/courses/10/assignments/1/submissions", nil)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -117,6 +116,7 @@ func TestListSubmissions_StudentSeesOnlyOwn(t *testing.T) {
 	if len(items) == 1 {
 		assert.EqualValues(t, 1, items[0]["user_id"])
 	}
+	submissionRepo.AssertNotCalled(t, "ListByAssignmentID", mock.Anything, mock.Anything, mock.Anything)
 }
 
 // SEC-004: course staff listing an assignment's submissions see the whole class.

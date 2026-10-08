@@ -25,7 +25,7 @@ func TestAddPortfolioSection_StoresPlainTextLiterally(t *testing.T) {
 	portfolioRepo := new(mocks.MockPortfolioRepository)
 	sectionRepo := new(mocks.MockPortfolioSectionRepository)
 	svc := service.NewPortfolioService(portfolioRepo, sectionRepo, nil, nil, nil, nil, nil, nil)
-	h := handlers.NewPortfolioHandler(svc, handlers.NewResourceAuthorizer(nil, nil))
+	h := handlers.NewPortfolioHandler(svc, handlers.NewResourceAuthorizer(nil, nil, nil))
 
 	portfolioRepo.On("FindByID", mock.Anything, uint(7), uint(1)).
 		Return(&models.Portfolio{ID: 7, UserID: 10}, nil)

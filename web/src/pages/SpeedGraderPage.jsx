@@ -33,6 +33,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '../components/ui/tooltip';
+import { normalizeRubricScores } from '../utils/grading';
 
 const STATUS_CONFIG = {
   submitted: { label: 'Submitted', color: 'bg-brand-100 text-brand-800', icon: CheckCircle, dot: 'bg-brand-500' },
@@ -405,7 +406,10 @@ const SpeedGraderPage = () => {
   useEffect(() => {
     if (students.length > 0 && students[selectedIndex]) {
       const student = students[selectedIndex];
-      const score = student.submission?.score;
+      // B021: edit the ENTERED score; the final score may carry a late
+      // deduction, and re-posting it would deduct again.
+      const sub = student.submission;
+      const score = sub?.entered_score ?? sub?.score;
       setGradeInput(score !== null && score !== undefined ? String(score) : '');
       setGradeSuccess(false);
     }
@@ -443,9 +447,12 @@ const SpeedGraderPage = () => {
     [selectedStudent]
   );
 
+  // B113: an empty input clears an existing grade (posted_grade "").
+  const hasExistingGrade =
+    selectedStudent?.submission?.score !== null && selectedStudent?.submission?.score !== undefined;
   const canPost = useMemo(
-    () => !!selectedStudent && gradeInput !== '' && !grading,
-    [selectedStudent, gradeInput, grading]
+    () => !!selectedStudent && (gradeInput !== '' || hasExistingGrade) && !grading,
+    [selectedStudent, gradeInput, grading, hasExistingGrade]
   );
 
   const handleSelectStudent = useCallback((userId) => {
@@ -482,30 +489,40 @@ const SpeedGraderPage = () => {
 
   const handlePost = useCallback(async (e) => {
     e.preventDefault();
-    if (!selectedStudent || gradeInput === '') return;
+    if (!selectedStudent) return;
+    const clearing = gradeInput.trim() === '';
+    if (clearing && !hasExistingGrade) return;
 
     setGrading(true);
     setGradeSuccess(false);
     try {
-      await api.gradeSubmission(courseId, assignmentId, selectedStudent.user_id, {
-        posted_grade: gradeInput,
+      const saved = await api.gradeSubmission(courseId, assignmentId, selectedStudent.user_id, {
+        posted_grade: clearing ? '' : gradeInput,
       });
 
       setStudents((prev) => {
         const updated = [...prev];
         const student = { ...updated[selectedIndex] };
         const base = student.submission || { user_id: student.user_id };
-        student.submission = {
-          ...base,
-          score: parseFloat(gradeInput),
-          grade: gradeInput,
-          workflow_state: 'graded',
-        };
+        student.submission =
+          saved && typeof saved === 'object' && 'score' in saved
+            ? { ...base, ...saved }
+            : {
+                ...base,
+                score: clearing ? null : parseFloat(gradeInput),
+                grade: clearing ? null : gradeInput,
+                entered_score: clearing ? null : parseFloat(gradeInput),
+                workflow_state: clearing ? (base.submitted_at ? 'submitted' : 'unsubmitted') : 'graded',
+              };
         updated[selectedIndex] = student;
         return updated;
       });
       setGradeSuccess(true);
-      announce(`Grade ${gradeInput} saved for ${selectedStudent.user_name || 'student'}.`);
+      announce(
+        clearing
+          ? `Grade cleared for ${selectedStudent.user_name || 'student'}.`
+          : `Grade ${gradeInput} saved for ${selectedStudent.user_name || 'student'}.`
+      );
       setTimeout(() => setGradeSuccess(false), 2000);
     } catch (err) {
       setError(err.message);
@@ -513,7 +530,7 @@ const SpeedGraderPage = () => {
     } finally {
       setGrading(false);
     }
-  }, [courseId, assignmentId, selectedStudent, selectedIndex, gradeInput, announce]);
+  }, [courseId, assignmentId, selectedStudent, selectedIndex, gradeInput, hasExistingGrade, announce]);
 
   const handleAddComment = useCallback(async (e) => {
     e.preventDefault();
@@ -563,7 +580,9 @@ const SpeedGraderPage = () => {
     const assocId = rubric.rubric_association.id;
     setRubricSaving(true);
     try {
-      const dataStr = JSON.stringify(rubricScores);
+      // B120: a typed criterion box holds a string ("4"); save numbers so
+      // the server can total the assessment.
+      const dataStr = JSON.stringify(normalizeRubricScores(rubricScores));
       if (existingAssessmentId) {
         await api.updateRubricAssessment(courseId, assocId, existingAssessmentId, {
           data: dataStr,
@@ -763,9 +782,15 @@ const SpeedGraderPage = () => {
                     {((parseFloat(gradeInput) / assignment.points_possible) * 100).toFixed(1)}%
                   </div>
                 )}
+                {selectedStudent?.submission?.points_deducted > 0 && (
+                  <div className="text-xs text-accent-danger">
+                    Late penalty -{selectedStudent.submission.points_deducted} pts (final score{' '}
+                    {selectedStudent.submission.score})
+                  </div>
+                )}
 
                 <Button type="submit" disabled={!canPost} className="w-full">
-                  {grading ? 'Saving...' : 'Update Grade'}
+                  {grading ? 'Saving...' : gradeInput.trim() === '' && hasExistingGrade ? 'Clear Grade' : 'Update Grade'}
                 </Button>
 
                 {gradeSuccess && (

@@ -322,6 +322,11 @@ func TestTenantIsolation_GetSubmission(t *testing.T) {
 				Return(nil, errors.New("record not found"))
 		}
 
+		// B009/F-013: the parent assignment is loaded under the caller's
+		// tenant first; a cross-tenant id is already a 404 there.
+		expectAccountIDPassThrough(&assignmentRepo.Mock, "FindByID", resourceID, ownerOf(resourceID),
+			&models.Assignment{ID: resourceID, CourseID: 1, WorkflowState: models.AssignmentPublished})
+
 		svc := service.NewSubmissionService(submissionRepo, assignmentRepo, enrollmentRepo, latePolicyRepo, courseRepo, gpgRepo, gpRepo, nil)
 		h := handlers.NewSubmissionHandler(svc, commentRepo, attachmentRepo, userRepo, assignmentRepo, nil, nil, nil, nil, nil)
 

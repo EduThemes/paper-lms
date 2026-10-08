@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
+
+	"gorm.io/gorm"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -44,15 +47,51 @@ func (s *OverrideService) UpdateOverride(ctx context.Context, override *models.A
 	return s.overrideRepo.Update(ctx, override)
 }
 
+// DeleteOverride soft-deletes the override and removes its student rows.
+// Leaving them behind kept the (assignment_id, user_id) unique slot taken,
+// so the student could never get another override on that assignment
+// (B112).
 func (s *OverrideService) DeleteOverride(ctx context.Context, id uint) error {
-	return s.overrideRepo.Delete(ctx, id)
+	if err := s.overrideRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	if s.overrideStudentRepo != nil {
+		if students, err := s.overrideStudentRepo.ListByOverrideID(ctx, id); err == nil {
+			for _, st := range students {
+				_ = s.overrideStudentRepo.Delete(ctx, id, st.UserID)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *OverrideService) ListOverrides(ctx context.Context, assignmentID uint) ([]models.AssignmentOverride, error) {
 	return s.overrideRepo.ListByAssignmentID(ctx, assignmentID)
 }
 
+// IsCourseStudent reports whether userID holds an active StudentEnrollment
+// in courseID (tenant-scoped by accountID).
+func (s *OverrideService) IsCourseStudent(ctx context.Context, courseID, userID, accountID uint) bool {
+	if s.enrollmentRepo == nil {
+		return false
+	}
+	e, err := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID, accountID)
+	return err == nil && e != nil && e.Type == "StudentEnrollment"
+}
+
 func (s *OverrideService) AddStudent(ctx context.Context, overrideID, userID, assignmentID uint) error {
+	// Drop stale rows left by overrides deleted before DeleteOverride
+	// cleaned up after itself; they would otherwise block this insert.
+	if rows, err := s.overrideStudentRepo.ListByUserAndAssignment(ctx, userID, assignmentID); err == nil {
+		for _, r := range rows {
+			if r.AssignmentOverrideID == overrideID {
+				continue
+			}
+			if _, err := s.overrideRepo.FindByID(ctx, r.AssignmentOverrideID); errors.Is(err, gorm.ErrRecordNotFound) {
+				_ = s.overrideStudentRepo.Delete(ctx, r.AssignmentOverrideID, userID)
+			}
+		}
+	}
 	student := &models.AssignmentOverrideStudent{
 		AssignmentOverrideID: overrideID,
 		UserID:               userID,
@@ -105,4 +144,90 @@ func (s *OverrideService) GetEffectiveDates(ctx context.Context, assignmentID, u
 
 	// 3. No overrides found — caller uses assignment defaults
 	return nil, nil, nil
+}
+
+// EffectiveDatesFor resolves the due/unlock/lock dates that actually
+// apply to userID on assignment, starting from the assignment's own
+// dates and replacing them with the most lenient applicable override
+// (an ad-hoc student override or one for a section the student is
+// enrolled in, in the assignment's course). Mirrors Canvas: when several
+// overrides apply, the one with the latest due date wins, and "no due
+// date" counts as the latest of all.
+func (s *OverrideService) EffectiveDatesFor(ctx context.Context, assignment *models.Assignment, userID uint) (dueAt, unlockAt, lockAt *time.Time) {
+	if assignment == nil {
+		return nil, nil, nil
+	}
+	dueAt, unlockAt, lockAt = assignment.DueAt, assignment.UnlockAt, assignment.LockAt
+	if s == nil {
+		return
+	}
+
+	var applicable []models.AssignmentOverride
+	seen := map[uint]bool{}
+	add := func(o models.AssignmentOverride) {
+		if o.AssignmentID != assignment.ID || o.WorkflowState == "deleted" || seen[o.ID] {
+			return
+		}
+		seen[o.ID] = true
+		applicable = append(applicable, o)
+	}
+
+	if s.overrideStudentRepo != nil {
+		if rows, err := s.overrideStudentRepo.ListByUserAndAssignment(ctx, userID, assignment.ID); err == nil {
+			for _, r := range rows {
+				if o, err := s.overrideRepo.FindByID(ctx, r.AssignmentOverrideID); err == nil && o != nil {
+					add(*o)
+				}
+			}
+		}
+	}
+
+	if s.enrollmentRepo != nil && s.overrideRepo != nil {
+		var sectionIDs []uint
+		if enrollments, err := s.enrollmentRepo.ListByUserID(ctx, userID, 0); err == nil {
+			for _, e := range enrollments {
+				if e.CourseID == assignment.CourseID && e.CourseSectionID != nil {
+					sectionIDs = append(sectionIDs, *e.CourseSectionID)
+				}
+			}
+		}
+		if len(sectionIDs) > 0 {
+			if overrides, err := s.overrideRepo.ListByAssignmentID(ctx, assignment.ID); err == nil {
+				for _, o := range overrides {
+					if o.CourseSectionID == nil {
+						continue
+					}
+					for _, sid := range sectionIDs {
+						if *o.CourseSectionID == sid {
+							add(o)
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if len(applicable) == 0 {
+		return
+	}
+	best := applicable[0]
+	for _, o := range applicable[1:] {
+		if laterDue(o.DueAt, best.DueAt) {
+			best = o
+		}
+	}
+	return best.DueAt, best.UnlockAt, best.LockAt
+}
+
+// laterDue reports whether a is a strictly more lenient due date than b
+// (nil = no due date = most lenient).
+func laterDue(a, b *time.Time) bool {
+	if b == nil {
+		return false
+	}
+	if a == nil {
+		return true
+	}
+	return a.After(*b)
 }

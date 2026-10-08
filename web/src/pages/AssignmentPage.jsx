@@ -189,8 +189,10 @@ const AssignmentPage = () => {
   const handleSubmit = async (submissionData) => {
     let result;
     if (submissionData.submission_type === 'online_upload' && submissionData.file) {
-      // Upload file first, then create submission with file ID
-      const uploadResult = await api.uploadCourseFile(courseId, submissionData.file);
+      // Upload file first, then create submission with file ID. B013: the
+      // course files route is instructor-only; students upload to the
+      // submission-file endpoint (their own space).
+      const uploadResult = await api.uploadSubmissionFile(courseId, assignmentId, submissionData.file);
       const fileData = uploadResult.data || uploadResult;
       result = await api.createSubmission(courseId, assignmentId, {
         submission_type: 'online_upload',
@@ -840,6 +842,32 @@ const AssignmentPage = () => {
                           className="text-sm text-text-secondary bg-surface-1 rounded p-3 mb-3 prose max-w-none"
                           body={review.submission?.body || review.submission_body}
                         />
+                      )}
+                      {review.submission?.url && (
+                        <p className="text-sm mb-3">
+                          <a
+                            href={review.submission.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-brand-600 hover:underline break-all"
+                          >
+                            {review.submission.url}
+                          </a>
+                        </p>
+                      )}
+                      {review.submission?.attachments?.length > 0 && (
+                        <ul className="text-sm mb-3 space-y-1">
+                          {review.submission.attachments.map((att) => (
+                            <li key={att.id}>
+                              <a href={att.url} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">
+                                {att.display_name || att.filename}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {review.submission && !review.submission.body && !review.submission.url && !review.submission.attachments?.length && (
+                        <p className="text-sm text-text-tertiary mb-3">This student has not submitted any content yet.</p>
                       )}
 
                       {/* Show completed review details */}

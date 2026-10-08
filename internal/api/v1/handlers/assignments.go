@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -54,7 +55,9 @@ func (h *AssignmentHandler) ListAssignments(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.assignmentService.ListByCourse(c.Context(), uint(courseID), params)
+	// B116: students and observers only ever see published assignments
+	// (Canvas hides unpublished drafts — title, description and all).
+	result, err := h.assignmentService.ListVisibleByCourse(c.Context(), uint(courseID), params, callerIsCourseStaff(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch assignments")
 	}
@@ -70,6 +73,10 @@ func (h *AssignmentHandler) ListAssignments(c *fiber.Ctx) error {
 }
 
 func (h *AssignmentHandler) GetAssignment(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid assignment ID")
@@ -77,6 +84,12 @@ func (h *AssignmentHandler) GetAssignment(c *fiber.Ctx) error {
 
 	assignment, err := h.assignmentService.GetByID(c.Context(), uint(id), callerAccountID(c))
 	if err != nil {
+		return responses.NotFound(c, "assignment")
+	}
+	// F-013 parent-tie, deleted rows are gone, and (B116) a draft is
+	// invisible to students/observers — all the same 404.
+	if assignment.CourseID != uint(courseID) || assignment.WorkflowState == models.AssignmentDeleted ||
+		(!callerIsCourseStaff(c) && !assignment.IsPublished()) {
 		return responses.NotFound(c, "assignment")
 	}
 
@@ -220,6 +233,36 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 
+	// B114: a pointer field can't tell "absent" from an explicit JSON
+	// null, so clearing a date or turning off group assignment was
+	// silently ignored. Detect explicit nulls from the raw body.
+	var raw struct {
+		Assignment map[string]json.RawMessage `json:"assignment"`
+	}
+	_ = json.Unmarshal(c.Body(), &raw)
+	explicitNull := func(key string) bool {
+		v, ok := raw.Assignment[key]
+		return ok && strings.TrimSpace(string(v)) == "null"
+	}
+	if explicitNull("due_at") {
+		assignment.DueAt = nil
+	}
+	if explicitNull("unlock_at") {
+		assignment.UnlockAt = nil
+	}
+	if explicitNull("lock_at") {
+		assignment.LockAt = nil
+	}
+	if explicitNull("points_possible") {
+		assignment.PointsPossible = nil
+	}
+	if explicitNull("assignment_group_id") {
+		assignment.AssignmentGroupID = nil
+	}
+	if explicitNull("group_category_id") {
+		assignment.GroupCategoryID = nil
+	}
+
 	if input.Assignment.Name != nil {
 		assignment.Name = *input.Assignment.Name
 	}
@@ -271,7 +314,11 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 		assignment.PeerReviewCount = *input.Assignment.PeerReviewCount
 	}
 	if input.Assignment.GroupCategoryID != nil {
-		assignment.GroupCategoryID = input.Assignment.GroupCategoryID
+		if *input.Assignment.GroupCategoryID == 0 {
+			assignment.GroupCategoryID = nil
+		} else {
+			assignment.GroupCategoryID = input.Assignment.GroupCategoryID
+		}
 	}
 
 	if err := h.assignmentService.Update(c.Context(), assignment); err != nil {

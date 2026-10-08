@@ -299,13 +299,20 @@ func (h *AccommodationHandler) ListCourseAccommodations(c *fiber.Ctx) error {
 // ApplyAccommodationsToAssignment handles POST /api/v1/assignments/:id/apply_accommodations
 // This previews what accommodations would be applied to an assignment for specified users.
 func (h *AccommodationHandler) ApplyAccommodationsToAssignment(c *fiber.Ctx) error {
-	assignmentID, err := c.ParamsInt("id")
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
+	// B122: the route declares :assignment_id (reading "id" made every
+	// call a 400).
+	assignmentID, err := c.ParamsInt("assignment_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid assignment ID")
 	}
 
 	assignment, err := h.assignmentService.GetByID(c.Context(), uint(assignmentID), callerAccountID(c))
-	if err != nil {
+	if err != nil || assignment.CourseID != uint(courseID) {
+		// F-013 parent-tie: an assignment of another course is a 404.
 		return responses.NotFound(c, "assignment")
 	}
 
@@ -322,10 +329,10 @@ func (h *AccommodationHandler) ApplyAccommodationsToAssignment(c *fiber.Ctx) err
 	}
 
 	adjustments := make([]fiber.Map, 0)
-	courseID := assignment.CourseID
+	assignmentCourseID := assignment.CourseID
 
 	for _, userID := range input.UserIDs {
-		adjustment, err := h.accommodationService.ApplyAccommodationsToAssignment(c.Context(), userID, &courseID, assignment.DueAt)
+		adjustment, err := h.accommodationService.ApplyAccommodationsToAssignment(c.Context(), userID, &assignmentCourseID, assignment.DueAt)
 		if err != nil {
 			continue
 		}

@@ -340,6 +340,8 @@ func (r *Router) Register(app *fiber.App) {
 	// Submissions (view: enrolled; create: enrolled; grade: instructor)
 	protected.Get("/courses/:course_id/assignments/:assignment_id/submissions", enrolled, r.SubmissionHandler.ListSubmissions)
 	protected.Post("/courses/:course_id/assignments/:assignment_id/submissions", enrolled, r.SubmissionHandler.CreateSubmission)
+	protected.Post("/courses/:course_id/assignments/:assignment_id/submissions/self/files", middleware.UploadRateLimit(), middleware.EnforceUploadSize(r.SettingsLookup), enrolled, r.SubmissionHandler.UploadSubmissionFile)
+	protected.Get("/courses/:course_id/assignments/:assignment_id/submissions/:user_id/files/:file_id/download", enrolled, r.SubmissionHandler.DownloadSubmissionFile)
 	protected.Get("/courses/:course_id/assignments/:assignment_id/submissions/:user_id", enrolled, r.SubmissionHandler.GetSubmission)
 	protected.Put("/courses/:course_id/assignments/:assignment_id/submissions/:user_id", instructor, r.SubmissionHandler.UpdateSubmission)
 

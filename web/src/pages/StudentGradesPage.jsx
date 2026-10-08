@@ -5,7 +5,7 @@ import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
-import { getLetterGrade, gradeColor } from '../utils/grading';
+import { getLetterGrade, gradeColor, assignmentGradeWeight } from '../utils/grading';
 import { Calculator, RotateCcw } from 'lucide-react';
 
 const isRecentlyGraded = (sub) => {
@@ -175,16 +175,11 @@ const StudentGradesPage = () => {
     const useWeights = course?.apply_assignment_group_weights && groups.length > 0 &&
       groups.some(g => g.group_weight > 0);
 
-    // Quiz point totals (added to unweighted / ungrouped totals)
-    let quizEarned = 0;
-    let quizPossible = 0;
-    for (const q of quizzes) {
-      const qs = quizSubmissions[q.id];
-      if (qs && qs.score !== null && qs.score !== undefined) {
-        quizEarned += parseFloat(qs.score) || 0;
-        quizPossible += parseFloat(q.points_possible) || 0;
-      }
-    }
+    // B205: quizzes are not assignments in Paper, so neither the teacher
+    // gradebook nor the server's course grade counts them; the student
+    // total must not either (it used to, so the two disagreed).
+    // B115: excused / unpublished / not_graded work never counts and a
+    // 0-point assignment is extra credit (assignmentGradeWeight).
 
     if (useWeights) {
       let weightedSum = 0;
@@ -202,9 +197,10 @@ const StudentGradesPage = () => {
 
         for (const a of groupAssignments) {
           const sub = submissions[a.id];
-          if (sub && sub.score !== null && sub.score !== undefined) {
+          const w = assignmentGradeWeight(a, sub);
+          if (w.counts && sub && sub.score !== null && sub.score !== undefined) {
             groupEarned += parseFloat(sub.score) || 0;
-            groupPossible += parseFloat(a.points_possible) || 0;
+            groupPossible += w.possible;
           }
         }
 
@@ -222,15 +218,12 @@ const StudentGradesPage = () => {
       const ungrouped = assignments.filter(a => !groupedAssignmentIds.has(a.id));
       for (const a of ungrouped) {
         const sub = submissions[a.id];
-        if (sub && sub.score !== null && sub.score !== undefined) {
+        const w = assignmentGradeWeight(a, sub);
+        if (w.counts && sub && sub.score !== null && sub.score !== undefined) {
           totalEarned += parseFloat(sub.score) || 0;
-          totalPossible += parseFloat(a.points_possible) || 0;
+          totalPossible += w.possible;
         }
       }
-
-      // Include quiz scores in totals (quizzes aren't in assignment groups)
-      totalEarned += quizEarned;
-      totalPossible += quizPossible;
 
       if (weightTotal === 0) return { earned: 0, possible: 0, pct: null, weighted: true };
       return {
@@ -246,14 +239,12 @@ const StudentGradesPage = () => {
     let possible = 0;
     for (const a of assignments) {
       const sub = submissions[a.id];
-      if (sub && sub.score !== null && sub.score !== undefined) {
+      const w = assignmentGradeWeight(a, sub);
+      if (w.counts && sub && sub.score !== null && sub.score !== undefined) {
         earned += parseFloat(sub.score) || 0;
-        possible += parseFloat(a.points_possible) || 0;
+        possible += w.possible;
       }
     }
-    // Include quiz scores
-    earned += quizEarned;
-    possible += quizPossible;
     if (possible === 0) return { earned: 0, possible: 0, pct: null, weighted: false };
     return { earned, possible, pct: ((earned / possible) * 100).toFixed(1), weighted: false };
   };
@@ -302,33 +293,12 @@ const StudentGradesPage = () => {
     return isNaN(num) ? null : num;
   }, [whatIfMode, whatIfScores, submissions]);
 
-  // Resolve the effective score for a quiz (What-If aware)
-  const getEffectiveQuizScore = useCallback((quizId) => {
-    if (!whatIfMode) {
-      const qs = quizSubmissions[quizId];
-      return (qs && qs.score !== null && qs.score !== undefined) ? parseFloat(qs.score) : null;
-    }
-    const val = whatIfScores[`q_${quizId}`];
-    if (val === undefined || val === '') return null;
-    const num = parseFloat(val);
-    return isNaN(num) ? null : num;
-  }, [whatIfMode, whatIfScores, quizSubmissions]);
-
   // Calculate totals using effective scores (What-If aware)
   const calcWhatIfTotals = useCallback(() => {
     const useWeights = course?.apply_assignment_group_weights && groups.length > 0 &&
       groups.some(g => g.group_weight > 0);
 
-    // Quiz point totals
-    let quizEarned = 0;
-    let quizPossible = 0;
-    for (const q of quizzes) {
-      const score = getEffectiveQuizScore(q.id);
-      if (score !== null) {
-        quizEarned += score;
-        quizPossible += parseFloat(q.points_possible) || 0;
-      }
-    }
+    // Same inclusion rules as calcTotals (quizzes excluded, B205/B115).
 
     if (useWeights) {
       let weightedSum = 0;
@@ -346,9 +316,10 @@ const StudentGradesPage = () => {
 
         for (const a of groupAssignments) {
           const score = getEffectiveAssignmentScore(a.id);
-          if (score !== null) {
+          const w = assignmentGradeWeight(a, { ...submissions[a.id], score });
+          if (w.counts && score !== null) {
             groupEarned += score;
-            groupPossible += parseFloat(a.points_possible) || 0;
+            groupPossible += w.possible;
           }
         }
 
@@ -365,14 +336,12 @@ const StudentGradesPage = () => {
       const ungrouped = assignments.filter(a => !groupedAssignmentIds.has(a.id));
       for (const a of ungrouped) {
         const score = getEffectiveAssignmentScore(a.id);
-        if (score !== null) {
+        const w = assignmentGradeWeight(a, { ...submissions[a.id], score });
+        if (w.counts && score !== null) {
           totalEarned += score;
-          totalPossible += parseFloat(a.points_possible) || 0;
+          totalPossible += w.possible;
         }
       }
-
-      totalEarned += quizEarned;
-      totalPossible += quizPossible;
 
       if (weightTotal === 0) return { earned: 0, possible: 0, pct: null, weighted: true };
       return {
@@ -388,16 +357,15 @@ const StudentGradesPage = () => {
     let possible = 0;
     for (const a of assignments) {
       const score = getEffectiveAssignmentScore(a.id);
-      if (score !== null) {
+      const w = assignmentGradeWeight(a, { ...submissions[a.id], score });
+      if (w.counts && score !== null) {
         earned += score;
-        possible += parseFloat(a.points_possible) || 0;
+        possible += w.possible;
       }
     }
-    earned += quizEarned;
-    possible += quizPossible;
     if (possible === 0) return { earned: 0, possible: 0, pct: null, weighted: false };
     return { earned, possible, pct: ((earned / possible) * 100).toFixed(1), weighted: false };
-  }, [course, groups, assignments, quizzes, getEffectiveAssignmentScore, getEffectiveQuizScore]);
+  }, [course, groups, assignments, submissions, getEffectiveAssignmentScore]);
 
   if (loading) {
     return <Layout><div className="flex items-center justify-center py-12 gap-2 text-gray-500">
@@ -519,7 +487,9 @@ const StudentGradesPage = () => {
               <tbody className="divide-y divide-gray-100">
                 {group.items.map(a => {
                   const sub = submissions[a.id];
-                  const scoreVisible = !sub || sub.posted_at || a.post_policy !== 'manual';
+                  // B109: the API withholds the score until the grade is
+                  // posted and serializes posted_at, so posted_at decides.
+                  const scoreVisible = !sub || !!sub.posted_at;
                   const score = scoreVisible ? sub?.score : null;
                   const pts = a.points_possible ?? 0;
                   const pct = (score !== null && score !== undefined && pts > 0)
@@ -577,7 +547,9 @@ const StudentGradesPage = () => {
                             </div>
                           );
                         })() : (
-                          !scoreVisible && sub?.workflow_state === 'graded' ? (
+                          sub?.excused && scoreVisible ? (
+                            <span className="text-xs text-gray-500 italic">Excused</span>
+                          ) : !scoreVisible && a.post_policy === 'manual' && sub?.submitted_at ? (
                             <span className="text-xs text-gray-400 italic">Not posted</span>
                           ) : score !== null && score !== undefined ? (
                             <div>
@@ -610,6 +582,7 @@ const StudentGradesPage = () => {
         <div className="mb-6">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-lg font-semibold text-gray-800">Quizzes</h3>
+            <span className="text-xs text-gray-500">Not included in the course total</span>
           </div>
           <div className="bg-white rounded-lg shadow overflow-hidden">
             <div className="overflow-x-auto">

@@ -570,6 +570,15 @@ func main() {
 	portfolioService := service.NewPortfolioService(portfolioRepo, portfolioSectionRepo, portfolioArtifactRepo, portfolioReflectionRepo, portfolioTemplateRepo, portfolioCommentRepo, submissionRepo, assignmentRepo)
 	courseHomeService := service.NewCourseHomeService(courseRepo, courseHomeButtonRepo, todaysLessonOverrideRepo, courseVisitRepo, moduleRepo)
 	peerReviewService := service.NewPeerReviewService(peerReviewRepo, submissionRepo, enrollmentRepo)
+	// Grading parity (B022/B121): per-student dates from overrides and
+	// accommodations, and a grade-change audit trail on every grade write.
+	submissionService.SetOverrideService(overrideService)
+	submissionService.SetAccommodationService(accommodationService)
+	submissionService.SetGradeChangeLogger(func(ctx context.Context, ch service.GradeChange) {
+		if err := auditService.LogGradeChange(ctx, ch.CourseID, ch.AssignmentID, ch.StudentID, ch.GraderID, ch.SubmissionID, ch.OldGrade, ch.NewGrade, ch.OldScore, ch.NewScore, ch.Excused, "manual"); err != nil {
+			slog.Warn("grade change audit failed", "submission_id", ch.SubmissionID, "err", err)
+		}
+	})
 	questionBankService := service.NewQuestionBankService(questionBankRepo, questionBankEntryRepo, quizQuestionRepo, quizRepo)
 	// P3 Feature services
 	featureFlagService := service.NewFeatureFlagService(featureFlagRepo, courseRepo, accountRepo, userRepo)
@@ -766,6 +775,8 @@ func main() {
 	assignmentHandler := handlers.NewAssignmentHandler(assignmentService)
 	assignmentGroupHandler := handlers.NewAssignmentGroupHandler(assignmentGroupService)
 	submissionHandler := handlers.NewSubmissionHandler(submissionService, submissionCommentRepo, attachmentRepo, userRepo, assignmentRepo, notificationDeliveryService, observerService, outcomeAlignmentRepo, learningOutcomeService, auditService)
+	submissionHandler.SetFileService(fileService)
+	submissionHandler.SetPeerReviewService(peerReviewService)
 	gradebookHandler := handlers.NewGradebookHandler(gradingService, auditService)
 	gradingStandardHandler := handlers.NewGradingStandardHandler(gradingStandardRepo)
 	developerKeyHandler := handlers.NewDeveloperKeyHandler(devKeyService)
@@ -787,6 +798,7 @@ func main() {
 	quizSubmissionHandler := handlers.NewQuizSubmissionHandler(quizService, observerService, auditService)
 	rubricHandler := handlers.NewRubricHandler(rubricService)
 	rubricAssessmentHandler := handlers.NewRubricAssessmentHandler(rubricService)
+	rubricAssessmentHandler.SetVisibilityDeps(submissionService, observerService)
 	gradingPeriodHandler := handlers.NewGradingPeriodHandler(gradingPeriodService)
 	assignmentOverrideHandler := handlers.NewAssignmentOverrideHandler(overrideService, assignmentService)
 	latePolicyHandler := handlers.NewLatePolicyHandler(latePolicyService)
@@ -834,6 +846,7 @@ func main() {
 	portfolioHandler := handlers.NewPortfolioHandler(portfolioService, authz)
 	courseHomeHandler := handlers.NewCourseHomeHandler(courseHomeService)
 	peerReviewHandler := handlers.NewPeerReviewHandler(peerReviewService, auditService)
+	peerReviewHandler.SetAssignmentService(assignmentService)
 	questionBankHandler := handlers.NewQuestionBankHandler(questionBankService)
 	quizQuestionGroupHandler := handlers.NewQuizQuestionGroupHandler(quizService)
 	quizStatisticsHandler := handlers.NewQuizStatisticsHandler(quizService)

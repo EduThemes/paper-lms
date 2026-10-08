@@ -20,7 +20,14 @@ import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import GradeInput from '../components/GradeInput';
-import { getLetterGrade, gradeColor } from '../utils/grading';
+import {
+  getLetterGrade,
+  gradeColor,
+  assignmentGradeWeight,
+  enteredScore,
+  curveGrades,
+  parseCSV,
+} from '../utils/grading';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -179,16 +186,22 @@ const CurveDialog = ({ open, onOpenChange, assignment, students, getCellData, on
     }
   }, [open]);
 
-  const stats = useMemo(() => {
-    if (!assignment) return { count: 0, avg: 0, max: 0 };
-    const scores = students
-      .map((s) => getCellData(s.id, assignment.id))
-      .filter((c) => c && c.score != null)
-      .map((c) => parseFloat(c.score));
-    if (scores.length === 0) return { count: 0, avg: 0, max: assignment.points_possible ?? 0 };
-    const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-    return { count: scores.length, avg, max: assignment.points_possible ?? 0 };
+  // Curving works on ENTERED scores (before late deductions): the server
+  // re-applies the late policy to whatever is posted, so curving the
+  // already-deducted score would compound the penalty (B021).
+  const entries = useMemo(() => {
+    if (!assignment) return [];
+    return students
+      .map((s) => ({ userId: s.id, entered: enteredScore(getCellData(s.id, assignment.id)) }))
+      .filter((e) => e.entered != null);
   }, [assignment, students, getCellData]);
+
+  const stats = useMemo(() => {
+    const max = parseFloat(assignment?.points_possible) || 0;
+    if (entries.length === 0) return { count: 0, avg: 0, avgPct: null, max };
+    const avg = entries.reduce((a, e) => a + parseFloat(e.entered), 0) / entries.length;
+    return { count: entries.length, avg, avgPct: max > 0 ? (avg / max) * 100 : null, max };
+  }, [assignment, entries]);
 
   const handleConfirm = async () => {
     if (!assignment) return;
@@ -196,25 +209,10 @@ const CurveDialog = ({ open, onOpenChange, assignment, students, getCellData, on
     setError(null);
     try {
       const target = parseFloat(targetAvg);
-      const max = assignment.points_possible ?? 0;
       if (isNaN(target)) throw new Error('Target average must be a number');
-      const offset = target - stats.avg;
-      const grades = [];
-      for (const s of students) {
-        const cell = getCellData(s.id, assignment.id);
-        if (!cell || cell.score == null) continue;
-        const orig = parseFloat(cell.score);
-        let curved = orig + offset;
-        if (max > 0) curved = Math.max(0, Math.min(max, curved));
-        else curved = Math.max(0, curved);
-        curved = Math.round(curved * 100) / 100;
-        grades.push({
-          assignment_id: assignment.id,
-          user_id: s.id,
-          posted_grade: String(curved),
-        });
-      }
-      await onApply(grades);
+      if (stats.max > 0 && (target < 0 || target > 100)) throw new Error('Target average must be between 0 and 100%');
+      const { grades } = curveGrades({ entries, pointsPossible: stats.max, targetPercent: target });
+      await onApply(grades.map((g) => ({ ...g, assignment_id: assignment.id })));
       onOpenChange(false);
     } catch (e) {
       setError(e.message);
@@ -229,7 +227,8 @@ const CurveDialog = ({ open, onOpenChange, assignment, students, getCellData, on
         <DialogHeader>
           <DialogTitle>Curve Grades</DialogTitle>
           <DialogDescription>
-            Shifts every existing score by (target average − current average). Out-of-bounds scores are clamped to 0…max.
+            Shifts every entered score by the same number of points so the class average reaches the target
+            percentage of points possible. Out-of-bounds scores are clamped to 0…max; late penalties are re-applied.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
@@ -240,17 +239,24 @@ const CurveDialog = ({ open, onOpenChange, assignment, students, getCellData, on
             </div>
             <div>
               <div className="text-xs text-text-tertiary">Current avg</div>
-              <div className="font-medium">{stats.avg.toFixed(2)}</div>
+              <div className="font-medium">
+                {stats.avg.toFixed(2)} pts{stats.avgPct != null ? ` (${stats.avgPct.toFixed(1)}%)` : ''}
+              </div>
             </div>
             <div>
               <div className="text-xs text-text-tertiary">Max points</div>
               <div className="font-medium">{stats.max}</div>
             </div>
           </div>
-          <label className="text-sm font-medium block">Target average</label>
+          <label htmlFor="curve-target" className="text-sm font-medium block">
+            {stats.max > 0 ? 'Target average (% of points possible)' : 'Target average (points)'}
+          </label>
           <input
+            id="curve-target"
             type="number"
             step="0.01"
+            min="0"
+            max={stats.max > 0 ? 100 : undefined}
             value={targetAvg}
             onChange={(e) => setTargetAvg(e.target.value)}
             className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
@@ -554,9 +560,16 @@ const GradebookCell = memo(function GradebookCell({
       {isExcused ? (
         <span className="text-xs text-text-disabled italic">EX</span>
       ) : (
-        <div className={isMissing ? 'line-through text-accent-danger' : ''}>
+        <div
+          className={isMissing ? 'line-through text-accent-danger' : ''}
+          title={
+            cell?.points_deducted > 0
+              ? `Late penalty -${cell.points_deducted} (final ${cell.score})`
+              : undefined
+          }
+        >
           <GradeInput
-            value={cell?.score ?? null}
+            value={enteredScore(cell)}
             pointsPossible={assignment.points_possible ?? 0}
             studentName={student.name}
             onSave={(score) => onCommit(student.id, assignment.id, score)}
@@ -1065,6 +1078,8 @@ const GradebookPage = () => {
             gradebookData[uid][sub.assignment_id] = {
               score: sub.score,
               grade: sub.grade,
+              entered_score: sub.entered_score,
+              points_deducted: sub.points_deducted,
               workflow_state: sub.workflow_state,
               submitted_at: sub.submitted_at,
               late: sub.late,
@@ -1159,9 +1174,10 @@ const GradebookPage = () => {
           let groupPossible = 0;
           for (const a of groupAssignments) {
             const cell = getCellData(student.id, a.id);
-            if (cell && cell.score != null) {
+            const w = assignmentGradeWeight(a, cell);
+            if (w.counts && cell && cell.score != null) {
               groupEarned += parseFloat(cell.score) || 0;
-              groupPossible += parseFloat(a.points_possible) || 0;
+              groupPossible += w.possible;
             }
           }
           totalEarned += groupEarned;
@@ -1175,9 +1191,10 @@ const GradebookPage = () => {
         for (const a of assignments) {
           if (groupedIds.has(a.id)) continue;
           const cell = getCellData(student.id, a.id);
-          if (cell && cell.score != null) {
+          const w = assignmentGradeWeight(a, cell);
+          if (w.counts && cell && cell.score != null) {
             totalEarned += parseFloat(cell.score) || 0;
-            totalPossible += parseFloat(a.points_possible) || 0;
+            totalPossible += w.possible;
           }
         }
 
@@ -1193,11 +1210,15 @@ const GradebookPage = () => {
       } else {
         let earned = 0;
         let possible = 0;
+        // B115: excused, unpublished and not_graded work never counts;
+        // a 0-point assignment's score is extra credit (same rules as
+        // GradingService.GetStudentGrade and the student Grades page).
         for (const a of assignments) {
           const cell = getCellData(student.id, a.id);
-          if (cell && cell.score != null) {
+          const w = assignmentGradeWeight(a, cell);
+          if (w.counts && cell && cell.score != null) {
             earned += parseFloat(cell.score) || 0;
-            possible += parseFloat(a.points_possible) || 0;
+            possible += w.possible;
           }
         }
         result[student.id] =
@@ -1217,7 +1238,11 @@ const GradebookPage = () => {
 
   const handleCommit = useCallback(
     async (studentId, assignmentId, score) => {
-      await api.gradeSubmission(courseId, assignmentId, studentId, { posted_grade: String(score) });
+      // B113: clearing a cell sends an empty posted_grade, which the API
+      // treats as "remove the grade" (String(null) used to send "null").
+      const saved = await api.gradeSubmission(courseId, assignmentId, studentId, {
+        posted_grade: score == null ? '' : String(score),
+      });
       setGradebook((prev) => {
         if (!prev) return prev;
         const sid = String(studentId);
@@ -1225,12 +1250,27 @@ const GradebookPage = () => {
         const hasSubmissions = !!prev.submissions;
         const oldSubs = hasSubmissions ? prev.submissions : prev;
         const oldStudent = oldSubs[sid] || {};
-        const newCell = {
-          ...(oldStudent[aid] || {}),
-          score: score == null ? null : parseFloat(score),
-          grade: score == null ? null : String(score),
-          workflow_state: score != null ? 'graded' : 'unsubmitted',
-        };
+        const old = oldStudent[aid] || {};
+        // Prefer the server's view: the late policy may have deducted
+        // points from what was entered.
+        const newCell = saved && typeof saved === 'object' && 'score' in saved
+          ? {
+              ...old,
+              score: saved.score ?? null,
+              grade: saved.grade ?? null,
+              entered_score: saved.entered_score ?? null,
+              points_deducted: saved.points_deducted ?? null,
+              excused: saved.excused ?? old.excused,
+              workflow_state: saved.workflow_state,
+            }
+          : {
+              ...old,
+              score: score == null ? null : parseFloat(score),
+              grade: score == null ? null : String(score),
+              entered_score: score == null ? null : parseFloat(score),
+              points_deducted: null,
+              workflow_state: score != null ? 'graded' : old.submitted_at ? 'submitted' : 'unsubmitted',
+            };
         const newStudent = { ...oldStudent, [aid]: newCell };
         const newSubs = { ...oldSubs, [sid]: newStudent };
         return hasSubmissions ? { ...prev, submissions: newSubs } : newSubs;
@@ -1284,8 +1324,10 @@ const GradebookPage = () => {
         return prev;
       });
       try {
+        let serverResults = null;
         if (typeof api.bulkGrade === 'function') {
-          await api.bulkGrade(courseId, grades);
+          const res = await api.bulkGrade(courseId, grades);
+          serverResults = res?.results || null;
         } else {
           // TODO: replace with real bulk endpoint when available
           for (const g of grades) {
@@ -1298,17 +1340,26 @@ const GradebookPage = () => {
           const hasSubmissions = !!prev.submissions;
           const oldSubs = hasSubmissions ? prev.submissions : prev;
           const newSubs = { ...oldSubs };
+          const resultFor = (g) =>
+            (serverResults || []).find(
+              (r) => String(r.assignment_id) === String(g.assignment_id) && String(r.user_id) === String(g.user_id)
+            );
           for (const g of grades) {
+            const r = resultFor(g);
+            if (r && r.error) continue;
             const sid = String(g.user_id);
             const aid = String(g.assignment_id);
             const num = parseFloat(g.posted_grade);
             const oldStudent = newSubs[sid] || {};
+            const finalScore = r && r.score != null ? r.score : isNaN(num) ? null : num;
             newSubs[sid] = {
               ...oldStudent,
               [aid]: {
                 ...(oldStudent[aid] || {}),
-                score: isNaN(num) ? null : num,
-                grade: g.posted_grade,
+                score: finalScore,
+                grade: r && r.grade != null ? r.grade : g.posted_grade,
+                entered_score: isNaN(num) ? null : num,
+                points_deducted: finalScore != null && !isNaN(num) && num - finalScore > 0 ? num - finalScore : null,
                 workflow_state: 'graded',
               },
             };
@@ -1549,17 +1600,19 @@ const GradebookPage = () => {
     setImportResult(null);
     try {
       const text = await file.text();
-      const lines = text.split('\n').filter((l) => l.trim());
-      if (lines.length < 2) throw new Error('CSV must have a header row and at least one data row');
-      const headers = lines[0].split(',').map((h) => h.trim().replace(/^"(.*)"$/, '$1'));
+      // B118: a real CSV parser — quoted fields (e.g. an assignment named
+      // "Essay 1, Draft" or a "Doe, Jane" student) used to shift columns.
+      const rows = parseCSV(text);
+      if (rows.length < 2) throw new Error('CSV must have a header row and at least one data row');
+      const headers = rows[0];
       const studentIdIdx = headers.findIndex((h) => /student\s*id/i.test(h));
       if (studentIdIdx === -1) throw new Error('CSV must include a "Student ID" column');
       const assignmentMap = {};
       for (const a of assignments) assignmentMap[a.name.toLowerCase().trim()] = a;
       let skipped = 0;
       const gradeData = [];
-      for (let i = 1; i < lines.length; i++) {
-        const cells = lines[i].split(',').map((c) => c.trim().replace(/^"(.*)"$/, '$1'));
+      for (let i = 1; i < rows.length; i++) {
+        const cells = rows[i];
         const studentId = parseInt(cells[studentIdIdx], 10);
         if (!studentId) {
           skipped++;
@@ -1575,6 +1628,11 @@ const GradebookPage = () => {
           if (scoreStr === '' || scoreStr === undefined) continue;
           const score = parseFloat(scoreStr);
           if (isNaN(score)) continue;
+          // Re-importing an unchanged value (the exported final score, or
+          // the entered score) must not re-grade it — that would re-apply
+          // the late penalty (B021).
+          const current = getCellData(studentId, assignment.id);
+          if (current && (parseFloat(current.score) === score || parseFloat(enteredScore(current)) === score)) continue;
           gradeData.push({ assignment_id: assignment.id, user_id: studentId, posted_grade: String(score) });
         }
       }
@@ -1606,6 +1664,8 @@ const GradebookPage = () => {
           gradebookData[uid][sub.assignment_id] = {
             score: sub.score,
             grade: sub.grade,
+            entered_score: sub.entered_score,
+            points_deducted: sub.points_deducted,
             workflow_state: sub.workflow_state,
             submitted_at: sub.submitted_at,
             late: sub.late,
