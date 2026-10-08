@@ -90,6 +90,10 @@ var ErrCrossTenantIdentity = errors.New("federated identity belongs to another a
 // account-level IdP must not be able to mint a platform-level session.
 var ErrPrivilegedAutoLink = errors.New("refusing to auto-link a privileged account by email; link it explicitly")
 
+// ErrProviderMismatch is returned when the outcome names a provider that
+// is not an active provider of the verified credential's type.
+var ErrProviderMismatch = errors.New("authentication provider does not match the verified credential")
+
 // LoginPipeline orchestrates post-credential-verification work for
 // every login path.
 type LoginPipeline struct {
@@ -291,6 +295,17 @@ func (p *LoginPipeline) resolveUser(ctx context.Context, outcome SSOOutcome, met
 	}
 	if provider == nil {
 		return nil, false, fmt.Errorf("authentication provider %d not found", outcome.ProviderID)
+	}
+	// The provider decides the tenant, so it must be the provider that
+	// actually verified the credential: same auth type, and not deleted
+	// or disabled. Otherwise a credential verified one way (e.g. a SAML
+	// assertion checked against the root account's IdP) could be
+	// attributed to any other tenant's provider by naming its id.
+	if outcome.ProviderType != "" && provider.AuthType != outcome.ProviderType {
+		return nil, false, ErrProviderMismatch
+	}
+	if provider.WorkflowState != "" && provider.WorkflowState != "active" {
+		return nil, false, ErrProviderMismatch
 	}
 
 	// (a) federated_identities lookup.
