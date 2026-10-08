@@ -113,18 +113,28 @@ func conversationMessageToJSON(m *models.ConversationMessage) fiber.Map {
 // Non-participants get 404, not 403 — surfacing a 403 leaks the existence of the
 // conversation across the tenant boundary and violates the 13.1.E contract. The
 // not-found shape is also consistent with cross-tenant FindByID misses elsewhere.
+//
+// Returns a *fiber.Error (rendered by the app ErrorHandler) and does NOT
+// write the response: it used to return responses.NotFound(...), which is
+// nil after writing, so every `if err := h.requireParticipant(...); err !=
+// nil { return err }` caller fell through and a non-participant could read,
+// reply to, update or delete the conversation.
 func (h *ConversationHandler) requireParticipant(c *fiber.Ctx, conversationID uint) error {
+	notFound := fiber.NewError(fiber.StatusNotFound, "The specified conversation was not found")
 	userID, _ := c.Locals("user_id").(uint)
+	if userID == 0 {
+		return notFound
+	}
 	participants, err := h.conversationService.GetParticipants(c.Context(), conversationID)
 	if err != nil {
-		return responses.NotFound(c, "conversation")
+		return notFound
 	}
 	for _, p := range participants {
 		if p.UserID == userID {
 			return nil
 		}
 	}
-	return responses.NotFound(c, "conversation")
+	return notFound
 }
 
 func (h *ConversationHandler) resolveParticipants(c *fiber.Ctx, conversationID uint) []fiber.Map {
