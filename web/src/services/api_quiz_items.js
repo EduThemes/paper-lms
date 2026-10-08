@@ -48,6 +48,27 @@ export const quizItemsApi = {
     return data?.quiz_submissions?.[0] || data;
   },
 
+  // Question banks (the single bank system): share with the account,
+  // copy into this course, or draw random questions into a quiz.
+  setQuestionBankSharing: async (courseId, bankId, shared) => {
+    const { data } = await api.request(`/courses/${courseId}/question_banks/${bankId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ shared_with_account: Boolean(shared) }),
+    });
+    return data;
+  },
+  copyQuestionBank: async (courseId, bankId) => {
+    const { data } = await api.request(`/courses/${courseId}/question_banks/${bankId}/copy`, { method: 'POST' });
+    return data;
+  },
+  randomDrawFromQuestionBank: async (courseId, bankId, quizId, count) => {
+    const { data } = await api.request(`/courses/${courseId}/question_banks/${bankId}/random_draw`, {
+      method: 'POST',
+      body: JSON.stringify({ quiz_id: Number(quizId), count: Number(count) }),
+    });
+    return data;
+  },
+
   // Delivery / security settings live on the quiz itself.
   updateDeliverySettings: async (courseId, quizId, settings) => {
     const { data } = await api.request(`/courses/${courseId}/quizzes/${quizId}`, {

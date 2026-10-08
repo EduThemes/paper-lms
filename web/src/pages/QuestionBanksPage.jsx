@@ -1,23 +1,21 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { BookOpen, Plus, Trash2, Edit2, ChevronDown, ChevronRight, HelpCircle, Download } from 'lucide-react';
+import { BookOpen, Plus, Trash2, Edit2, ChevronDown, ChevronRight, HelpCircle, Download, Copy, Share2 } from 'lucide-react';
 import { api } from '../services/api';
+import { quizItemsApi } from '../services/api_quiz_items';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import QuizzesSubNav from '../components/quiz/QuizzesSubNav';
+import ItemAnswersEditor from '../components/quiz/itemTypes/ItemAnswersEditor';
+import {
+  ALL_TYPES as QUESTION_TYPES, TYPE_LABELS, defaultAnswersForType, parseAnswers, stringifyAnswers, normalizeQuestionType,
+} from '../components/quiz/itemTypes/types';
 
-const QUESTION_TYPES = [
-  { value: 'multiple_choice', label: 'Multiple Choice' },
-  { value: 'true_false', label: 'True/False' },
-  { value: 'short_answer', label: 'Short Answer' },
-  { value: 'essay', label: 'Essay' },
-  { value: 'numerical_question', label: 'Numerical' },
-];
-
-const formatQuestionType = (type) => {
-  const found = QUESTION_TYPES.find((t) => t.value === type);
-  return found ? found.label : type;
-};
+// One question-bank system (G060): every item type can live in a bank,
+// and banks shared by another course in the account are listed read-only
+// (pull / draw / copy, link to a question group) with owned=false.
+const formatQuestionType = (type) => TYPE_LABELS[normalizeQuestionType(type)] || type;
 
 const LoadingSpinner = ({ size = 'h-8 w-8', message }) => (
   <div className="flex items-center justify-center py-12 gap-3 text-text-tertiary">
@@ -34,10 +32,7 @@ const emptyQuestion = () => ({
   question_type: 'multiple_choice',
   question_text: '',
   points_possible: 1,
-  answers: [
-    { text: '', weight: 100 },
-    { text: '', weight: 0 },
-  ],
+  answers: defaultAnswersForType('multiple_choice'),
   feedback: '',
 });
 
@@ -45,6 +40,8 @@ const emptyQuestion = () => ({
 // Pull-to-Quiz Modal
 // ---------------------------------------------------------------------------
 const PullToQuizModal = ({ courseId, bankId, questions, onClose, onSuccess }) => {
+  const [mode, setMode] = useState('select'); // 'select' | 'random'
+  const [randomCount, setRandomCount] = useState(1);
   const [quizzes, setQuizzes] = useState([]);
   const [loadingQuizzes, setLoadingQuizzes] = useState(true);
   const [selectedQuizId, setSelectedQuizId] = useState('');
@@ -84,10 +81,16 @@ const PullToQuizModal = ({ courseId, bankId, questions, onClose, onSuccess }) =>
   };
 
   const handlePull = async () => {
-    if (!selectedQuizId || selectedQuestionIds.length === 0) return;
+    if (!selectedQuizId) return;
+    if (mode === 'select' && selectedQuestionIds.length === 0) return;
     setPulling(true);
     setError(null);
     try {
+      if (mode === 'random') {
+        const res = await quizItemsApi.randomDrawFromQuestionBank(courseId, bankId, selectedQuizId, Number(randomCount) || 1);
+        onSuccess(res?.questions_added ?? Number(randomCount));
+        return;
+      }
       await api.pullBankQuestionsToQuiz(courseId, bankId, selectedQuizId, selectedQuestionIds);
       onSuccess(selectedQuestionIds.length);
     } catch (err) {
@@ -143,8 +146,32 @@ const PullToQuizModal = ({ courseId, bankId, questions, onClose, onSuccess }) =>
             )}
           </div>
 
+          <fieldset className="flex gap-4 text-sm">
+            <legend className="sr-only">How to add questions</legend>
+            <label className="flex items-center gap-1.5">
+              <input type="radio" name="pull-mode" checked={mode === 'select'} onChange={() => setMode('select')} />
+              Choose questions
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input type="radio" name="pull-mode" checked={mode === 'random'} onChange={() => setMode('random')} />
+              Random draw
+            </label>
+          </fieldset>
+
+          {mode === 'random' && (
+            <div>
+              <label htmlFor="pull-random-count" className="block text-sm font-medium text-text-secondary mb-1">Number of questions to draw</label>
+              <input id="pull-random-count" type="number" min="1" max={questions.length || 1} value={randomCount}
+                onChange={(e) => setRandomCount(e.target.value)}
+                className="w-32 border border-border-strong rounded-md px-3 py-2 text-sm" />
+              <p className="text-xs text-text-tertiary mt-1">
+                Copies a fixed random set into the quiz. To give every student a different draw, link this bank to a question group in the quiz editor.
+              </p>
+            </div>
+          )}
+
           {/* Question checkboxes */}
-          <div>
+          {mode === 'select' && <div>
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium text-text-secondary">
                 Questions ({selectedQuestionIds.length}/{questions.length} selected)
@@ -177,7 +204,7 @@ const PullToQuizModal = ({ courseId, bankId, questions, onClose, onSuccess }) =>
                 </label>
               ))}
             </div>
-          </div>
+          </div>}
         </div>
 
         <div className="flex justify-end gap-3 p-4 border-t">
@@ -191,7 +218,7 @@ const PullToQuizModal = ({ courseId, bankId, questions, onClose, onSuccess }) =>
           <button
             type="button"
             onClick={handlePull}
-            disabled={pulling || !selectedQuizId || selectedQuestionIds.length === 0}
+            disabled={pulling || !selectedQuizId || (mode === 'select' && selectedQuestionIds.length === 0)}
             className="inline-flex items-center px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
           >
             {pulling ? (
@@ -205,7 +232,9 @@ const PullToQuizModal = ({ courseId, bankId, questions, onClose, onSuccess }) =>
             ) : (
               <>
                 <Download className="w-4 h-4 me-1" />
-                Pull {selectedQuestionIds.length} Question{selectedQuestionIds.length !== 1 ? 's' : ''}
+                {mode === 'random'
+                  ? `Draw ${Number(randomCount) || 1} at random`
+                  : `Pull ${selectedQuestionIds.length} Question${selectedQuestionIds.length !== 1 ? 's' : ''}`}
               </>
             )}
           </button>
@@ -218,53 +247,20 @@ const PullToQuizModal = ({ courseId, bankId, questions, onClose, onSuccess }) =>
 // ---------------------------------------------------------------------------
 // Question Form
 // ---------------------------------------------------------------------------
-const QuestionForm = ({ initial, onSave, onCancel, saving }) => {
+const QuestionForm = ({ initial, onSave, onCancel, saving, courseId }) => {
   const [form, setForm] = useState(() => initial || emptyQuestion());
 
   const update = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
-
-  const updateAnswer = (idx, field, value) => {
-    setForm((prev) => {
-      const answers = [...(prev.answers || [])];
-      answers[idx] = { ...answers[idx], [field]: value };
-      return { ...prev, answers };
-    });
-  };
-
-  const addAnswer = () => {
-    setForm((prev) => ({
-      ...prev,
-      answers: [...(prev.answers || []), { text: '', weight: 0 }],
-    }));
-  };
-
-  const removeAnswer = (idx) => {
-    setForm((prev) => ({
-      ...prev,
-      answers: (prev.answers || []).filter((_, i) => i !== idx),
-    }));
-  };
-
-  const markCorrect = (idx) => {
-    setForm((prev) => {
-      const answers = (prev.answers || []).map((a, i) => ({
-        ...a,
-        weight: i === idx ? 100 : 0,
-      }));
-      return { ...prev, answers };
-    });
-  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
     onSave({
       ...form,
       points_possible: Number(form.points_possible) || 0,
-      answers: form.answers || [],
+      // Stored as JSON text, exactly like quiz questions.
+      answers: stringifyAnswers(form.answers ?? []),
     });
   };
-
-  const showAnswers = form.question_type === 'multiple_choice' || form.question_type === 'true_false';
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 bg-surface-1 rounded-md p-4 border border-border-default">
@@ -289,18 +285,8 @@ const QuestionForm = ({ initial, onSave, onCancel, saving }) => {
               value={form.question_type}
               onChange={(e) => {
                 const newType = e.target.value;
-                update('question_type', newType);
-                // Reset answers for true_false
-                if (newType === 'true_false') {
-                  setForm((prev) => ({
-                    ...prev,
-                    question_type: newType,
-                    answers: [
-                      { text: 'True', weight: 100 },
-                      { text: 'False', weight: 0 },
-                    ],
-                  }));
-                }
+                // Each type has its own answer-key shape.
+                setForm((prev) => ({ ...prev, question_type: newType, answers: defaultAnswersForType(newType) }));
               }}
               className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
             >
@@ -337,57 +323,13 @@ const QuestionForm = ({ initial, onSave, onCancel, saving }) => {
         />
       </div>
 
-      {/* Answers section for MC / TF */}
-      {showAnswers && (
-        <div>
-          <span className="block text-sm font-medium text-text-secondary mb-2">
-            Answers {form.question_type === 'true_false' ? '' : '(click radio to mark correct)'}
-          </span>
-          <div className="space-y-2">
-            {(form.answers || []).map((ans, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="correct-answer"
-                  checked={ans.weight === 100}
-                  onChange={() => markCorrect(idx)}
-                  className="text-brand-600 focus:ring-brand-500"
-                  title="Mark as correct answer"
-                  disabled={form.question_type === 'true_false'}
-                />
-                <input
-                  type="text"
-                  value={ans.text}
-                  onChange={(e) => updateAnswer(idx, 'text', e.target.value)}
-                  className="flex-1 border border-border-strong rounded-md px-3 py-1.5 text-sm"
-                  placeholder={`Answer ${idx + 1}`}
-                  required
-                  readOnly={form.question_type === 'true_false'}
-                />
-                {form.question_type !== 'true_false' && (form.answers || []).length > 2 && (
-                  <button
-                    type="button"
-                    onClick={() => removeAnswer(idx)}
-                    className="text-text-disabled hover:text-accent-danger"
-                    title="Remove answer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-          {form.question_type === 'multiple_choice' && (
-            <button
-              type="button"
-              onClick={addAnswer}
-              className="mt-2 text-sm text-brand-600 hover:text-brand-800"
-            >
-              + Add Answer
-            </button>
-          )}
-        </div>
-      )}
+      <ItemAnswersEditor
+        type={form.question_type}
+        answers={form.answers}
+        onChange={(answers) => update('answers', answers)}
+        questionText={form.question_text}
+        courseId={courseId}
+      />
 
       <div>
         <label htmlFor="q-feedback" className="block text-sm font-medium text-text-secondary mb-1">Feedback (optional)</label>
@@ -424,7 +366,11 @@ const QuestionForm = ({ initial, onSave, onCancel, saving }) => {
 // ---------------------------------------------------------------------------
 // Bank Card (expandable)
 // ---------------------------------------------------------------------------
-const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate }) => {
+const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate, onCopied }) => {
+  // Banks shared by another course in the account are read-only here.
+  const owned = bank.owned !== false;
+  const canEdit = isTeacher && owned;
+  const [copying, setCopying] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [questions, setQuestions] = useState([]);
   const [loadingQuestions, setLoadingQuestions] = useState(false);
@@ -510,6 +456,27 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate }) => {
     }
   };
 
+  const handleToggleShare = async () => {
+    try {
+      const updated = await quizItemsApi.setQuestionBankSharing(courseId, bank.id, !bank.shared_with_account);
+      onUpdate({ ...bank, ...(updated || {}), shared_with_account: !bank.shared_with_account });
+    } catch (err) {
+      setQuestionsError(err.message);
+    }
+  };
+
+  const handleCopy = async () => {
+    setCopying(true);
+    try {
+      const res = await quizItemsApi.copyQuestionBank(courseId, bank.id);
+      onCopied?.(res?.question_bank);
+    } catch (err) {
+      setQuestionsError(err.message);
+    } finally {
+      setCopying(false);
+    }
+  };
+
   const handlePullSuccess = (count) => {
     setShowPullModal(false);
     setPullSuccess(count);
@@ -537,7 +504,7 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate }) => {
               <ChevronRight className="w-5 h-5 text-text-disabled flex-shrink-0" />
             )}
             <BookOpen className="w-5 h-5 text-brand-500 flex-shrink-0" />
-            {editingTitle && isTeacher ? (
+            {editingTitle && canEdit ? (
               <input
                 type="text"
                 value={titleDraft}
@@ -553,7 +520,15 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate }) => {
               />
             ) : (
               <div className="min-w-0">
-                <span className="font-medium text-text-primary truncate block">{bank.title}</span>
+                <span className="font-medium text-text-primary truncate block">
+                  {bank.title}
+                  {!owned && (
+                    <span className="ms-2 text-xs font-normal px-2 py-0.5 rounded-full bg-surface-2 text-text-secondary">Shared by another course</span>
+                  )}
+                  {owned && bank.shared_with_account && (
+                    <span className="ms-2 text-xs font-normal px-2 py-0.5 rounded-full bg-brand-50 text-brand-700">Shared with account</span>
+                  )}
+                </span>
                 <span className="text-xs text-text-tertiary">
                   {questions.length > 0
                     ? `${questions.length} question${questions.length !== 1 ? 's' : ''} \u00b7 ${totalPoints} pts`
@@ -580,6 +555,28 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate }) => {
               </button>
             )}
             {isTeacher && (
+              <button
+                onClick={handleCopy}
+                disabled={copying}
+                className="inline-flex items-center text-xs text-brand-600 hover:text-brand-800 px-2 py-1 rounded hover:bg-brand-50 disabled:opacity-50"
+                title={owned ? 'Duplicate this bank' : 'Copy this bank into your course'}
+              >
+                <Copy className="w-3.5 h-3.5 me-1" />
+                {owned ? 'Duplicate' : 'Copy to course'}
+              </button>
+            )}
+            {canEdit && (
+              <button
+                onClick={handleToggleShare}
+                aria-pressed={Boolean(bank.shared_with_account)}
+                className="inline-flex items-center text-xs text-text-secondary hover:text-brand-700 px-2 py-1 rounded hover:bg-surface-1"
+                title="Let other courses in this account use this bank"
+              >
+                <Share2 className="w-3.5 h-3.5 me-1" />
+                {bank.shared_with_account ? 'Stop sharing' : 'Share with account'}
+              </button>
+            )}
+            {canEdit && (
               <>
                 <button
                   onClick={() => { setEditingTitle(true); setTitleDraft(bank.title); }}
@@ -636,7 +633,7 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate }) => {
                 {questions.length > 0 && (
                   <div className="divide-y mt-3">
                     {questions.map((q) =>
-                      editingQuestionId === q.id && isTeacher ? (
+                      editingQuestionId === q.id && canEdit ? (
                         <div key={q.id} className="py-3">
                           <QuestionForm
                             initial={{
@@ -644,12 +641,13 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate }) => {
                               question_type: q.question_type || 'multiple_choice',
                               question_text: q.question_text || '',
                               points_possible: q.points_possible ?? 1,
-                              answers: q.answers || [],
+                              answers: parseAnswers(q.answers, []),
                               feedback: q.feedback || '',
                             }}
                             onSave={handleUpdateQuestion}
                             onCancel={() => setEditingQuestionId(null)}
                             saving={savingQuestion}
+                            courseId={courseId}
                           />
                         </div>
                       ) : (
@@ -669,9 +667,9 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate }) => {
                             <p className="text-sm text-text-secondary mt-1 line-clamp-2">{q.question_text}</p>
                             {/* Show answers for MC / TF in read-only view */}
                             {(q.question_type === 'multiple_choice' || q.question_type === 'true_false') &&
-                              Array.isArray(q.answers) && q.answers.length > 0 && (
+                              parseAnswers(q.answers, []).length > 0 && (
                                 <div className="mt-2 space-y-1">
-                                  {q.answers.map((a, aIdx) => (
+                                  {parseAnswers(q.answers, []).map((a, aIdx) => (
                                     <div key={aIdx} className="flex items-center gap-1.5 text-xs">
                                       <span className={`w-3 h-3 rounded-full border ${a.weight === 100 ? 'bg-accent-success border-accent-success' : 'border-border-strong'}`} />
                                       <span className={a.weight === 100 ? 'text-accent-success font-medium' : 'text-text-secondary'}>
@@ -685,7 +683,7 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate }) => {
                               <p className="text-xs text-text-disabled mt-1 italic">Feedback: {q.feedback}</p>
                             )}
                           </div>
-                          {isTeacher && (
+                          {canEdit && (
                             <div className="flex items-center gap-1 flex-shrink-0 pt-0.5">
                               <button
                                 onClick={() => setEditingQuestionId(q.id)}
@@ -710,13 +708,14 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate }) => {
                 )}
 
                 {/* Add question form / button */}
-                {isTeacher && (
+                {canEdit && (
                   <div className="mt-4">
                     {showAddQuestion ? (
                       <QuestionForm
                         onSave={handleAddQuestion}
                         onCancel={() => setShowAddQuestion(false)}
                         saving={savingQuestion}
+                        courseId={courseId}
                       />
                     ) : (
                       <button
@@ -846,6 +845,7 @@ const QuestionBanksPage = () => {
   return (
     <Layout>
       <CourseNav />
+      <QuizzesSubNav />
       <div className="mb-6">
         <Link to={`/courses/${courseId}`} className="text-brand-600 hover:underline text-sm">
           &larr; Back to Course
@@ -924,6 +924,7 @@ const QuestionBanksPage = () => {
               isTeacher={isTeacher}
               onDelete={handleDeleteBank}
               onUpdate={handleUpdateBank}
+              onCopied={(copied) => copied && setBanks((prev) => [...prev, copied])}
             />
           ))}
         </div>

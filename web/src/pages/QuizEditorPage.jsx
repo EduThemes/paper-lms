@@ -867,7 +867,7 @@ const QuizEditorPage = () => {
                 >
                   <option value="">No bank</option>
                   {questionBanks.map(b => (
-                    <option key={b.id} value={b.id}>{b.title}</option>
+                    <option key={b.id} value={b.id}>{b.title}{b.owned === false ? ' (shared)' : ''}</option>
                   ))}
                 </select>
               </div>
