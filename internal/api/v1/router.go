@@ -599,6 +599,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Get("/conferences/:id", r.ConferenceHandler.GetConference)
 	protected.Put("/conferences/:id", r.ConferenceHandler.UpdateConference)
 	protected.Delete("/conferences/:id", r.ConferenceHandler.DeleteConference)
+	protected.Post("/conferences/:id/start", r.ConferenceHandler.StartConference)
 	protected.Post("/conferences/:id/join", r.ConferenceHandler.JoinConference)
 	protected.Post("/conferences/:id/end", r.ConferenceHandler.EndConference)
 	protected.Get("/conferences/:id/recordings", r.ConferenceHandler.GetRecordings)

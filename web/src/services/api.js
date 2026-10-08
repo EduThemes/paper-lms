@@ -1489,6 +1489,10 @@ export const api = {
     const { data } = await request(`/conferences/${id}`, { method: 'DELETE' });
     return data;
   },
+  startConference: async (id) => {
+    const { data } = await request(`/conferences/${id}/start`, { method: 'POST' });
+    return data;
+  },
   joinConference: async (id) => {
     const { data } = await request(`/conferences/${id}/join`, { method: 'POST' });
     return data;

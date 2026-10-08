@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -118,7 +119,7 @@ func (h *CollaborationHandler) GetCollaboration(c *fiber.Ctx) error {
 
 	// Authorization: require enrollment for course-scoped collaborations
 	if collaboration.ContextType == "Course" {
-		if err := h.authz.RequireCourseEnrolled(c, collaboration.ContextID); err != nil {
+		if err := h.authz.RequireCourseEnrolled(c, collaboration.ContextID); authzDenied(c, err) {
 			return err
 		}
 	}
@@ -141,7 +142,7 @@ func (h *CollaborationHandler) UpdateCollaboration(c *fiber.Ctx) error {
 
 	// Authorization: require instructor for course-scoped collaborations
 	if collaboration.ContextType == "Course" {
-		if err := h.authz.RequireCourseInstructor(c, collaboration.ContextID); err != nil {
+		if err := h.authz.RequireCourseInstructor(c, collaboration.ContextID); authzDenied(c, err) {
 			return err
 		}
 	}
@@ -181,6 +182,9 @@ func (h *CollaborationHandler) UpdateCollaboration(c *fiber.Ctx) error {
 	}
 
 	if err := h.collaborationService.Update(c.Context(), collaboration); err != nil {
+		if errors.Is(err, service.ErrInvalidCollaborationURL) {
+			return responses.BadRequest(c, err.Error())
+		}
 		return responses.InternalError(c, "Could not update collaboration")
 	}
 
@@ -203,7 +207,7 @@ func (h *CollaborationHandler) DeleteCollaboration(c *fiber.Ctx) error {
 
 	// Authorization: require instructor for course-scoped collaborations
 	if collaboration.ContextType == "Course" {
-		if err := h.authz.RequireCourseInstructor(c, collaboration.ContextID); err != nil {
+		if err := h.authz.RequireCourseInstructor(c, collaboration.ContextID); authzDenied(c, err) {
 			return err
 		}
 	}

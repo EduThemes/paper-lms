@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Video, Plus, X, Pencil, Trash2, Play, Square, LogIn, Film } from 'lucide-react';
 import { api } from '../services/api';
-import { useAuth } from '../contexts/AuthContext';
+import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 
 const ConferencesPage = () => {
   const { courseId } = useParams();
-  const { user } = useAuth();
+  // Start / End / Edit / Delete are instructor actions (the API enforces
+  // it too); students only see Join once a conference is running.
+  const isTeacher = useIsTeacher(courseId);
   const [conferences, setConferences] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -19,6 +21,7 @@ const ConferencesPage = () => {
     description: '',
     conference_type: 'BigBlueButton',
     duration: 60,
+    join_url: '',
   });
   const [submitting, setSubmitting] = useState(false);
   const [selectedConference, setSelectedConference] = useState(null);
@@ -46,6 +49,7 @@ const ConferencesPage = () => {
       description: '',
       conference_type: 'BigBlueButton',
       duration: 60,
+      join_url: '',
     });
     setEditingId(null);
     setShowForm(false);
@@ -57,6 +61,7 @@ const ConferencesPage = () => {
       description: conf.description || '',
       conference_type: conf.conference_type,
       duration: conf.duration || 60,
+      join_url: /^https?:\/\//.test(conf.join_url || '') ? conf.join_url : '',
     });
     setEditingId(conf.id);
     setShowForm(true);
@@ -67,7 +72,7 @@ const ConferencesPage = () => {
     setSubmitting(true);
     try {
       if (editingId) {
-        await api.updateConference(courseId, editingId, formData);
+        await api.updateConference(editingId, formData);
       } else {
         await api.createConference(courseId, formData);
       }
@@ -84,7 +89,7 @@ const ConferencesPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this conference?')) return;
     try {
-      await api.deleteConference(courseId, id);
+      await api.deleteConference(id);
       setLoading(true);
       await fetchConferences();
     } catch (err) {
@@ -94,10 +99,21 @@ const ConferencesPage = () => {
 
   const handleJoin = async (id) => {
     try {
-      const result = await api.joinConference(courseId, id);
-      if (result.join_url) {
-        window.open(result.join_url, '_blank');
+      const result = await api.joinConference(id);
+      if (result?.join_url) {
+        window.open(result.join_url, '_blank', 'noopener,noreferrer');
       }
+      await fetchConferences();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  // Instructor: start the conference, then join it as moderator.
+  const handleStart = async (id) => {
+    try {
+      await api.startConference(id);
+      await handleJoin(id);
     } catch (err) {
       setError(err.message);
     }
@@ -106,7 +122,7 @@ const ConferencesPage = () => {
   const handleEnd = async (id) => {
     if (!window.confirm('Are you sure you want to end this conference?')) return;
     try {
-      await api.endConference(courseId, id);
+      await api.endConference(id);
       setLoading(true);
       await fetchConferences();
     } catch (err) {
@@ -116,7 +132,7 @@ const ConferencesPage = () => {
 
   const handleViewRecordings = async (conf) => {
     try {
-      const result = await api.getConferenceRecordings(courseId, conf.id);
+      const result = await api.getConferenceRecordings(conf.id);
       setRecordings(result.recordings);
       setSelectedConference(conf);
       setParticipants(null);
@@ -127,7 +143,7 @@ const ConferencesPage = () => {
 
   const handleViewParticipants = async (conf) => {
     try {
-      const result = await api.getConferenceParticipants(courseId, conf.id);
+      const result = await api.getConferenceParticipants(conf.id);
       setParticipants(result);
       setSelectedConference(conf);
       setRecordings(null);
@@ -175,6 +191,7 @@ const ConferencesPage = () => {
         </Link>
         <div className="flex items-center justify-between mt-2">
           <h2 className="text-2xl font-bold text-text-primary">Conferences</h2>
+          {isTeacher && (
           <button
             onClick={() => { if (showForm) { resetForm(); } else { setShowForm(true); } }}
             className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
@@ -182,6 +199,7 @@ const ConferencesPage = () => {
             {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
             <span>{showForm ? 'Cancel' : 'New Conference'}</span>
           </button>
+          )}
         </div>
       </div>
 
@@ -230,6 +248,22 @@ const ConferencesPage = () => {
                   min={1}
                 />
               </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-1" htmlFor="conference-join-url">
+                Meeting link (optional)
+              </label>
+              <input
+                id="conference-join-url"
+                type="url"
+                value={formData.join_url}
+                onChange={(e) => setFormData({ ...formData, join_url: e.target.value })}
+                placeholder="https://zoom.us/j/..."
+                className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+              <p className="text-xs text-text-tertiary mt-1">
+                Used when no BigBlueButton server is configured, or for Zoom and other external meetings.
+              </p>
             </div>
             <div className="flex justify-end space-x-3">
               <button
@@ -299,9 +333,9 @@ const ConferencesPage = () => {
                       </div>
                     </div>
                     <div className="flex items-center space-x-1 flex-shrink-0 ml-4">
-                      {!conf.started_at && (
+                      {isTeacher && !conf.started_at && !conf.ended_at && (
                         <button
-                          onClick={() => handleJoin(conf.id)}
+                          onClick={() => handleStart(conf.id)}
                           className="inline-flex items-center space-x-1 px-3 py-1.5 bg-accent-success text-white rounded-md hover:bg-accent-success/90 text-xs font-medium"
                           title="Start and Join"
                         >
@@ -319,6 +353,7 @@ const ConferencesPage = () => {
                             <LogIn className="w-3.5 h-3.5" />
                             <span>Join</span>
                           </button>
+                          {isTeacher && (
                           <button
                             onClick={() => handleEnd(conf.id)}
                             className="inline-flex items-center space-x-1 px-3 py-1.5 bg-accent-danger text-white rounded-md hover:bg-accent-danger/90 text-xs font-medium"
@@ -327,6 +362,7 @@ const ConferencesPage = () => {
                             <Square className="w-3.5 h-3.5" />
                             <span>End</span>
                           </button>
+                          )}
                         </>
                       )}
                       <button
@@ -336,6 +372,8 @@ const ConferencesPage = () => {
                       >
                         <Film className="w-4 h-4" />
                       </button>
+                      {isTeacher && (
+                      <>
                       <button
                         onClick={() => handleEdit(conf)}
                         className="p-1.5 text-text-disabled hover:text-brand-600 hover:bg-brand-50 rounded"
@@ -350,6 +388,8 @@ const ConferencesPage = () => {
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
+                      </>
+                      )}
                     </div>
                   </div>
                 </div>

@@ -218,6 +218,22 @@ var Catalog = []Definition{
 		TestAction:  "anthropic",
 	},
 
+	// ── Conferencing (BigBlueButton) ────────────────────────────────
+	{
+		Key: "conferences.bbb.url", Group: "Conferencing", Label: "BigBlueButton server URL",
+		Description: "Base URL of the BigBlueButton server, e.g. https://bbb.example.edu/bigbluebutton/. Leave empty to disable BigBlueButton conferences (teachers can still attach an external meeting link).",
+		ValueType:   TypeString,
+		Scopes:      []ScopeType{ScopeInstance, ScopeAccount},
+		EnvFallback: "BBB_URL",
+	},
+	{
+		Key: "conferences.bbb.secret", Group: "Conferencing", Label: "BigBlueButton shared secret",
+		Description: "Shared secret of the BigBlueButton server (bbb-conf --secret). Stored encrypted.",
+		ValueType:   TypeSecret,
+		Scopes:      []ScopeType{ScopeInstance, ScopeAccount},
+		EnvFallback: "BBB_SECRET",
+	},
+
 	// ── Federated auth (SAML defaults) ──────────────────────────────
 	{
 		Key: "auth.saml.entity_id", Group: "Federated auth", Label: "SAML entity ID",
