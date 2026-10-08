@@ -21,6 +21,9 @@ type OAuth2Handler struct {
 	// authorization endpoint redirects the browser to the SPA consent
 	// page there. Empty means same-origin (relative redirect).
 	frontendURL string
+	// ltiService answers grant_type=client_credentials (G127). Nil
+	// disables the grant.
+	ltiService *service.LTIService
 }
 
 func NewOAuth2Handler(
@@ -35,6 +38,40 @@ func NewOAuth2Handler(
 		tokenService:  tokenService,
 		userService:   userService,
 	}
+}
+
+// SetLTIService wires the LTI service that answers the LTI Advantage
+// client_credentials grant (G127).
+func (h *OAuth2Handler) SetLTIService(s *service.LTIService) { h.ltiService = s }
+
+// handleClientCredentialsGrant is the LTI Advantage service token grant
+// (G127): client_assertion is a JWT signed by the tool's private key.
+// Errors follow RFC 6749 §5.2.
+func (h *OAuth2Handler) handleClientCredentialsGrant(c *fiber.Ctx) error {
+	if h.ltiService == nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "unsupported_grant_type"})
+	}
+	grant, err := h.ltiService.GrantClientCredentials(c.Context(),
+		c.FormValue("client_assertion_type"), c.FormValue("client_assertion"), c.FormValue("scope"))
+	if err != nil {
+		code, status := "invalid_request", fiber.StatusBadRequest
+		switch {
+		case errors.Is(err, service.ErrLTIInvalidClient):
+			code, status = "invalid_client", fiber.StatusUnauthorized
+		case errors.Is(err, service.ErrLTIInvalidGrant):
+			code = "invalid_grant"
+		case errors.Is(err, service.ErrLTIInvalidScope):
+			code = "invalid_scope"
+		}
+		return c.Status(status).JSON(fiber.Map{"error": code, "error_description": err.Error()})
+	}
+	c.Set("Cache-Control", "no-store")
+	return c.JSON(fiber.Map{
+		"access_token": grant.AccessToken,
+		"token_type":   "Bearer",
+		"expires_in":   grant.ExpiresIn,
+		"scope":        grant.Scope,
+	})
 }
 
 // SetFrontendURL configures the SPA origin used for the consent redirect.
@@ -230,6 +267,9 @@ func (h *OAuth2Handler) Token(c *fiber.Ctx) error {
 	}
 
 	switch grantType {
+	case "client_credentials":
+		return h.handleClientCredentialsGrant(c)
+
 	case "authorization_code":
 		code := c.FormValue("code")
 		clientID := c.FormValue("client_id")

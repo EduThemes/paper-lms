@@ -188,6 +188,7 @@ func (r *Router) Register(app *fiber.App) {
 
 	authLimit := middleware.AuthRateLimit()
 	r.registerPublicRoutes(api, authLimit)
+	r.registerLTIToolRoutes(api, enrolled, instructor, authLimit)
 
 	// Protected routes (authentication required)
 	protected := api.Group("", r.AuthMiddleware.Protected(), middleware.CSRFProtection())
@@ -368,17 +369,8 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Put("/courses/:course_id/grading_standards/:id", instructor, r.GradingStandardHandler.UpdateGradingStandard)
 	protected.Delete("/courses/:course_id/grading_standards/:id", instructor, r.GradingStandardHandler.DeleteGradingStandard)
 
-	// LTI AGS (Assignment and Grade Services) - protected via OAuth2 token + enrollment
-	protected.Get("/lti/courses/:course_id/line_items", enrolled, r.LTIHandler.ListLineItems)
-	protected.Post("/lti/courses/:course_id/line_items", instructor, r.LTIHandler.CreateLineItem)
-	protected.Get("/lti/courses/:course_id/line_items/:id", enrolled, r.LTIHandler.GetLineItem)
-	protected.Put("/lti/courses/:course_id/line_items/:id", instructor, r.LTIHandler.UpdateLineItem)
-	protected.Delete("/lti/courses/:course_id/line_items/:id", instructor, r.LTIHandler.DeleteLineItem)
-	protected.Post("/lti/courses/:course_id/line_items/:id/scores", instructor, r.LTIHandler.PostScore)
-	protected.Get("/lti/courses/:course_id/line_items/:id/results", enrolled, r.LTIHandler.GetResults)
-
-	// LTI NRPS (Names and Role Provisioning Services)
-	protected.Get("/lti/courses/:course_id/memberships", enrolled, r.LTIHandler.GetMemberships)
+	// LTI AGS / NRPS live in routes_lti.go (registerLTIToolRoutes): tools
+	// call them with a service token, so they mount before this group.
 
 	// Discussion Topics (view: enrolled; manage: instructor; post: enrolled)
 	protected.Get("/courses/:course_id/discussion_topics", enrolled, r.DiscussionHandler.ListTopics)
@@ -853,4 +845,5 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerQuizExtensionRoutes(protected, enrolled, instructor)
 	r.registerGamificationRoutes(protected, admin, instructor, selfOrAdmin)
 	r.registerSuperAdminRoutes(protected)
+	r.registerLTIRoutes(protected, admin, enrolled, instructor)
 }

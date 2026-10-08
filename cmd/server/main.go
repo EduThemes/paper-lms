@@ -405,6 +405,8 @@ func main() {
 
 	agsService := service.NewLTIAGSService(lineItemRepo, resultRepo, assignmentRepo, enrollmentRepo, submissionService)
 	nrpsService := service.NewLTINRPSService(enrollmentRepo, userRepo)
+	wireLTIAdvantage(database, ltiService, agsService, nrpsService, devKeyService, submissionService,
+		userRepo, courseRepo, assignmentRepo, moduleRepo, moduleItemRepo, lineItemRepo, resultRepo)
 	// services
 	discussionService := service.NewDiscussionService(discussionTopicRepo, discussionEntryRepo, discussionRatingRepo)
 	// Initialize file storage backend
@@ -831,6 +833,7 @@ func main() {
 	developerKeyHandler := handlers.NewDeveloperKeyHandler(devKeyService)
 	accessTokenHandler := handlers.NewAccessTokenHandler(accessTokenService)
 	oauth2Handler := handlers.NewOAuth2Handler(oauth2Service, devKeyService, accessTokenService, userService)
+	oauth2Handler.SetLTIService(ltiService)
 	oauth2Handler.SetFrontendURL(cfg.FrontendURL)
 	externalToolHandler := handlers.NewExternalToolHandler(externalToolService, devKeyService)
 	ltiHandler := handlers.NewLTIHandler(ltiService, agsService, nrpsService, externalToolRepo, ltiConfigRepo, userRepo, accountRepo, parentalConsentRepo)

@@ -55,12 +55,17 @@ func (s *ExternalToolService) Create(ctx context.Context, tool *models.ContextEx
 	}
 
 	if tool.DeveloperKeyID == 0 {
-		return invalidTool("developer_key_id is required")
-	}
-
-	// The developer key must belong to the caller's tenant.
-	if _, err := s.devKeyRepo.FindByID(ctx, tool.DeveloperKeyID, accountID); err != nil {
+		// G133: an LTI 1.1 install carries its own launch URL and OAuth1
+		// consumer credentials instead of a developer key.
+		if tool.ConsumerKey == "" || tool.SharedSecret == "" || tool.URL == "" {
+			return invalidTool("developer_key_id is required")
+		}
+	} else if _, err := s.devKeyRepo.FindByID(ctx, tool.DeveloperKeyID, accountID); err != nil {
+		// The developer key must belong to the caller's tenant.
 		return invalidTool("developer key not found")
+	}
+	if tool.PrivacyLevel == "" {
+		tool.PrivacyLevel = LTIPrivacyAnonymous
 	}
 
 	// Set default workflow state

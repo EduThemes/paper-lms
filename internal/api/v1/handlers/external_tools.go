@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -12,6 +13,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/auth"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
 
@@ -47,6 +49,9 @@ func externalToolToJSON(tool *models.ContextExternalTool, includeConsumerKey boo
 		"domain":           tool.Domain,
 		"custom_fields":    customFields,
 		"workflow_state":   tool.WorkflowState,
+		"privacy_level":    tool.PrivacyLevel,
+		"lti_version":      ltiVersionOf(tool),
+		"deployment_id":    strconv.FormatUint(uint64(tool.ID), 10),
 		"created_at":       tool.CreatedAt,
 		"updated_at":       tool.UpdatedAt,
 	}
@@ -54,6 +59,13 @@ func externalToolToJSON(tool *models.ContextExternalTool, includeConsumerKey boo
 		m["consumer_key"] = tool.ConsumerKey
 	}
 	return m
+}
+
+func ltiVersionOf(tool *models.ContextExternalTool) string {
+	if tool.IsLTI11() {
+		return "1.1"
+	}
+	return "1.3"
 }
 
 // flexUint accepts a JSON number or a numeric JSON string (HTML form
@@ -152,9 +164,20 @@ func (h *ExternalToolHandler) ListExternalTools(c *fiber.Ctx) error {
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
 
 	staff := callerIsCourseStaff(c)
-	tools := make([]fiber.Map, len(result.Items))
-	for i, tool := range result.Items {
-		tools[i] = externalToolToJSON(&tool, staff)
+	tools := make([]fiber.Map, 0, len(result.Items))
+	for i := range result.Items {
+		tools = append(tools, externalToolToJSON(&result.Items[i], staff))
+	}
+	// G132: include_parents=true adds the tools installed for the whole
+	// tenant (Canvas include_parents), which every course inherits.
+	if c.Query("include_parents") == "true" && params.Page <= 1 {
+		if acct, aErr := h.toolService.ListByContext(c.Context(), "Account", callerAccountID(c), repository.PaginationParams{Page: 1, PerPage: 100}); aErr == nil && acct != nil {
+			for i := range acct.Items {
+				if acct.Items[i].WorkflowState == "active" {
+					tools = append(tools, externalToolToJSON(&acct.Items[i], false))
+				}
+			}
+		}
 	}
 
 	return c.JSON(tools)
@@ -181,6 +204,7 @@ type createExternalToolRequest struct {
 		ConsumerKey    string       `json:"consumer_key"`
 		SharedSecret   string       `json:"shared_secret"`
 		CustomFields   flexJSONText `json:"custom_fields"`
+		PrivacyLevel   string       `json:"privacy_level"`
 	} `json:"external_tool"`
 }
 
@@ -193,6 +217,57 @@ func sealSharedSecret(c *fiber.Ctx, plaintext string) (string, bool) {
 		return "", true
 	}
 	return sealed, false
+}
+
+// buildToolFromRequest validates an install request and builds the
+// install for a context. An LTI 1.3 install names a developer key; an
+// LTI 1.1 install (G133) omits it and supplies url, consumer_key and
+// shared_secret. Returns (tool, wrote).
+func buildToolFromRequest(c *fiber.Ctx, input *createExternalToolRequest, contextType string, contextID uint) (*models.ContextExternalTool, bool) {
+	in := input.ExternalTool
+	if in.Name == "" {
+		_ = responses.BadRequest(c, "External tool name is required")
+		return nil, true
+	}
+	privacy := in.PrivacyLevel
+	if privacy == "" {
+		privacy = service.LTIPrivacyAnonymous
+	}
+	if !service.ValidLTIPrivacyLevel(privacy) {
+		_ = responses.BadRequest(c, "privacy_level must be anonymous, name_only, email_only or public")
+		return nil, true
+	}
+	lti11 := !in.DeveloperKeyID.Set || in.DeveloperKeyID.Value == 0
+	if lti11 {
+		if in.ConsumerKey == "" || in.SharedSecret == "" || in.URL == "" {
+			_ = responses.BadRequest(c, "developer_key_id is required (or url, consumer_key and shared_secret for an LTI 1.1 tool)")
+			return nil, true
+		}
+		if u, err := url.Parse(in.URL); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			_ = responses.BadRequest(c, "url must be an http(s) launch URL")
+			return nil, true
+		}
+	}
+	sharedSecret, wrote := sealSharedSecret(c, in.SharedSecret)
+	if wrote {
+		return nil, true
+	}
+	tool := &models.ContextExternalTool{
+		ContextType:  contextType,
+		ContextID:    contextID,
+		Name:         service.SanitizePlainText(in.Name),
+		Description:  service.SanitizePlainText(in.Description),
+		URL:          in.URL,
+		Domain:       in.Domain,
+		ConsumerKey:  in.ConsumerKey,
+		SharedSecret: sharedSecret,
+		CustomFields: in.CustomFields.Value,
+		PrivacyLevel: privacy,
+	}
+	if !lti11 {
+		tool.DeveloperKeyID = in.DeveloperKeyID.Value
+	}
+	return tool, false
 }
 
 // CreateExternalTool creates a new external tool for a course.
@@ -208,29 +283,9 @@ func (h *ExternalToolHandler) CreateExternalTool(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 
-	if input.ExternalTool.Name == "" {
-		return responses.BadRequest(c, "External tool name is required")
-	}
-	if !input.ExternalTool.DeveloperKeyID.Set || input.ExternalTool.DeveloperKeyID.Value == 0 {
-		return responses.BadRequest(c, "developer_key_id is required")
-	}
-
-	sharedSecret, wrote := sealSharedSecret(c, input.ExternalTool.SharedSecret)
+	tool, wrote := buildToolFromRequest(c, &input, "Course", uint(courseID))
 	if wrote {
 		return nil
-	}
-
-	tool := &models.ContextExternalTool{
-		ContextType:    "Course",
-		ContextID:      uint(courseID),
-		DeveloperKeyID: input.ExternalTool.DeveloperKeyID.Value,
-		Name:           input.ExternalTool.Name,
-		Description:    service.SanitizePlainText(input.ExternalTool.Description),
-		URL:            input.ExternalTool.URL,
-		Domain:         input.ExternalTool.Domain,
-		ConsumerKey:    input.ExternalTool.ConsumerKey,
-		SharedSecret:   sharedSecret,
-		CustomFields:   input.ExternalTool.CustomFields.Value,
 	}
 
 	// Developer key is validated tenant-scoped inside the service.
@@ -263,6 +318,7 @@ func (h *ExternalToolHandler) UpdateExternalTool(c *fiber.Ctx) error {
 			CustomFields   flexJSONText `json:"custom_fields"`
 			DeveloperKeyID flexUint     `json:"developer_key_id"`
 			WorkflowState  *string      `json:"workflow_state"`
+			PrivacyLevel   *string      `json:"privacy_level"`
 		} `json:"external_tool"`
 	}
 
@@ -271,7 +327,7 @@ func (h *ExternalToolHandler) UpdateExternalTool(c *fiber.Ctx) error {
 	}
 
 	if input.ExternalTool.Name != nil {
-		tool.Name = *input.ExternalTool.Name
+		tool.Name = service.SanitizePlainText(*input.ExternalTool.Name)
 	}
 	if input.ExternalTool.URL != nil {
 		tool.URL = *input.ExternalTool.URL
@@ -303,6 +359,12 @@ func (h *ExternalToolHandler) UpdateExternalTool(c *fiber.Ctx) error {
 		}
 		tool.DeveloperKeyID = input.ExternalTool.DeveloperKeyID.Value
 	}
+	if input.ExternalTool.PrivacyLevel != nil {
+		if !service.ValidLTIPrivacyLevel(*input.ExternalTool.PrivacyLevel) {
+			return responses.BadRequest(c, "privacy_level must be anonymous, name_only, email_only or public")
+		}
+		tool.PrivacyLevel = *input.ExternalTool.PrivacyLevel
+	}
 	if input.ExternalTool.WorkflowState != nil {
 		state := *input.ExternalTool.WorkflowState
 		if state != "active" && state != "inactive" && state != "deleted" {
@@ -330,5 +392,82 @@ func (h *ExternalToolHandler) DeleteExternalTool(c *fiber.Ctx) error {
 		return responses.NotFound(c, "external tool")
 	}
 
+	return c.JSON(fiber.Map{"delete": true})
+}
+
+// --- account-level installs (G132) --------------------------------------------------
+
+// requireToolInAccount loads :id as an install of the caller's tenant
+// account (404 otherwise). Returns (tool, wrote).
+func (h *ExternalToolHandler) requireToolInAccount(c *fiber.Ctx, accountID uint) (*models.ContextExternalTool, bool) {
+	id, err := c.ParamsInt("id")
+	if err != nil || id <= 0 {
+		_ = responses.BadRequest(c, "Invalid external tool ID")
+		return nil, true
+	}
+	tool, err := h.toolService.GetByID(c.Context(), uint(id), accountID)
+	if err != nil || tool.ContextType != "Account" || tool.ContextID != accountID {
+		_ = responses.NotFound(c, "external tool")
+		return nil, true
+	}
+	return tool, false
+}
+
+// ListAccountExternalTools — GET /accounts/:account_id/external_tools (admin)
+func (h *ExternalToolHandler) ListAccountExternalTools(c *fiber.Ctx) error {
+	accountID, wrote := resolveDeveloperKeyAccount(c)
+	if wrote {
+		return nil
+	}
+	params := middleware.GetPagination(c)
+	result, err := h.toolService.ListByContext(c.Context(), "Account", accountID, params)
+	if err != nil {
+		return responses.InternalError(c, "Could not fetch external tools")
+	}
+	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
+	tools := make([]fiber.Map, len(result.Items))
+	for i := range result.Items {
+		tools[i] = externalToolToJSON(&result.Items[i], true)
+	}
+	return c.JSON(tools)
+}
+
+// CreateAccountExternalTool — POST /accounts/:account_id/external_tools (admin)
+// Installs a tool for every course of the tenant.
+func (h *ExternalToolHandler) CreateAccountExternalTool(c *fiber.Ctx) error {
+	accountID, wrote := resolveDeveloperKeyAccount(c)
+	if wrote {
+		return nil
+	}
+	var input createExternalToolRequest
+	if err := c.BodyParser(&input); err != nil {
+		return responses.BadRequest(c, "Invalid input")
+	}
+	tool, wrote := buildToolFromRequest(c, &input, "Account", accountID)
+	if wrote {
+		return nil
+	}
+	if err := h.toolService.Create(c.Context(), tool, accountID); err != nil {
+		if errors.Is(err, service.ErrExternalToolInvalid) {
+			return responses.BadRequest(c, err.Error())
+		}
+		return responses.InternalError(c, "Could not create external tool")
+	}
+	return c.Status(fiber.StatusCreated).JSON(externalToolToJSON(tool, true))
+}
+
+// DeleteAccountExternalTool — DELETE /accounts/:account_id/external_tools/:id (admin)
+func (h *ExternalToolHandler) DeleteAccountExternalTool(c *fiber.Ctx) error {
+	accountID, wrote := resolveDeveloperKeyAccount(c)
+	if wrote {
+		return nil
+	}
+	tool, wrote := h.requireToolInAccount(c, accountID)
+	if wrote {
+		return nil
+	}
+	if err := h.toolService.Delete(c.Context(), tool.ID, accountID); err != nil {
+		return responses.NotFound(c, "external tool")
+	}
 	return c.JSON(fiber.Map{"delete": true})
 }
