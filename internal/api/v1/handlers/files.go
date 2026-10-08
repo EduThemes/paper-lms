@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
@@ -167,6 +168,23 @@ func (h *FileHandler) UploadCourseFile(c *fiber.Ctx) error {
 		Size:        fileHeader.Size,
 	}
 
+	// B138: honor the destination folder. The folder must be a live
+	// folder of THIS course (tenant-scoped load + context tie), otherwise
+	// 404 — a foreign folder id must not let a file land in another
+	// course's tree.
+	if raw := strings.TrimSpace(c.FormValue("folder_id")); raw != "" {
+		fid, convErr := strconv.ParseUint(raw, 10, 64)
+		if convErr != nil || fid == 0 {
+			return responses.BadRequest(c, "Invalid folder_id")
+		}
+		folder, ferr := h.fileService.GetFolder(c.Context(), uint(fid), callerAccountID(c))
+		if ferr != nil || folder == nil || folder.ContextType != "Course" || folder.ContextID != uint(courseID) || folder.WorkflowState == "deleted" {
+			return responses.NotFound(c, "folder")
+		}
+		folderID := folder.ID
+		attachment.FolderID = &folderID
+	}
+
 	// Stamp the caller's account onto ctx so the S3 backend (Wave 6 lookup
 	// closure) resolves storage.s3.* at account scope first, falling back to
 	// instance/env. Enables per-district S3 buckets on the upload path.
@@ -243,49 +261,7 @@ func (h *FileHandler) DownloadFile(c *fiber.Ctx) error {
 	// Account, etc.) fell through to "allow." User-context attachments
 	// (personal files, draft uploads) and Group-context attachments
 	// (often private to members) were readable by anyone with a JWT.
-	userID, _ := c.Locals("user_id").(uint)
-	switch attachment.ContextType {
-	case "Course":
-		enrollment, _ := h.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, attachment.ContextID, callerAccountID(c))
-		if enrollment == nil || enrollment.WorkflowState != "active" {
-			return responses.NotFound(c, "file")
-		}
-	case "User":
-		// Personal files: only the owner can download. Admins of the
-		// same tenant retain access via the GetAttachment tenant gate
-		// + is_admin Locals; that combination is intentionally
-		// permissive for FERPA / data-export workflows.
-		isAdmin, _ := c.Locals("is_admin").(bool)
-		if !isAdmin && attachment.ContextID != userID {
-			return responses.NotFound(c, "file")
-		}
-	case "Group":
-		// Group files: visible only to members of the group + admins.
-		isMember := false
-		if h.groupMembershipRepo != nil {
-			memberships, _ := h.groupMembershipRepo.ListByGroupID(c.Context(), attachment.ContextID, repository.PaginationParams{Page: 1, PerPage: 10000})
-			if memberships != nil {
-				for _, m := range memberships.Items {
-					if m.UserID == userID && m.WorkflowState == "accepted" {
-						isMember = true
-						break
-					}
-				}
-			}
-		}
-		isAdmin, _ := c.Locals("is_admin").(bool)
-		if !isMember && !isAdmin {
-			return responses.NotFound(c, "file")
-		}
-	case "Account":
-		// Account-context attachments are admin-only by convention.
-		isAdmin, _ := c.Locals("is_admin").(bool)
-		if !isAdmin {
-			return responses.NotFound(c, "file")
-		}
-	default:
-		// Unknown context type — fail closed. Adding a new context
-		// type now requires explicit authz wiring here.
+	if !h.canReadContextFiles(c, attachment.ContextType, attachment.ContextID) {
 		return responses.NotFound(c, "file")
 	}
 
@@ -339,10 +315,66 @@ func (h *FileHandler) DownloadFile(c *fiber.Ctx) error {
 	return c.SendStream(reader)
 }
 
+// canReadContextFiles reports whether the caller may read files that
+// live in the (contextType, contextID) context. The tenant check is the
+// caller's job (load the attachment/folder with callerAccountID first);
+// this adds the per-context membership rule and default-denies unknown
+// context types.
+func (h *FileHandler) canReadContextFiles(c *fiber.Ctx, contextType string, contextID uint) bool {
+	userID, _ := c.Locals("user_id").(uint)
+	isAdmin, _ := c.Locals("is_admin").(bool)
+	switch contextType {
+	case "Course":
+		enrollment, _ := h.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, contextID, callerAccountID(c))
+		return enrollment != nil && enrollment.WorkflowState == "active"
+	case "User":
+		// Personal files: only the owner. Admins of the same tenant
+		// retain access via the tenant gate + is_admin Locals; that
+		// combination is intentionally permissive for FERPA /
+		// data-export workflows.
+		return isAdmin || contextID == userID
+	case "Group":
+		// Group files: visible only to members of the group + admins.
+		if isAdmin {
+			return true
+		}
+		if h.groupMembershipRepo != nil {
+			memberships, _ := h.groupMembershipRepo.ListByGroupID(c.Context(), contextID, repository.PaginationParams{Page: 1, PerPage: 10000})
+			if memberships != nil {
+				for _, m := range memberships.Items {
+					if m.UserID == userID && m.WorkflowState == "accepted" {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	case "Account":
+		// Account-context attachments are admin-only by convention.
+		return isAdmin
+	default:
+		// Unknown context type — fail closed. Adding a new context
+		// type now requires explicit authz wiring here.
+		return false
+	}
+}
+
 func (h *FileHandler) ListFolderFiles(c *fiber.Ctx) error {
 	folderID, err := c.ParamsInt("folder_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid folder ID")
+	}
+
+	// B046: the route has no course middleware, so authorize here. Load
+	// the folder under the caller's tenant (cross-tenant → 404), then
+	// apply the same per-context read rule as file download. Pre-fix any
+	// authenticated user could enumerate any folder's file metadata.
+	folder, err := h.fileService.GetFolder(c.Context(), uint(folderID), callerAccountID(c))
+	if err != nil || folder == nil || folder.WorkflowState == "deleted" {
+		return responses.NotFound(c, "folder")
+	}
+	if !h.canReadContextFiles(c, folder.ContextType, folder.ContextID) {
+		return responses.NotFound(c, "folder")
 	}
 
 	params := middleware.GetPagination(c)
