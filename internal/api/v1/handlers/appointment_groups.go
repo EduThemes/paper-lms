@@ -168,7 +168,7 @@ func (h *AppointmentGroupHandler) Create(c *fiber.Ctx) error {
 	group := &models.AppointmentGroup{
 		CourseID:                      in.CourseID,
 		Title:                         in.Title,
-		Description:                   service.SanitizeHTML(in.Description),
+		Description:                   service.SanitizePlainText(in.Description),
 		LocationName:                  in.LocationName,
 		LocationAddress:               in.LocationAddress,
 		MinAppointmentsPerParticipant: in.MinAppointmentsPerParticipant,
@@ -223,7 +223,7 @@ func (h *AppointmentGroupHandler) Update(c *fiber.Ctx) error {
 	if in.Title != "" {
 		g.Title = in.Title
 	}
-	g.Description = service.SanitizeHTML(in.Description)
+	g.Description = service.SanitizePlainText(in.Description)
 	g.LocationName = in.LocationName
 	g.LocationAddress = in.LocationAddress
 	if in.MinAppointmentsPerParticipant >= 0 {

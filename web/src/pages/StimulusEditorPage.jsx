@@ -8,6 +8,8 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import QuizzesSubNav from '../components/quiz/QuizzesSubNav';
 import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
+import { htmlPreview } from '../utils/html';
+import { clearRceDraft } from '../components/rce/rceDrafts';
 
 /**
  * Stimulus passages — reusable reading/diagram content that one or more
@@ -82,12 +84,14 @@ const StimulusEditorPage = () => {
     try {
       if (isNew) {
         const created = await api.createStimulus(courseId, form);
+        clearRceDraft(`stimulus-${courseId}-new-content`);
         reportOk(t('stimulusEditor.stimulusCreated'));
         if (created?.id) {
           navigate(`/courses/${courseId}/stimuli/${created.id}`);
         }
       } else {
         await api.updateStimulus(courseId, stimulusId, form);
+        clearRceDraft(`stimulus-${courseId}-${stimulusId}-content`);
         reportOk(t('stimulusEditor.saved'));
         await fetchList();
       }
@@ -199,7 +203,7 @@ const StimulusEditorPage = () => {
                     {linkedQuestions.map(q => (
                       <li key={q.id} className="text-text-secondary">
                         <span className="text-text-tertiary text-xs mr-2">#{q.id}</span>
-                        <span dangerouslySetInnerHTML={{ __html: String(q.question_text || '').slice(0, 200) }} />
+                        <span>{htmlPreview(q.question_text, 200)}</span>
                       </li>
                     ))}
                   </ul>

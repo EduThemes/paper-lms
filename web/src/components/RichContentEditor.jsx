@@ -8,6 +8,7 @@ import {
 import katex from 'katex';
 import { api } from '../services/api';
 import { useClickOutside } from '../hooks/useClickOutside';
+import { sanitizeHTML } from './RichContentViewer';
 
 /* --- Helpers ------------------------------------------------------------ */
 
@@ -477,8 +478,9 @@ function MediaPopover({ open, onClose, onInsert }) {
 
 function runAccessibilityCheck(html) {
   const issues = [];
-  const container = document.createElement('div');
-  container.innerHTML = html;
+  // Parse into an inert document: a detached element created with
+  // document.createElement still loads images and runs onerror handlers.
+  const container = new DOMParser().parseFromString(`<!DOCTYPE html><body>${html || ''}</body>`, 'text/html').body;
 
   container.querySelectorAll('img').forEach((img, i) => {
     if (!img.getAttribute('alt')?.trim()) {
@@ -604,7 +606,10 @@ export default function RichContentEditor({
   useEffect(() => {
     if (editorRef.current && !sourceView) {
       if (editorRef.current.innerHTML !== value) {
-        editorRef.current.innerHTML = value || '';
+        // Assigning innerHTML on this live contenteditable loads images and
+        // fires their onerror handlers, so stored content (e.g. an imported
+        // description) must be sanitized first (B001).
+        editorRef.current.innerHTML = sanitizeHTML(value || '');
       }
       updateCharCount();
     }
@@ -893,10 +898,11 @@ export default function RichContentEditor({
 
   const handleToggleSource = useCallback(() => {
     if (sourceView) {
+      const clean = sanitizeHTML(sourceHtml);
       if (editorRef.current) {
-        editorRef.current.innerHTML = sourceHtml;
+        editorRef.current.innerHTML = clean;
       }
-      onChange?.(sourceHtml);
+      onChange?.(clean);
     } else {
       setSourceHtml(editorRef.current?.innerHTML || '');
     }

@@ -181,7 +181,7 @@ func (h *BatchHandler) BulkSendMessage(c *fiber.Ctx) error {
 		input.CourseID,
 		input.EnrollmentTypes,
 		input.Subject,
-		service.SanitizeHTML(input.Body),
+		service.SanitizePlainText(input.Body),
 	)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())

@@ -15,7 +15,8 @@ import {
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
-import RichContentViewer, { sanitizeHTML } from '../components/RichContentViewer';
+import RichContentViewer from '../components/RichContentViewer';
+import SafeHTML from '../components/SafeHTML';
 import { useLiveRegion } from '../components/LiveRegion';
 import QuizTimer from '../components/quiz/QuizTimer';
 import QuestionPalette from '../components/quiz/QuestionPalette';
@@ -331,15 +332,15 @@ const QuizTakePage = () => {
             <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-text-secondary">
               Passage: {stimulus.title || 'Reading'}
             </summary>
-            <div className="px-3 pb-3 prose prose-sm max-w-prose text-text-primary"
-                 dangerouslySetInnerHTML={{ __html: sanitizeHTML(stimulus.content || '') }} />
+            <SafeHTML className="px-3 pb-3 prose prose-sm max-w-prose text-text-primary"
+                      html={stimulus.content || ''} />
           </details>
         )}
 
         {!suppressStem && (
-          <div
+          <SafeHTML
             className="prose prose-sm max-w-prose mb-5 text-text-primary"
-            dangerouslySetInnerHTML={{ __html: sanitizeHTML(q.question_text) }}
+            html={q.question_text}
           />
         )}
 

@@ -19,7 +19,7 @@ import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
-import { sanitizeHTML } from '../components/RichContentViewer';
+import { SubmissionBody } from '../components/SafeHTML';
 import { useLiveRegion } from '../components/LiveRegion';
 import { Card } from '../components/ui/card';
 import { Avatar, AvatarFallback } from '../components/ui/avatar';
@@ -234,10 +234,7 @@ const SubmissionPreview = React.memo(function SubmissionPreview({ student }) {
             )}
 
             {sub.body && (
-              <div
-                className="prose max-w-none text-text-secondary"
-                dangerouslySetInnerHTML={{ __html: sanitizeHTML(sub.body) }}
-              />
+              <SubmissionBody className="prose max-w-none text-text-secondary" body={sub.body} />
             )}
 
             {sub.url && (

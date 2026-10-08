@@ -8,6 +8,7 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import RichContentViewer, { sanitizeHTML } from '../components/RichContentViewer';
 import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
+import { clearRceDraft } from '../components/rce/rceDrafts';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 
@@ -47,11 +48,17 @@ const PageDetailPage = () => {
   const doSave = async () => {
     setSaving(true);
     try {
-      await api.updatePage(courseId, slug, {
+      const saved = await api.updatePage(courseId, slug, {
         title: editForm.title,
         body: editForm.body,
       });
-      setPage((prev) => ({ ...prev, title: editForm.title, body: editForm.body, updated_at: new Date().toISOString() }));
+      clearRceDraft(`page-${courseId}-${slug || 'new'}-body`);
+      // Show what the server stored (it sanitizes the body), not the local
+      // editor HTML — otherwise anything the server drops looks saved until
+      // the next reload (B102).
+      setPage((prev) => (saved && typeof saved === 'object' && 'body' in saved
+        ? { ...prev, ...saved }
+        : { ...prev, title: editForm.title, body: editForm.body, updated_at: new Date().toISOString() }));
       setIsDirty(false);
       setEditing(false);
     } catch (err) {

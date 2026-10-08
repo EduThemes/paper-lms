@@ -34,7 +34,7 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import HomeEngine from '../components/home/HomeEngine';
 import K2Layout from '../components/home/K2Layout';
-import { sanitizeHTML } from '../components/RichContentViewer';
+import SafeHTML from '../components/SafeHTML';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -874,9 +874,9 @@ const CoursePage = () => {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div
+              <SafeHTML
                 className="prose max-w-none text-text-primary"
-                dangerouslySetInnerHTML={{ __html: sanitizeHTML(course.syllabus_body) }}
+                html={course.syllabus_body}
               />
             </CardContent>
           </Card>
@@ -899,9 +899,9 @@ const CoursePage = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div
+                  <SafeHTML
                     className="prose max-w-none text-text-primary"
-                    dangerouslySetInnerHTML={{ __html: sanitizeHTML(course.syllabus_body) }}
+                    html={course.syllabus_body}
                   />
                 </CardContent>
               </Card>

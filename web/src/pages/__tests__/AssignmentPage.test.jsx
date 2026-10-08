@@ -65,6 +65,7 @@ vi.mock('../../components/SubmissionComments', () => ({
 vi.mock('../../components/RichContentViewer', () => ({
   default: ({ content }) => <div data-testid="rich-content">{content}</div>,
   sanitizeHTML: (html) => html,
+  renderMathInElement: () => {},
 }));
 
 vi.mock('../../components/RichContentEditor', () => ({

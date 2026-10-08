@@ -203,7 +203,7 @@ func (h *PortfolioHandler) CreatePortfolio(c *fiber.Ctx) error {
 	portfolio := &models.Portfolio{
 		UserID:         uint(userID),
 		Title:          input.Portfolio.Title,
-		Description:    service.SanitizeHTML(input.Portfolio.Description),
+		Description:    service.SanitizePlainText(input.Portfolio.Description),
 		ThemeID:        input.Portfolio.ThemeID,
 		CustomCSS:      input.Portfolio.CustomCSS,
 		HeaderImageURL: input.Portfolio.HeaderImageURL,
@@ -272,7 +272,7 @@ func (h *PortfolioHandler) UpdatePortfolio(c *fiber.Ctx) error {
 		portfolio.Title = *input.Portfolio.Title
 	}
 	if input.Portfolio.Description != nil {
-		portfolio.Description = service.SanitizeHTML(*input.Portfolio.Description)
+		portfolio.Description = service.SanitizePlainText(*input.Portfolio.Description)
 	}
 	if input.Portfolio.ThemeID != nil {
 		portfolio.ThemeID = *input.Portfolio.ThemeID
@@ -398,9 +398,12 @@ func (h *PortfolioHandler) AddSection(c *fiber.Ctx) error {
 		PortfolioID: portfolio.ID,
 		Title:       input.Section.Title,
 		SectionType: input.Section.SectionType,
-		// Rich HTML, rendered raw into the exported portfolio site/PDF —
-		// sanitize on write (the locked rich-content rule) to close stored XSS.
-		Content:   service.SanitizeHTML(input.Section.Content),
+		// Typed in a textarea and rendered as text by the portfolio pages,
+		// so it is plain text (B005): the HTML sanitizer entity-encoded it
+		// and the public page showed "Don&#39;t". The plain-text sanitizer
+		// leaves no markup at all, so the raw embed in the exported
+		// site/PDF (generateStaticHTML) stays free of stored XSS.
+		Content:   service.SanitizePlainText(input.Section.Content),
 		Layout:    input.Section.Layout,
 		IsVisible: isVisible,
 	}
@@ -457,8 +460,8 @@ func (h *PortfolioHandler) UpdateSection(c *fiber.Ctx) error {
 		section.SectionType = *input.Section.SectionType
 	}
 	if input.Section.Content != nil {
-		// Sanitize on update too — see AddSection. Closes stored XSS.
-		section.Content = service.SanitizeHTML(*input.Section.Content)
+		// Sanitize on update too — see AddSection (plain text, no markup).
+		section.Content = service.SanitizePlainText(*input.Section.Content)
 	}
 	if input.Section.Layout != nil {
 		section.Layout = *input.Section.Layout
@@ -547,7 +550,7 @@ func (h *PortfolioHandler) AddArtifact(c *fiber.Ctx) error {
 		PortfolioID:   portfolio.ID,
 		SectionID:     input.Artifact.SectionID,
 		Title:         input.Artifact.Title,
-		Description:   service.SanitizeHTML(input.Artifact.Description),
+		Description:   service.SanitizePlainText(input.Artifact.Description),
 		ArtifactType:  input.Artifact.ArtifactType,
 		ContentURL:    input.Artifact.ContentURL,
 		ThumbnailURL:  input.Artifact.ThumbnailURL,
@@ -607,7 +610,7 @@ func (h *PortfolioHandler) UpdateArtifact(c *fiber.Ctx) error {
 		artifact.Title = *input.Artifact.Title
 	}
 	if input.Artifact.Description != nil {
-		artifact.Description = service.SanitizeHTML(*input.Artifact.Description)
+		artifact.Description = service.SanitizePlainText(*input.Artifact.Description)
 	}
 	if input.Artifact.ArtifactType != nil {
 		artifact.ArtifactType = *input.Artifact.ArtifactType

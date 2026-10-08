@@ -3,7 +3,7 @@ import { DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Upload, AlertCircle } from 'lucide-react';
-import { sanitizeHTML } from '../../RichContentViewer';
+import SafeHTML from '../../SafeHTML';
 import { parseAnswers } from './types';
 import { extractBlankIds } from './MultipleDropdownEditor';
 
@@ -159,9 +159,9 @@ const ItemPlayer = ({ question, value, onChange, readOnly = false, onFileUpload 
       const blankIds = extractBlankIds(question.question_text);
       return (
         <div className="max-w-prose">
-          <div className="prose prose-sm max-w-prose mb-2 text-text-primary"
+          <SafeHTML className="prose prose-sm max-w-prose mb-2 text-text-primary"
                // Strip blank tokens from the rendered HTML so they don't appear twice
-               dangerouslySetInnerHTML={{ __html: sanitizeHTML(String(question.question_text || '').replace(/\[[a-zA-Z][\w-]*\]/g, '___')) }} />
+               html={String(question.question_text || '').replace(/\[[a-zA-Z][\w-]*\]/g, '___')} />
           <div className="text-sm text-text-primary">
             {renderInlineTextWithBlanks(question.question_text, blankIds, value, onChange, answers, readOnly)}
           </div>

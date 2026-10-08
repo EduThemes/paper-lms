@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { BookOpen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
-import { sanitizeHTML } from '../components/RichContentViewer';
+import SafeHTML from '../components/SafeHTML';
 
 const PublicPageView = () => {
   const { t } = useTranslation();
@@ -52,9 +52,9 @@ const PublicPageView = () => {
       <div className="min-h-screen bg-surface-0 flex flex-col">
         <main className="flex-1 max-w-4xl mx-auto px-6 py-12 w-full">
           <h1 className="text-3xl font-bold text-text-primary mb-8">{page.title}</h1>
-          <div
+          <SafeHTML
             className="prose prose-lg max-w-none"
-            dangerouslySetInnerHTML={{ __html: sanitizeHTML(page.body) }}
+            html={page.body}
           />
         </main>
         <footer className="border-t border-border-default py-4 text-center text-sm text-text-disabled">
@@ -79,9 +79,9 @@ const PublicPageView = () => {
         <main className="max-w-4xl mx-auto px-6 py-8">
           <h1 className="text-2xl font-bold text-text-primary mb-6">{page.title}</h1>
           <div className="bg-surface-0 rounded-lg shadow p-6">
-            <div
+            <SafeHTML
               className="prose max-w-none"
-              dangerouslySetInnerHTML={{ __html: sanitizeHTML(page.body) }}
+              html={page.body}
             />
           </div>
         </main>

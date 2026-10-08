@@ -8,6 +8,7 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import QuizzesSubNav from '../components/quiz/QuizzesSubNav';
 import { TYPE_LABELS, parseAnswers } from '../components/quiz/itemTypes/types';
+import { htmlPreview } from '../utils/html';
 
 /**
  * Item Analysis — per-question metrics across all student attempts.
@@ -121,8 +122,9 @@ const ItemAnalysisTable = ({ analysis, questions }) => {
                 <div className="text-xs text-text-tertiary uppercase tracking-wide">
                   {TYPE_LABELS[q.question_type] || q.question_type}
                 </div>
-                <div className="text-sm text-text-primary mt-1 line-clamp-2"
-                     dangerouslySetInnerHTML={{ __html: String(q.question_text || '').slice(0, 240) }} />
+                <div className="text-sm text-text-primary mt-1 line-clamp-2">
+                  {htmlPreview(q.question_text, 240)}
+                </div>
               </div>
               <div className="text-right text-xs text-text-tertiary whitespace-nowrap">
                 <div>{t('itemAnalysis.attempts', { count: totalAttempts })}</div>

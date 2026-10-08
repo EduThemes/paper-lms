@@ -87,8 +87,9 @@ type classicItemMeta struct {
 
 type classicPresentation struct {
 	// Question prompt is in `<material><mattext>`. Canvas wraps it in
-	// CDATA or escaped HTML. We treat it as raw bytes — the renderer
-	// downstream handles sanitization.
+	// CDATA or escaped HTML. We treat it as raw bytes here; the question
+	// models' BeforeSave hooks (models/rich_content_sanitize.go) sanitize
+	// it when the imported question is persisted.
 	Material   []classicMaterial   `xml:"material"`
 	ResponseLid []classicResponseLid `xml:"response_lid"`
 	ResponseStr []classicResponseStr `xml:"response_str"`

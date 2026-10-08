@@ -10,7 +10,7 @@ import { Input } from '../ui/input';
  * @typedef {Object} EmbedMediaDialogProps
  * @property {boolean} open
  * @property {() => void} onClose
- * @property {(iframeHTML: string) => void} onInsert
+ * @property {(attrs: {src: string, title: string}) => void} onInsert
  */
 
 const ALLOWED_HOSTS = new Set([
@@ -65,12 +65,9 @@ export default function EmbedMediaDialog({ open, onClose, onInsert }) {
       setError('URL must be a YouTube or Vimeo link.');
       return;
     }
-    const html =
-      `<div class="rce-embed" style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;">` +
-      `<iframe src="${src}" title="Embedded media" frameborder="0" ` +
-      `allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" ` +
-      `allowfullscreen style="position:absolute;top:0;left:0;width:100%;height:100%;"></iframe></div>`;
-    onInsert(html);
+    // Hand back node attributes; the editor inserts an `iframe` schema node
+    // (extensions/Iframe.js), which serializes to a responsive .rce-embed.
+    onInsert({ src, title: 'Embedded media' });
     setUrl('');
     setError(null);
   };

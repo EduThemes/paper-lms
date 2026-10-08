@@ -123,7 +123,7 @@ func (h *AccommodationHandler) CreateAccommodation(c *fiber.Ctx) error {
 		UserID:            uint(userID),
 		CourseID:          input.Accommodation.CourseID,
 		AccommodationType: input.Accommodation.AccommodationType,
-		Description:       service.SanitizeHTML(input.Accommodation.Description),
+		Description:       service.SanitizePlainText(input.Accommodation.Description),
 		TimeMultiplier:    input.Accommodation.TimeMultiplier,
 		ExtraDays:         input.Accommodation.ExtraDays,
 		PlanType:          input.Accommodation.PlanType,
@@ -208,7 +208,7 @@ func (h *AccommodationHandler) UpdateAccommodation(c *fiber.Ctx) error {
 		accommodation.AccommodationType = *input.Accommodation.AccommodationType
 	}
 	if input.Accommodation.Description != nil {
-		accommodation.Description = service.SanitizeHTML(*input.Accommodation.Description)
+		accommodation.Description = service.SanitizePlainText(*input.Accommodation.Description)
 	}
 	if input.Accommodation.TimeMultiplier != nil {
 		accommodation.TimeMultiplier = input.Accommodation.TimeMultiplier

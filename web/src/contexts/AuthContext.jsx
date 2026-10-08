@@ -2,6 +2,7 @@ import React, { createContext, useState, useContext, useEffect } from 'react';
 import i18n from 'i18next';
 import { api } from '../services/api';
 import { setCurrentAccountId } from '../services/currentAccount';
+import { clearAllRceDrafts } from '../components/rce/rceDrafts';
 
 const AuthContext = createContext(null);
 
@@ -125,6 +126,10 @@ export const AuthProvider = ({ children }) => {
     // Clear any legacy localStorage data
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    // Editor autosave drafts are plaintext course content; don't leave them
+    // for the next person on a shared machine (B103). Session expiry keeps
+    // them so an interrupted author can sign back in and restore.
+    clearAllRceDrafts();
     setUser(null);
   };
 

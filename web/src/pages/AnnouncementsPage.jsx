@@ -7,6 +7,8 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import { useAuth } from '../contexts/AuthContext';
 import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
+import RichContentViewer from '../components/RichContentViewer';
+import { clearRceDraft } from '../components/rce/rceDrafts';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -23,6 +25,9 @@ const AnnouncementsPage = () => {
   const [expandedReceipts, setExpandedReceipts] = useState({});
   const [receiptData, setReceiptData] = useState({});
   const [editingId, setEditingId] = useState(null);
+  // Course-scoped so a "new announcement" draft never surfaces in another
+  // course; cleared after a successful save (B103).
+  const announcementDraftKey = `announcement-${courseId}-${editingId || 'new'}-message`;
 
   const [formData, setFormData] = useState({
     title: '',
@@ -128,6 +133,7 @@ const AnnouncementsPage = () => {
         });
       }
 
+      clearRceDraft(announcementDraftKey);
       resetForm();
       setShowForm(false);
       setLoading(true);
@@ -306,7 +312,7 @@ const AnnouncementsPage = () => {
                 onChange={(html) => setFormData((prev) => ({ ...prev, message: html }))}
                 placeholder="Announcement message..."
                 courseId={courseId}
-                autoSaveKey={editingId ? `announcement-${editingId}` : 'new-announcement'}
+                autoSaveKey={announcementDraftKey}
               />
             </div>
 
@@ -465,7 +471,10 @@ const AnnouncementsPage = () => {
                       )}
                     </div>
 
-                    <p className="text-text-secondary text-sm mt-2 whitespace-pre-wrap">{announcement.message}</p>
+                    {/* Messages are HTML from the rich content editor (B004). */}
+                    <div className="mt-2 text-text-secondary">
+                      <RichContentViewer content={announcement.message} className="prose-sm text-sm" />
+                    </div>
 
                     <div className="flex items-center space-x-4 mt-3 text-xs text-text-disabled">
                       <span>

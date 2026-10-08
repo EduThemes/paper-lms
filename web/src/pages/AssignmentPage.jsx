@@ -10,7 +10,8 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import SubmissionForm from '../components/SubmissionForm';
 import SubmissionComments from '../components/SubmissionComments';
-import RichContentViewer, { sanitizeHTML } from '../components/RichContentViewer';
+import RichContentViewer from '../components/RichContentViewer';
+import { SubmissionBody } from '../components/SafeHTML';
 import RichContentEditor from '../components/RichContentEditor';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
@@ -835,9 +836,9 @@ const AssignmentPage = () => {
 
                       {/* Show submission content to review */}
                       {(review.submission?.body || review.submission_body) && (
-                        <div
+                        <SubmissionBody
                           className="text-sm text-text-secondary bg-surface-1 rounded p-3 mb-3 prose max-w-none"
-                          dangerouslySetInnerHTML={{ __html: sanitizeHTML(review.submission?.body || review.submission_body) }}
+                          body={review.submission?.body || review.submission_body}
                         />
                       )}
 
@@ -949,9 +950,9 @@ const AssignmentPage = () => {
                     </div>
 
                     {submission.body && (
-                      <div
+                      <SubmissionBody
                         className="text-sm text-text-secondary bg-surface-1 rounded p-3 mb-3 prose max-w-none"
-                        dangerouslySetInnerHTML={{ __html: sanitizeHTML(submission.body) }}
+                        body={submission.body}
                       />
                     )}
 

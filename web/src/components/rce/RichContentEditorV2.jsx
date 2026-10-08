@@ -22,6 +22,9 @@ import { getCSRFToken } from '../../services/api';
 import { useClickOutside } from '../../hooks/useClickOutside';
 import RCEToolbar from './RCEToolbar';
 import RestoreAutosaveModal from './RestoreAutosaveModal';
+import Iframe from './extensions/Iframe';
+import { readRceDraft, scheduleRceDraftWrite, cancelRceDraftWrite, clearRceDraft } from './rceDrafts';
+import { normalizeHTML, plainTextToHtml } from '../../utils/html';
 
 /**
  * @typedef {Object} RCEV2Props
@@ -29,44 +32,18 @@ import RestoreAutosaveModal from './RestoreAutosaveModal';
  * @property {(html: string) => void} onChange - Called with sanitized HTML on every change
  * @property {string=} placeholder - Empty-state placeholder
  * @property {(string|number)=} courseId - Course context, used by ContentPicker
- * @property {string=} autoSaveKey - If set, drafts persist to localStorage[`paperlms.rce.${autoSaveKey}`]
+ * @property {string=} autoSaveKey - If set, drafts persist to localStorage[`paperlms.rce.${autoSaveKey}`].
+ *   Scope it to the record (course + entity id) and call clearRceDraft(key)
+ *   from ./rceDrafts after a successful save.
  * @property {string=} className - Pass-through wrapper class
  */
 
-const AUTOSAVE_PREFIX = 'paperlms.rce.';
 const AUTOSAVE_DEBOUNCE_MS = 2000;
 const RESTORE_THRESHOLD_MS = 5000; // ignore drafts older than props.value by less than this
 
-/** Read draft from localStorage. Returns { html, savedAt } or null. */
-function readDraft(key) {
-  if (!key || typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(AUTOSAVE_PREFIX + key);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-/** Persist a draft. Silent on quota errors. */
-function writeDraft(key, html) {
-  if (!key || typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(
-      AUTOSAVE_PREFIX + key,
-      JSON.stringify({ html, savedAt: Date.now() })
-    );
-  } catch {
-    /* quota exceeded — ignore */
-  }
-}
-
-function clearDraft(key) {
-  if (!key || typeof window === 'undefined') return;
-  try {
-    window.localStorage.removeItem(AUTOSAVE_PREFIX + key);
-  } catch { /* ignore */ }
+/** Draft vs saved value, ignoring sanitizer/serializer differences. */
+function sameContent(a, b) {
+  return normalizeHTML(sanitizeHTML(a || '')) === normalizeHTML(sanitizeHTML(b || ''));
 }
 
 /**
@@ -84,7 +61,9 @@ export default function RichContentEditorV2({
   className,
 }) {
   const [restorePrompt, setRestorePrompt] = useState(null); // { html, savedAt }
-  const debounceRef = useRef(null);
+  // Last HTML passed to onChange, so the value-sync effect can tell our own
+  // echo apart from a real external change (parent reset, restore, ...).
+  const lastEmittedRef = useRef(null);
   // AI Assist UI state
   const [aiMenuOpen, setAiMenuOpen] = useState(false);
   const [aiBusy, setAiBusy] = useState(null); // null | 'outline' | 'summarize' | 'rewrite'
@@ -118,6 +97,7 @@ export default function RichContentEditorV2({
     Typography,
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
     Highlight.configure({ multicolor: true }),
+    Iframe,
   ], [placeholder]);
 
   const editor = useEditor({
@@ -133,10 +113,10 @@ export default function RichContentEditorV2({
     },
     onUpdate: ({ editor: ed }) => {
       const html = sanitizeHTML(ed.getHTML());
+      lastEmittedRef.current = html;
       onChange?.(html);
       if (autoSaveKey) {
-        if (debounceRef.current) clearTimeout(debounceRef.current);
-        debounceRef.current = setTimeout(() => writeDraft(autoSaveKey, html), AUTOSAVE_DEBOUNCE_MS);
+        scheduleRceDraftWrite(autoSaveKey, html, AUTOSAVE_DEBOUNCE_MS);
       }
     },
   });
@@ -144,9 +124,14 @@ export default function RichContentEditorV2({
   // Restore-prompt logic on mount
   useEffect(() => {
     if (!autoSaveKey || !editor) return;
-    const draft = readDraft(autoSaveKey);
+    const draft = readRceDraft(autoSaveKey);
     if (!draft || !draft.html) return;
-    if (draft.html === (value || '')) return;
+    // Compare text, not markup: the server re-serializes saved HTML (rel /
+    // target / entity changes), which made every draft look "different".
+    if (sameContent(draft.html, value)) {
+      clearRceDraft(autoSaveKey);
+      return;
+    }
     // Show prompt only when draft is meaningfully newer than what we received
     if (Date.now() - draft.savedAt > RESTORE_THRESHOLD_MS) {
       setRestorePrompt(draft);
@@ -157,6 +142,11 @@ export default function RichContentEditorV2({
   // Sync external value changes (e.g. parent reset)
   useEffect(() => {
     if (!editor) return;
+    // Our own onChange echoing back. It is the *sanitized* HTML, which need
+    // not match editor.getHTML() byte for byte (the sanitizer disables task
+    // list checkboxes, for instance); treating that as an external change
+    // reset the document and threw the caret on every keystroke.
+    if (value !== undefined && value === lastEmittedRef.current) return;
     const current = editor.getHTML();
     if (value !== undefined && value !== current) {
       editor.commands.setContent(value || '', { emitUpdate: false });
@@ -164,20 +154,22 @@ export default function RichContentEditorV2({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, editor]);
 
-  // Cleanup pending autosave on unmount
+  // Cleanup pending autosave on unmount (a save that unmounts the editor
+  // must not be followed by a late draft write).
   useEffect(() => () => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-  }, []);
+    if (autoSaveKey) cancelRceDraftWrite(autoSaveKey);
+  }, [autoSaveKey]);
 
   const handleRestore = useCallback(() => {
     if (!restorePrompt || !editor) return;
-    editor.commands.setContent(restorePrompt.html);
-    onChange?.(sanitizeHTML(restorePrompt.html));
+    const clean = sanitizeHTML(restorePrompt.html);
+    editor.commands.setContent(clean);
+    onChange?.(clean);
     setRestorePrompt(null);
   }, [restorePrompt, editor, onChange]);
 
   const handleDiscard = useCallback(() => {
-    if (autoSaveKey) clearDraft(autoSaveKey);
+    if (autoSaveKey) clearRceDraft(autoSaveKey);
     setRestorePrompt(null);
   }, [autoSaveKey]);
 
@@ -229,11 +221,15 @@ export default function RichContentEditorV2({
       const result = (data?.result || '').trim();
       if (!result) throw new Error('AI Assist returned an empty response.');
 
+      // The model returns plain text with newlines / "- " bullets. A bare
+      // string is inserted as one text run (newlines collapse), so convert
+      // it to escaped HTML paragraphs and lists first (B108).
+      const resultHTML = plainTextToHtml(result, { markdownLite: true });
       const chain = editor.chain().focus();
       if (selectedText) {
-        chain.deleteRange({ from, to }).insertContent(result).run();
+        chain.deleteRange({ from, to }).insertContent(resultHTML).run();
       } else {
-        chain.insertContent(result).run();
+        chain.insertContent(resultHTML).run();
       }
       setAiMenuOpen(false);
     } catch (err) {
@@ -316,7 +312,9 @@ export default function RichContentEditorV2({
       <EditorContent editor={editor} />
 
       <div className="flex items-center justify-between border-t border-input px-3 py-1.5 text-xs text-muted-foreground">
-        <span aria-live="polite">{charCount.toLocaleString()} characters</span>
+        {/* Not a live region: announcing every keystroke drowned out
+            dictation and review for screen-reader users (B107). */}
+        <span>{charCount.toLocaleString()} characters</span>
         {autoSaveKey && <span className="italic">Autosave on</span>}
       </div>
 
