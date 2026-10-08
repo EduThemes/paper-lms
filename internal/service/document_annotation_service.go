@@ -29,15 +29,6 @@ func NewDocumentAnnotationService(
 	}
 }
 
-// isInstructor checks whether a user has an instructor or TA role in the given course.
-func (s *DocumentAnnotationService) isInstructor(ctx context.Context, userID, courseID uint) (bool, error) {
-	enrollment, err := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID, 0)
-	if err != nil {
-		return false, nil
-	}
-	return enrollment.Type == "TeacherEnrollment" || enrollment.Type == "TaEnrollment", nil
-}
-
 // GetAnnotation returns a single annotation by ID with its replies preloaded.
 func (s *DocumentAnnotationService) GetAnnotation(ctx context.Context, annotationID uint) (*models.DocumentAnnotation, error) {
 	annotation, err := s.annotationRepo.FindByID(ctx, annotationID, 0)
@@ -51,21 +42,17 @@ func (s *DocumentAnnotationService) GetAnnotation(ctx context.Context, annotatio
 }
 
 // CreateAnnotation creates a new annotation on a submission.
-// Instructors can annotate any submission. Students can only annotate their own submissions.
-func (s *DocumentAnnotationService) CreateAnnotation(ctx context.Context, annotation *models.DocumentAnnotation, courseID uint) error {
-	// Validate submission exists
+// Course staff can annotate any submission; everyone else only their own.
+// callerIsStaff MUST be resolved by the caller against the course the
+// submission belongs to (never a client-supplied course id).
+func (s *DocumentAnnotationService) CreateAnnotation(ctx context.Context, annotation *models.DocumentAnnotation, callerIsStaff bool) error {
+	// Validate submission exists (the handler already loaded it tenant-scoped).
 	submission, err := s.submissionRepo.FindByID(ctx, annotation.SubmissionID, 0)
 	if err != nil {
 		return errors.New("submission not found")
 	}
 
-	// Permission check
-	instructor, err := s.isInstructor(ctx, annotation.UserID, courseID)
-	if err != nil {
-		return err
-	}
-
-	if !instructor {
+	if !callerIsStaff {
 		// Students can only annotate their own submission
 		if submission.UserID != annotation.UserID {
 			return errors.New("you do not have permission to annotate this submission")
@@ -139,22 +126,12 @@ func (s *DocumentAnnotationService) UpdateAnnotation(ctx context.Context, annota
 	return annotation, nil
 }
 
-// DeleteAnnotation soft-deletes an annotation. Owner or instructor can delete.
-func (s *DocumentAnnotationService) DeleteAnnotation(ctx context.Context, annotationID uint, userID uint, courseID uint) error {
-	annotation, err := s.annotationRepo.FindByID(ctx, annotationID, 0)
-	if err != nil {
+// DeleteAnnotation soft-deletes an annotation. Authorization (owner, or an
+// instructor of the annotated submission's course) is the handler's job: it
+// resolves the course from the annotation itself, tenant-scoped.
+func (s *DocumentAnnotationService) DeleteAnnotation(ctx context.Context, annotationID uint) error {
+	if _, err := s.annotationRepo.FindByID(ctx, annotationID, 0); err != nil {
 		return errors.New("annotation not found")
-	}
-
-	if annotation.UserID != userID {
-		// Check if the user is an instructor
-		instructor, err := s.isInstructor(ctx, userID, courseID)
-		if err != nil {
-			return err
-		}
-		if !instructor {
-			return errors.New("only the annotation owner or an instructor can delete this annotation")
-		}
 	}
 
 	return s.annotationRepo.Delete(ctx, annotationID)
@@ -241,7 +218,9 @@ func (s *DocumentAnnotationService) GetAnnotationSummary(ctx context.Context, su
 }
 
 // ReplyToAnnotation creates an annotation as a reply to an existing annotation.
-func (s *DocumentAnnotationService) ReplyToAnnotation(ctx context.Context, parentAnnotationID uint, reply *models.DocumentAnnotation, courseID uint) error {
+// Authorization (course staff or the submission's author, on the course
+// derived from the annotation) is the handler's job.
+func (s *DocumentAnnotationService) ReplyToAnnotation(ctx context.Context, parentAnnotationID uint, reply *models.DocumentAnnotation) error {
 	parent, err := s.annotationRepo.FindByID(ctx, parentAnnotationID, 0)
 	if err != nil {
 		return errors.New("parent annotation not found")
@@ -257,21 +236,6 @@ func (s *DocumentAnnotationService) ReplyToAnnotation(ctx context.Context, paren
 	reply.ParentAnnotationID = &parentAnnotationID
 	reply.AnnotationType = "comment" // replies are always comments
 	reply.WorkflowState = "active"
-
-	// Permission check: instructors can reply to any annotation, students to their own submission's annotations
-	submission, err := s.submissionRepo.FindByID(ctx, reply.SubmissionID, 0)
-	if err != nil {
-		return errors.New("submission not found")
-	}
-
-	instructor, err := s.isInstructor(ctx, reply.UserID, courseID)
-	if err != nil {
-		return err
-	}
-
-	if !instructor && submission.UserID != reply.UserID {
-		return errors.New("you do not have permission to reply to this annotation")
-	}
 
 	return s.annotationRepo.Create(ctx, reply)
 }
