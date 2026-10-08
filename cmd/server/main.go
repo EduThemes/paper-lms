@@ -899,7 +899,15 @@ func main() {
 	// course; conferences resolve the per-tenant BigBlueButton server.
 	announcementService.SetNotifier(notificationDeliveryService)
 	conversationHandler.SetNotifier(notificationDeliveryService)
-	conversationHandler.SetRecipientSearch(postgres.NewRecipientSearchRepository(database))
+	recipientSearchRepo := postgres.NewRecipientSearchRepository(database)
+	conversationHandler.SetRecipientSearch(recipientSearchRepo)
+	// notify-inbox lane: inbox state + attachments, address book,
+	// announcement replies / section targeting, notification policy grid.
+	conversationHandler.SetAddressBook(recipientSearchRepo)
+	conversationHandler.SetInbox(postgres.NewInboxRepository(database))
+	conversationHandler.SetFileService(fileService)
+	announcementService.SetExtras(postgres.NewAnnouncementExtrasRepository(database))
+	notificationDeliveryService.SetPolicyStore(postgres.NewNotificationPolicyRepository(database))
 	conferenceService.SetSettingsLookup(settingsLookup)
 	// Discussions parity: section / group visibility, graded submissions,
 	// subscription + @mention notifications (replaces notifying only the

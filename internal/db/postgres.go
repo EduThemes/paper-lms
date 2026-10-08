@@ -131,6 +131,8 @@ func allAutoMigrateModels() []interface{} {
 		&models.Conversation{},
 		&models.ConversationParticipant{},
 		&models.ConversationMessage{},
+		&models.ConversationMessageAttachment{},
+		&models.ConversationMessageRecipient{},
 		&models.NotificationPreference{},
 		&models.Notification{},
 		// Content Migration, Learning Outcomes
@@ -167,10 +169,13 @@ func allAutoMigrateModels() []interface{} {
 		// Announcements, Enrollment Terms
 		&models.Announcement{},
 		&models.AnnouncementReadReceipt{},
+		&models.AnnouncementReply{},
+		&models.AnnouncementSectionVisibility{},
 		&models.EnrollmentTerm{},
 		// Notification Delivery, Audit Logs
 		&models.CommunicationChannel{},
 		&models.NotificationDelivery{},
+		&models.NotificationPolicy{},
 		&models.AuditLog{},
 		&models.GradeChangeLog{},
 		// Custom Roles, OneRoster, Document Annotations

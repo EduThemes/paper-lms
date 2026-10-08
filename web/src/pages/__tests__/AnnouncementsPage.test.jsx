@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import AnnouncementsPage from '../AnnouncementsPage';
 import { api } from '../../services/api';
@@ -92,5 +92,45 @@ describe('AnnouncementsPage teacher detection', () => {
     await waitFor(() => expect(api.request).toHaveBeenCalled());
     expect(screen.queryByRole('button', { expanded: false })).not.toBeInTheDocument();
     expect(api.getAllEnrollments).not.toHaveBeenCalled();
+  });
+});
+
+describe('AnnouncementsPage section targeting (G090)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.getAllEnrollments.mockResolvedValue({ data: [] });
+    api.getMyCourseEnrollments.mockResolvedValue({
+      enrollments: [{ id: 501, user_id: 500, type: 'TeacherEnrollment', role: 'TeacherEnrollment', enrollment_state: 'active' }],
+      is_admin: false,
+    });
+    api.request.mockImplementation(async (url) => {
+      if (url.startsWith('/courses/7/sections')) {
+        return { data: [{ id: 3, name: 'Period 1' }, { id: 4, name: 'Period 2' }] };
+      }
+      return { data: [] };
+    });
+  });
+
+  it('posts to the chosen sections only', async () => {
+    renderPage();
+    const newButton = await screen.findByRole('button', { expanded: false });
+    fireEvent.click(newButton);
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Lab moved' } });
+    expect(await screen.findByText('Specific Sections')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Audience'), { target: { value: 'sections' } });
+
+    // No section chosen yet: the form refuses to submit.
+    fireEvent.click(screen.getByRole('button', { name: 'Post Announcement' }));
+    expect(await screen.findByText('Choose at least one section')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Period 2'));
+    fireEvent.click(screen.getByRole('button', { name: 'Post Announcement' }));
+    await waitFor(() => {
+      const post = api.request.mock.calls.find(([url, opts]) => url === '/courses/7/announcements' && opts?.method === 'POST');
+      expect(post).toBeTruthy();
+      const body = JSON.parse(post[1].body);
+      expect(body.target_audience).toBe('sections');
+      expect(body.section_ids).toEqual([4]);
+    });
   });
 });

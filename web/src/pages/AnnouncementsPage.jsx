@@ -14,6 +14,9 @@ import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import useIsTeacher from '../hooks/useIsTeacher';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import AnnouncementReplies from '../components/AnnouncementReplies';
+import { audienceLabel, validateAnnouncementForm } from '../utils/notifyInbox';
+import { isoToDateTimeLocal } from '../utils/datetimeLocal';
 
 const AnnouncementsPage = () => {
   const { t } = useTranslation();
@@ -43,7 +46,10 @@ const AnnouncementsPage = () => {
     workflow_state: 'published',
     delayed_post_at: '',
     schedule: false,
+    section_ids: [],
   });
+  const [formError, setFormError] = useState(null);
+  const [sections, setSections] = useState([]);
 
   const [userNames, setUserNames] = useState({});
   const isInstructor = useIsTeacher(courseId) === true;
@@ -64,12 +70,24 @@ const AnnouncementsPage = () => {
     fetchAnnouncements();
   }, [courseId]);
 
+  // Course sections, for section targeting and the audience label (G090).
+  useEffect(() => {
+    if (!courseId) return;
+    Promise.resolve(api.request(`/courses/${courseId}/sections?per_page=100`))
+      .then((result) => setSections(Array.isArray(result?.data) ? result.data : []))
+      .catch(() => setSections([]));
+  }, [courseId]);
+  const sectionNames = Object.fromEntries(sections.map((s) => [s.id, s.name]));
+
   // Build the user name map for read receipts (staff only). The caller's
   // role comes from useIsTeacher (B072): scanning the first roster page
   // for the caller's own row missed late-created teacher enrollments in
   // courses larger than the server's 100-row page cap.
+  // Keyed on the user id, not the user object: a new object with the same
+  // id must not refetch the roster.
+  const userId = user?.id;
   useEffect(() => {
-    if (!courseId || !user || !isInstructor) return;
+    if (!courseId || !userId || !isInstructor) return;
     api.getAllEnrollments(courseId)
       .then((result) => {
         const names = {};
@@ -82,7 +100,7 @@ const AnnouncementsPage = () => {
         setUserNames(names);
       })
       .catch(() => {});
-  }, [courseId, user, isInstructor]);
+  }, [courseId, userId, isInstructor]);
 
   const resetForm = () => {
     setFormData({
@@ -95,7 +113,9 @@ const AnnouncementsPage = () => {
       workflow_state: 'published',
       delayed_post_at: '',
       schedule: false,
+      section_ids: [],
     });
+    setFormError(null);
     setEditingId(null);
   };
 
@@ -111,6 +131,9 @@ const AnnouncementsPage = () => {
         allow_comments: formData.allow_comments,
         workflow_state: formData.schedule ? 'scheduled' : 'published',
       };
+      // Section targeting: the post is visible to (and notifies) only the
+      // chosen sections; any other audience clears the stored list.
+      payload.section_ids = formData.target_audience === 'sections' ? formData.section_ids : [];
 
       if (formData.schedule && formData.delayed_post_at) {
         payload.delayed_post_at = new Date(formData.delayed_post_at).toISOString();
@@ -142,7 +165,19 @@ const AnnouncementsPage = () => {
 
   const handleCreate = (e) => {
     e.preventDefault();
+    const invalid = validateAnnouncementForm(formData);
+    setFormError(invalid);
+    if (invalid) return;
     checkAndSave(formData.message, doCreate);
+  };
+
+  const toggleSection = (id) => {
+    setFormData((prev) => ({
+      ...prev,
+      section_ids: prev.section_ids.includes(id)
+        ? prev.section_ids.filter((x) => x !== id)
+        : [...prev.section_ids, id],
+    }));
   };
 
   const handleDelete = async (id) => {
@@ -157,17 +192,28 @@ const AnnouncementsPage = () => {
   };
 
   const handleEdit = (announcement) => {
+    // A legacy single-section target ("section:<id>") edits as a
+    // one-section "sections" target.
+    let target = announcement.target_audience || 'all';
+    let sectionIDs = announcement.section_ids || [];
+    if (target.startsWith('section:')) {
+      sectionIDs = [Number(target.slice('section:'.length))];
+      target = 'sections';
+    }
     setFormData({
       title: announcement.title,
       message: announcement.message,
       priority: announcement.priority,
-      target_audience: announcement.target_audience,
+      target_audience: target,
       require_acknowledgement: announcement.require_acknowledgement,
       allow_comments: announcement.allow_comments,
       workflow_state: announcement.workflow_state,
-      delayed_post_at: announcement.delayed_post_at || '',
+      // datetime-local needs local "YYYY-MM-DDTHH:mm", not the stored ISO.
+      delayed_post_at: isoToDateTimeLocal(announcement.delayed_post_at),
       schedule: announcement.workflow_state === 'scheduled',
+      section_ids: sectionIDs,
     });
+    setFormError(null);
     setEditingId(announcement.id);
     setShowForm(true);
   };
@@ -336,9 +382,29 @@ const AnnouncementsPage = () => {
                   <option value="students">Students Only</option>
                   <option value="teachers">Teachers Only</option>
                   <option value="observers">Observers Only</option>
+                  {sections.length > 0 && <option value="sections">Specific Sections</option>}
                 </select>
               </div>
             </div>
+
+            {formData.target_audience === 'sections' && (
+              <fieldset className="border border-border-default rounded-md p-3">
+                <legend className="text-sm font-medium text-text-secondary px-1">Post to sections</legend>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {sections.map((s) => (
+                    <label key={s.id} className="flex items-center gap-2 text-sm text-text-secondary">
+                      <input
+                        type="checkbox"
+                        checked={formData.section_ids.includes(s.id)}
+                        onChange={() => toggleSection(s.id)}
+                        className="rounded border-border-strong"
+                      />
+                      {s.name}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            )}
 
             <div className="flex flex-wrap items-center gap-6">
               <div className="flex items-center space-x-2">
@@ -389,6 +455,10 @@ const AnnouncementsPage = () => {
                   aria-required={formData.schedule}
                 />
               </div>
+            )}
+
+            {formError && (
+              <p className="text-sm text-accent-danger" role="alert">{formError}</p>
             )}
 
             <div className="flex justify-end space-x-3">
@@ -478,7 +548,7 @@ const AnnouncementsPage = () => {
                           ? `Posted ${formatDate(announcement.posted_at)}`
                           : `Created ${formatDate(announcement.created_at)}`}
                       </span>
-                      <span className="capitalize">Audience: {announcement.target_audience}</span>
+                      <span>Audience: {audienceLabel(announcement, sectionNames)}</span>
                       {announcement.delayed_post_at && announcement.workflow_state === 'scheduled' && (
                         <span>Scheduled for {formatDate(announcement.delayed_post_at)}</span>
                       )}
@@ -618,6 +688,10 @@ const AnnouncementsPage = () => {
                       <p className="text-sm text-text-tertiary">No one has read this announcement yet.</p>
                     )}
                   </div>
+                )}
+
+                {announcement.workflow_state !== 'scheduled' && (
+                  <AnnouncementReplies announcement={announcement} currentUserId={user?.id} canModerate={isInstructor} />
                 )}
               </div>
             </article>

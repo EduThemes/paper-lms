@@ -530,6 +530,8 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Delete("/calendar_events/:id", r.CalendarEventHandler.DeleteEvent)
 	protected.Get("/courses/:course_id/calendar_events", enrolled, r.CalendarEventHandler.ListEvents)
 
+	r.registerNotifyInboxRoutes(protected) // notify-inbox lane; must precede /conversations/:id
+
 	// Conversations (any authenticated user)
 	protected.Get("/conversations", r.ConversationHandler.ListConversations)
 	protected.Post("/conversations", r.ConversationHandler.CreateConversation)

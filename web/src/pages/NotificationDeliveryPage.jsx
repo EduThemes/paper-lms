@@ -89,6 +89,14 @@ const NotificationDeliveryPage = () => {
     }
   }, []);
 
+  // SMS and push are stub channel types: offered only once the site has a
+  // provider for them (G091).
+  const [channelTypes, setChannelTypes] = useState([]);
+  useEffect(() => {
+    apiFetch('/users/self/communication_channel_types').then(setChannelTypes).catch(() => setChannelTypes([]));
+  }, []);
+  const stubTypes = channelTypes.filter((ct) => ct.type === 'sms' || ct.type === 'push');
+
   const fetchStats = useCallback(async () => {
     if (!isAdmin) return;
     try {
@@ -289,18 +297,23 @@ const NotificationDeliveryPage = () => {
                 >
                   <option value="email">Email</option>
                   <option value="webhook">Webhook</option>
+                  {stubTypes.map((ct) => (
+                    <option key={ct.type} value={ct.type} disabled={!ct.available}>
+                      {ct.type === 'sms' ? 'SMS' : 'Push'}{ct.available ? '' : ' (not available)'}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className="flex-1">
                 <label htmlFor="channel-address" className="block text-xs font-medium text-text-secondary mb-1">
-                  {newChannelType === 'email' ? 'Email Address' : 'Webhook URL'}
+                  {{ email: 'Email Address', sms: 'Phone Number', push: 'Device Token' }[newChannelType] || 'Webhook URL'}
                 </label>
                 <input
                   id="channel-address"
-                  type={newChannelType === 'email' ? 'email' : 'url'}
+                  type={{ email: 'email', sms: 'tel', push: 'text' }[newChannelType] || 'url'}
                   value={newChannelAddress}
                   onChange={(e) => setNewChannelAddress(e.target.value)}
-                  placeholder={newChannelType === 'email' ? 'you@example.com' : 'https://hooks.example.com/notify'}
+                  placeholder={{ email: 'you@example.com', sms: '+15555550100', push: '' }[newChannelType] ?? 'https://hooks.example.com/notify'}
                   required
                   className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />

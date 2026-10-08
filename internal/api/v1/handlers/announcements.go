@@ -79,8 +79,31 @@ func (h *AnnouncementHandler) ListCourseAnnouncements(c *fiber.Ctx) error {
 		s := statusMap[a.ID]
 		announcements[i] = announcementToJSON(&a, s.IsRead, s.IsAcknowledged)
 	}
+	h.decorate(c, result.Items, announcements)
 
 	return c.JSON(announcements)
+}
+
+// decorate adds the section targets and reply counts (G090) to rendered
+// announcements.
+func (h *AnnouncementHandler) decorate(c *fiber.Ctx, items []models.Announcement, out []fiber.Map) {
+	if len(items) == 0 {
+		return
+	}
+	ids := make([]uint, len(items))
+	for i, a := range items {
+		ids[i] = a.ID
+	}
+	sections := h.announcementService.SectionsFor(c.Context(), ids)
+	counts := h.announcementService.ReplyCounts(c.Context(), ids)
+	for i, a := range items {
+		secs := sections[a.ID]
+		if secs == nil {
+			secs = []uint{}
+		}
+		out[i]["section_ids"] = secs
+		out[i]["reply_count"] = counts[a.ID]
+	}
 }
 
 // CreateCourseAnnouncement handles POST /courses/:course_id/announcements
@@ -99,6 +122,7 @@ func (h *AnnouncementHandler) CreateCourseAnnouncement(c *fiber.Ctx) error {
 		DelayedPostAt  *time.Time `json:"delayed_post_at"`
 		WorkflowState  string     `json:"workflow_state"`
 		AllowComments  bool       `json:"allow_comments"`
+		SectionIDs     []uint     `json:"section_ids"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
@@ -125,13 +149,14 @@ func (h *AnnouncementHandler) CreateCourseAnnouncement(c *fiber.Ctx) error {
 		AllowComments:  input.AllowComments,
 	}
 
-	if err := h.announcementService.CreateAnnouncement(c.Context(), announcement); err != nil {
+	if err := h.announcementService.CreateAnnouncementWithSections(c.Context(), announcement, input.SectionIDs); err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 
-	return c.Status(fiber.StatusCreated).JSON(announcementToJSON(announcement, false, false))
+	out := []fiber.Map{announcementToJSON(announcement, false, false)}
+	h.decorate(c, []models.Announcement{*announcement}, out)
+	return c.Status(fiber.StatusCreated).JSON(out[0])
 }
-
 
 // authorizeAnnouncement enforces access to a single announcement. It
 // returns wrote=true after writing the refusal; the caller MUST return
@@ -208,7 +233,9 @@ func (h *AnnouncementHandler) GetAnnouncement(c *fiber.Ctx) error {
 	isRead := true
 	isAck := h.announcementService.IsAcknowledged(c.Context(), announcement.ID, userID)
 
-	return c.JSON(announcementToJSON(announcement, isRead, isAck))
+	out := []fiber.Map{announcementToJSON(announcement, isRead, isAck)}
+	h.decorate(c, []models.Announcement{*announcement}, out)
+	return c.JSON(out[0])
 }
 
 // UpdateAnnouncement handles PUT /announcements/:id
@@ -239,6 +266,7 @@ func (h *AnnouncementHandler) UpdateAnnouncement(c *fiber.Ctx) error {
 		DelayedPostAt  *time.Time `json:"delayed_post_at"`
 		WorkflowState  *string    `json:"workflow_state"`
 		AllowComments  *bool      `json:"allow_comments"`
+		SectionIDs     *[]uint    `json:"section_ids"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
@@ -275,7 +303,14 @@ func (h *AnnouncementHandler) UpdateAnnouncement(c *fiber.Ctx) error {
 		announcement.AllowComments = *input.AllowComments
 	}
 
-	if err := h.announcementService.UpdateAnnouncement(c.Context(), announcement, previousState); err != nil {
+	var sectionIDs []uint
+	if input.SectionIDs != nil {
+		sectionIDs = *input.SectionIDs
+		if sectionIDs == nil {
+			sectionIDs = []uint{}
+		}
+	}
+	if err := h.announcementService.UpdateAnnouncementWithSections(c.Context(), announcement, previousState, sectionIDs); err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 
@@ -283,7 +318,9 @@ func (h *AnnouncementHandler) UpdateAnnouncement(c *fiber.Ctx) error {
 	isRead := h.announcementService.IsRead(c.Context(), announcement.ID, userID)
 	isAck := h.announcementService.IsAcknowledged(c.Context(), announcement.ID, userID)
 
-	return c.JSON(announcementToJSON(announcement, isRead, isAck))
+	out := []fiber.Map{announcementToJSON(announcement, isRead, isAck)}
+	h.decorate(c, []models.Announcement{*announcement}, out)
+	return c.JSON(out[0])
 }
 
 // DeleteAnnouncement handles DELETE /announcements/:id
@@ -461,6 +498,7 @@ func (h *AnnouncementHandler) ListAccountAnnouncements(c *fiber.Ctx) error {
 		s := statusMap[a.ID]
 		announcements[i] = announcementToJSON(&a, s.IsRead, s.IsAcknowledged)
 	}
+	h.decorate(c, result.Items, announcements)
 
 	return c.JSON(announcements)
 }

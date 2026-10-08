@@ -62,6 +62,76 @@ type NotificationDeliveryService struct {
 	notifRepo    repository.NotificationRepository
 	userRepo     repository.UserRepository
 	lookup       SettingsLookupFunc
+	// policies holds the per-category x per-channel overrides (G091).
+	// Nil means every delivery follows the global NotificationPreference.
+	policies NotificationPolicyStore
+	// senders are pluggable transports for channel types beyond the
+	// built-in email and webhook (SMS, push). A type without a registered
+	// sender is a stub: it is listed as unavailable and never queued.
+	senders map[string]ChannelSender
+}
+
+// NotificationPolicyStore is the persistence the per-category x
+// per-channel preferences need (postgres.NotificationPolicyRepository).
+type NotificationPolicyStore interface {
+	ListByUser(ctx context.Context, userID uint) ([]models.NotificationPolicy, error)
+	Upsert(ctx context.Context, p *models.NotificationPolicy) error
+	Delete(ctx context.Context, userID, channelID uint, category string) error
+	DeleteByChannel(ctx context.Context, userID, channelID uint) error
+}
+
+// ChannelSender delivers one notification to one address over a transport
+// the engine does not implement itself (an SMS gateway, a push service).
+type ChannelSender interface {
+	Send(ctx context.Context, address, subject, body string) error
+}
+
+// SetPolicyStore wires the per-category x per-channel preferences.
+func (s *NotificationDeliveryService) SetPolicyStore(p NotificationPolicyStore) {
+	s.policies = p
+}
+
+// RegisterChannelSender makes channelType ("sms", "push") deliverable via
+// sender. Without a registration that channel type stays a stub.
+func (s *NotificationDeliveryService) RegisterChannelSender(channelType string, sender ChannelSender) {
+	if s.senders == nil {
+		s.senders = map[string]ChannelSender{}
+	}
+	s.senders[channelType] = sender
+}
+
+// ChannelTypeInfo describes one communication channel type for the UI.
+type ChannelTypeInfo struct {
+	Type      string `json:"type"`
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// stubChannelTypes are the channel types Canvas offers that this
+// deployment can only deliver to once a provider is registered.
+var stubChannelTypes = []string{"sms", "push"}
+
+// ChannelTypes lists every channel type and whether it can deliver here.
+func (s *NotificationDeliveryService) ChannelTypes() []ChannelTypeInfo {
+	out := []ChannelTypeInfo{{Type: "email", Available: true}, {Type: "webhook", Available: true}}
+	for _, t := range stubChannelTypes {
+		if s.senders[t] != nil {
+			out = append(out, ChannelTypeInfo{Type: t, Available: true})
+			continue
+		}
+		label := map[string]string{"sms": "SMS", "push": "push notification"}[t]
+		out = append(out, ChannelTypeInfo{Type: t, Available: false, Reason: "No " + label + " provider is configured for this site."})
+	}
+	return out
+}
+
+// IsDeliverableChannelType reports whether notifications can be sent to a
+// channel of this type (built-in email/webhook, or a registered sender).
+func (s *NotificationDeliveryService) IsDeliverableChannelType(channelType string) bool {
+	if channelType == "email" || channelType == "webhook" {
+		return true
+	}
+	return s.senders[channelType] != nil
 }
 
 // NewNotificationDeliveryService creates a new NotificationDeliveryService
@@ -201,13 +271,11 @@ func DefaultNotificationPreference(userID uint) *models.NotificationPreference {
 	}
 }
 
-// deliverableChannelTypes are the channel types the delivery engine can
-// actually send to. Anything else (e.g. "push", which has no transport)
-// is never queued.
-var deliverableChannelTypes = map[string]bool{"email": true, "webhook": true}
-
-// deliveryTarget is one address a notification is sent to.
+// deliveryTarget is one address a notification is sent to. ChannelID is
+// the communication_channels row, or models.PrimaryEmailChannelID for the
+// account email.
 type deliveryTarget struct {
+	ChannelID   uint
 	ChannelType string
 	Address     string
 }
@@ -225,7 +293,7 @@ func (s *NotificationDeliveryService) deliveryTargets(ctx context.Context, userI
 	// tenant-checked request. accountID=0 is correct here.
 	user, userErr := s.userRepo.FindByID(ctx, userID, 0)
 	if userErr == nil && user != nil && strings.TrimSpace(user.Email) != "" {
-		targets = append(targets, deliveryTarget{ChannelType: "email", Address: user.Email})
+		targets = append(targets, deliveryTarget{ChannelID: models.PrimaryEmailChannelID, ChannelType: "email", Address: user.Email})
 		seen["email:"+strings.ToLower(strings.TrimSpace(user.Email))] = true
 	}
 
@@ -233,7 +301,7 @@ func (s *NotificationDeliveryService) deliveryTargets(ctx context.Context, userI
 		channels, err := s.channelRepo.ListByUserID(ctx, userID)
 		if err == nil {
 			for _, ch := range channels {
-				if !ch.Confirmed || ch.WorkflowState != "active" || !deliverableChannelTypes[ch.ChannelType] {
+				if !ch.Confirmed || ch.WorkflowState != "active" || !s.IsDeliverableChannelType(ch.ChannelType) {
 					continue
 				}
 				key := ch.ChannelType + ":" + strings.ToLower(strings.TrimSpace(ch.Address))
@@ -241,7 +309,7 @@ func (s *NotificationDeliveryService) deliveryTargets(ctx context.Context, userI
 					continue
 				}
 				seen[key] = true
-				targets = append(targets, deliveryTarget{ChannelType: ch.ChannelType, Address: ch.Address})
+				targets = append(targets, deliveryTarget{ChannelID: ch.ID, ChannelType: ch.ChannelType, Address: ch.Address})
 			}
 		}
 	}
@@ -258,12 +326,12 @@ func (s *NotificationDeliveryService) deliveryTargets(ctx context.Context, userI
 //  1. An in-app notification row is always created (the /notifications
 //     feed), like Canvas's stream items — preferences govern delivery
 //     channels, not the in-app feed.
-//  2. The user's preference (or DefaultNotificationPreference when none
-//     is stored) decides whether the type is delivered and how often:
-//     "immediately" deliveries are sent by the per-minute job,
-//     daily/weekly ones are batched into digests.
-//  3. One delivery is created per deliverable target (account email plus
-//     confirmed channels).
+//  2. For each deliverable target (account email plus confirmed channels)
+//     the frequency is the user's explicit policy for that channel and the
+//     type's category (G091), falling back to the global preference (or
+//     DefaultNotificationPreference when none is stored). "immediately"
+//     deliveries are sent by the per-minute job, daily/weekly ones are
+//     batched into digests, and "never" queues nothing on that channel.
 func (s *NotificationDeliveryService) QueueNotification(
 	ctx context.Context,
 	userID uint,
@@ -294,22 +362,8 @@ func (s *NotificationDeliveryService) QueueNotification(
 	if err != nil || prefs == nil {
 		prefs = DefaultNotificationPreference(userID)
 	}
-
-	// If user has opted out of notification delivery entirely, skip
-	if prefs.Policy == "never" {
-		return nil
-	}
-
-	// Check if the specific notification type is enabled
-	if !s.isNotificationTypeEnabled(prefs, notificationType) {
-		return nil
-	}
-
-	// Map the policy to a digest type
-	digestType := s.policyToDigestType(prefs.Policy)
-
-	// Calculate when this delivery should be sent
-	scheduledFor := s.calculateScheduledFor(digestType)
+	category := NotificationCategoryFor(notificationType)
+	overrides := s.explicitPolicies(ctx, userID)
 
 	targets, err := s.deliveryTargets(ctx, userID)
 	if err != nil {
@@ -317,6 +371,12 @@ func (s *NotificationDeliveryService) QueueNotification(
 	}
 
 	for _, t := range targets {
+		frequency := s.frequencyFor(prefs, overrides, t.ChannelID, category, notificationType)
+		if frequency == models.NotificationFrequencyNever {
+			continue
+		}
+		digestType := s.policyToDigestType(frequency)
+		scheduledFor := s.calculateScheduledFor(digestType)
 		delivery := &models.NotificationDelivery{
 			NotificationID: notificationID,
 			UserID:         userID,
@@ -374,10 +434,11 @@ func newChannelConfirmCode() (string, error) {
 // Email channels get a one-time code (stored hashed) that is mailed to
 // the address; the channel receives no notifications until the owner
 // enters the code (ConfirmChannel). Webhook channels are owner-supplied
-// URLs behind the SSRF guard and are confirmed immediately. The caller
-// persists the channel after this returns.
+// URLs behind the SSRF guard and are confirmed immediately. SMS channels
+// (only accepted once an SMS provider is registered) get a code by text,
+// like email. The caller persists the channel after this returns.
 func (s *NotificationDeliveryService) BeginChannelConfirmation(ch *models.CommunicationChannel) (code string, err error) {
-	if ch.ChannelType != "email" {
+	if ch.ChannelType != "email" && ch.ChannelType != "sms" {
 		now := time.Now()
 		ch.Confirmed = true
 		ch.ConfirmedAt = &now
@@ -397,7 +458,16 @@ func (s *NotificationDeliveryService) BeginChannelConfirmation(ch *models.Commun
 // SendChannelConfirmation mails the confirmation code to a new email
 // channel. Best-effort: a failure leaves the channel unconfirmed.
 func (s *NotificationDeliveryService) SendChannelConfirmation(ctx context.Context, ch *models.CommunicationChannel, code string) error {
-	if ch.ChannelType != "email" || code == "" {
+	if code == "" {
+		return nil
+	}
+	if ch.ChannelType == "sms" {
+		if sender := s.senders["sms"]; sender != nil {
+			return sender.Send(ctx, ch.Address, "Paper LMS", "Your Paper LMS confirmation code is "+code)
+		}
+		return nil
+	}
+	if ch.ChannelType != "email" {
 		return nil
 	}
 	body := fmt.Sprintf("<p>Enter this code in Paper LMS to start receiving notifications at this address:</p><p><strong>%s</strong></p><p>If you did not add this address, you can ignore this email.</p>", code)
@@ -445,21 +515,7 @@ func (s *NotificationDeliveryService) ProcessPendingDeliveries(ctx context.Conte
 			continue
 		}
 
-		var sendErr error
-		switch d.ChannelType {
-		case "email":
-			// Wave 8: per-tenant SMTP. Look up the recipient's
-			// account_id and stamp the lookup context so SMTP creds
-			// resolve at the account scope (walking parent chain to
-			// the district). A district that sets SMTP at its root
-			// account propagates to every sub-school unless the
-			// sub-school overrides.
-			sendErr = s.SendEmail(s.scopeCtxFor(ctx, d.UserID), d.Address, d.Subject, d.Body)
-		case "webhook":
-			sendErr = s.sendWebhook(d.Address, d.Subject, d.Body)
-		default:
-			sendErr = fmt.Errorf("unsupported channel type: %s", d.ChannelType)
-		}
+		sendErr := s.dispatch(ctx, d.UserID, d.ChannelType, d.Address, d.Subject, d.Body)
 
 		if sendErr != nil {
 			if err := s.deliveryRepo.IncrementRetry(ctx, d.ID, sendErr.Error()); err != nil {
@@ -477,6 +533,25 @@ func (s *NotificationDeliveryService) ProcessPendingDeliveries(ctx context.Conte
 	}
 
 	return processed, nil
+}
+
+// dispatch sends one message over the delivery's channel.
+//
+// Email uses per-tenant SMTP (Wave 8): the recipient's account_id is
+// stamped on the lookup context so SMTP creds resolve at the account
+// scope (walking the parent chain to the district). Webhooks go through
+// the SSRF guard. Any other type needs a registered ChannelSender.
+func (s *NotificationDeliveryService) dispatch(ctx context.Context, userID uint, channelType, address, subject, body string) error {
+	switch channelType {
+	case "email":
+		return s.SendEmail(s.scopeCtxFor(ctx, userID), address, subject, body)
+	case "webhook":
+		return s.sendWebhook(address, subject, body)
+	}
+	if sender := s.senders[channelType]; sender != nil {
+		return sender.Send(ctx, address, subject, notificationPreview(body))
+	}
+	return fmt.Errorf("unsupported channel type: %s", channelType)
 }
 
 // SendEmail sends an email via SMTP with the body wrapped in a simple
@@ -588,14 +663,7 @@ func (s *NotificationDeliveryService) ProcessDigests(ctx context.Context, digest
 				continue
 			}
 
-			var sendErr error
-			switch key.ChannelType {
-			case "email":
-				// Wave 8: per-tenant SMTP — see ProcessPendingDeliveries.
-				sendErr = s.SendEmail(s.scopeCtxFor(ctx, key.UserID), key.Address, d.Subject, d.Body)
-			case "webhook":
-				sendErr = s.sendWebhook(key.Address, d.Subject, d.Body)
-			}
+			sendErr := s.dispatch(ctx, key.UserID, key.ChannelType, key.Address, d.Subject, d.Body)
 			if sendErr != nil {
 				_ = s.deliveryRepo.IncrementRetry(ctx, d.ID, sendErr.Error())
 			} else {
@@ -613,15 +681,7 @@ func (s *NotificationDeliveryService) ProcessDigests(ctx context.Context, digest
 		subject := fmt.Sprintf("Paper LMS %s Digest — %d notifications", digestLabel, len(group))
 		digestBody := buildDigestBody(digestType, group)
 
-		var sendErr error
-		switch key.ChannelType {
-		case "email":
-			// Wave 8: per-tenant SMTP. Digest emails go to one
-			// recipient; their account scope drives the SMTP creds.
-			sendErr = s.SendEmail(s.scopeCtxFor(ctx, key.UserID), key.Address, subject, digestBody)
-		case "webhook":
-			sendErr = s.sendWebhook(key.Address, subject, digestBody)
-		}
+		sendErr := s.dispatch(ctx, key.UserID, key.ChannelType, key.Address, subject, digestBody)
 
 		sentAt := time.Now()
 		for i := range group {
@@ -719,18 +779,13 @@ func (s *NotificationDeliveryService) calculateScheduledFor(digestType string) t
 		return now
 	case "hourly":
 		return now.Truncate(time.Hour).Add(time.Hour)
-	case "daily":
-		// Schedule for the next day at 8:00 AM UTC
-		next := time.Date(now.Year(), now.Month(), now.Day()+1, 8, 0, 0, 0, time.UTC)
-		return next
-	case "weekly":
-		// Schedule for next Monday at 8:00 AM UTC
-		daysUntilMonday := (8 - int(now.Weekday())) % 7
-		if daysUntilMonday == 0 {
-			daysUntilMonday = 7
-		}
-		next := time.Date(now.Year(), now.Month(), now.Day()+daysUntilMonday, 8, 0, 0, 0, time.UTC)
-		return next
+	case "daily", "weekly":
+		// Digest rows are due as soon as they are queued: the digest job
+		// itself only runs at the digest hour (daily) or on the digest day
+		// (weekly) and batches everything pending up to that run. A future
+		// timestamp here used to land just after the job's hour, so a
+		// daily digest went out a day late and a weekly one a week late.
+		return now
 	default:
 		return now
 	}

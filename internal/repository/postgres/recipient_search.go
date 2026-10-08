@@ -54,16 +54,9 @@ func (r *RecipientSearchRepository) SearchRecipients(ctx context.Context, caller
 	}
 
 	if !allInAccount {
-		q = q.Where(`users.id IN (
-			SELECT peer.user_id
-			FROM enrollments mine
-			JOIN enrollments peer ON peer.course_id = mine.course_id
-			JOIN courses ON courses.id = mine.course_id
-			WHERE mine.user_id = ?
-			  AND mine.workflow_state = 'active'
-			  AND peer.workflow_state = 'active'
-			  AND courses.account_id = ?
-		)`, callerID, accountID)
+		// The address book: people who share an active course or an
+		// accepted group membership with the caller (address_book.go).
+		q = q.Where("(users.id IN ("+coursePeersSQL+") OR users.id IN ("+groupPeersSQL+"))", callerID, accountID, callerID, accountID, accountID)
 	}
 
 	var users []models.User
