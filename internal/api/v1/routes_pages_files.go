@@ -17,6 +17,9 @@ type PagesFilesRoutes struct {
 	// File management, visibility and quota routes live on the core
 	// FileHandler (G070-G072); this flag mounts them.
 	FileManagement bool
+
+	// Student View (G076).
+	StudentView *handlers.StudentViewHandler
 }
 
 // registerPagesFilesRoutes mounts the pages-files lane routes. Core page,
@@ -42,5 +45,13 @@ func (r *Router) registerPagesFilesRoutes(protected fiber.Router, enrolled, inst
 		protected.Get("/courses/:course_id/files/quota", instructor, r.FileHandler.GetCourseQuota)
 		protected.Put("/courses/:course_id/files/:id", instructor, r.FileHandler.UpdateCourseFile)
 		protected.Post("/courses/:course_id/files/:id/replace", middleware.UploadRateLimit(), middleware.EnforceUploadSize(r.SettingsLookup), instructor, r.FileHandler.ReplaceCourseFile)
+	}
+
+	// Student View: staff enter; reset works from outside (staff) or from
+	// inside Student View (the handler checks which).
+	if pf.StudentView != nil {
+		protected.Post("/courses/:course_id/student_view", instructor, pf.StudentView.Enter)
+		protected.Delete("/courses/:course_id/student_view", enrolled, pf.StudentView.Reset)
+		protected.Get("/users/self/student_view", pf.StudentView.Status)
 	}
 }

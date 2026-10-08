@@ -29,6 +29,19 @@ type ResourceAuthorizer struct {
 	enrollmentRepo repository.EnrollmentRepository
 	userRepo       repository.UserRepository
 	courseRepo     repository.CourseRepository
+	// studentViewCheck (optional) lets Student View sessions into
+	// unpublished courses (G076); see SetStudentViewCheck.
+	studentViewCheck middleware.StudentViewCheck
+}
+
+// SetStudentViewCheck mirrors PermissionMiddleware.SetStudentViewCheck.
+func (a *ResourceAuthorizer) SetStudentViewCheck(fn middleware.StudentViewCheck) {
+	a.studentViewCheck = fn
+}
+
+func (a *ResourceAuthorizer) inStudentView(c *fiber.Ctx, userID, courseID uint) bool {
+	realID, _ := c.Locals("masquerade_by").(uint)
+	return realID != 0 && a.studentViewCheck != nil && a.studentViewCheck(c, userID, courseID)
 }
 
 func NewResourceAuthorizer(enrollmentRepo repository.EnrollmentRepository, userRepo repository.UserRepository, courseRepo repository.CourseRepository) *ResourceAuthorizer {
@@ -97,7 +110,8 @@ func (a *ResourceAuthorizer) requireCourse(c *fiber.Ctx, courseID uint, instruct
 	if instructorOnly && enrollment.Type != "TeacherEnrollment" && enrollment.Type != "TaEnrollment" {
 		return authzForbidden("instructor access required")
 	}
-	if courseIsUnpublished(course) && (enrollment.Type == "StudentEnrollment" || enrollment.Type == "ObserverEnrollment") {
+	if courseIsUnpublished(course) && (enrollment.Type == "StudentEnrollment" || enrollment.Type == "ObserverEnrollment") &&
+		!a.inStudentView(c, userID, courseID) {
 		return authzForbidden("this course has not been published yet")
 	}
 	return nil

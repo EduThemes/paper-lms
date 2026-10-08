@@ -91,6 +91,8 @@ type PermissionMiddleware struct {
 	enrollmentRepo repository.EnrollmentRepository
 	userRepo       repository.UserRepository
 	courseRepo     repository.CourseRepository
+	// studentViewCheck (optional) identifies Student View sessions.
+	studentViewCheck StudentViewCheck
 }
 
 // NewPermissionMiddleware creates a new permission middleware. courseRepo is
@@ -239,6 +241,23 @@ func (pm *PermissionMiddleware) RequireEnrolled() fiber.Handler {
 	}
 }
 
+// StudentViewCheck reports whether userID is courseID's Student View
+// test student (G076).
+type StudentViewCheck func(c *fiber.Ctx, userID, courseID uint) bool
+
+// SetStudentViewCheck lets Student View sessions into unpublished
+// courses (Canvas lets teachers preview a course before publishing it).
+func (pm *PermissionMiddleware) SetStudentViewCheck(fn StudentViewCheck) {
+	pm.studentViewCheck = fn
+}
+
+// inStudentView: a masquerade session whose user is the course's test
+// student. Real students never match.
+func (pm *PermissionMiddleware) inStudentView(c *fiber.Ctx, userID, courseID uint) bool {
+	realID, _ := c.Locals("masquerade_by").(uint)
+	return realID != 0 && pm.studentViewCheck != nil && pm.studentViewCheck(c, userID, courseID)
+}
+
 // courseUnpublished reports whether a course is still being built. Canvas
 // denies student and observer reads until the course is published
 // (available); a concluded (completed) course stays readable.
@@ -330,7 +349,7 @@ func (pm *PermissionMiddleware) courseGate(c *fiber.Ctx, roleSet map[string]bool
 		return forbidden(c, "insufficient permissions for this action")
 	}
 
-	if course != nil && courseUnpublished(course) && learnerEnrollment(enrollment.Type) {
+	if course != nil && courseUnpublished(course) && learnerEnrollment(enrollment.Type) && !pm.inStudentView(c, userID, courseID) {
 		return forbidden(c, "this course has not been published yet")
 	}
 
