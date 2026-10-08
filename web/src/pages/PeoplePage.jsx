@@ -7,6 +7,8 @@ import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import { Skeleton } from '@/components/ui/skeleton';
+import EnrollmentRoleSelect from '../components/admin/EnrollmentRoleSelect';
+import { parseRoleChoice } from '../utils/adminAccounts';
 
 const ROLE_LABELS = {
   TeacherEnrollment: 'Teacher',
@@ -122,7 +124,7 @@ const PeoplePage = () => {
     try {
       await api.createEnrollment(courseId, {
         user_id: parseInt(addForm.user_id, 10),
-        type: addForm.type,
+        ...parseRoleChoice(addForm.type), // type, plus role_id for a custom role (G102)
         enrollment_state: 'active',
         ...(addForm.course_section_id ? { course_section_id: parseInt(addForm.course_section_id, 10) } : {}),
       });
@@ -284,17 +286,12 @@ const PeoplePage = () => {
             </div>
             <div>
               <label htmlFor="add-person-role" className="block text-sm font-medium text-text-secondary mb-1">Role</label>
-              <select
-                id="add-person-role"
+              <EnrollmentRoleSelect
+                courseId={courseId}
                 value={addForm.type}
-                onChange={(e) => setAddForm({ ...addForm, type: e.target.value })}
+                onChange={(type) => setAddForm({ ...addForm, type })}
                 className="border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              >
-                <option value="StudentEnrollment">Student</option>
-                <option value="TeacherEnrollment">Teacher</option>
-                <option value="TaEnrollment">TA</option>
-                <option value="ObserverEnrollment">Observer</option>
-              </select>
+              />
             </div>
             {sections.length > 0 && (
               <div>
@@ -396,7 +393,7 @@ const PeoplePage = () => {
                     </td>
                     <td className="px-4 py-3">
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_COLORS[enrollment.type] || 'bg-surface-2 text-text-primary'}`}>
-                        {ROLE_LABELS[enrollment.type] || enrollment.type}
+                        {enrollment.role_id && enrollment.role ? enrollment.role : (ROLE_LABELS[enrollment.type] || enrollment.type)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-text-secondary">

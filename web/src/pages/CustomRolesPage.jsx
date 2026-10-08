@@ -4,6 +4,7 @@ import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import useAccountId from '../hooks/useAccountId';
 import { getCSRFToken } from '../services/api';
+import { adminAccountsApi } from '../services/api_admin_accounts';
 
 const PERMISSION_CATEGORIES = {
   'Course Management': 'bg-brand-100 text-brand-800',
@@ -19,6 +20,19 @@ const BASE_ROLE_TYPES = [
   { value: 'observer', label: 'Observer', color: 'bg-surface-2 text-text-secondary' },
   { value: 'admin', label: 'Admin', color: 'bg-accent-danger/20 text-accent-danger' },
 ];
+
+// applyBaseDefaults fills the permission checkboxes with a base role's
+// default permission set (G102).
+const applyBaseDefaults = async (baseRoleType, accountId, setFormData) => {
+  try {
+    const res = await adminAccountsApi.getBaseRolePermissions(baseRoleType, accountId ?? undefined);
+    const permObj = {};
+    (res?.permissions || []).forEach((p) => { permObj[p] = true; });
+    setFormData((prev) => (prev.base_role_type === baseRoleType ? { ...prev, permissions: permObj } : prev));
+  } catch {
+    // Leave the form as is; the admin can tick permissions by hand.
+  }
+};
 
 const CustomRolesPage = () => {
   const { user } = useAuth();
@@ -349,7 +363,11 @@ const CustomRolesPage = () => {
             <h1 className="text-2xl font-bold text-text-primary">Custom Roles & Permissions</h1>
           </div>
           <button
-            onClick={() => { resetForm(); setShowCreateForm(!showCreateForm); }}
+            onClick={() => {
+              resetForm();
+              if (!showCreateForm) applyBaseDefaults('teacher', accountId, setFormData);
+              setShowCreateForm(!showCreateForm);
+            }}
             className="flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
             aria-expanded={showCreateForm}
           >
@@ -442,7 +460,12 @@ const CustomRolesPage = () => {
                 <select
                   id="role-base-type"
                   value={formData.base_role_type}
-                  onChange={(e) => setFormData({ ...formData, base_role_type: e.target.value })}
+                  onChange={(e) => {
+                    const base = e.target.value;
+                    setFormData({ ...formData, base_role_type: base });
+                    // G102: a new role starts from its base role's defaults.
+                    if (!editingRole && !selectedPreset) applyBaseDefaults(base, accountId, setFormData);
+                  }}
                   className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                   aria-required="true"
                 >
@@ -450,6 +473,9 @@ const CustomRolesPage = () => {
                     <option key={rt.value} value={rt.value}>{rt.label}</option>
                   ))}
                 </select>
+                <p className="text-xs text-text-tertiary mt-1">
+                  People given this role in a course get exactly the permissions enabled below on the course&apos;s staff pages.
+                </p>
               </div>
               <div>
                 <label htmlFor="role-label" className="block text-sm font-medium text-text-secondary mb-1">
