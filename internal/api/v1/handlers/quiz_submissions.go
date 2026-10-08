@@ -436,6 +436,11 @@ func (h *QuizSubmissionHandler) GetSubmissionQuestions(c *fiber.Ctx) error {
 		return responses.NotFound(c, "quiz submission")
 	}
 
+	// An attempt in progress is only served on an approved network.
+	if submission.WorkflowState == "untaken" && enforceQuizTakeRestrictions(c, quiz, false) {
+		return nil
+	}
+
 	questions, err := h.quizService.GetSubmissionQuestions(c.Context(), submission.ID)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch submission questions")

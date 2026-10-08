@@ -5,6 +5,9 @@ import { api } from '../services/api';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import SafeHTML from '../components/SafeHTML';
+import ItemPlayer from '../components/quiz/itemTypes/ItemPlayer';
+import { normalizeQuestionType } from '../components/quiz/itemTypes/types';
+import { REVIEW_INLINE_TYPES, parseStoredAnswer } from '../components/quiz/reviewAnswers';
 
 const QuizReviewPage = () => {
   const { courseId, quizId, submissionId } = useParams();
@@ -214,6 +217,25 @@ const QuizReviewPage = () => {
                     </div>
                   );
                 })()}
+
+                {/* Every other item type: the read-only player shows the response */}
+                {!REVIEW_INLINE_TYPES.has(normalizeQuestionType(question.question_type)) && (
+                  <div className="mb-3">
+                    <p className="text-sm font-medium text-text-tertiary mb-1">Your answer:</p>
+                    <ItemPlayer
+                      question={question}
+                      value={parseStoredAnswer(question.question_type, answer?.answer)}
+                      onChange={() => {}}
+                      readOnly
+                    />
+                    {question.formula_answer != null && (
+                      <p className="text-xs text-text-tertiary mt-2">
+                        Correct answer: <span className="font-mono">{question.formula_answer}</span>
+                        {question.formula_margin ? ` (margin ${question.formula_margin})` : ''}
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Show text answers for short answer / essay / numerical */}
                 {(question.question_type === 'short_answer' || question.question_type === 'essay' || question.question_type === 'numerical_question') && (
