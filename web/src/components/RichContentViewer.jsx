@@ -1,10 +1,8 @@
 import React, { useMemo, useEffect, useRef, useState, useCallback, useContext } from 'react';
 import DOMPurify from 'dompurify';
-import katex from 'katex';
-// KaTeX layout CSS: without it .katex-mathml is not visually hidden and every
-// equation renders twice (MathML + flattened text) for anyone who never
-// opened the equation dialog (B100).
-import 'katex/dist/katex.min.css';
+import { TRUSTED_IFRAME_SRC } from '../utils/iframePolicy';
+import { renderMathInElement } from '../utils/mathRender';
+import { enhanceUserContent } from '../utils/enhanceUserContent';
 import { Volume2, Square } from 'lucide-react';
 import { ReadingPrefsContext } from '../contexts/ReadingPrefsContext';
 import { htmlToText } from '../utils/html';
@@ -82,7 +80,7 @@ const purifyConfig = {
     'list', 'maxlength', 'minlength', 'size',
     'for', 'open',
     // Media tracks
-    'kind', 'srclang', 'default',
+    'kind', 'srclang', 'default', 'label',
     // SVG / MathML
     'viewBox', 'xmlns', 'fill', 'stroke', 'stroke-width', 'stroke-linecap',
     'stroke-linejoin', 'stroke-dasharray', 'stroke-opacity', 'fill-opacity',
@@ -100,22 +98,9 @@ const purifyConfig = {
   ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|ftp|sftp|blob):|data:image\/(?:png|gif|jpe?g|webp|bmp|svg\+xml)[;,]|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
 };
 
-// Mirrors the server allowlist (internal/security/htmlsanitize
-// TrustedIframeSrc). The server strips other iframes on write; this covers
-// content stored before that policy existed.
-export const TRUSTED_IFRAME_SRC = new RegExp(
-  '^https://(' +
-    '(www\\.)?youtube(-nocookie)?\\.com/embed/|' +
-    'youtu\\.be/|' +
-    'player\\.vimeo\\.com/video/|' +
-    '(www\\.)?vimeo\\.com/|' +
-    '(www\\.)?khanacademy\\.org/embed/|' +
-    '(www\\.)?edpuzzle\\.com/embed/|' +
-    'h5p\\.org/h5p/embed/|' +
-    '(www\\.)?loom\\.com/embed/' +
-  ')',
-  'i',
-);
+// The iframe allowlist mirrors the server sanitizer (G001); see
+// utils/iframePolicy.js. Re-exported for existing importers.
+export { TRUSTED_IFRAME_SRC };
 
 // A private DOMPurify instance so these hooks never affect other callers.
 let purifier = null;
@@ -156,85 +141,6 @@ export function sanitizeHTML(dirty) {
 }
 
 /* --- Rich Content Viewer ------------------------------------------------ */
-
-/**
- * Render all math-tex spans inside a container element using KaTeX.
- * Looks for elements with class "math-tex" and renders their LaTeX content.
- * Also detects inline LaTeX delimiters: \( ... \) and $$ ... $$
- */
-function renderMathInElement(container) {
-  if (!container) return;
-
-  // Render explicit math-tex spans (from our RCE). The text content carries
-  // \( \) delimiters, which KaTeX itself does not accept.
-  const mathSpans = container.querySelectorAll('.math-tex');
-  mathSpans.forEach((span) => {
-    if (span.querySelector('.katex')) return; // already rendered
-    const latex = (span.getAttribute('data-latex') || span.textContent || '')
-      .trim()
-      .replace(/^\\\(([\s\S]*)\\\)$/, '$1')
-      .replace(/^\\\[([\s\S]*)\\\]$/, '$1');
-    if (!latex) return;
-    try {
-      katex.render(latex, span, { throwOnError: false, displayMode: false });
-    } catch {
-      // Leave as-is if rendering fails
-    }
-  });
-
-  // Also process LaTeX delimiters \( ... \), \[ ... \], and $$ ... $$ in text nodes
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
-  const textNodes = [];
-  let node;
-  while ((node = walker.nextNode())) {
-    // Leave rendered math and code samples alone.
-    if (node.parentElement?.closest('.katex, code, pre, textarea')) continue;
-    if (/\\\(.*?\\\)|\\\[.*?\\\]|\$\$.*?\$\$/s.test(node.textContent)) {
-      textNodes.push(node);
-    }
-  }
-
-  textNodes.forEach((textNode) => {
-    const text = textNode.textContent;
-    const parts = text.split(/(\\\(.*?\\\)|\\\[.*?\\\]|\$\$.*?\$\$)/s);
-    if (parts.length <= 1) return;
-
-    const fragment = document.createDocumentFragment();
-    parts.forEach((part) => {
-      let match;
-      if ((match = part.match(/^\\\((.*?)\\\)$/s))) {
-        const span = document.createElement('span');
-        try {
-          katex.render(match[1], span, { throwOnError: false, displayMode: false });
-        } catch {
-          span.textContent = part;
-        }
-        fragment.appendChild(span);
-      } else if ((match = part.match(/^\\\[(.*?)\\\]$/s))) {
-        const div = document.createElement('div');
-        div.style.textAlign = 'center';
-        div.style.margin = '0.5em 0';
-        try {
-          katex.render(match[1], div, { throwOnError: false, displayMode: true });
-        } catch {
-          div.textContent = part;
-        }
-        fragment.appendChild(div);
-      } else if ((match = part.match(/^\$\$(.*?)\$\$$/s))) {
-        const div = document.createElement('div');
-        try {
-          katex.render(match[1], div, { throwOnError: false, displayMode: true });
-        } catch {
-          div.textContent = part;
-        }
-        fragment.appendChild(div);
-      } else if (part) {
-        fragment.appendChild(document.createTextNode(part));
-      }
-    });
-    textNode.parentNode.replaceChild(fragment, textNode);
-  });
-}
 
 /* --- Read-aloud (browser SpeechSynthesis) --------------------------------- */
 
@@ -293,7 +199,7 @@ export default function RichContentViewer({ content, className }) {
 
   useEffect(() => {
     if (containerRef.current && sanitized) {
-      renderMathInElement(containerRef.current);
+      enhanceUserContent(containerRef.current);
     }
   }, [sanitized]);
 
