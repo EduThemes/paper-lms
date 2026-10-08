@@ -9,8 +9,10 @@ package postgres_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/repository/postgres"
 )
 
@@ -94,6 +96,54 @@ func TestDiscussionRepos_UnreadDeletedAndRatings(t *testing.T) {
 		}
 		if len(other) != 0 {
 			t.Fatalf("account 2 saw %d entries of account 1's topic", len(other))
+		}
+	})
+
+	t.Run("student-visible topic listing", func(t *testing.T) {
+		topicRepo := postgres.NewDiscussionTopicRepository(g)
+		now := time.Now()
+		past, future := now.Add(-time.Hour), now.Add(time.Hour)
+		mk := func(title string, state models.DiscussionTopicWorkflow, delayed *time.Time) *models.DiscussionTopic {
+			tp := &models.DiscussionTopic{CourseID: course.ID, UserID: author.ID, Title: title, WorkflowState: state, DelayedPostAt: delayed}
+			if err := topicRepo.Create(ctx, tp); err != nil {
+				t.Fatalf("create topic %s: %v", title, err)
+			}
+			return tp
+		}
+		draft := mk("draft", models.DiscussionTopicUnpublished, nil)
+		later := mk("later", models.DiscussionTopicActive, &future)
+		released := mk("released", models.DiscussionTopicPostDelayed, &past)
+		waiting := mk("waiting", models.DiscussionTopicPostDelayed, &future)
+		gone := mk("gone", models.DiscussionTopicDeleted, nil)
+
+		lister, ok := topicRepo.(interface {
+			ListStudentVisibleByCourseID(context.Context, uint, uint, time.Time, repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionTopic], error)
+		})
+		if !ok {
+			t.Fatalf("topic repo lacks ListStudentVisibleByCourseID")
+		}
+		res, err := lister.ListStudentVisibleByCourseID(ctx, course.ID, 1, now, repository.PaginationParams{Page: 1, PerPage: 50})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		got := map[uint]bool{}
+		for _, tp := range res.Items {
+			got[tp.ID] = true
+		}
+		if !got[topic.ID] || !got[released.ID] {
+			t.Fatalf("visible topics missing: got %v", got)
+		}
+		for _, hidden := range []*models.DiscussionTopic{draft, later, waiting, gone} {
+			if got[hidden.ID] {
+				t.Fatalf("topic %q listed for students", hidden.Title)
+			}
+		}
+		if res.TotalCount != 2 {
+			t.Fatalf("total = %d, want 2", res.TotalCount)
+		}
+		other, err := lister.ListStudentVisibleByCourseID(ctx, course.ID, 2, now, repository.PaginationParams{Page: 1, PerPage: 50})
+		if err != nil || len(other.Items) != 0 {
+			t.Fatalf("account 2 listed %d topics of account 1 (err %v)", len(other.Items), err)
 		}
 	})
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/service"
 )
 
 // discussionTopicGetter is satisfied by DiscussionService,
@@ -77,14 +78,7 @@ func discussionTopicVisibleToCaller(c *fiber.Ctx, topic *models.DiscussionTopic)
 	if discussionCallerIsStaff(c) {
 		return true
 	}
-	if topic.WorkflowState == models.DiscussionTopicUnpublished ||
-		topic.WorkflowState == models.DiscussionTopicPostDelayed {
-		return false
-	}
-	if topic.DelayedPostAt != nil && topic.DelayedPostAt.After(discussionNow()) {
-		return false
-	}
-	return true
+	return service.DiscussionTopicVisibleToStudents(topic, discussionNow())
 }
 
 // discussionTopicLockedForCaller reports whether the caller may no longer

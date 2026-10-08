@@ -339,6 +339,8 @@ const (
 	dTopicRated     uint = 13 // course 1, allow_rating
 	dTopicGraderOnl uint = 14 // course 1, allow_rating + only_graders_can_rate
 	dTopicDeleted   uint = 15 // course 1, soft-deleted
+	dTopicDraft     uint = 16 // course 1, unpublished (e.g. from a course copy)
+	dTopicReleased  uint = 17 // course 1, post_delayed with delayed_post_at in the past
 	dTopicOtherCrs  uint = 20 // course 2 (same tenant)
 	dTopicOtherTen  uint = 30 // course 3 (tenant B)
 
@@ -358,6 +360,7 @@ type discEnv struct {
 func newDiscEnv(t *testing.T, callerID uint, enrollmentType string) *discEnv {
 	t.Helper()
 	future := time.Now().Add(48 * time.Hour)
+	past := time.Now().Add(-48 * time.Hour)
 	s := &discStore{
 		courseAccount: map[uint]uint{dCourseA1: dAcctA, dCourseA2: dAcctA, dCourseB: dAcctB},
 		topics:        map[uint]*models.DiscussionTopic{},
@@ -381,6 +384,11 @@ func newDiscEnv(t *testing.T, callerID uint, enrollmentType string) *discEnv {
 	addTopic(dTopicRated, dCourseA1, func(tp *models.DiscussionTopic) { tp.AllowRating = true })
 	addTopic(dTopicGraderOnl, dCourseA1, func(tp *models.DiscussionTopic) { tp.AllowRating = true; tp.OnlyGradersCanRate = true })
 	addTopic(dTopicDeleted, dCourseA1, func(tp *models.DiscussionTopic) { tp.WorkflowState = models.DiscussionTopicDeleted })
+	addTopic(dTopicDraft, dCourseA1, func(tp *models.DiscussionTopic) { tp.WorkflowState = models.DiscussionTopicUnpublished })
+	addTopic(dTopicReleased, dCourseA1, func(tp *models.DiscussionTopic) {
+		tp.WorkflowState = models.DiscussionTopicPostDelayed
+		tp.DelayedPostAt = &past
+	})
 	addTopic(dTopicOtherCrs, dCourseA2, nil)
 	addTopic(dTopicOtherTen, dCourseB, nil)
 
@@ -427,6 +435,7 @@ func newDiscEnv(t *testing.T, callerID uint, enrollmentType string) *discEnv {
 	}, middleware.PaginationParams())
 
 	base := "/courses/:course_id/discussion_topics"
+	app.Get(base, th.ListTopics)
 	app.Get(base+"/:topic_id", th.GetTopic)
 	app.Put(base+"/:topic_id", th.UpdateTopic)
 	app.Delete(base+"/:topic_id", th.DeleteTopic)

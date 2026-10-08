@@ -37,6 +37,7 @@ import {
   isEntryDeleted,
   wasEntryEdited,
   countUnreadEntries,
+  unwrapList,
 } from '../utils/discussionEntries';
 
 // ---------------------------------------------------------------------------
@@ -778,12 +779,19 @@ const DiscussionTopicPageV2 = () => {
   // api adapter for the DiscussionCheckpointsPanel.
   // The panel uses a slim shape ({list, replace, update, remove, progress})
   // so it can stay decoupled from any specific HTTP client.
+  // The api.js helpers resolve to `{ data, pagination }`; the panel
+  // expects plain arrays (it calls .map/.length on them), so unwrap here.
   const checkpointsApi = React.useMemo(() => ({
-    list: (tId) => api.getDiscussionCheckpoints(courseId, tId),
-    replace: (tId, payload) => api.createDiscussionCheckpoints(courseId, tId, payload),
-    update: (tId, id, body) => api.updateDiscussionCheckpoint(courseId, tId, id, body),
-    remove: (tId, id) => api.deleteDiscussionCheckpoint(courseId, tId, id),
-    progress: (tId, uId) => api.getDiscussionCheckpointProgress(courseId, tId, uId),
+    list: (tId) => api.getDiscussionCheckpoints(courseId, tId).then(unwrapList),
+    replace: (tId, payload) => api.createDiscussionCheckpoints(courseId, tId, payload).then(unwrapList),
+    update: (tId, id, body) => api.updateDiscussionCheckpoint(courseId, tId, id, body).then((r) => r?.data ?? r),
+    // DELETE answers 204 with no body, which the JSON helper can't parse;
+    // the delete itself succeeded, so don't report that as a failure.
+    remove: (tId, id) => api.deleteDiscussionCheckpoint(courseId, tId, id).catch((err) => {
+      if (err instanceof SyntaxError) return null;
+      throw err;
+    }),
+    progress: (tId, uId) => api.getDiscussionCheckpointProgress(courseId, tId, uId).then(unwrapList),
   }), [courseId]);
 
   const [topic, setTopic] = useState(null);

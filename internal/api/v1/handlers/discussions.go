@@ -8,6 +8,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
 
@@ -38,6 +39,7 @@ func topicToJSON(t *models.DiscussionTopic) fiber.Map {
 		"require_initial_post": t.RequireInitialPost,
 		"assignment_id":        t.AssignmentID,
 		"workflow_state":       t.WorkflowState,
+		"published":            t.WorkflowState != models.DiscussionTopicUnpublished,
 		"created_at":           t.CreatedAt,
 		"updated_at":           t.UpdatedAt,
 	}
@@ -51,7 +53,9 @@ func (h *DiscussionHandler) ListTopics(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.discussionService.ListTopics(c.Context(), uint(courseID), params)
+	// Students only see topics they could open (published, not delayed);
+	// staff see every topic in the course.
+	result, err := h.discussionService.ListTopicsForViewer(c.Context(), uint(courseID), callerAccountID(c), !discussionCallerIsStaff(c), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch discussion topics")
 	}
@@ -157,11 +161,51 @@ func (h *DiscussionHandler) UpdateTopic(c *fiber.Ctx) error {
 			SortByRating       *bool      `json:"sort_by_rating"`
 			RequireInitialPost *bool      `json:"require_initial_post"`
 			AssignmentID       *uint      `json:"assignment_id"`
+			// Published (Canvas `published`) publishes or unpublishes the
+			// topic through the DiscussionTopic state machine. Students
+			// can't open unpublished topics, so this is how a teacher
+			// releases a copied or imported (unpublished) topic.
+			Published *bool `json:"published"`
 		} `json:"discussion_topic"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
+	}
+
+	if p := input.DiscussionTopic.Published; p != nil {
+		// Only the unpublished <-> active edge is driven by this flag; a
+		// locked or post_delayed topic already counts as published.
+		target := topic.WorkflowState
+		if *p && topic.WorkflowState == models.DiscussionTopicUnpublished {
+			target = models.DiscussionTopicActive
+		}
+		if !*p {
+			target = models.DiscussionTopicUnpublished
+		}
+		if target != topic.WorkflowState {
+			role := callerRoleForStateMachine(c)
+			if role == models.RoleTA {
+				// TAs manage topics alongside teachers (this route is
+				// behind the instructor middleware), as in Canvas.
+				role = models.RoleTeacher
+			}
+			if err := models.TransitionDiscussionTopicWorkflowState(topic.WorkflowState, target, role); err != nil {
+				return responses.BadRequest(c, err.Error())
+			}
+			// Canvas can_unpublish?: a topic people have already posted
+			// in can't go back to draft.
+			if target == models.DiscussionTopicUnpublished {
+				existing, err := h.discussionService.ListEntries(c.Context(), topic.ID, callerAccountID(c), repository.PaginationParams{Page: 1, PerPage: 1})
+				if err != nil {
+					return responses.InternalError(c, "Could not update discussion topic")
+				}
+				if existing.TotalCount > 0 {
+					return responses.BadRequest(c, "A discussion with replies can't be unpublished")
+				}
+			}
+			topic.WorkflowState = target
+		}
 	}
 
 	if input.DiscussionTopic.Title != nil {

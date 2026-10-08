@@ -99,8 +99,60 @@ func (s *DiscussionService) DeleteTopic(ctx context.Context, id uint) error {
 	return s.topicRepo.Delete(ctx, id)
 }
 
-func (s *DiscussionService) ListTopics(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionTopic], error) {
-	return s.topicRepo.ListByCourseID(ctx, courseID, 0, params)
+// DiscussionTopicVisibleToStudents mirrors Canvas DiscussionTopic
+// visibility for non-staff: unpublished topics are hidden, and so is a
+// topic whose delayed_post_at is still in the future. A post_delayed
+// topic becomes visible once its delayed_post_at has passed (nothing
+// here flips the state to active on schedule, so the date decides).
+func DiscussionTopicVisibleToStudents(topic *models.DiscussionTopic, now time.Time) bool {
+	switch topic.WorkflowState {
+	case models.DiscussionTopicDeleted, models.DiscussionTopicUnpublished:
+		return false
+	case models.DiscussionTopicPostDelayed:
+		if topic.DelayedPostAt == nil {
+			return false
+		}
+	}
+	if topic.DelayedPostAt != nil && topic.DelayedPostAt.After(now) {
+		return false
+	}
+	return true
+}
+
+// studentVisibleTopicLister is implemented by the Postgres topic repo; it
+// applies DiscussionTopicVisibleToStudents in SQL so paging and counts
+// stay correct.
+type studentVisibleTopicLister interface {
+	ListStudentVisibleByCourseID(ctx context.Context, courseID, accountID uint, now time.Time, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionTopic], error)
+}
+
+// ListTopicsForViewer lists a course's topics scoped to accountID. When
+// studentView is set, topics a student may not see yet (unpublished or
+// delayed) are left out, matching what GET .../discussion_topics/:id
+// lets them open.
+func (s *DiscussionService) ListTopicsForViewer(ctx context.Context, courseID, accountID uint, studentView bool, params repository.PaginationParams) (*repository.PaginatedResult[models.DiscussionTopic], error) {
+	if !studentView {
+		return s.topicRepo.ListByCourseID(ctx, courseID, accountID, params)
+	}
+	now := time.Now()
+	if lister, ok := s.topicRepo.(studentVisibleTopicLister); ok {
+		return lister.ListStudentVisibleByCourseID(ctx, courseID, accountID, now, params)
+	}
+	// Fallback for repos without the SQL filter (test fakes): filter one
+	// page in memory.
+	res, err := s.topicRepo.ListByCourseID(ctx, courseID, accountID, params)
+	if err != nil {
+		return nil, err
+	}
+	kept := res.Items[:0]
+	for _, t := range res.Items {
+		if DiscussionTopicVisibleToStudents(&t, now) {
+			kept = append(kept, t)
+		}
+	}
+	res.TotalCount -= int64(len(res.Items) - len(kept))
+	res.Items = kept
+	return res, nil
 }
 
 // Entry methods

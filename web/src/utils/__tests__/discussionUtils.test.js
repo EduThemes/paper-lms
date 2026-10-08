@@ -3,6 +3,7 @@ import {
   isEntryDeleted,
   wasEntryEdited,
   countUnreadEntries,
+  unwrapList,
 } from '../discussionEntries';
 import { fetchAllPages } from '../fetchAllPages';
 
@@ -27,6 +28,15 @@ describe('discussionEntries helpers', () => {
     expect(wasEntryEdited({ version_count: 0 })).toBe(false);
     expect(wasEntryEdited({ version_count: 1 })).toBe(true);
     expect(wasEntryEdited({ version_count: 2 })).toBe(true);
+  });
+
+  test('unwrapList returns the array inside an api.js { data } result', () => {
+    // The checkpoints panel calls .map on what the adapter returns; the raw
+    // api.js result is an object, which crashed the topic page.
+    expect(unwrapList({ data: [{ id: 1 }], pagination: {} })).toEqual([{ id: 1 }]);
+    expect(unwrapList([{ id: 2 }])).toEqual([{ id: 2 }]);
+    expect(unwrapList({ data: null })).toEqual([]);
+    expect(unwrapList(undefined)).toEqual([]);
   });
 
   test('deleted placeholder detection (B157)', () => {

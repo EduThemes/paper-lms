@@ -96,6 +96,17 @@ const DiscussionsPage = () => {
     }
   };
 
+  // Students can't open unpublished topics (e.g. ones a course copy or
+  // import created), so teachers need a way to release them.
+  const handleTogglePublished = async (topic) => {
+    try {
+      await api.updateDiscussionTopic(courseId, topic.id, { published: topic.published === false });
+      await fetchTopics();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   const formatDate = (dateStr) => {
     if (!dateStr) return '';
     return new Date(dateStr).toLocaleDateString(undefined, {
@@ -239,6 +250,11 @@ const DiscussionsPage = () => {
                       {topic.pinned && (
                         <Pin className="w-3.5 h-3.5 text-brand-500 flex-shrink-0" />
                       )}
+                      {topic.published === false && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-surface-2 text-text-tertiary flex-shrink-0">
+                          Unpublished
+                        </span>
+                      )}
                     </div>
                     <span className="text-xs text-text-disabled">
                       {topic.discussion_type === 'side_comment' ? 'Side Comment' : topic.discussion_type === 'threaded' ? 'Threaded' : topic.discussion_type}
@@ -251,6 +267,13 @@ const DiscussionsPage = () => {
                   </span>
                   {isTeacher && (
                     <>
+                      <button
+                        onClick={(e) => { e.preventDefault(); handleTogglePublished(topic); }}
+                        className="px-2 py-0.5 text-xs rounded border border-border-default text-text-secondary hover:text-brand-600"
+                        title={topic.published === false ? 'Publish' : 'Unpublish'}
+                      >
+                        {topic.published === false ? 'Publish' : 'Unpublish'}
+                      </button>
                       <button
                         onClick={(e) => { e.preventDefault(); handleEdit(topic); }}
                         className="p-1 text-text-disabled hover:text-brand-600 opacity-0 group-hover:opacity-100"

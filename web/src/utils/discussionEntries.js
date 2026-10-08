@@ -23,6 +23,17 @@ export function wasEntryEdited(entry) {
   return (entry?.version_count || 0) > 0;
 }
 
+/**
+ * api.js list helpers resolve to `{ data, pagination }`. Returns the list
+ * inside (or the value itself when it is already an array), and [] for
+ * anything else, so callers can always .map/.length the result.
+ */
+export function unwrapList(result) {
+  if (Array.isArray(result)) return result;
+  if (Array.isArray(result?.data)) return result.data;
+  return [];
+}
+
 /** Number of unread entries in a (nested) entry tree. */
 export function countUnreadEntries(entries) {
   let count = 0;

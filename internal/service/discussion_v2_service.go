@@ -242,6 +242,8 @@ func (s *DiscussionV2Service) MarkTopicAsRead(ctx context.Context, topic *models
 	} else {
 		// No row yet: seed it with the Canvas default rather than an
 		// unconditional "subscribed".
+		// accountID=0: internal hop; the handler resolved this topic
+		// inside the caller's tenant and course.
 		entries, lerr := s.entryRepo.ListAllByTopicID(ctx, topic.ID, 0)
 		if lerr != nil {
 			entries = nil
