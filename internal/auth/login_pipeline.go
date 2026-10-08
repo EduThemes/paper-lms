@@ -80,6 +80,16 @@ var ErrParentalConsentRequired = errors.New("parental consent required before th
 // until an admin un-suspends the account.
 var ErrAccountSuspended = errors.New("account is suspended")
 
+// ErrCrossTenantIdentity is returned when a federated identity resolves to
+// a user outside the authentication provider's account. A provider (and
+// the IdP behind it) is trusted only for its own tenant's users.
+var ErrCrossTenantIdentity = errors.New("federated identity belongs to another account")
+
+// ErrPrivilegedAutoLink is returned when an IdP's verified email matches a
+// platform super_admin. Super admins are never auto-linked by email: an
+// account-level IdP must not be able to mint a platform-level session.
+var ErrPrivilegedAutoLink = errors.New("refusing to auto-link a privileged account by email; link it explicitly")
+
 // LoginPipeline orchestrates post-credential-verification work for
 // every login path.
 type LoginPipeline struct {
@@ -267,18 +277,41 @@ func (p *LoginPipeline) resolveUser(ctx context.Context, outcome SSOOutcome, met
 		return user, false, nil
 	}
 
+	// Every federated path needs the provider: it decides the tenant.
+	// An authentication provider belongs to exactly one account, and the
+	// IdP behind it is only trusted for that account's users.
+	if outcome.ProviderID == 0 {
+		// No provider context (shouldn't happen for non-local paths)
+		// — refuse to resolve or JIT anyone.
+		return nil, false, errors.New("no provider context; refusing to provision")
+	}
+	provider, err := p.providers.FindByID(ctx, outcome.ProviderID)
+	if err != nil {
+		return nil, false, err
+	}
+	if provider == nil {
+		return nil, false, fmt.Errorf("authentication provider %d not found", outcome.ProviderID)
+	}
+
 	// (a) federated_identities lookup.
-	if outcome.ProviderID != 0 && outcome.ExternalSubject != "" {
+	if outcome.ExternalSubject != "" {
 		fi, err := p.federations.FindByProviderAndSubject(ctx, outcome.ProviderID, outcome.ExternalSubject)
 		if err != nil {
 			return nil, false, err
 		}
 		if fi != nil {
 			// AUTH-INTERNAL: pre-authentication user resolution; see
-			// note above. accountID=0 is intentional.
+			// note above. accountID=0 is intentional — the tenant is
+			// checked explicitly against the provider just below.
 			user, err := p.users.FindByID(ctx, fi.UserID, 0)
 			if err != nil {
 				return nil, false, err
+			}
+			// Defense in depth: a binding must never carry a session
+			// across tenants (e.g. a row created before the auto-link
+			// was tenant-scoped).
+			if user.AccountID != provider.AccountID {
+				return nil, false, ErrCrossTenantIdentity
 			}
 			// Touch last_seen + refresh claims if richer than what
 			// we have stored (Apple's first-login email quirk
@@ -290,9 +323,18 @@ func (p *LoginPipeline) resolveUser(ctx context.Context, outcome SSOOutcome, met
 	}
 
 	// (b) Email auto-link to an existing local user. Only when the
-	// IdP attests email_verified=true (locked 2026-05-15).
+	// IdP attests email_verified=true (locked 2026-05-15), and only to a
+	// user in the provider's own account: the lookup used to be global,
+	// so an admin of tenant B could configure an IdP they control,
+	// assert email=<anyone>@<tenant A> and log in as that user —
+	// super_admins included. A platform super_admin is never
+	// auto-linked by email at all: an account-level IdP must not be able
+	// to mint a session for a role above the account.
 	if outcome.EmailVerified && outcome.Email != "" {
-		user, err := p.users.FindByEmail(ctx, outcome.Email)
+		user, err := p.users.FindByEmailInAccount(ctx, outcome.Email, provider.AccountID)
+		if err == nil && user != nil && user.Role == "super_admin" {
+			return nil, false, ErrPrivilegedAutoLink
+		}
 		if err == nil && user != nil {
 			// Create the federation binding so the next login uses
 			// path (a) instead of re-matching by email.
@@ -312,20 +354,19 @@ func (p *LoginPipeline) resolveUser(ctx context.Context, outcome SSOOutcome, met
 
 	// (c) JIT-provision a new user. Only when the provider's
 	// auto_provision toggle is on.
-	if outcome.ProviderID == 0 {
-		// No provider context (shouldn't happen for non-local paths)
-		// — refuse JIT.
-		return nil, false, errors.New("no provider context; refusing to provision")
-	}
-	provider, err := p.providers.FindByID(ctx, outcome.ProviderID)
-	if err != nil {
-		return nil, false, err
-	}
-	if provider == nil || !provider.AutoProvision {
+	if !provider.AutoProvision {
 		return nil, false, fmt.Errorf("provider %d has auto-provisioning disabled; admin must pre-create the user", outcome.ProviderID)
 	}
 
+	// The new user belongs to the provider's tenant. Without AccountID
+	// set here User.BeforeCreate defaulted every JIT user to account 1,
+	// so a student signing in through tenant 5's IdP landed in the root
+	// tenant and couldn't see tenant 5's courses.
+	if provider.AccountID == 0 {
+		return nil, false, fmt.Errorf("provider %d has no account; refusing to provision", outcome.ProviderID)
+	}
 	newUser := &models.User{
+		AccountID:    provider.AccountID,
 		Name:         coalesce(outcome.Name, outcome.Email),
 		SortableName: coalesce(outcome.Name, outcome.Email),
 		ShortName:    firstWord(coalesce(outcome.Name, outcome.Email)),
@@ -401,13 +442,18 @@ func decideMFAGate(policy string, user *models.User) mfaGate {
 }
 
 // lookupTenantPolicy reads accounts.mfa_policy for the user's home
-// account. v1: always account_id=1 (single-tenant). Multi-tenant
-// resolution is a Phase 10 concern.
+// account (account 1 for a legacy row with no tenant). It used to read
+// account 1 unconditionally, so a tenant's own MFA policy never applied
+// to its users.
 func (p *LoginPipeline) lookupTenantPolicy(ctx context.Context, user *models.User) string {
 	if p.accounts == nil {
 		return "off"
 	}
-	acc, err := p.accounts.FindByID(ctx, 1)
+	accountID := user.AccountID
+	if accountID == 0 {
+		accountID = 1
+	}
+	acc, err := p.accounts.FindByID(ctx, accountID)
 	if err != nil || acc == nil {
 		return "off"
 	}

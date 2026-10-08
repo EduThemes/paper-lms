@@ -407,6 +407,9 @@ func (r *fakePasskeyUserRepo) FindByLoginID(context.Context, string) (*models.Us
 func (r *fakePasskeyUserRepo) FindByEmail(context.Context, string) (*models.User, error) {
 	panic("unused")
 }
+func (r *fakePasskeyUserRepo) FindByEmailInAccount(context.Context, string, uint) (*models.User, error) {
+	panic("unused")
+}
 func (r *fakePasskeyUserRepo) FindBySISUserID(context.Context, string) (*models.User, error) {
 	panic("unused")
 }

@@ -94,8 +94,16 @@ func (f *fakeUserRepo) FindByEmail(ctx context.Context, email string) (*models.U
 	return u, nil
 }
 
+func (f *fakeUserRepo) FindByEmailInAccount(ctx context.Context, email string, accountID uint) (*models.User, error) {
+	u, ok := f.byEmail[email]
+	if !ok || u.AccountID != accountID {
+		return nil, errors.New("user not found")
+	}
+	return u, nil
+}
+
 // Unused-but-required interface methods. The pipeline only calls the
-// three above; everything else returns zero-values so the interface
+// methods above; everything else returns zero-values so the interface
 // is satisfied for typing.
 func (f *fakeUserRepo) FindByLoginID(context.Context, string) (*models.User, error) {
 	return nil, errors.New("not implemented")
@@ -220,15 +228,15 @@ func newHarness(t *testing.T, mfaPolicy string) *harness {
 
 func enrolledUser(id uint, email, role string) *models.User {
 	now := time.Now()
-	return &models.User{ID: id, Email: email, LoginID: email, Name: "User " + email, Role: role, TOTPVerifiedAt: &now}
+	return &models.User{ID: id, AccountID: 1, Email: email, LoginID: email, Name: "User " + email, Role: role, TOTPVerifiedAt: &now}
 }
 
 func unenrolledUser(id uint, email, role string) *models.User {
-	return &models.User{ID: id, Email: email, LoginID: email, Name: "User " + email, Role: role}
+	return &models.User{ID: id, AccountID: 1, Email: email, LoginID: email, Name: "User " + email, Role: role}
 }
 
 func provider(id uint, ptype string, autoProvision bool) *models.AuthenticationProvider {
-	return &models.AuthenticationProvider{ID: id, AuthType: ptype, AutoProvision: autoProvision}
+	return &models.AuthenticationProvider{ID: id, AccountID: 1, AuthType: ptype, AutoProvision: autoProvision}
 }
 
 // ----- the matrix -----

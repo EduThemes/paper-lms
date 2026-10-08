@@ -42,6 +42,14 @@ func (m *MockUserRepository) FindByEmail(ctx context.Context, email string) (*mo
 	return args.Get(0).(*models.User), args.Error(1)
 }
 
+func (m *MockUserRepository) FindByEmailInAccount(ctx context.Context, email string, accountID uint) (*models.User, error) {
+	args := m.Called(ctx, email, accountID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.User), args.Error(1)
+}
+
 func (m *MockUserRepository) FindBySISUserID(ctx context.Context, sisUserID string) (*models.User, error) {
 	args := m.Called(ctx, sisUserID)
 	if args.Get(0) == nil {
