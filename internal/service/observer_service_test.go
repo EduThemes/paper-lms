@@ -116,3 +116,60 @@ func TestListObservedStudentProfiles_IncludesNames(t *testing.T) {
 	assert.Equal(t, uint(200), students[0].ID)
 	assert.Equal(t, "Jane Doe", students[0].Name)
 }
+
+// F25: the observer dashboard's course grade uses the same calculator as
+// the Grades page: assignment-group weights apply, and a hidden (unposted)
+// grade counts as not graded yet.
+func TestObserverOverview_CourseGradeAppliesGroupWeights(t *testing.T) {
+	child := uint(200)
+	enrollments := new(mocks.MockEnrollmentRepository)
+	enrollments.On("ListByUserID", mock.Anything, uint(100), uint(0)).Return([]models.Enrollment{
+		{ID: 1, UserID: 100, CourseID: 1, Type: "ObserverEnrollment", WorkflowState: models.EnrollmentActive, AssociatedUserID: &child},
+	}, nil)
+	enrollments.On("ListByUserID", mock.Anything, uint(200), uint(0)).Return([]models.Enrollment{
+		{ID: 2, UserID: 200, CourseID: 1, Type: "StudentEnrollment", WorkflowState: models.EnrollmentActive},
+	}, nil)
+	enrollments.On("Create", mock.Anything, mock.Anything).Return(nil).Maybe()
+	courses := new(mocks.MockCourseRepository)
+	courses.On("FindByID", mock.Anything, uint(1), uint(0)).Return(&models.Course{ID: 1, Name: "Math", ApplyGroupWeights: true}, nil)
+
+	svc := service.NewObserverService(enrollments, courses, new(mocks.MockUserRepository))
+	submissions := new(mocks.MockSubmissionRepository)
+	pages := new(mocks.MockPageRepository)
+	assignments := new(mocks.MockAssignmentRepository)
+	quizzes := new(mocks.MockQuizRepository)
+	groups := new(mocks.MockAssignmentGroupRepository)
+	svc.SetOverviewDeps(assignments, submissions, quizzes, fakeObserverAnnouncements{}, pages)
+	svc.SetAssignmentGroupRepo(groups)
+
+	hundred := 100.0
+	exams, homework := uint(1), uint(2)
+	assignments.On("ListByCourseID", mock.Anything, uint(1), mock.Anything).Return(&repository.PaginatedResult[models.Assignment]{
+		Items: []models.Assignment{
+			{ID: 50, CourseID: 1, Name: "Exam", WorkflowState: models.AssignmentPublished, Published: true, PointsPossible: &hundred, AssignmentGroupID: &exams},
+			{ID: 51, CourseID: 1, Name: "Homework", WorkflowState: models.AssignmentPublished, Published: true, PointsPossible: &hundred, AssignmentGroupID: &homework},
+			{ID: 52, CourseID: 1, Name: "Hidden quiz", WorkflowState: models.AssignmentPublished, Published: true, PointsPossible: &hundred, AssignmentGroupID: &homework, PostPolicy: "manual"},
+		},
+	}, nil)
+	groups.On("ListByCourseID", mock.Anything, uint(1), mock.Anything).Return(&repository.PaginatedResult[models.AssignmentGroup]{
+		Items: []models.AssignmentGroup{{ID: 1, CourseID: 1, Name: "Exams", GroupWeight: 80}, {ID: 2, CourseID: 1, Name: "Homework", GroupWeight: 20}},
+	}, nil)
+	quizzes.On("ListByCourseID", mock.Anything, mock.Anything, mock.Anything).Return(&repository.PaginatedResult[models.Quiz]{}, nil)
+	pages.On("ListPublishedByCourseID", mock.Anything, mock.Anything, mock.Anything).Return(&repository.PaginatedResult[models.WikiPage]{}, nil)
+
+	posted := time.Now().Add(-time.Hour)
+	fifty, full, zero := 50.0, 100.0, 0.0
+	submissions.On("ListByUserAndCourse", mock.Anything, uint(200), uint(1)).Return([]models.Submission{
+		{ID: 9, UserID: 200, AssignmentID: 50, Score: &fifty, GradedAt: &posted, PostedAt: &posted, WorkflowState: models.SubmissionGraded},
+		{ID: 10, UserID: 200, AssignmentID: 51, Score: &full, GradedAt: &posted, PostedAt: &posted, WorkflowState: models.SubmissionGraded},
+		{ID: 11, UserID: 200, AssignmentID: 52, Score: &zero, GradedAt: &posted, WorkflowState: models.SubmissionGraded}, // hidden
+	}, nil)
+
+	overview, err := svc.GetChildOverview(context.Background(), 100, 200)
+	require.NoError(t, err)
+	require.Len(t, overview.Courses, 1)
+	require.NotNil(t, overview.Courses[0].CurrentGrade)
+	// Exams 50% x 80 + Homework 100% x 20 = 60%, not the 75% point average,
+	// and the hidden 0 does not drag homework down.
+	assert.InDelta(t, 60.0, *overview.Courses[0].CurrentGrade, 1e-9)
+}

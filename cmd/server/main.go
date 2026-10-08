@@ -503,7 +503,7 @@ func main() {
 	collaborationService := service.NewCollaborationService(collaborationRepo)
 	conferenceService := service.NewConferenceService(conferenceRepo, conferenceParticipantRepo)
 	analyticsService := service.NewAnalyticsService(pageViewRepo, submissionRepo, enrollmentRepo, assignmentRepo)
-	observerService := service.NewObserverService(enrollmentRepo, courseRepo, userRepo).SetObserverLinkStore(postgres.NewObserverLinkRepository(database))
+	observerService := service.NewObserverService(enrollmentRepo, courseRepo, userRepo).SetObserverLinkStore(postgres.NewObserverLinkRepository(database)).SetAssignmentGroupRepo(assignmentGroupRepo)
 	observerService.SetOverviewDeps(
 		assignmentRepo,
 		submissionRepo,

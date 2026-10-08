@@ -110,6 +110,16 @@ type ObserverService struct {
 	quizRepo         repository.QuizRepository
 	announcementRepo ObserverAnnouncementRepository
 	pageRepo         repository.PageRepository
+	// assignmentGroupRepo lets the overview apply assignment-group weights
+	// (same grade as the Grades page). Nil: unweighted point totals.
+	assignmentGroupRepo repository.AssignmentGroupRepository
+}
+
+// SetAssignmentGroupRepo wires the assignment groups the overview's course
+// grade needs for weighted courses.
+func (s *ObserverService) SetAssignmentGroupRepo(r repository.AssignmentGroupRepository) *ObserverService {
+	s.assignmentGroupRepo = r
+	return s
 }
 
 func NewObserverService(
@@ -584,7 +594,7 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 		course := courseByID[courseID]
 
 		// Per-course assignments (used for upcoming + grade calculation).
-		assignments, _ := s.assignmentRepo.ListByCourseID(ctx, courseID, listParams)
+		assignments, _ := s.assignmentRepo.ListByCourseID(ctx, courseID, repository.PaginationParams{Page: 1, PerPage: 1000})
 		assignmentByID := map[uint]models.Assignment{}
 		if assignments != nil {
 			for _, a := range assignments.Items {
@@ -627,7 +637,8 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 
 		// Submissions for this child in this course (drives grade % + recent + pending).
 		subs, serr := s.submissionRepo.ListByUserAndCourse(ctx, childID, courseID)
-		var earned, possible float64
+		// The submissions the child can see, for the grade calculator.
+		visibleSubs := map[uint]*models.Submission{}
 		pending := 0
 		if serr == nil {
 			for _, sub := range subs {
@@ -648,10 +659,11 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 				// grades"). Excused work and unpublished assignments never
 				// count.
 				visible := sub.Score != nil && sub.PostedAt != nil && !sub.Excused && assn.IsPublished()
-				// Grade contribution: only graded, posted submissions with score.
-				if visible && assn.PointsPossible != nil && *assn.PointsPossible > 0 {
-					earned += *sub.Score
-					possible += *assn.PointsPossible
+				// Grade contribution: posted grades (and excusals, which drop
+				// the assignment); a hidden grade counts as not graded yet.
+				if visible || sub.Excused {
+					subCopy := sub
+					visibleSubs[sub.AssignmentID] = &subCopy
 				}
 				// Recent grades feed: hidden (unposted) grades never leak here.
 				if visible && sub.GradedAt != nil && sub.Score != nil {
@@ -669,9 +681,20 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 			}
 		}
 
+		// Same calculator as the Grades page and gradebook (group weights,
+		// extra credit, not_graded/unpublished/excused rules).
 		var grade *float64
-		if possible > 0 {
-			pct := (earned / possible) * 100.0
+		var groups []models.AssignmentGroup
+		if course.ApplyGroupWeights && s.assignmentGroupRepo != nil {
+			if gr, gerr := s.assignmentGroupRepo.ListByCourseID(ctx, courseID, repository.PaginationParams{Page: 1, PerPage: 100}); gerr == nil && gr != nil {
+				groups = gr.Items
+			}
+		}
+		var assignmentList []models.Assignment
+		if assignments != nil {
+			assignmentList = assignments.Items
+		}
+		if pct, ok := CurrentCourseScore(course.ApplyGroupWeights, assignmentList, groups, visibleSubs); ok {
 			grade = &pct
 		}
 		courseSummaries = append(courseSummaries, ChildCourseSummary{

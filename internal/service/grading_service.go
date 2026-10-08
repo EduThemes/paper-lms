@@ -227,6 +227,41 @@ func assignmentCounts(a *models.Assignment, sub *models.Submission) (pointsPossi
 // Current score: only considers groups where the student has graded submissions.
 // Final score: treats unsubmitted assignments as 0.
 func (s *GradingService) calculateWeightedGrade(assignments []models.Assignment, groups []models.AssignmentGroup, subByAssignment map[uint]*models.Submission) (currentScore, finalScore float64) {
+	currentScore, finalScore, _ = weightedScores(assignments, groups, subByAssignment)
+	return
+}
+
+// CurrentCourseScore is the grade calculator's current score (0-100) for
+// one student, the same number the Grades page and gradebook show: group
+// weights when the course applies them, extra credit and excused work per
+// assignmentCounts, and only graded work counted. subByAssignment must
+// hold only the submissions the viewer may see (e.g. posted grades for a
+// student or observer). ok is false when nothing graded counts yet.
+func CurrentCourseScore(applyGroupWeights bool, assignments []models.Assignment, groups []models.AssignmentGroup, subByAssignment map[uint]*models.Submission) (score float64, ok bool) {
+	if applyGroupWeights && len(groups) > 0 {
+		current, _, hasCurrent := weightedScores(assignments, groups, subByAssignment)
+		return current, hasCurrent
+	}
+	var earned, possible float64
+	for i := range assignments {
+		a := &assignments[i]
+		sub := subByAssignment[a.ID]
+		points, counts := assignmentCounts(a, sub)
+		if !counts || sub == nil || sub.Score == nil {
+			continue
+		}
+		earned += *sub.Score
+		possible += points
+	}
+	if possible <= 0 {
+		return 0, false
+	}
+	return math.Round(earned/possible*10000) / 100, true
+}
+
+// weightedScores is calculateWeightedGrade's body; hasCurrent reports
+// whether any weighted group has graded work.
+func weightedScores(assignments []models.Assignment, groups []models.AssignmentGroup, subByAssignment map[uint]*models.Submission) (currentScore, finalScore float64, hasCurrent bool) {
 	// Build group lookup
 	groupMap := make(map[uint]*models.AssignmentGroup)
 	for i := range groups {
@@ -290,6 +325,7 @@ func (s *GradingService) calculateWeightedGrade(assignments []models.Assignment,
 
 	if currentWeightTotal > 0 {
 		currentScore = math.Round(currentWeightedSum/currentWeightTotal*100) / 100
+		hasCurrent = true
 	}
 	if finalWeightTotal > 0 {
 		finalScore = math.Round(finalWeightedSum/finalWeightTotal*100) / 100
