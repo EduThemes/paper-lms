@@ -49,6 +49,7 @@ func wireGradingUI(database *gorm.DB, d gradingUIDeps) *handlers.GradingUIHandle
 	d.speedGraderHandler.SetGradingUIService(svc)
 	d.gradebookHandler.SetGradingUIService(svc)
 	d.assignmentHandler.SetGradingUIDeps(d.enrollmentRepo, d.attachmentRepo)
+	d.assignmentHandler.SetGradesExistCheck(svc.GradesExist)
 	d.peerReviewHandler.SetUserRepository(d.userRepo)
 	if d.rubricAssessmentHandler != nil {
 		d.rubricAssessmentHandler.SetAnonymityCheck(func(ctx context.Context, courseID, assignmentID, accountID uint) bool {

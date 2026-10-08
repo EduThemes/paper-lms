@@ -51,8 +51,24 @@ describe('CommentThread', () => {
       group_comment: true,
     });
     expect(await screen.findByText('Nice work')).toBeInTheDocument();
-    // No edit/delete controls without a user id to address the comment.
-    expect(screen.queryByText('Delete')).not.toBeInTheDocument();
+    // The grader can still manage the comment, addressed by anonymous id.
+    expect(screen.getByText('Delete')).toBeInTheDocument();
+  });
+
+  it('publishes a draft by anonymous id under anonymous grading', async () => {
+    gradingApi.updateComment.mockResolvedValue({ id: 8, draft: false, comment: 'anon draft', author_id: 5 });
+    render(
+      <CommentThread
+        courseId="1"
+        assignmentId="2"
+        submissionKey={{ anonymousId: 'ab12c' }}
+        isTeacher
+        currentUserId={5}
+        initialComments={[{ id: 8, author_id: 5, comment: 'anon draft', draft: true, attachments: [] }]}
+      />,
+    );
+    fireEvent.click(screen.getByText('Publish'));
+    await waitFor(() => expect(gradingApi.updateComment).toHaveBeenCalledWith('1', '2', { anonymousId: 'ab12c' }, 8, { draft: false }));
   });
 
   it('publishes a draft', async () => {
@@ -68,6 +84,6 @@ describe('CommentThread', () => {
       />,
     );
     fireEvent.click(screen.getByText('Publish'));
-    await waitFor(() => expect(gradingApi.updateComment).toHaveBeenCalledWith('1', '2', 3, 7, { draft: false }));
+    await waitFor(() => expect(gradingApi.updateComment).toHaveBeenCalledWith('1', '2', { userId: 3 }, 7, { draft: false }));
   });
 });

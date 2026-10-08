@@ -109,6 +109,7 @@ func newGUEnv(t *testing.T) *guEnv {
 	prH.SetUserRepository(users)
 	asgH := handlers.NewAssignmentHandler(service.NewAssignmentService(assignmentRepo))
 	asgH.SetGradingUIDeps(enrollments, attachmentRepo)
+	asgH.SetGradesExistCheck(gu.GradesExist)
 	guH := handlers.NewGradingUIHandler(gu, subH, users, peerSvc, nil)
 	guH.SetRubricService(service.NewRubricService(postgres.NewRubricRepository(g), postgres.NewRubricAssociationRepository(g), postgres.NewRubricAssessmentRepository(g)))
 
@@ -141,6 +142,8 @@ func (e *guEnv) app(userID, accountID uint, enrollmentType string, isAdmin bool)
 	anon := a + "/anonymous_submissions/:anonymous_id"
 	app.Put(anon, e.guH.UpdateAnonymousSubmission)
 	app.Get(anon+"/comments", e.guH.ListAnonymousSubmissionComments)
+	app.Put(anon+"/comments/:comment_id", e.guH.UpdateAnonymousSubmissionComment)
+	app.Delete(anon+"/comments/:comment_id", e.guH.DeleteAnonymousSubmissionComment)
 	app.Get(anon+"/rubric_assessment", e.guH.GetAnonymousRubricAssessment)
 	app.Put(anon+"/rubric_assessment", e.guH.SaveAnonymousRubricAssessment)
 	app.Get("/courses/:course_id/grading_periods", e.guH.ListCourseGradingPeriods)

@@ -36,7 +36,6 @@ const CommentThread = ({
   const fileInputRef = useRef(null);
 
   const keyId = submissionKey?.anonymousId || submissionKey?.userId;
-  const canManageById = !!submissionKey?.userId; // edit/delete routes are by user id
 
   // initialComments seeds the thread (SpeedGrader already has them);
   // otherwise the thread loads its comments. The parent remounts the
@@ -96,7 +95,7 @@ const CommentThread = ({
 
   const saveEdit = async (comment) => {
     try {
-      const saved = await gradingApi.updateComment(courseId, assignmentId, submissionKey.userId, comment.id, { text_comment: editText });
+      const saved = await gradingApi.updateComment(courseId, assignmentId, submissionKey, comment.id, { text_comment: editText });
       update(comments.map((c) => (c.id === comment.id ? { ...c, ...saved } : c)));
       setEditingId(null);
     } catch (err) {
@@ -106,7 +105,7 @@ const CommentThread = ({
 
   const publishDraft = async (comment) => {
     try {
-      const saved = await gradingApi.updateComment(courseId, assignmentId, submissionKey.userId, comment.id, { draft: false });
+      const saved = await gradingApi.updateComment(courseId, assignmentId, submissionKey, comment.id, { draft: false });
       update(comments.map((c) => (c.id === comment.id ? { ...c, ...saved, draft: false } : c)));
     } catch (err) {
       setError(err.message);
@@ -116,7 +115,7 @@ const CommentThread = ({
   const remove = async (comment) => {
     if (!window.confirm('Delete this comment?')) return;
     try {
-      await gradingApi.deleteComment(courseId, assignmentId, submissionKey.userId, comment.id);
+      await gradingApi.deleteComment(courseId, assignmentId, submissionKey, comment.id);
       update(comments.filter((c) => c.id !== comment.id));
     } catch (err) {
       setError(err.message);
@@ -191,7 +190,7 @@ const CommentThread = ({
                   ))}
                 </div>
               )}
-              {isMine(comment) && canManageById && editingId !== comment.id && (
+              {isMine(comment) && keyId && editingId !== comment.id && (
                 <div className="mt-2 flex items-center gap-3 text-xs">
                   {comment.draft && (
                     <button type="button" onClick={() => publishDraft(comment)} className="text-brand-600 hover:underline">

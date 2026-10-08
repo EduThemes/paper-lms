@@ -23,6 +23,8 @@ func (r *Router) registerGradingUIRoutes(protected fiber.Router, admin, enrolled
 	protected.Put(anon, instructor, h.UpdateAnonymousSubmission)
 	protected.Get(anon+"/comments", instructor, h.ListAnonymousSubmissionComments)
 	protected.Post(anon+"/comments", instructor, h.CreateAnonymousSubmissionComment)
+	protected.Put(anon+"/comments/:comment_id", instructor, h.UpdateAnonymousSubmissionComment)
+	protected.Delete(anon+"/comments/:comment_id", instructor, h.DeleteAnonymousSubmissionComment)
 	protected.Post(anon+"/comment_files", append(upload, instructor, h.UploadAnonymousCommentFile)...)
 	protected.Get(anon+"/files/:file_id/download", instructor, h.DownloadAnonymousSubmissionFile)
 	protected.Get(anon+"/comments/:comment_id/files/:file_id/download", instructor, h.DownloadAnonymousCommentFile)

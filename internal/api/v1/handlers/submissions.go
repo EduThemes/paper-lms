@@ -975,14 +975,30 @@ func (h *SubmissionHandler) listCommentsFor(c *fiber.Ctx, assignment *models.Ass
 		}
 	}
 
+	// Moderated grading: while grader identities are hidden from this
+	// grader, other graders' comments carry only their grader label.
+	var graderLabels map[uint]string
+	isAdmin, _ := c.Locals("is_admin").(bool)
+	hideGraders := isStaff && !service.CanViewOtherGraderIdentities(assignment, callerID, isAdmin)
+	if hideGraders && h.gradingUI != nil {
+		graderLabels = h.gradingUI.GraderLabels(c.Context(), assignment.ID)
+	}
+
 	courseID, _ := c.ParamsInt("course_id")
 	pathKey := commentPathKey(submission, anonymize)
 	result := make([]fiber.Map, len(visible))
 	for i := range visible {
 		j := commentJSON(uint(courseID), submission.AssignmentID, pathKey, &visible[i])
-		if anonymize && visible[i].AuthorID == submission.UserID {
+		author := visible[i].AuthorID
+		if anonymize && author == submission.UserID {
 			j["author_id"] = nil
 			j["author_name"] = "Student"
+		} else if hideGraders && author != submission.UserID && author != callerID {
+			j["author_id"] = nil
+			j["author_name"] = "Grader"
+			if label := graderLabels[author]; label != "" {
+				j["author_name"] = label
+			}
 		} else if name, ok := authorNames[visible[i].AuthorID]; ok {
 			j["author_name"] = name
 		}

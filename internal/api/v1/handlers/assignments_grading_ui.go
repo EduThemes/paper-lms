@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -23,6 +24,16 @@ import (
 func (h *AssignmentHandler) SetGradingUIDeps(enrollmentRepo repository.EnrollmentRepository, attachmentRepo repository.AttachmentRepository) {
 	h.enrollmentRepo = enrollmentRepo
 	h.attachmentRepo = attachmentRepo
+}
+
+// gradesExistFunc reports whether an assignment has graded submissions
+// or provisional grades.
+type gradesExistFunc func(ctx context.Context, assignmentID uint) bool
+
+// SetGradesExistCheck enables Canvas's rule that moderated grading
+// cannot be switched on or off once work has been graded (nil-safe).
+func (h *AssignmentHandler) SetGradesExistCheck(fn func(ctx context.Context, assignmentID uint) bool) {
+	h.gradesExist = fn
 }
 
 // addGradingUIFields adds the settings to an assignment's JSON.
@@ -71,13 +82,18 @@ func (h *AssignmentHandler) applyGradingUISettings(c *fiber.Ctx, a *models.Assig
 	var body struct {
 		Assignment gradingUISettingsInput `json:"assignment"`
 	}
-	if err := json.Unmarshal(c.Body(), &body); err != nil {
-		return errors.New("invalid input")
-	}
 	var raw struct {
 		Assignment map[string]json.RawMessage `json:"assignment"`
 	}
-	_ = json.Unmarshal(c.Body(), &raw)
+	// The create/update handlers already parsed the body with BodyParser,
+	// which also accepts form-encoded input. Those settings are JSON-only;
+	// a body that is not a JSON object carries none of them (the Canvas
+	// defaults below still apply on create).
+	if err := json.Unmarshal(c.Body(), &body); err == nil {
+		_ = json.Unmarshal(c.Body(), &raw)
+	} else if strings.Contains(strings.ToLower(c.Get(fiber.HeaderContentType)), "json") {
+		return errors.New("invalid input")
+	}
 	isNull := func(key string) bool {
 		v, ok := raw.Assignment[key]
 		return ok && strings.TrimSpace(string(v)) == "null"
@@ -149,8 +165,25 @@ func (h *AssignmentHandler) applyGradingUISettings(c *fiber.Ctx, a *models.Assig
 	if in.ModeratedGrading != nil && *in.ModeratedGrading != wasModerated && a.GradesPublishedAt != nil {
 		return errors.New("moderated grading cannot be changed after grades have been published")
 	}
+	if in.ModeratedGrading != nil && *in.ModeratedGrading != wasModerated && !creating &&
+		h.gradesExist != nil && h.gradesExist(c.Context(), a.ID) {
+		// Canvas moderation_setting_ok?: switching after grading would
+		// either expose grades a moderator never selected or strand the
+		// provisional grades.
+		return errors.New("moderated grading cannot be changed once submissions have been graded")
+	}
 	if in.ModeratedGrading != nil {
 		a.ModeratedGrading = *in.ModeratedGrading
+	}
+	if a.ModeratedGrading && (creating || !wasModerated) {
+		switch {
+		case a.GradingType == "not_graded":
+			return errors.New("moderated grading cannot be enabled for ungraded assignments")
+		case a.IsGroupAssignment():
+			return errors.New("moderated grading cannot be enabled for group assignments")
+		case a.PeerReviewsEnabled:
+			return errors.New("moderated grading cannot be enabled for peer reviewed assignments")
+		}
 	}
 	if in.GraderCount != nil {
 		if *in.GraderCount < 1 || *in.GraderCount > 10 {

@@ -233,6 +233,23 @@ func (h *GradingUIHandler) UpdateSubmissionComment(c *fiber.Ctx) error {
 	if wrote {
 		return nil
 	}
+	return h.updateComment(c, courseID, assignment, sub, false)
+}
+
+// UpdateAnonymousSubmissionComment is UpdateSubmissionComment by
+// anonymous id, so a grader can edit a comment or publish a draft while
+// the assignment anonymizes students (the route is instructor-gated).
+//
+//	PUT /courses/:course_id/assignments/:assignment_id/anonymous_submissions/:anonymous_id/comments/:comment_id
+func (h *GradingUIHandler) UpdateAnonymousSubmissionComment(c *fiber.Ctx) error {
+	courseID, assignment, sub, wrote := h.anonymousSubmission(c)
+	if wrote {
+		return nil
+	}
+	return h.updateComment(c, courseID, assignment, sub, true)
+}
+
+func (h *GradingUIHandler) updateComment(c *fiber.Ctx, courseID uint, assignment *models.Assignment, sub *models.Submission, anonymize bool) error {
 	cm, wrote := h.loadComment(c, sub, assignment)
 	if wrote {
 		return nil
@@ -253,16 +270,27 @@ func (h *GradingUIHandler) UpdateSubmissionComment(c *fiber.Ctx) error {
 	if input.Comment.TextComment != nil && strings.TrimSpace(*input.Comment.TextComment) == "" && (cm.Attachments == nil || *cm.Attachments == "" || *cm.Attachments == "[]") {
 		return responses.BadRequest(c, "Comment text is required")
 	}
+	// A draft can be published, but a sent comment (which the student
+	// may already have read) never goes back to being a draft. This also
+	// keeps a student from hiding a comment from the graders: drafts are
+	// a grader tool (Canvas), and comment creation already refuses them
+	// to students.
+	if input.Comment.Draft != nil && *input.Comment.Draft && !cm.Draft {
+		return responses.BadRequest(c, "A sent comment cannot be turned back into a draft")
+	}
 	wasDraft := cm.Draft
 	if err := h.svc.UpdateComment(c.Context(), cm, input.Comment.TextComment, input.Comment.Draft); err != nil {
 		return responses.InternalError(c, "Could not update comment")
 	}
 	// Publishing a grader's draft on an automatically-posted assignment
-	// posts the submission, as sending the comment directly would.
+	// posts the submission (every member's, for a group comment), as
+	// sending the comment directly would.
 	if wasDraft && !cm.Draft && callerIsCourseStaff(c) && !assignment.UsesManualPostPolicy() && assignment.GradesPublished() {
-		_ = h.subs.submissionService.MarkPosted(c.Context(), sub)
+		for _, target := range h.svc.CommentCopySubmissions(c.Context(), cm, sub) {
+			_ = h.subs.submissionService.MarkPosted(c.Context(), target)
+		}
 	}
-	return c.JSON(commentJSON(courseID, assignment.ID, commentPathKey(sub, false), cm))
+	return c.JSON(commentJSON(courseID, assignment.ID, commentPathKey(sub, anonymize), cm))
 }
 
 // DeleteSubmissionComment removes a comment: its author, or course staff.
@@ -273,6 +301,22 @@ func (h *GradingUIHandler) DeleteSubmissionComment(c *fiber.Ctx) error {
 	if wrote {
 		return nil
 	}
+	return h.deleteComment(c, assignment, sub)
+}
+
+// DeleteAnonymousSubmissionComment is DeleteSubmissionComment by
+// anonymous id (instructor-gated route).
+//
+//	DELETE /courses/:course_id/assignments/:assignment_id/anonymous_submissions/:anonymous_id/comments/:comment_id
+func (h *GradingUIHandler) DeleteAnonymousSubmissionComment(c *fiber.Ctx) error {
+	_, assignment, sub, wrote := h.anonymousSubmission(c)
+	if wrote {
+		return nil
+	}
+	return h.deleteComment(c, assignment, sub)
+}
+
+func (h *GradingUIHandler) deleteComment(c *fiber.Ctx, assignment *models.Assignment, sub *models.Submission) error {
 	cm, wrote := h.loadComment(c, sub, assignment)
 	if wrote {
 		return nil
@@ -607,7 +651,7 @@ func (h *GradingUIHandler) GetModeration(c *fiber.Ctx) error {
 	if anonymizeStudents {
 		service.SortForAnonymity(assignment.ID, students)
 	}
-	hideGraderNames := !isAdmin && !assignment.GraderNamesVisibleToFinalGrader
+	hideGraderNames := !service.CanViewOtherGraderIdentities(assignment, callerID, isAdmin)
 	graderJSON := make([]fiber.Map, 0, len(graders))
 	graderName := map[uint]string{}
 	for _, g := range graders {

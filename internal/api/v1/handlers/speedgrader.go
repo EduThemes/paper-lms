@@ -103,10 +103,15 @@ func versionJSON(v *models.SubmissionVersion, courseID uint, anonymousID string)
 	if v.Attachments != nil && *v.Attachments != "" {
 		_ = json.Unmarshal([]byte(*v.Attachments), &atts)
 	}
-	if anonymousID != "" {
-		for _, a := range atts {
-			if id, ok := a["id"].(float64); ok {
+	// The URL stored with the attempt is the current-submission route,
+	// which only serves files of the latest attempt; earlier attempts'
+	// files go through the history (or anonymous) route.
+	for _, a := range atts {
+		if id, ok := a["id"].(float64); ok {
+			if anonymousID != "" {
 				a["url"] = anonymousFileURL(courseID, v.AssignmentID, anonymousID, uint(id))
+			} else {
+				a["url"] = fmt.Sprintf("/api/v1/courses/%d/assignments/%d/submissions/%d/history/files/%d/download", courseID, v.AssignmentID, v.UserID, uint(id))
 			}
 		}
 	}
@@ -183,6 +188,7 @@ func (h *SpeedGraderHandler) GetSpeedGraderData(c *fiber.Ctx) error {
 	var provisional map[uint][]models.ProvisionalGrade
 	var selections map[uint]*uint
 	graderLabels := map[uint]string{}
+	hideGraderNames := false // other graders shown by label (moderated grading)
 	var statuses []models.CustomGradeStatus
 	if h.gradingUI != nil {
 		if anonymous || assignment.ModeratedGrading {
@@ -202,8 +208,7 @@ func (h *SpeedGraderHandler) GetSpeedGraderData(c *fiber.Ctx) error {
 			provisional, _ = h.gradingUI.ProvisionalGradesForStudents(c.Context(), subIDs)
 			selections, _ = h.gradingUI.ModerationSelections(c.Context(), assignment.ID)
 			graders, _ := h.gradingUI.ModerationGraders(c.Context(), assignment.ID)
-			hideGraderNames := (assignment.GradersAnonymousToGraders && !isModerator) ||
-				(isModerator && !isAdmin && !assignment.GraderNamesVisibleToFinalGrader)
+			hideGraderNames = !service.CanViewOtherGraderIdentities(assignment, callerID, isAdmin)
 			for _, g := range graders {
 				if hideGraderNames && g.UserID != callerID {
 					graderLabels[g.UserID] = "Grader " + strings.ToUpper(g.AnonymousID)
@@ -251,6 +256,17 @@ func (h *SpeedGraderHandler) GetSpeedGraderData(c *fiber.Ctx) error {
 				authorID = nil
 				if comment.AuthorID == student.UserID {
 					authorName = student.UserName
+				}
+			}
+			// Moderated grading: another grader's comment carries only
+			// their grader label while identities are hidden from the
+			// caller (graders_anonymous_to_graders /
+			// grader_names_visible_to_final_grader).
+			if hideGraderNames && !studentIDs[comment.AuthorID] && comment.AuthorID != callerID {
+				authorID = nil
+				authorName = graderLabels[comment.AuthorID]
+				if authorName == "" {
+					authorName = "Grader"
 				}
 			}
 			pathKey := fmt.Sprintf("submissions/%d", student.UserID)
@@ -391,6 +407,7 @@ func (h *SpeedGraderHandler) GetStudentSubmission(c *fiber.Ctx) error {
 	callerID, _ := getUserID(c)
 	isAdmin, _ := c.Locals("is_admin").(bool)
 	isModerator := service.IsModerator(data.Assignment, callerID, isAdmin)
+	hideGraders := !service.CanViewOtherGraderIdentities(data.Assignment, callerID, isAdmin)
 	commentsJSON := make([]fiber.Map, 0, len(data.Comments))
 	for i := range data.Comments {
 		comment := &data.Comments[i]
@@ -399,6 +416,11 @@ func (h *SpeedGraderHandler) GetStudentSubmission(c *fiber.Ctx) error {
 		}
 		var authorID interface{} = comment.AuthorID
 		if anonymous && comment.AuthorID == uint(userID) {
+			authorID = nil
+		}
+		// Moderated grading: another grader stays unnamed while grader
+		// identities are hidden from the caller.
+		if hideGraders && comment.AuthorID != uint(userID) && comment.AuthorID != callerID {
 			authorID = nil
 		}
 		cj := commentJSON(uint(courseID), uint(assignmentID), fmt.Sprintf("submissions/%d", userID), comment)

@@ -48,12 +48,13 @@ export const gradingApi = {
   createComment: (courseId, assignmentId, key, comment) =>
     data(req(`${base(courseId, assignmentId)}/${submissionKeyPath(key)}/comments`, json('POST', { comment }))),
 
-  // Comment edit / delete are by user id (students and graders).
-  updateComment: (courseId, assignmentId, userId, commentId, comment) =>
-    data(req(`${base(courseId, assignmentId)}/submissions/${userId}/comments/${commentId}`, json('PUT', { comment }))),
+  // Comment edit / delete / publish-draft, by user id or (graders, under
+  // anonymous grading) by anonymous id.
+  updateComment: (courseId, assignmentId, key, commentId, comment) =>
+    data(req(`${base(courseId, assignmentId)}/${submissionKeyPath(key)}/comments/${commentId}`, json('PUT', { comment }))),
 
-  deleteComment: (courseId, assignmentId, userId, commentId) =>
-    data(req(`${base(courseId, assignmentId)}/submissions/${userId}/comments/${commentId}`, { method: 'DELETE' })),
+  deleteComment: (courseId, assignmentId, key, commentId) =>
+    data(req(`${base(courseId, assignmentId)}/${submissionKeyPath(key)}/comments/${commentId}`, { method: 'DELETE' })),
 
   uploadCommentFile: (courseId, assignmentId, key, file) =>
     uploadMultipart(`${base(courseId, assignmentId)}/${submissionKeyPath(key)}/comment_files`, file),

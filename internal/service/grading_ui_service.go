@@ -236,6 +236,43 @@ func IsModerator(a *models.Assignment, userID uint, isAdmin bool) bool {
 	return a.FinalGraderID != nil && *a.FinalGraderID == userID
 }
 
+// CanViewOtherGraderIdentities mirrors Canvas
+// Assignment#can_view_other_grader_identities? for a course grader:
+// until a moderated assignment's grades are published, the final grader
+// sees the other graders' names only when grader_names_visible_to_final_grader
+// is on; an administrator always does; any other grader does only when
+// grader comments are visible and graders are not anonymous to each
+// other. Outside moderated grading identities are never hidden.
+func CanViewOtherGraderIdentities(a *models.Assignment, userID uint, isAdmin bool) bool {
+	if a == nil || !a.ModeratedGrading || a.GradesPublished() {
+		return true
+	}
+	if a.FinalGraderID != nil && *a.FinalGraderID == userID {
+		return a.GraderNamesVisibleToFinalGrader
+	}
+	if isAdmin {
+		return true
+	}
+	if !a.GraderCommentsVisibleToGraders {
+		return false
+	}
+	return !a.GradersAnonymousToGraders
+}
+
+// GraderLabels maps each grader of a moderated assignment to the label
+// another grader sees when identities are hidden ("Grader AB12C").
+func (s *GradingUIService) GraderLabels(ctx context.Context, assignmentID uint) map[uint]string {
+	out := map[uint]string{}
+	graders, err := s.repo.ListModerationGraders(ctx, assignmentID)
+	if err != nil {
+		return out
+	}
+	for _, g := range graders {
+		out[g.UserID] = "Grader " + strings.ToUpper(g.AnonymousID)
+	}
+	return out
+}
+
 // ensureModerationGrader registers graderID as a grader of the moderated
 // assignment, taking one of the grader_count slots unless the grader is
 // the moderator (Canvas ensure_grader_can_adjudicate).
@@ -444,6 +481,35 @@ func (s *GradingUIService) SelectProvisionalGrade(ctx context.Context, a *models
 	}
 	id := pg.ID
 	return s.selectGrade(ctx, a.ID, studentID, &id)
+}
+
+// GradesExist mirrors Canvas graded_submissions_exist?: some student of
+// the assignment has a grade (or is excused), or a grader has entered a
+// provisional grade. The caller has already loaded the assignment under
+// its tenant. Errors count as "graded" so the moderation switch fails
+// closed.
+func (s *GradingUIService) GradesExist(ctx context.Context, assignmentID uint) bool {
+	subs, err := s.repo.ListSubmissionsByAssignment(ctx, assignmentID)
+	if err != nil {
+		return true
+	}
+	ids := make([]uint, 0, len(subs))
+	for _, sub := range subs {
+		if sub.Score != nil || sub.Grade != nil || sub.Excused || sub.WorkflowState == models.SubmissionGraded {
+			return true
+		}
+		ids = append(ids, sub.ID)
+	}
+	pgs, err := s.repo.ListProvisionalGradesBySubmissions(ctx, ids)
+	if err != nil {
+		return true
+	}
+	for _, pg := range pgs {
+		if pg.Score != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // PublishResult reports what PublishGrades did.
@@ -744,6 +810,31 @@ func (s *GradingUIService) UpdateComment(ctx context.Context, c *models.Submissi
 		}
 	}
 	return nil
+}
+
+// CommentCopySubmissions returns the submissions carrying comment c: sub
+// alone, or, for a group comment, every member's submission that holds a
+// copy (sub first).
+func (s *GradingUIService) CommentCopySubmissions(ctx context.Context, c *models.SubmissionComment, sub *models.Submission) []*models.Submission {
+	out := []*models.Submission{sub}
+	if c == nil || c.GroupCommentID == nil || *c.GroupCommentID == "" {
+		return out
+	}
+	copies, err := s.repo.ListSubmissionCommentsByGroupCommentID(ctx, *c.GroupCommentID)
+	if err != nil {
+		return out
+	}
+	for _, cp := range copies {
+		if cp.SubmissionID == sub.ID {
+			continue
+		}
+		// The copies were written by this lane for members of the same
+		// assignment; the id comes from our own row, not the request.
+		if other, err := s.submissionRepo.FindByID(ctx, cp.SubmissionID, 0); err == nil && other != nil && other.AssignmentID == sub.AssignmentID {
+			out = append(out, other)
+		}
+	}
+	return out
 }
 
 // DeleteComment removes a comment (every copy of a group comment).

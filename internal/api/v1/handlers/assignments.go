@@ -19,6 +19,9 @@ type AssignmentHandler struct {
 	// Optional (SetGradingUIDeps): validate final grader / annotatable doc.
 	enrollmentRepo repository.EnrollmentRepository
 	attachmentRepo repository.AttachmentRepository
+	// gradesExist (SetGradesExistCheck) reports graded or provisionally
+	// graded work, which freezes the moderated-grading switch.
+	gradesExist gradesExistFunc
 }
 
 func NewAssignmentHandler(assignmentService *service.AssignmentService) *AssignmentHandler {
