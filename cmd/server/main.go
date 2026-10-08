@@ -351,7 +351,7 @@ func main() {
 	// Initialize services
 	userService := service.NewUserService(userRepo)
 	courseService := service.NewCourseService(courseRepo, enrollmentRepo, sectionRepo)
-	enrollmentService := service.NewEnrollmentService(enrollmentRepo)
+	enrollmentService := service.NewEnrollmentService(enrollmentRepo).SetTenantRepos(userRepo, courseRepo, sectionRepo)
 	contentViewService := service.NewContentViewService(contentViewRepo)
 	moduleService := service.NewModuleService(moduleRepo, moduleItemRepo, service.WithPrerequisiteRepo(modulePrerequisiteRepo))
 	pageService := service.NewPageService(pageRepo)

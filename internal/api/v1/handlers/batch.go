@@ -211,11 +211,21 @@ func (h *BatchHandler) BulkEnrollUsers(c *fiber.Ctx) error {
 	if len(input.Enrollments) == 0 {
 		return responses.BadRequest(c, "enrollments array is required")
 	}
+	for _, e := range input.Enrollments {
+		t := e.Type
+		if t == "" {
+			t = "StudentEnrollment"
+		}
+		if !canAddEnrollmentType(c, t) {
+			return responses.Forbidden(c, "You are not allowed to add this enrollment type")
+		}
+	}
 
 	result, err := h.batchService.BulkEnrollUsers(
 		c.Context(),
 		uint(courseID),
 		input.Enrollments,
+		enrollmentCourseScope(c),
 	)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())

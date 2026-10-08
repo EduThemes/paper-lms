@@ -18,6 +18,13 @@ type EnrollmentCreatedCallback func(ctx context.Context, enrollmentID uint)
 type EnrollmentService struct {
 	enrollmentRepo repository.EnrollmentRepository
 
+	// Tenant guards for Create (B068): the enrolled user must belong to
+	// the course's account and any section must belong to the course.
+	// Wired via SetTenantRepos; Create fails closed when they are unset.
+	userRepo    repository.UserRepository
+	courseRepo  repository.CourseRepository
+	sectionRepo repository.SectionRepository
+
 	// onCreatedCallbacks fire (in goroutines) after a successful Create.
 	// Registered via OnCreated; never invoked in tests unless explicitly
 	// wired.
@@ -52,9 +59,54 @@ var validEnrollmentTypes = map[string]bool{
 	"DesignerEnrollment": true,
 }
 
+// SetTenantRepos wires the repositories Create uses to keep an
+// enrollment inside one tenant. Returns the service for chaining.
+func (s *EnrollmentService) SetTenantRepos(userRepo repository.UserRepository, courseRepo repository.CourseRepository, sectionRepo repository.SectionRepository) *EnrollmentService {
+	s.userRepo = userRepo
+	s.courseRepo = courseRepo
+	s.sectionRepo = sectionRepo
+	return s
+}
+
+// ErrEnrollmentUserNotFound / ErrEnrollmentSectionNotFound are returned
+// when the target user is not in the course's tenant, or the section is
+// not in the course. Both are surfaced as a generic 404/400 so a teacher
+// can't probe other tenants' user ids.
+var (
+	ErrEnrollmentUserNotFound    = errors.New("user not found")
+	ErrEnrollmentSectionNotFound = errors.New("course section not found")
+)
+
+// validateTarget ties the enrollment's user and section to the course.
+// accountID is the caller's tenant, used to scope the course lookup
+// (0 = already validated upstream, e.g. a super_admin request).
+func (s *EnrollmentService) validateTarget(ctx context.Context, enrollment *models.Enrollment, accountID uint) error {
+	if s.userRepo == nil || s.courseRepo == nil || s.sectionRepo == nil {
+		return errors.New("enrollment tenant guards not configured")
+	}
+	course, err := s.courseRepo.FindByID(ctx, enrollment.CourseID, accountID)
+	if err != nil || course == nil {
+		return errors.New("course not found")
+	}
+	user, err := s.userRepo.FindByID(ctx, enrollment.UserID, course.AccountID)
+	if err != nil || user == nil || user.AccountID != course.AccountID {
+		return ErrEnrollmentUserNotFound
+	}
+	if enrollment.CourseSectionID != nil {
+		section, err := s.sectionRepo.FindByID(ctx, *enrollment.CourseSectionID)
+		if err != nil || section == nil || section.CourseID != enrollment.CourseID {
+			return ErrEnrollmentSectionNotFound
+		}
+	}
+	return nil
+}
+
 func (s *EnrollmentService) Create(ctx context.Context, enrollment *models.Enrollment, accountID uint) error {
 	if !validEnrollmentTypes[enrollment.Type] {
 		return errors.New("invalid enrollment type")
+	}
+	if err := s.validateTarget(ctx, enrollment, accountID); err != nil {
+		return err
 	}
 	enrollment.Role = enrollment.Type
 	if enrollment.WorkflowState == "" {

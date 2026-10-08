@@ -15,7 +15,7 @@ import (
 
 func TestEnrollmentCreate_Valid(t *testing.T) {
 	mockRepo := new(mocks.MockEnrollmentRepository)
-	svc := service.NewEnrollmentService(mockRepo)
+	svc := newGuardedEnrollmentService(mockRepo)
 	ctx := context.Background()
 
 	enrollment := &models.Enrollment{
@@ -38,7 +38,7 @@ func TestEnrollmentCreate_Valid(t *testing.T) {
 
 func TestEnrollmentCreate_InvalidType(t *testing.T) {
 	mockRepo := new(mocks.MockEnrollmentRepository)
-	svc := service.NewEnrollmentService(mockRepo)
+	svc := newGuardedEnrollmentService(mockRepo)
 	ctx := context.Background()
 
 	enrollment := &models.Enrollment{
@@ -55,7 +55,7 @@ func TestEnrollmentCreate_InvalidType(t *testing.T) {
 
 func TestEnrollmentCreate_DefaultState(t *testing.T) {
 	mockRepo := new(mocks.MockEnrollmentRepository)
-	svc := service.NewEnrollmentService(mockRepo)
+	svc := newGuardedEnrollmentService(mockRepo)
 	ctx := context.Background()
 
 	enrollment := &models.Enrollment{
@@ -77,7 +77,7 @@ func TestEnrollmentCreate_DefaultState(t *testing.T) {
 
 func TestEnrollmentCreate_Duplicate(t *testing.T) {
 	mockRepo := new(mocks.MockEnrollmentRepository)
-	svc := service.NewEnrollmentService(mockRepo)
+	svc := newGuardedEnrollmentService(mockRepo)
 	ctx := context.Background()
 
 	existing := &models.Enrollment{
@@ -114,7 +114,7 @@ func TestEnrollmentCreate_AllTypes(t *testing.T) {
 	for _, enrollType := range validTypes {
 		t.Run(enrollType, func(t *testing.T) {
 			mockRepo := new(mocks.MockEnrollmentRepository)
-			svc := service.NewEnrollmentService(mockRepo)
+			svc := newGuardedEnrollmentService(mockRepo)
 			ctx := context.Background()
 
 			enrollment := &models.Enrollment{
@@ -139,7 +139,7 @@ func TestEnrollmentCreate_AllTypes(t *testing.T) {
 
 func TestEnrollmentCreate_PreservesExistingState(t *testing.T) {
 	mockRepo := new(mocks.MockEnrollmentRepository)
-	svc := service.NewEnrollmentService(mockRepo)
+	svc := newGuardedEnrollmentService(mockRepo)
 	ctx := context.Background()
 
 	enrollment := &models.Enrollment{
@@ -161,7 +161,7 @@ func TestEnrollmentCreate_PreservesExistingState(t *testing.T) {
 
 func TestEnrollmentCreate_RepoError(t *testing.T) {
 	mockRepo := new(mocks.MockEnrollmentRepository)
-	svc := service.NewEnrollmentService(mockRepo)
+	svc := newGuardedEnrollmentService(mockRepo)
 	ctx := context.Background()
 
 	enrollment := &models.Enrollment{
@@ -181,7 +181,7 @@ func TestEnrollmentCreate_RepoError(t *testing.T) {
 
 func TestEnrollmentListByCourse(t *testing.T) {
 	mockRepo := new(mocks.MockEnrollmentRepository)
-	svc := service.NewEnrollmentService(mockRepo)
+	svc := newGuardedEnrollmentService(mockRepo)
 	ctx := context.Background()
 
 	params := repository.PaginationParams{Page: 1, PerPage: 10}
@@ -210,7 +210,7 @@ func TestEnrollmentListByCourse(t *testing.T) {
 
 func TestEnrollmentListByUser(t *testing.T) {
 	mockRepo := new(mocks.MockEnrollmentRepository)
-	svc := service.NewEnrollmentService(mockRepo)
+	svc := newGuardedEnrollmentService(mockRepo)
 	ctx := context.Background()
 
 	expectedEnrollments := []models.Enrollment{
@@ -231,7 +231,7 @@ func TestEnrollmentListByUser(t *testing.T) {
 
 func TestEnrollmentGetUserRole(t *testing.T) {
 	mockRepo := new(mocks.MockEnrollmentRepository)
-	svc := service.NewEnrollmentService(mockRepo)
+	svc := newGuardedEnrollmentService(mockRepo)
 	ctx := context.Background()
 
 	enrollment := &models.Enrollment{
@@ -253,7 +253,7 @@ func TestEnrollmentGetUserRole(t *testing.T) {
 
 func TestEnrollmentGetUserRole_NotFound(t *testing.T) {
 	mockRepo := new(mocks.MockEnrollmentRepository)
-	svc := service.NewEnrollmentService(mockRepo)
+	svc := newGuardedEnrollmentService(mockRepo)
 	ctx := context.Background()
 
 	mockRepo.On("FindByUserAndCourse", ctx, uint(10), uint(5), uint(0)).Return(nil, errors.New("not found"))
@@ -263,4 +263,54 @@ func TestEnrollmentGetUserRole_NotFound(t *testing.T) {
 	assert.EqualError(t, err, "not found")
 	assert.Equal(t, "", role)
 	mockRepo.AssertExpectations(t)
+}
+
+// newGuardedEnrollmentService wires the tenant-guard repos with a course
+// and user that both live in account 1, so Create's target validation
+// passes for the generic tests above.
+func newGuardedEnrollmentService(enrollmentRepo *mocks.MockEnrollmentRepository) *service.EnrollmentService {
+	userRepo := new(mocks.MockUserRepository)
+	courseRepo := new(mocks.MockCourseRepository)
+	sectionRepo := new(mocks.MockSectionRepository)
+	courseRepo.On("FindByID", mock.Anything, mock.Anything, mock.Anything).
+		Return(&models.Course{ID: 1, AccountID: 1}, nil).Maybe()
+	userRepo.On("FindByID", mock.Anything, mock.Anything, uint(1)).
+		Return(&models.User{ID: 1, AccountID: 1}, nil).Maybe()
+	return service.NewEnrollmentService(enrollmentRepo).SetTenantRepos(userRepo, courseRepo, sectionRepo)
+}
+
+// B068: a teacher must not be able to enroll a user from another tenant
+// (and then read their PII off the roster), nor attach a section from a
+// different course. Nothing is written in either case.
+func TestEnrollmentCreate_RefusesCrossTenantUserAndForeignSection(t *testing.T) {
+	ctx := context.Background()
+	enrollmentRepo := new(mocks.MockEnrollmentRepository)
+	userRepo := new(mocks.MockUserRepository)
+	courseRepo := new(mocks.MockCourseRepository)
+	sectionRepo := new(mocks.MockSectionRepository)
+	svc := service.NewEnrollmentService(enrollmentRepo).SetTenantRepos(userRepo, courseRepo, sectionRepo)
+
+	courseRepo.On("FindByID", ctx, uint(7), uint(1)).Return(&models.Course{ID: 7, AccountID: 1}, nil)
+	// User 99 lives in tenant 2 — the tenant-scoped lookup misses.
+	userRepo.On("FindByID", ctx, uint(99), uint(1)).Return(nil, errors.New("record not found"))
+	userRepo.On("FindByID", ctx, uint(5), uint(1)).Return(&models.User{ID: 5, AccountID: 1}, nil)
+	// Section 3 belongs to course 8, not 7.
+	sectionRepo.On("FindByID", ctx, uint(3)).Return(&models.CourseSection{ID: 3, CourseID: 8}, nil)
+
+	err := svc.Create(ctx, &models.Enrollment{UserID: 99, CourseID: 7, Type: "StudentEnrollment"}, 1)
+	assert.ErrorIs(t, err, service.ErrEnrollmentUserNotFound)
+
+	sec := uint(3)
+	err = svc.Create(ctx, &models.Enrollment{UserID: 5, CourseID: 7, Type: "StudentEnrollment", CourseSectionID: &sec}, 1)
+	assert.ErrorIs(t, err, service.ErrEnrollmentSectionNotFound)
+
+	enrollmentRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+}
+
+func TestEnrollmentCreate_FailsClosedWithoutGuards(t *testing.T) {
+	enrollmentRepo := new(mocks.MockEnrollmentRepository)
+	svc := service.NewEnrollmentService(enrollmentRepo)
+	err := svc.Create(context.Background(), &models.Enrollment{UserID: 1, CourseID: 1, Type: "StudentEnrollment"}, 1)
+	assert.Error(t, err)
+	enrollmentRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
 }
