@@ -37,6 +37,8 @@ const purifyConfig = {
     'a', 'b', 'i', 'u', 's', 'em', 'strong', 'mark', 'small', 'q', 'cite',
     'abbr', 'time', 'kbd', 'samp', 'var', 'code', 'sub', 'sup', 'del', 'ins',
     'bdi', 'bdo', 'wbr', 'ruby', 'rt', 'rp', 'dfn',
+    // Legacy Canvas/TinyMCE colour + size markup (the server allows it too)
+    'font',
     // Lists
     'ul', 'ol', 'li', 'dl', 'dt', 'dd',
     // Tables
@@ -67,8 +69,10 @@ const purifyConfig = {
     'target', 'rel', 'style', 'width', 'height', 'role', 'aria-label',
     'aria-hidden', 'aria-describedby', 'aria-labelledby', 'tabindex',
     'contenteditable',
-    // Tables
-    'colspan', 'rowspan', 'scope', 'headers', 'span',
+    // Tables (colwidth carries resized column widths for the editor)
+    'colspan', 'rowspan', 'scope', 'headers', 'span', 'colwidth',
+    // Ordered lists, legacy <font>
+    'start', 'reversed', 'color', 'face',
     // Anchors / links
     'download', 'hreflang', 'type', 'referrerpolicy',
     // Images / picture / video / audio / iframe

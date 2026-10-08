@@ -69,6 +69,25 @@ var allowedStyleProperties = []string{
 	"direction",
 }
 
+// ariaAttributes are the WAI-ARIA states and properties allowed on every
+// element (the set Canvas's canvas_sanitize allows).
+var ariaAttributes = []string{
+	"aria-atomic", "aria-autocomplete", "aria-busy", "aria-checked",
+	"aria-colcount", "aria-colindex", "aria-colspan", "aria-controls",
+	"aria-current", "aria-describedby", "aria-description", "aria-details",
+	"aria-disabled", "aria-expanded", "aria-flowto", "aria-haspopup",
+	"aria-hidden", "aria-invalid", "aria-label", "aria-labelledby",
+	"aria-level", "aria-live", "aria-multiline", "aria-multiselectable",
+	"aria-orientation", "aria-owns", "aria-posinset", "aria-pressed",
+	"aria-readonly", "aria-relevant", "aria-required", "aria-roledescription",
+	"aria-rowcount", "aria-rowindex", "aria-rowspan", "aria-selected",
+	"aria-setsize", "aria-sort", "aria-valuemax", "aria-valuemin",
+	"aria-valuenow", "aria-valuetext",
+}
+
+// ariaRoleValue matches one or more space-separated ARIA role tokens.
+var ariaRoleValue = regexp.MustCompile(`^[a-z]+( [a-z]+)*$`)
+
 var (
 	policy     *bluemonday.Policy
 	policyOnce sync.Once
@@ -99,6 +118,31 @@ func buildPolicy() *bluemonday.Policy {
 	// Link targets. bluemonday adds rel="noopener" automatically whenever
 	// target="_blank" is present.
 	p.AllowAttrs("target").Matching(regexp.MustCompile(`^_blank$`)).OnElements("a")
+
+	// tel: links (phone numbers in contact/syllabus pages). Canvas allows
+	// them; UGCPolicy's standard URL set is only http/https/mailto (G014).
+	p.AllowURLSchemes("tel")
+
+	// Accessibility markup (G013). Canvas allows role plus the aria-* state
+	// and property attributes on every element; without them imported and
+	// editor-authored content lost aria-label / aria-hidden / role
+	// (including role="presentation" on decorative images) on save. Values
+	// are attribute-escaped by bluemonday; role is limited to ARIA role
+	// tokens.
+	p.AllowAttrs("role").Matching(ariaRoleValue).Globally()
+	p.AllowAttrs(ariaAttributes...).Globally()
+
+	// Legacy and editor table/list markup: resized column widths (colwidth
+	// on cells, width on col), ordered-list start numbers, and the <font>
+	// element old Canvas/TinyMCE content still carries (G000, G015).
+	p.AllowAttrs("colwidth").Matching(regexp.MustCompile(`^[0-9]{1,4}(,[0-9]{1,4})*$`)).OnElements("td", "th")
+	p.AllowAttrs("width").Matching(regexp.MustCompile(`^[0-9]{1,4}(px|%)?$`)).OnElements("col", "colgroup")
+	p.AllowAttrs("start").Matching(regexp.MustCompile(`^-?[0-9]{1,6}$`)).OnElements("ol")
+	p.AllowAttrs("reversed").Matching(regexp.MustCompile(`^(|reversed)$`)).OnElements("ol")
+	p.AllowElements("font")
+	p.AllowAttrs("color").Matching(regexp.MustCompile(`^#?[a-zA-Z0-9]{1,20}$`)).OnElements("font")
+	p.AllowAttrs("size").Matching(regexp.MustCompile(`^[+-]?[1-7]$`)).OnElements("font")
+	p.AllowAttrs("face").Matching(regexp.MustCompile(`^[a-zA-Z0-9 ,'"-]{1,100}$`)).OnElements("font")
 
 	// HTML5 media (Canvas media embeds, uploaded video/audio files). src values
 	// go through the policy's URL-scheme check (http/https/mailto + relative).
