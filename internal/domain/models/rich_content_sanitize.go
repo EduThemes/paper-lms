@@ -50,21 +50,30 @@ func (q *Quiz) BeforeSave(_ *gorm.DB) error {
 	return nil
 }
 
-// BeforeSave sanitizes the question text.
+// BeforeSave sanitizes the question text and its feedback (the feedback
+// is edited with the rich content editor, G010).
 func (q *QuizQuestion) BeforeSave(_ *gorm.DB) error {
 	q.QuestionText = htmlsanitize.Sanitize(q.QuestionText)
+	q.CorrectComments = htmlsanitize.Sanitize(q.CorrectComments)
+	q.IncorrectComments = htmlsanitize.Sanitize(q.IncorrectComments)
+	q.NeutralComments = htmlsanitize.Sanitize(q.NeutralComments)
 	return nil
 }
 
-// BeforeSave sanitizes the question-bank entry text.
+// BeforeSave sanitizes the question-bank entry text and feedback.
 func (e *QuestionBankEntry) BeforeSave(_ *gorm.DB) error {
 	e.QuestionText = htmlsanitize.Sanitize(e.QuestionText)
+	e.Feedback = htmlsanitize.Sanitize(e.Feedback)
 	return nil
 }
 
-// BeforeSave sanitizes the item-bank item text.
+// BeforeSave sanitizes the item-bank item text and feedback (copied onto
+// quiz questions, whose feedback is rich content).
 func (i *QuizItemBankItem) BeforeSave(_ *gorm.DB) error {
 	i.QuestionText = htmlsanitize.Sanitize(i.QuestionText)
+	i.CorrectComments = htmlsanitize.Sanitize(i.CorrectComments)
+	i.IncorrectComments = htmlsanitize.Sanitize(i.IncorrectComments)
+	i.NeutralComments = htmlsanitize.Sanitize(i.NeutralComments)
 	return nil
 }
 
