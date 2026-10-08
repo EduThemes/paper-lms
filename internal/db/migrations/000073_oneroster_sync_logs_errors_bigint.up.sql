@@ -11,26 +11,42 @@
 -- non-numeric text becomes 0 (the details were never readable through
 -- the API, which serializes the int field).
 
-BEGIN;
+-- Idempotent: a database whose column AutoMigrate already turned into
+-- bigint (dev/staging with AUTO_MIGRATE=true) is left alone — applying the
+-- text regex operator to a bigint aborted the migration and left the chain
+-- dirty. The cast also goes through text and caps the digit count, so an
+-- oversized legacy number becomes 0 instead of failing the cast.
 
-ALTER TABLE one_roster_sync_logs
-    ALTER COLUMN errors DROP DEFAULT;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+          FROM information_schema.columns
+         WHERE table_schema = current_schema()
+           AND table_name = 'one_roster_sync_logs'
+           AND column_name = 'errors'
+           AND data_type IN ('text', 'character varying')
+    ) THEN
+        ALTER TABLE one_roster_sync_logs
+            ALTER COLUMN errors DROP DEFAULT;
 
-ALTER TABLE one_roster_sync_logs
-    ALTER COLUMN errors TYPE bigint
-    USING (CASE WHEN errors ~ '^[0-9]+$' THEN errors::bigint ELSE 0 END);
+        ALTER TABLE one_roster_sync_logs
+            ALTER COLUMN errors TYPE bigint
+            USING (CASE WHEN errors::text ~ '^[0-9]{1,18}$' THEN errors::text::bigint ELSE 0 END);
 
-ALTER TABLE one_roster_sync_logs
-    ALTER COLUMN errors SET DEFAULT 0;
+        -- Each failed attempt had already marked its connection 'syncing'
+        -- before the sync-log INSERT failed, and nothing cleared it, so
+        -- those connections refuse every later sync as "already in
+        -- progress" (and auto-sync never finds them due). No sync could
+        -- have been running on such a database, so any 'syncing' row is
+        -- stale.
+        UPDATE one_roster_connections
+           SET sync_status = 'error',
+               last_sync_error = 'sync interrupted before it could start; run it again'
+         WHERE sync_status = 'syncing';
+    END IF;
 
--- Each failed attempt above had already marked its connection
--- 'syncing' before the sync-log INSERT failed, and nothing cleared it,
--- so those connections refuse every later sync as "already in
--- progress" (and auto-sync never finds them due). No sync could have
--- been running on such a database, so any 'syncing' row is stale.
-UPDATE one_roster_connections
-   SET sync_status = 'error',
-       last_sync_error = 'sync interrupted before it could start; run it again'
- WHERE sync_status = 'syncing';
-
-COMMIT;
+    ALTER TABLE one_roster_sync_logs
+        ALTER COLUMN errors SET DEFAULT 0;
+END
+$$;
