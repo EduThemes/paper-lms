@@ -20,6 +20,33 @@ func (r *wikiPageRevisionRepo) Create(ctx context.Context, revision *models.Wiki
 	return r.db.WithContext(ctx).Create(revision).Error
 }
 
+// CreateNext stores revision as the page's next revision, numbering it
+// MAX(revision_number)+1. Two concurrent saves can pick the same number;
+// the unique (wiki_page_id, revision_number) index rejects the loser,
+// which retries with a fresh number.
+func (r *wikiPageRevisionRepo) CreateNext(ctx context.Context, revision *models.WikiPageRevision) error {
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		var max int
+		if err := r.db.WithContext(ctx).Model(&models.WikiPageRevision{}).
+			Where("wiki_page_id = ?", revision.WikiPageID).
+			Select("COALESCE(MAX(revision_number), 0)").Scan(&max).Error; err != nil {
+			return err
+		}
+		revision.ID = 0
+		revision.RevisionNumber = max + 1
+		err := r.db.WithContext(ctx).Create(revision).Error
+		if err == nil {
+			return nil
+		}
+		if !isUniqueViolation(err) {
+			return err
+		}
+		lastErr = err
+	}
+	return lastErr
+}
+
 func (r *wikiPageRevisionRepo) FindByID(ctx context.Context, id uint) (*models.WikiPageRevision, error) {
 	var revision models.WikiPageRevision
 	if err := r.db.WithContext(ctx).First(&revision, id).Error; err != nil {
@@ -33,7 +60,9 @@ func (r *wikiPageRevisionRepo) ListByPageID(ctx context.Context, pageID uint, pa
 	var count int64
 
 	query := r.db.WithContext(ctx).Model(&models.WikiPageRevision{}).Where("wiki_page_id = ?", pageID)
-	query.Count(&count)
+	if err := query.Count(&count).Error; err != nil {
+		return nil, err
+	}
 
 	offset := (params.Page - 1) * params.PerPage
 	if err := query.Offset(offset).Limit(params.PerPage).Order("revision_number DESC").Find(&revisions).Error; err != nil {

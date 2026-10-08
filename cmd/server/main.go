@@ -964,6 +964,7 @@ func main() {
 
 	authMiddleware := middleware.NewAuthMiddleware(cfg.JWTSecret, accessTokenService, userRepo, tokenBlacklist)
 	permMiddleware := middleware.NewPermissionMiddleware(enrollmentRepo, userRepo, courseRepo)
+	pagesFilesRoutes := wirePagesFiles(pagesFilesDeps{database: database, pageRepo: pageRepo, pageHandler: pageHandler})
 
 	// Create router
 	router := &v1.Router{
@@ -1054,6 +1055,7 @@ func main() {
 		QuizStatisticsHandler:     quizStatisticsHandler,
 		SetupHandler:              setupHandler,
 		SuperAdminSettingsHandler: superAdminSettingsHandler,
+		PagesFiles:                pagesFilesRoutes,
 
 		FeatureFlagHandler:           featureFlagHandler,
 		CustomGradebookColumnHandler: customGradebookColumnHandler,
