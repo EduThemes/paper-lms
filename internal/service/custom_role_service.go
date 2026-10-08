@@ -327,13 +327,30 @@ func (s *CustomRoleService) GetEffectivePermissions(ctx context.Context, userID,
 // a role id copied from another tenant never grants anything. A role that
 // is missing, deleted or from another tenant falls back to the base role.
 func (s *CustomRoleService) EnrollmentPermissions(ctx context.Context, enrollment *models.Enrollment, accountID uint) (map[string]bool, error) {
-	baseRole := enrollmentTypeToBaseRole(enrollment.Type)
+	perms, active, err := s.CustomRolePermissions(ctx, enrollment, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if !active {
+		return baseRolePermissions(enrollmentTypeToBaseRole(enrollment.Type)), nil
+	}
+	return perms, nil
+}
+
+// CustomRolePermissions resolves the permission set of the custom role an
+// enrollment carries. active=false means the enrollment has no usable
+// custom role (none, deleted, inactive or another tenant's): it is then
+// its base enrollment type, exactly as before custom roles existed, and
+// the course gates fall back to the type check rather than deciding on
+// the base role's permission defaults (role_id is only cleared by a hard
+// delete; the Custom Roles page soft-deletes).
+func (s *CustomRoleService) CustomRolePermissions(ctx context.Context, enrollment *models.Enrollment, accountID uint) (map[string]bool, bool, error) {
 	if enrollment.RoleID == nil || *enrollment.RoleID == 0 {
-		return baseRolePermissions(baseRole), nil
+		return nil, false, nil
 	}
 	role, err := s.roleRepo.FindByID(ctx, *enrollment.RoleID, accountID)
-	if err != nil || role == nil || role.WorkflowState != "active" {
-		return baseRolePermissions(baseRole), nil
+	if err != nil || role == nil || role.WorkflowState != "active" || role.AccountID != accountID {
+		return nil, false, nil
 	}
 
 	perms := make(map[string]bool, len(models.AllPermissionNames()))
@@ -353,7 +370,7 @@ func (s *CustomRoleService) EnrollmentPermissions(ctx context.Context, enrollmen
 
 	overrides, err := s.overrideRepo.ListByRoleID(ctx, role.ID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	// Account-level overrides first, then this course's.
 	for _, o := range overrides {
@@ -372,7 +389,7 @@ func (s *CustomRoleService) EnrollmentPermissions(ctx context.Context, enrollmen
 		}
 		perms[o.Permission] = o.Enabled
 	}
-	return perms, nil
+	return perms, true, nil
 }
 
 // BaseRolePermissions exposes a base role's default permission set (used to

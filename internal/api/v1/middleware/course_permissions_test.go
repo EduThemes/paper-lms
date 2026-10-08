@@ -17,16 +17,17 @@ import (
 )
 
 type fakeResolver struct {
-	perms map[string]bool
-	calls int
+	perms    map[string]bool
+	inactive bool // the role was deleted or deactivated
+	calls    int
 }
 
-func (r *fakeResolver) EnrollmentPermissions(_ context.Context, _ *models.Enrollment, accountID uint) (map[string]bool, error) {
+func (r *fakeResolver) CustomRolePermissions(_ context.Context, _ *models.Enrollment, accountID uint) (map[string]bool, bool, error) {
 	r.calls++
-	if accountID != 1 {
-		return map[string]bool{}, nil
+	if accountID != 1 || r.inactive {
+		return nil, false, nil
 	}
-	return r.perms, nil
+	return r.perms, true, nil
 }
 
 func roleID(id uint) *uint { return &id }
@@ -102,6 +103,26 @@ func TestCustomRole_BaseEnrollmentUnaffected(t *testing.T) {
 	assert.Equal(t, http.StatusOK, do(http.MethodPost, "/api/v1/courses/101/assignments"))
 	assert.Equal(t, http.StatusForbidden, do(http.MethodGet, "/api/v1/courses/101/audit_log"))
 	assert.Equal(t, 0, res.calls, "no custom role → resolver never consulted")
+}
+
+func TestCustomRole_DeletedRoleFallsBackToTypeGate(t *testing.T) {
+	// The role behind role_id was soft-deleted: a TA is a TA again. The
+	// gate must not decide on the TA base defaults (which list
+	// manage_files etc.) — the teacher-only audit log stays closed and
+	// the instructor routes stay open, as with no custom role at all.
+	e := &models.Enrollment{ID: 1, UserID: 7, CourseID: 101, Type: "TaEnrollment", RoleID: roleID(5), WorkflowState: models.EnrollmentActive}
+	res, do := customRoleApp(t, e, map[string]bool{models.PermViewAuditLog: true})
+	res.inactive = true
+	assert.Equal(t, http.StatusForbidden, do(http.MethodGet, "/api/v1/courses/101/audit_log"))
+	assert.Equal(t, http.StatusOK, do(http.MethodPost, "/api/v1/courses/101/assignments"))
+
+	// A teacher whose role was deleted keeps every teacher route,
+	// including ones the teacher base defaults don't list.
+	e2 := &models.Enrollment{ID: 2, UserID: 7, CourseID: 101, Type: "TeacherEnrollment", RoleID: roleID(5), WorkflowState: models.EnrollmentActive}
+	res2, do2 := customRoleApp(t, e2, map[string]bool{})
+	res2.inactive = true
+	assert.Equal(t, http.StatusOK, do2(http.MethodGet, "/api/v1/courses/101/audit_log"))
+	assert.Equal(t, http.StatusOK, do2(http.MethodPost, "/api/v1/courses/101/pages"))
 }
 
 func TestRequiredCoursePermission(t *testing.T) {

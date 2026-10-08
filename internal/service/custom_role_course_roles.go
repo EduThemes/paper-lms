@@ -29,9 +29,15 @@ func (s *CustomRoleService) CoursePermissions(ctx context.Context, userID, cours
 	if err != nil || enrollment == nil {
 		return nil, nil, ErrNotEnrolled
 	}
-	perms, err := s.EnrollmentPermissions(ctx, enrollment, accountID)
+	perms, active, err := s.CustomRolePermissions(ctx, enrollment, accountID)
 	if err != nil {
 		return nil, nil, err
+	}
+	if !active {
+		// No usable custom role (none, deleted, inactive): the base type
+		// governs the routes, so report no custom role and the UI keeps
+		// its type-based tabs.
+		return baseRolePermissions(enrollmentTypeToBaseRole(enrollment.Type)), nil, nil
 	}
 	return perms, enrollment.RoleID, nil
 }

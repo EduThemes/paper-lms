@@ -76,6 +76,29 @@ func TestEnrollmentPermissions_ForeignOrDeletedRoleFallsBackToBase(t *testing.T)
 	perms, err = svc.EnrollmentPermissions(context.Background(), &models.Enrollment{Type: "StudentEnrollment", RoleID: uintp(6)}, 1)
 	require.NoError(t, err)
 	assert.False(t, perms[models.PermManageAssignments])
+
+	// The course gates must see such a role as absent (type gating), not
+	// as an active role with the base defaults.
+	_, active, err := svc.CustomRolePermissions(context.Background(), &models.Enrollment{Type: "TaEnrollment", RoleID: uintp(6)}, 1)
+	require.NoError(t, err)
+	assert.False(t, active, "deleted role is not an active custom role")
+	_, active, err = svc.CustomRolePermissions(context.Background(), &models.Enrollment{Type: "TaEnrollment", RoleID: uintp(5)}, 2)
+	require.NoError(t, err)
+	assert.False(t, active, "another tenant's role is not an active custom role")
+}
+
+func TestCoursePermissions_DeletedRoleReportsNoCustomRole(t *testing.T) {
+	roles := new(mocks.MockCustomRoleRepository)
+	enrollments := new(mocks.MockEnrollmentRepository)
+	svc := service.NewCustomRoleService(roles, new(mocks.MockRoleOverrideRepository), enrollments)
+	enrollments.On("FindByUserAndCourse", mock.Anything, uint(7), uint(4), uint(1)).
+		Return(&models.Enrollment{UserID: 7, CourseID: 4, Type: "TeacherEnrollment", RoleID: uintp(6)}, nil)
+	roles.On("FindByID", mock.Anything, uint(6), uint(1)).Return(&models.CustomRole{ID: 6, AccountID: 1, WorkflowState: "deleted"}, nil)
+
+	perms, roleID, err := svc.CoursePermissions(context.Background(), 7, 4, 1)
+	require.NoError(t, err)
+	assert.Nil(t, roleID, "UI must keep the type-based tabs")
+	assert.True(t, perms[models.PermManageAssignments], "teacher base defaults")
 }
 
 func TestResolveEnrollmentRole(t *testing.T) {

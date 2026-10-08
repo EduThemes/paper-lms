@@ -10,8 +10,11 @@ import (
 
 // CoursePermissionResolver resolves the permission set an enrollment
 // carries (G102). *service.CustomRoleService implements it.
+// active=false means the enrollment has no usable custom role (none,
+// deleted, inactive, another tenant's) and the enrollment-type check
+// applies.
 type CoursePermissionResolver interface {
-	EnrollmentPermissions(ctx context.Context, enrollment *models.Enrollment, accountID uint) (map[string]bool, error)
+	CustomRolePermissions(ctx context.Context, enrollment *models.Enrollment, accountID uint) (perms map[string]bool, active bool, err error)
 }
 
 // SetPermissionResolver enables custom-role enforcement on the course
@@ -162,10 +165,18 @@ func (pm *PermissionMiddleware) customRoleDecision(c *fiber.Ctx, enrollment *mod
 	if !mapped {
 		return false, false
 	}
-	perms, err := pm.permResolver.EnrollmentPermissions(c.Context(), enrollment, course.AccountID)
+	perms, active, err := pm.permResolver.CustomRolePermissions(c.Context(), enrollment, course.AccountID)
 	if err != nil {
 		// Fail closed: the role exists but its permissions can't be read.
 		return false, true
+	}
+	if !active {
+		// The role was deleted or deactivated (role_id is only cleared by
+		// a hard delete): the enrollment is its base type again, gated by
+		// type exactly as before. Deciding on the base role's permission
+		// defaults instead would lift a TA through teacher-only routes and
+		// shut a teacher out of routes the defaults don't list.
+		return false, false
 	}
 	if !perms[perm] {
 		return false, true
