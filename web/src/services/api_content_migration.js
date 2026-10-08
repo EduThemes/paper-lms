@@ -4,7 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { request, uploadFile } from './api';
-import { anyJobActive } from '../lib/contentMigration';
+import { anyJobActive, anyMigrationActive } from '../lib/contentMigration';
 
 const enc = encodeURIComponent;
 
@@ -107,7 +107,7 @@ export function useContentMigrations(courseId) {
     queryKey: contentMigrationKeys.migrations(courseId),
     queryFn: () => contentMigrationApi.listMigrations(courseId),
     enabled: !!courseId,
-    refetchInterval: (query) => (anyJobActive(query.state.data) ? POLL_MS : false),
+    refetchInterval: (query) => (anyMigrationActive(query.state.data) ? POLL_MS : false),
   });
 }
 

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CheckCircle, AlertCircle, Clock, Loader2 } from 'lucide-react';
-import { isJobActive, summarizeCounts } from '../../lib/contentMigration';
+import { isMigrationActive, summarizeCounts } from '../../lib/contentMigration';
 
 const TYPE_LABEL_KEYS = {
   common_cartridge: 'contentImport.typeCommonCartridge',
@@ -83,7 +83,7 @@ export default function MigrationHistory({ migrations }) {
               </div>
               <div className="text-right shrink-0">
                 <StatusBadge state={m.workflow_state} />
-                {isJobActive(m) && (
+                {isMigrationActive(m) && (
                   <div
                     className="mt-2 w-32 bg-border-default rounded-full h-1.5"
                     role="progressbar"

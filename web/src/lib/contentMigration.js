@@ -159,6 +159,17 @@ export function anyJobActive(jobs) {
   return Array.isArray(jobs) && jobs.some(isJobActive);
 }
 
+// A content migration in "created" is not running and never will on its
+// own: only queued rows are picked up by the worker (an export in
+// "created" is about to start, so isJobActive keeps it).
+export function isMigrationActive(job) {
+  return isJobActive(job) && job.workflow_state !== 'created';
+}
+
+export function anyMigrationActive(jobs) {
+  return Array.isArray(jobs) && jobs.some(isMigrationActive);
+}
+
 // summarizeCounts renders migration/export result counts as
 // "3 assignments, 1 page" style text (zero counts omitted).
 export function summarizeCounts(counts) {

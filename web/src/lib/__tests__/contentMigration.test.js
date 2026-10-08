@@ -1,5 +1,6 @@
 import {
   anyJobActive,
+  anyMigrationActive,
   anyRestriction,
   blueprintTypeParam,
   buildCourseCopyRequest,
@@ -116,6 +117,11 @@ describe('job status and results', () => {
     expect(anyJobActive([{ workflow_state: 'exporting' }])).toBe(true);
     expect(anyJobActive([{ workflow_state: 'exported' }, { workflow_state: 'failed' }])).toBe(false);
     expect(anyJobActive(undefined)).toBe(false);
+    // A migration in "created" is never picked up by the worker: no
+    // endless polling for it. An export in "created" is about to start.
+    expect(anyMigrationActive([{ workflow_state: 'created' }, { workflow_state: 'completed' }])).toBe(false);
+    expect(anyMigrationActive([{ workflow_state: 'queued' }])).toBe(true);
+    expect(anyJobActive([{ workflow_state: 'created' }])).toBe(true);
   });
 
   test('summaries skip zero counts', () => {
