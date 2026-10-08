@@ -149,7 +149,7 @@ func (s *OneRosterService) SyncFull(ctx context.Context, connectionID, accountID
 		StartedAt:    &now,
 	}
 	if err := s.syncLogRepo.Create(ctx, syncLog); err != nil {
-		return nil, err
+		return nil, s.releaseSyncStart(ctx, conn, err)
 	}
 
 	// Run the sync
@@ -188,12 +188,23 @@ func (s *OneRosterService) SyncIncremental(ctx context.Context, connectionID, ac
 		StartedAt:    &now,
 	}
 	if err := s.syncLogRepo.Create(ctx, syncLog); err != nil {
-		return nil, err
+		return nil, s.releaseSyncStart(ctx, conn, err)
 	}
 
 	s.runSync(ctx, conn, syncLog, filter)
 
 	return syncLog, nil
+}
+
+// releaseSyncStart undoes the "syncing" mark when a sync fails before
+// runSync (whose deferred block normally clears it) gets to run. Without
+// it the connection stayed "syncing" forever: every later manual sync
+// was refused as "already in progress" and auto-sync never found it due.
+func (s *OneRosterService) releaseSyncStart(ctx context.Context, conn *models.OneRosterConnection, cause error) error {
+	conn.SyncStatus = "error"
+	conn.LastSyncError = fmt.Sprintf("could not start sync: %v", cause)
+	_ = s.connRepo.Update(ctx, conn)
+	return cause
 }
 
 // autoSyncDue reports whether an auto-sync connection is due at now: it

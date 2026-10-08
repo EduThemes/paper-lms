@@ -23,4 +23,14 @@ ALTER TABLE one_roster_sync_logs
 ALTER TABLE one_roster_sync_logs
     ALTER COLUMN errors SET DEFAULT 0;
 
+-- Each failed attempt above had already marked its connection
+-- 'syncing' before the sync-log INSERT failed, and nothing cleared it,
+-- so those connections refuse every later sync as "already in
+-- progress" (and auto-sync never finds them due). No sync could have
+-- been running on such a database, so any 'syncing' row is stale.
+UPDATE one_roster_connections
+   SET sync_status = 'error',
+       last_sync_error = 'sync interrupted before it could start; run it again'
+ WHERE sync_status = 'syncing';
+
 COMMIT;
