@@ -156,11 +156,11 @@ export async function requestPaged(path, page = 1, perPage = 10) {
   return { data: items.slice(0, perPage), pagination: {} };
 }
 
-function requestRaw(path, options = {}) {
+export function requestRaw(path, options = {}) {
   return fetchApi(path, { ...options, parse: 'raw' });
 }
 
-function uploadFile(path, formData) {
+export function uploadFile(path, formData) {
   return fetchApi(path, { parse: 'multipart', body: formData });
 }
 
