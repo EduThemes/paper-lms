@@ -24,29 +24,8 @@ import (
 	"github.com/microcosm-cc/bluemonday"
 )
 
-// TrustedIframeSrc matches src URLs of iframes we permit for embedded media.
-// Hosts are matched as the full host portion of an https URL.
-//
-// Allowed:
-//   - YouTube: youtube.com, www.youtube.com, youtube-nocookie.com, youtu.be
-//   - Vimeo:   player.vimeo.com, vimeo.com
-//   - Khan Academy, Edpuzzle, H5P, Loom (common K-12 embeds)
-//
-// Anything not matching this regex is stripped from <iframe src="...">,
-// effectively blocking the iframe. The web client mirrors this list in
-// web/src/components/RichContentViewer.jsx (TRUSTED_IFRAME_SRC).
-var TrustedIframeSrc = regexp.MustCompile(
-	`^https://(` +
-		`(www\.)?youtube(-nocookie)?\.com/embed/|` +
-		`youtu\.be/|` +
-		`player\.vimeo\.com/video/|` +
-		`(www\.)?vimeo\.com/|` +
-		`(www\.)?khanacademy\.org/embed/|` +
-		`(www\.)?edpuzzle\.com/embed/|` +
-		`h5p\.org/h5p/embed/|` +
-		`(www\.)?loom\.com/embed/` +
-		`)`,
-)
+// The iframe allowlist (TrustedIframeSrc, TrustedIframeHosts) lives in
+// iframe_policy.go.
 
 // allowedStyleProperties is the inline-CSS allowlist. It is a deliberately
 // conservative subset of Canvas's list: typography, colour, box model and
@@ -117,6 +96,9 @@ func buildPolicy() *bluemonday.Policy {
 	p.AllowAttrs("allowfullscreen").OnElements("iframe")
 	p.AllowAttrs("frameborder").Matching(regexp.MustCompile(`^[0-9]+$`)).OnElements("iframe")
 	p.AllowAttrs("title").OnElements("iframe")
+	p.AllowAttrs("allow").Matching(IframeAllowAttr).OnElements("iframe")
+	p.AllowAttrs("referrerpolicy").Matching(iframeReferrerPolicy).OnElements("iframe")
+	p.AllowAttrs("loading").Matching(regexp.MustCompile(`^(lazy|eager)$`)).OnElements("iframe")
 
 	return p
 }
