@@ -1069,6 +1069,32 @@ func (s *DiscussionParityService) audienceFilter(ctx context.Context, topic *mod
 	return out
 }
 
+// dropPostFirstHeld removes the non-staff users a require_initial_post
+// topic still hides posts from (Canvas subscription_hold
+// :initial_post_required). A reply notification carries the post's
+// text, so it must not reach someone who hasn't posted yet, even if
+// they subscribed.
+func (s *DiscussionParityService) dropPostFirstHeld(ctx context.Context, topic *models.DiscussionTopic, userIDs []uint) []uint {
+	if topic == nil || !topic.RequireInitialPost || len(userIDs) == 0 {
+		return userIDs
+	}
+	staff := map[uint]bool{}
+	ids, err := s.parity.CourseStaffIDs(ctx, topic.CourseID)
+	if err != nil {
+		return nil // fail closed
+	}
+	for _, id := range ids {
+		staff[id] = true
+	}
+	out := make([]uint, 0, len(userIDs))
+	for _, id := range userIDs {
+		if staff[id] || !s.InitialPostRequired(ctx, topic, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 func notificationTitle(topic *models.DiscussionTopic) string {
 	return topic.Title
 }
@@ -1105,7 +1131,7 @@ func (s *DiscussionParityService) EntryNotificationCallback() DiscussionEntryPos
 		if entry.ParentID != nil {
 			subject = fmt.Sprintf("New reply in %s", notificationTitle(topic))
 		}
-		for _, id := range s.audienceFilter(ctx, topic, recipients) {
+		for _, id := range s.dropPostFirstHeld(ctx, topic, s.audienceFilter(ctx, topic, recipients)) {
 			_ = s.notifier.QueueNotification(ctx, id, "discussion_reply", subject, entry.Message, "Course", topic.CourseID)
 		}
 	}

@@ -802,3 +802,29 @@ func TestDiscussionParity_PostingResubscribesAuthor(t *testing.T) {
 	eventually(t, func() bool { return env.notifier.of("discussion_reply")[env.carol.ID] > 0 },
 		"the author of the post replied to is notified")
 }
+
+// G083 + G088: on a "post before seeing replies" topic, a student who
+// subscribed without posting gets no reply notifications (they carry the
+// post's text), until they post themselves.
+func TestDiscussionParity_PostFirstHoldsReplyNotifications(t *testing.T) {
+	env := newDiscParityEnv(t)
+	topic := env.createTopic(t, map[string]any{"title": "Blind predictions", "require_initial_post": true})
+	tid := idOf(topic)
+
+	status, _ := env.req(t, env.bob, http.MethodPut, env.topicsPath(fmt.Sprintf("/%d/subscription", tid)), map[string]any{"subscribed": true})
+	require.Equal(t, http.StatusOK, status)
+
+	status, _ = env.post(t, env.alice, tid, map[string]any{"message": "<p>My prediction is 42</p>"})
+	require.Equal(t, http.StatusCreated, status)
+	eventually(t, func() bool { return env.notifier.of("discussion_reply")[env.teacher.ID] > 0 }, "staff are notified")
+	time.Sleep(100 * time.Millisecond)
+	assert.Zero(t, env.notifier.of("discussion_reply")[env.bob.ID], "a subscriber who hasn't posted isn't sent the post")
+
+	status, _ = env.post(t, env.bob, tid, map[string]any{"message": "<p>Mine is 7</p>"})
+	require.Equal(t, http.StatusCreated, status)
+	env.notifier.reset()
+	status, _ = env.post(t, env.carol, tid, map[string]any{"message": "<p>Mine is 3</p>"})
+	require.Equal(t, http.StatusCreated, status)
+	eventually(t, func() bool { return env.notifier.of("discussion_reply")[env.bob.ID] > 0 },
+		"once they have posted, replies reach them")
+}
