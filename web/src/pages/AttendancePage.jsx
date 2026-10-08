@@ -431,7 +431,7 @@ const AttendancePage = () => {
         setRecords(attRecords);
       } else {
         // No attendance records yet — build roster from enrollments
-        const enrollmentResult = await api.getEnrollments(courseId, 1, 200);
+        const enrollmentResult = await api.getAllEnrollments(courseId);
         const enrollments = enrollmentResult.data || [];
         const studentEnrollments = enrollments.filter(
           (e) => e.type === 'StudentEnrollment' || e.role === 'StudentEnrollment' || e.enrollment_type === 'student'

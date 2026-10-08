@@ -1024,7 +1024,9 @@ const GradebookPage = () => {
         const [courseData, assignmentResult, enrollmentResult, assignmentGroupResult] = await Promise.all([
           api.getCourse(courseId),
           api.getAssignments(courseId, 1, 100),
-          api.getEnrollments(courseId, 1, 200),
+          // The whole roster: per_page caps at 100, so a fixed page size
+          // silently dropped students in large courses.
+          api.getAllEnrollments(courseId),
           api.getAssignmentGroups(courseId, 1, 50).catch(() => ({ data: [] })),
         ]);
 

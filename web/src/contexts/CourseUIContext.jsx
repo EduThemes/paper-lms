@@ -39,6 +39,7 @@ export const CourseUIProvider = ({ children }) => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [course, setCourse] = useState(null);
   const [enrollments, setEnrollments] = useState(null);
+  const [courseAdmin, setCourseAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -51,13 +52,18 @@ export const CourseUIProvider = ({ children }) => {
     let cancelled = false;
     setLoading(true);
 
+    // The caller's own enrollments (GET .../enrollments/self). Scanning the
+    // first roster pages for the caller missed teachers whose enrollment
+    // sat beyond them, dropping them into the student (K-2 / 3-5) UI.
     Promise.allSettled([
       api.getCourse(courseId),
-      api.getEnrollments(courseId, 1, 200),
-    ]).then(([courseRes, enrollRes]) => {
+      api.getMyCourseEnrollments(courseId),
+    ]).then(([courseRes, selfRes]) => {
       if (cancelled) return;
       if (courseRes.status === 'fulfilled') setCourse(courseRes.value);
-      setEnrollments(enrollRes.status === 'fulfilled' ? (enrollRes.value?.data || []) : []);
+      const self = selfRes.status === 'fulfilled' ? selfRes.value : null;
+      setEnrollments(self?.enrollments || []);
+      setCourseAdmin(Boolean(self?.is_admin));
       setLoading(false);
     });
 
@@ -66,12 +72,11 @@ export const CourseUIProvider = ({ children }) => {
 
   const isStaff = useMemo(() => {
     if (!user) return false;
-    if (user.role === 'admin' || user.role === 'site_admin') return true;
+    if (user.role === 'admin' || user.role === 'super_admin' || user.role === 'site_admin') return true;
+    if (courseAdmin) return true;
     if (!enrollments) return false;
-    const mine = enrollments.find(e => e.user_id === user.id || e.user?.id === user.id);
-    if (!mine) return false;
-    return STAFF_ENROLLMENT_TYPES.has(mine.type) || STAFF_ENROLLMENT_TYPES.has(mine.role);
-  }, [user, enrollments]);
+    return enrollments.some((e) => STAFF_ENROLLMENT_TYPES.has(e.type) || STAFF_ENROLLMENT_TYPES.has(e.role));
+  }, [user, enrollments, courseAdmin]);
 
   const uiMode = course?.ui_mode || 'standard';
   const previewParam = searchParams.get('preview');

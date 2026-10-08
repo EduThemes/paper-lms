@@ -9,7 +9,7 @@ vi.mock('../../services/api', () => ({
     getGroupCategories: vi.fn(),
     getGroupsByCategory: vi.fn(),
     getGroupMemberships: vi.fn(),
-    getEnrollments: vi.fn(),
+    getAllEnrollments: vi.fn(),
     deleteGroupMembership: vi.fn(),
     createGroupMembership: vi.fn(),
   },
@@ -46,7 +46,7 @@ function mockGroupData(selfSignup = '', members = [{ id: 300, group_id: 21, user
   api.getGroupCategories.mockResolvedValue({ data: [{ id: 7, name: 'Project teams', self_signup: selfSignup }] });
   api.getGroupsByCategory.mockResolvedValue({ data: [{ id: 21, group_category_id: 7, name: 'Team A' }] });
   api.getGroupMemberships.mockResolvedValue({ data: members });
-  api.getEnrollments.mockResolvedValue({ data: [] });
+  api.getAllEnrollments.mockResolvedValue({ data: [] });
 }
 
 describe('GroupsPage', () => {
@@ -88,5 +88,12 @@ describe('GroupsPage', () => {
     renderPage();
     await waitFor(() => expect(screen.getByText('Team A')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Join' })).not.toBeInTheDocument();
+  });
+
+  // F20: the Add member picker draws on the whole roster, not the first 10.
+  test('loads the whole roster for the add-member picker', async () => {
+    mockGroupData();
+    renderPage();
+    await waitFor(() => expect(api.getAllEnrollments).toHaveBeenCalledWith('5'));
   });
 });

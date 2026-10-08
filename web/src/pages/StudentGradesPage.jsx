@@ -75,7 +75,7 @@ const StudentGradesPage = () => {
         // If observer view, resolve the observee's name from enrollments
         if (isObserverView) {
           try {
-            const enrollResult = await api.getEnrollments(courseId, 1, 200);
+            const enrollResult = await api.getAllEnrollments(courseId);
             const enrollments = enrollResult.data || [];
             const observeeEnrollment = enrollments.find(e =>
               (e.user_id === targetUserId || e.user?.id === targetUserId) && e.type === 'StudentEnrollment'

@@ -56,7 +56,9 @@ const GroupsPage = () => {
       setGroupsByCategory(groupsMap);
       setMembersByGroup(membersMap);
 
-      const enrollResult = await api.getEnrollments(courseId);
+      // The whole roster (the default page size is 10, so the Add member
+      // picker could never offer student #11 onward).
+      const enrollResult = await api.getAllEnrollments(courseId);
       const enrollList = enrollResult.data || [];
       setEnrollments(enrollList);
     } catch (err) {
