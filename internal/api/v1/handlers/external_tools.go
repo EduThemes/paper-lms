@@ -1,11 +1,16 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
+	"github.com/EduThemes/paper-lms/internal/auth"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
@@ -23,8 +28,15 @@ func NewExternalToolHandler(toolService *service.ExternalToolService, devKeyServ
 }
 
 // externalToolToJSON serializes a context external tool for API responses.
-func externalToolToJSON(tool *models.ContextExternalTool) fiber.Map {
-	return fiber.Map{
+// custom_fields is returned as a JSON object when the stored text is one
+// (Canvas shape); the LTI 1.1 consumer_key is staff-only.
+func externalToolToJSON(tool *models.ContextExternalTool, includeConsumerKey bool) fiber.Map {
+	var customFields interface{} = tool.CustomFields
+	var obj map[string]interface{}
+	if tool.CustomFields != "" && json.Unmarshal([]byte(tool.CustomFields), &obj) == nil {
+		customFields = obj
+	}
+	m := fiber.Map{
 		"id":               tool.ID,
 		"context_type":     tool.ContextType,
 		"context_id":       tool.ContextID,
@@ -33,12 +45,93 @@ func externalToolToJSON(tool *models.ContextExternalTool) fiber.Map {
 		"description":      tool.Description,
 		"url":              tool.URL,
 		"domain":           tool.Domain,
-		"consumer_key":     tool.ConsumerKey,
-		"custom_fields":    tool.CustomFields,
+		"custom_fields":    customFields,
 		"workflow_state":   tool.WorkflowState,
 		"created_at":       tool.CreatedAt,
 		"updated_at":       tool.UpdatedAt,
 	}
+	if includeConsumerKey {
+		m["consumer_key"] = tool.ConsumerKey
+	}
+	return m
+}
+
+// flexUint accepts a JSON number or a numeric JSON string (HTML form
+// inputs always yield strings). B084.
+type flexUint struct {
+	Set   bool
+	Value uint
+}
+
+func (f *flexUint) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if bytes.Equal(b, []byte("null")) {
+		return nil
+	}
+	f.Set = true
+	var s string
+	if len(b) > 0 && b[0] == '"' {
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		if s == "" {
+			f.Set = false
+			return nil
+		}
+	} else {
+		s = string(b)
+	}
+	n, err := strconv.ParseUint(s, 10, 64)
+	if err != nil {
+		return fmt.Errorf("expected an integer id, got %q", s)
+	}
+	f.Value = uint(n)
+	return nil
+}
+
+// flexJSONText accepts custom_fields as a JSON object (Canvas shape) or as
+// a string holding JSON; either way it is stored as text. B084.
+type flexJSONText struct {
+	Set   bool
+	Value string
+}
+
+func (f *flexJSONText) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	f.Set = true
+	if bytes.Equal(b, []byte("null")) {
+		f.Value = ""
+		return nil
+	}
+	if len(b) > 0 && b[0] == '"' {
+		return json.Unmarshal(b, &f.Value)
+	}
+	f.Value = string(b)
+	return nil
+}
+
+// requireToolInCourse loads the external tool named by :id and enforces
+// the F-013 parent-tie (B185): it must be installed in the course named
+// by :course_id (and live in the caller's tenant). Every mismatch is the
+// existence-leak 404. Returns (tool, wrote); wrote==true means a response
+// was already written and the caller must `return nil`.
+func (h *ExternalToolHandler) requireToolInCourse(c *fiber.Ctx) (*models.ContextExternalTool, bool) {
+	id, err := c.ParamsInt("id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid external tool ID")
+		return nil, true
+	}
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid course ID")
+		return nil, true
+	}
+	tool, err := h.toolService.GetByID(c.Context(), uint(id), callerAccountID(c))
+	if err != nil || tool.ContextType != "Course" || tool.ContextID != uint(courseID) {
+		_ = responses.NotFound(c, "external tool")
+		return nil, true
+	}
+	return tool, false
 }
 
 // ListExternalTools returns a paginated list of external tools for a course.
@@ -58,9 +151,10 @@ func (h *ExternalToolHandler) ListExternalTools(c *fiber.Ctx) error {
 
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
 
+	staff := callerIsCourseStaff(c)
 	tools := make([]fiber.Map, len(result.Items))
 	for i, tool := range result.Items {
-		tools[i] = externalToolToJSON(&tool)
+		tools[i] = externalToolToJSON(&tool, staff)
 	}
 
 	return c.JSON(tools)
@@ -69,30 +163,36 @@ func (h *ExternalToolHandler) ListExternalTools(c *fiber.Ctx) error {
 // GetExternalTool returns a single external tool.
 // GET /api/v1/courses/:course_id/external_tools/:id
 func (h *ExternalToolHandler) GetExternalTool(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid external tool ID")
+	tool, wrote := h.requireToolInCourse(c)
+	if wrote {
+		return nil
 	}
 
-	tool, err := h.toolService.GetByID(c.Context(), uint(id), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "external tool")
-	}
-
-	return c.JSON(externalToolToJSON(tool))
+	return c.JSON(externalToolToJSON(tool, callerIsCourseStaff(c)))
 }
 
 type createExternalToolRequest struct {
 	ExternalTool struct {
-		Name           string `json:"name"`
-		DeveloperKeyID uint   `json:"developer_key_id"`
-		URL            string `json:"url"`
-		Domain         string `json:"domain"`
-		Description    string `json:"description"`
-		ConsumerKey    string `json:"consumer_key"`
-		SharedSecret   string `json:"shared_secret"`
-		CustomFields   string `json:"custom_fields"`
+		Name           string       `json:"name"`
+		DeveloperKeyID flexUint     `json:"developer_key_id"`
+		URL            string       `json:"url"`
+		Domain         string       `json:"domain"`
+		Description    string       `json:"description"`
+		ConsumerKey    string       `json:"consumer_key"`
+		SharedSecret   string       `json:"shared_secret"`
+		CustomFields   flexJSONText `json:"custom_fields"`
 	} `json:"external_tool"`
+}
+
+// sealSharedSecret encrypts an LTI 1.1 shared secret for storage (B191).
+// Returns (value, wrote).
+func sealSharedSecret(c *fiber.Ctx, plaintext string) (string, bool) {
+	sealed, err := auth.SealString(plaintext)
+	if err != nil {
+		_ = responses.InternalError(c, "Could not encrypt shared secret")
+		return "", true
+	}
+	return sealed, false
 }
 
 // CreateExternalTool creates a new external tool for a course.
@@ -111,59 +211,58 @@ func (h *ExternalToolHandler) CreateExternalTool(c *fiber.Ctx) error {
 	if input.ExternalTool.Name == "" {
 		return responses.BadRequest(c, "External tool name is required")
 	}
+	if !input.ExternalTool.DeveloperKeyID.Set || input.ExternalTool.DeveloperKeyID.Value == 0 {
+		return responses.BadRequest(c, "developer_key_id is required")
+	}
 
-	// Validate developer key exists if provided (tenant-scoped)
-	if input.ExternalTool.DeveloperKeyID != 0 {
-		_, err := h.devKeyService.GetByID(c.Context(), input.ExternalTool.DeveloperKeyID, callerAccountID(c))
-		if err != nil {
-			return responses.BadRequest(c, "Invalid developer_key_id")
-		}
+	sharedSecret, wrote := sealSharedSecret(c, input.ExternalTool.SharedSecret)
+	if wrote {
+		return nil
 	}
 
 	tool := &models.ContextExternalTool{
 		ContextType:    "Course",
 		ContextID:      uint(courseID),
-		DeveloperKeyID: input.ExternalTool.DeveloperKeyID,
+		DeveloperKeyID: input.ExternalTool.DeveloperKeyID.Value,
 		Name:           input.ExternalTool.Name,
 		Description:    service.SanitizeHTML(input.ExternalTool.Description),
 		URL:            input.ExternalTool.URL,
 		Domain:         input.ExternalTool.Domain,
 		ConsumerKey:    input.ExternalTool.ConsumerKey,
-		SharedSecret:   input.ExternalTool.SharedSecret,
-		CustomFields:   input.ExternalTool.CustomFields,
+		SharedSecret:   sharedSecret,
+		CustomFields:   input.ExternalTool.CustomFields.Value,
 	}
 
-	if err := h.toolService.Create(c.Context(), tool); err != nil {
+	// Developer key is validated tenant-scoped inside the service.
+	if err := h.toolService.Create(c.Context(), tool, callerAccountID(c)); err != nil {
+		if errors.Is(err, service.ErrExternalToolInvalid) {
+			return responses.BadRequest(c, err.Error())
+		}
 		return responses.InternalError(c, "Could not create external tool")
 	}
 
-	return c.Status(fiber.StatusCreated).JSON(externalToolToJSON(tool))
+	return c.Status(fiber.StatusCreated).JSON(externalToolToJSON(tool, true))
 }
 
 // UpdateExternalTool updates an existing external tool.
 // PUT /api/v1/courses/:course_id/external_tools/:id
 func (h *ExternalToolHandler) UpdateExternalTool(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid external tool ID")
-	}
-
-	tool, err := h.toolService.GetByID(c.Context(), uint(id), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "external tool")
+	tool, wrote := h.requireToolInCourse(c)
+	if wrote {
+		return nil
 	}
 
 	var input struct {
 		ExternalTool struct {
-			Name           *string `json:"name"`
-			URL            *string `json:"url"`
-			Domain         *string `json:"domain"`
-			Description    *string `json:"description"`
-			ConsumerKey    *string `json:"consumer_key"`
-			SharedSecret   *string `json:"shared_secret"`
-			CustomFields   *string `json:"custom_fields"`
-			DeveloperKeyID *uint   `json:"developer_key_id"`
-			WorkflowState  *string `json:"workflow_state"`
+			Name           *string      `json:"name"`
+			URL            *string      `json:"url"`
+			Domain         *string      `json:"domain"`
+			Description    *string      `json:"description"`
+			ConsumerKey    *string      `json:"consumer_key"`
+			SharedSecret   *string      `json:"shared_secret"`
+			CustomFields   flexJSONText `json:"custom_fields"`
+			DeveloperKeyID flexUint     `json:"developer_key_id"`
+			WorkflowState  *string      `json:"workflow_state"`
 		} `json:"external_tool"`
 	}
 
@@ -187,18 +286,22 @@ func (h *ExternalToolHandler) UpdateExternalTool(c *fiber.Ctx) error {
 		tool.ConsumerKey = *input.ExternalTool.ConsumerKey
 	}
 	if input.ExternalTool.SharedSecret != nil {
-		tool.SharedSecret = *input.ExternalTool.SharedSecret
+		sealed, wrote := sealSharedSecret(c, *input.ExternalTool.SharedSecret)
+		if wrote {
+			return nil
+		}
+		tool.SharedSecret = sealed
 	}
-	if input.ExternalTool.CustomFields != nil {
-		tool.CustomFields = *input.ExternalTool.CustomFields
+	if input.ExternalTool.CustomFields.Set {
+		tool.CustomFields = input.ExternalTool.CustomFields.Value
 	}
-	if input.ExternalTool.DeveloperKeyID != nil {
+	if input.ExternalTool.DeveloperKeyID.Set {
 		// Validate the new developer key exists (tenant-scoped)
-		_, dkErr := h.devKeyService.GetByID(c.Context(), *input.ExternalTool.DeveloperKeyID, callerAccountID(c))
+		_, dkErr := h.devKeyService.GetByID(c.Context(), input.ExternalTool.DeveloperKeyID.Value, callerAccountID(c))
 		if dkErr != nil {
 			return responses.BadRequest(c, "Invalid developer_key_id")
 		}
-		tool.DeveloperKeyID = *input.ExternalTool.DeveloperKeyID
+		tool.DeveloperKeyID = input.ExternalTool.DeveloperKeyID.Value
 	}
 	if input.ExternalTool.WorkflowState != nil {
 		state := *input.ExternalTool.WorkflowState
@@ -212,18 +315,18 @@ func (h *ExternalToolHandler) UpdateExternalTool(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not update external tool")
 	}
 
-	return c.JSON(externalToolToJSON(tool))
+	return c.JSON(externalToolToJSON(tool, true))
 }
 
 // DeleteExternalTool deletes an external tool.
 // DELETE /api/v1/courses/:course_id/external_tools/:id
 func (h *ExternalToolHandler) DeleteExternalTool(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid external tool ID")
+	tool, wrote := h.requireToolInCourse(c)
+	if wrote {
+		return nil
 	}
 
-	if err := h.toolService.Delete(c.Context(), uint(id), callerAccountID(c)); err != nil {
+	if err := h.toolService.Delete(c.Context(), tool.ID, callerAccountID(c)); err != nil {
 		return responses.NotFound(c, "external tool")
 	}
 
