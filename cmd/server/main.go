@@ -57,6 +57,7 @@ func main() {
 		}
 		log.Printf("warning: encryption keys unavailable (%v) — MFA, OIDC client secrets, and passkeys will fail; set MFA_ENCRYPTION_KEY before exercising those flows", err)
 	}
+	service.SetQuizSecretSealer(auth.Encrypt) // imported quiz access codes
 
 	// Configure structured logging
 	logLevel := slog.LevelInfo

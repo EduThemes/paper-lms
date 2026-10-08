@@ -154,6 +154,10 @@ type canvasQuizMeta struct {
 	ShowCorrectAnswers string   `xml:"show_correct_answers"`
 	OneQuestionAtATime string   `xml:"one_question_at_a_time"`
 	CantGoBack         string   `xml:"cant_go_back"`
+	// Delivery restrictions (quiz-items lane).
+	AccessCode           string `xml:"access_code"`
+	IPFilter             string `xml:"ip_filter"`
+	AnonymousSubmissions string `xml:"anonymous_submissions"`
 	LockAt             string   `xml:"lock_at"`
 	UnlockAt           string   `xml:"unlock_at"`
 	DueAt              string   `xml:"due_at"`
@@ -1865,6 +1869,7 @@ func applyQuizMeta(q *models.Quiz, m *canvasQuizMeta) {
 	q.HideResults = strings.TrimSpace(m.HideResults)
 	q.OneQuestionAtATime = parseBoolFlag(m.OneQuestionAtATime)
 	q.CantGoBack = parseBoolFlag(m.CantGoBack)
+	applyQuizDeliveryMeta(q, m.AccessCode, m.IPFilter, m.AnonymousSubmissions)
 	if t := parseCanvasTime(m.LockAt); t != nil {
 		q.LockAt = t
 	}

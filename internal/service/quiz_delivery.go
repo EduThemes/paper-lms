@@ -247,6 +247,34 @@ func QuizIPAllowed(filter, remoteIP string) bool {
 	return false
 }
 
+// ---------- Import ----------
+
+// quizSecretSealer seals an imported access code (secretbox lives in the
+// auth package, which imports this one, so main wires it in).
+var quizSecretSealer func([]byte) ([]byte, error)
+
+// SetQuizSecretSealer registers the encryption used for imported quiz
+// access codes. Without it, imported access codes are dropped.
+func SetQuizSecretSealer(seal func([]byte) ([]byte, error)) {
+	quizSecretSealer = seal
+}
+
+// applyQuizDeliveryMeta copies a Canvas assessment_meta.xml's access code,
+// IP filter and anonymous-submissions flag onto an imported quiz. An IP
+// filter Paper cannot parse is dropped rather than locking everyone out.
+func applyQuizDeliveryMeta(q *models.Quiz, accessCode, ipFilter, anonymous string) {
+	if norm, err := NormalizeIPFilter(ipFilter); err == nil {
+		q.IPFilter = norm
+	}
+	q.AnonymousSubmissions = strings.EqualFold(strings.TrimSpace(anonymous), "true")
+	code := strings.TrimSpace(accessCode)
+	if code != "" && len(code) <= 255 && quizSecretSealer != nil {
+		if sealed, err := quizSecretSealer([]byte(code)); err == nil {
+			q.AccessCodeEncrypted = sealed
+		}
+	}
+}
+
 // ---------- Survey semantics ----------
 
 // QuizIsSurvey reports whether the quiz is a graded or ungraded survey.
