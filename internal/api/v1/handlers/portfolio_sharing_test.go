@@ -193,9 +193,9 @@ func TestImportableSubmissionsAndImportWithFiles(t *testing.T) {
 	f.sectionRepo.On("FindByID", mock.Anything, uint(1), uint(1)).Return(&models.PortfolioSection{ID: 1, PortfolioID: 10}, nil)
 	f.submissionRepo.On("FindByID", mock.Anything, uint(1), uint(1)).Return(&models.Submission{ID: 1, UserID: 5, AssignmentID: 40, SubmittedAt: &earlier, Attachments: &files, URL: &link}, nil)
 
-	resp = testutil.MakeRequest(f.app, http.MethodPost, "/portfolios/10/import", body(`{"submission_ids":[1],"section_id":1}`))
+	resp = testutil.MakeRequest(f.app, http.MethodPost, "/portfolios/10/import", body(`{"submission_ids":[1,1],"section_id":1}`))
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
-	require.Len(t, created, 2, "the course_work artifact plus one file artifact")
+	require.Len(t, created, 2, "the course_work artifact plus one file artifact; a repeated id is imported once")
 	assert.Equal(t, "course_submission", created[0].SourceType)
 	assert.Empty(t, created[0].ContentURL, "a javascript: link is never copied")
 	assert.Equal(t, "upload", created[1].SourceType)

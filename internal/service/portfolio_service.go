@@ -602,6 +602,8 @@ func (s *PortfolioService) ImportSubmissions(ctx context.Context, portfolioID ui
 		if err := s.artifactRepo.Create(ctx, &artifact); err != nil {
 			continue
 		}
+		// A submission id repeated in one request is imported once.
+		alreadyImported[submission.ID] = true
 
 		imported = append(imported, artifact)
 
