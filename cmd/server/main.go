@@ -442,6 +442,13 @@ func main() {
 		service.WithBankEntryRepo(questionBankEntryRepo),
 		service.WithQuestionBankRepo(questionBankRepo),
 		service.WithStimulusRepo(postgres.NewQuizStimulusRepository(database)),
+		// Quiz lifecycle: gradebook assignment, overrides, extensions,
+		// event log, regrades, overdue auto-submit.
+		service.WithQuizLifecycle(service.QuizLifecycleDeps{
+			Assignments: assignmentRepo, AssignmentGroups: assignmentGroupRepo, Gradebook: submissionService,
+			Extensions: postgres.NewQuizExtensionRepository(database), Events: postgres.NewQuizSubmissionEventRepository(database),
+			Regrades: postgres.NewQuizQuestionRegradeRepository(database), Overdue: quizSubmissionRepo, Enrollments: enrollmentRepo,
+		}),
 	)
 	// Phase 6 Wave 1 Sprint D-1: register every gamification emit
 	// callback against the services that own the lifecycle event. The
@@ -844,7 +851,7 @@ func main() {
 	sectionHandler = handlers.NewSectionHandler(sectionRepo, authz)
 	sisImportHandler := handlers.NewSISImportHandler(sisImportService)
 	// handlers
-	quizHandler := handlers.NewQuizHandler(quizRepo)
+	quizHandler := handlers.NewQuizHandler(quizRepo).SetQuizService(quizService)
 	quizQuestionHandler := handlers.NewQuizQuestionHandler(quizService)
 	quizSubmissionHandler := handlers.NewQuizSubmissionHandler(quizService, observerService, auditService)
 	quizSubmissionHandler.SetFileService(fileService)
@@ -1074,6 +1081,8 @@ func main() {
 
 		QTIImportHandler: qtiImportHandler,
 
+		QuizLifecycleHandler: handlers.NewQuizLifecycleHandler(quizService),
+
 		GamificationHandler: gamificationHandler,
 
 		AuthMiddleware: authMiddleware,
@@ -1223,6 +1232,7 @@ func main() {
 		publishJob, deliverJob := scheduler.NewMinuteJobs(announcementService, notificationDeliveryService)
 		minuteSched.Register("publishScheduledAnnouncements", scheduler.EveryTick(), publishJob)
 		minuteSched.Register("deliverImmediateNotifications", scheduler.EveryTick(), deliverJob)
+		minuteSched.Register("autoSubmitOverdueQuizzes", scheduler.EveryTick(), scheduler.NewQuizAutoSubmitJob(quizService))
 		minuteSched.Start(schedCtx)
 	}
 

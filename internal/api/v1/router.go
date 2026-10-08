@@ -140,6 +140,9 @@ type Router struct {
 	// QTI / IMSCC import + export
 	QTIImportHandler *handlers.QTIImportHandler
 
+	// Quiz lifecycle: manual grading, event log, moderation, regrade
+	QuizLifecycleHandler *handlers.QuizLifecycleHandler
+
 	// Phase 6: gamification
 	GamificationHandler *handlers.GamificationHandler
 
@@ -851,6 +854,7 @@ func (r *Router) Register(app *fiber.App) {
 
 	r.registerP3FeatureRoutes(protected, admin, enrolled, instructor)
 	r.registerQuizExtensionRoutes(protected, enrolled, instructor)
+	r.registerQuizEngineRoutes(protected, enrolled, instructor)
 	r.registerGamificationRoutes(protected, admin, instructor, selfOrAdmin)
 	r.registerSuperAdminRoutes(protected)
 }

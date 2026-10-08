@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
@@ -40,6 +41,9 @@ func quizSubmissionToJSON(qs *models.QuizSubmission) fiber.Map {
 		"validation_token": qs.ValidationToken,
 		"created_at":       qs.CreatedAt,
 		"updated_at":       qs.UpdatedAt,
+		"fudge_points":     qs.FudgePoints,
+		// score_before_regrade: the attempt's score before a regrade moved it.
+		"score_before_regrade": qs.ScoreBeforeRegrade,
 	}
 	if qs.SelectedQuestions != "" {
 		m["selected_questions"] = qs.SelectedQuestions
@@ -55,9 +59,29 @@ func quizSubmissionAnswerToJSON(a *models.QuizSubmissionAnswer) fiber.Map {
 		"answer":             a.Answer,
 		"correct":            a.Correct,
 		"points":             a.Points,
+		"graded_via":         a.GradedVia,
+		"comment":            a.Comment,
 		"created_at":         a.CreatedAt,
 		"updated_at":         a.UpdatedAt,
 	}
+}
+
+// quizSubmissionForViewer serializes an attempt for the caller. Staff see
+// everything; a student or observer sees the score only while the quiz's
+// gradebook grade is visible to the student (post policy).
+func (h *QuizSubmissionHandler) quizSubmissionForViewer(c *fiber.Ctx, quiz *models.Quiz, qs *models.QuizSubmission) fiber.Map {
+	m := quizSubmissionToJSON(qs)
+	if quizCallerIsStaff(c) || quiz == nil || !qs.IsCompleted() {
+		return m
+	}
+	if !h.quizService.StudentResultsView(c.Context(), quiz, qs, time.Now()).Score {
+		m["score"] = nil
+		m["kept_score"] = nil
+		m["fudge_points"] = nil
+		m["score_before_regrade"] = nil
+		m["score_hidden"] = true
+	}
+	return m
 }
 
 // requireQuizInCourse verifies the URL's quiz_id is a real quiz inside
@@ -153,7 +177,8 @@ func (h *QuizSubmissionHandler) GetSubmission(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if _, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID)); wrote {
+	quiz, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID))
+	if wrote {
 		return nil
 	}
 
@@ -175,7 +200,7 @@ func (h *QuizSubmissionHandler) GetSubmission(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"quiz_submissions": []fiber.Map{quizSubmissionToJSON(submission)},
+		"quiz_submissions": []fiber.Map{h.quizSubmissionForViewer(c, quiz, submission)},
 	})
 }
 
@@ -274,7 +299,8 @@ func (h *QuizSubmissionHandler) CompleteSubmission(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if _, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID)); wrote {
+	quiz, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID))
+	if wrote {
 		return nil
 	}
 
@@ -294,7 +320,7 @@ func (h *QuizSubmissionHandler) CompleteSubmission(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"quiz_submissions": []fiber.Map{quizSubmissionToJSON(submission)},
+		"quiz_submissions": []fiber.Map{h.quizSubmissionForViewer(c, quiz, submission)},
 	})
 }
 
@@ -331,16 +357,26 @@ func (h *QuizSubmissionHandler) GetSubmissionAnswers(c *fiber.Ctx) error {
 		return responses.BadRequest(c, err.Error())
 	}
 
-	// Per-answer correctness and points are the attempt's results: a
-	// student (or observer) sees them only when the quiz's hide_results
-	// policy allows, as on the questions view.
-	showResults := staff || resultsVisibleAfterAttempt(quiz, sub)
+	// Per-answer correctness, points and grader comments are the
+	// attempt's results: a student (or observer) sees them only when the
+	// quiz's result policy (hide_results, one-time results, post policy)
+	// allows, as on the questions view.
+	showResults := staff
+	if !staff {
+		now := time.Now()
+		showResults = h.quizService.StudentResultsView(c.Context(), quiz, sub, now).Results
+		if showResults && callerID(c) == sub.UserID {
+			h.quizService.MarkResultsSeen(c.Context(), quiz, sub, now)
+		}
+	}
 	result := make([]fiber.Map, len(answers))
 	for i := range answers {
 		result[i] = quizSubmissionAnswerToJSON(&answers[i])
 		if !showResults {
 			result[i]["correct"] = nil
 			result[i]["points"] = nil
+			result[i]["comment"] = ""
+			result[i]["graded_via"] = nil
 		}
 	}
 
@@ -356,40 +392,10 @@ func (h *QuizSubmissionHandler) GetSubmissionAnswers(c *fiber.Ctx) error {
 	})
 }
 
-// resultsVisibleAfterAttempt reports whether a non-staff viewer may see a
-// finished attempt's per-question results (correct / points). Canvas
-// hide_results: "always" never, "until_after_last_attempt" only once the
-// last allowed attempt is used.
-func resultsVisibleAfterAttempt(quiz *models.Quiz, submission *models.QuizSubmission) bool {
-	if quiz == nil || submission == nil || submission.WorkflowState == "untaken" {
-		return false
-	}
-	switch quiz.HideResults {
-	case "always":
-		return false
-	case "until_after_last_attempt":
-		return quiz.AllowedAttempts > 0 && submission.Attempt >= quiz.AllowedAttempts
-	}
-	return true
-}
-
-// answerKeyVisibleAfterAttempt reports whether a non-staff viewer may see
-// the answer key for a finished attempt (Canvas show_correct_answers /
-// hide_results semantics).
-func answerKeyVisibleAfterAttempt(quiz *models.Quiz, submission *models.QuizSubmission) bool {
-	if submission.WorkflowState == "untaken" {
-		return false
-	}
-	if !quiz.ShowCorrectAnswers {
-		return false
-	}
-	switch quiz.HideResults {
-	case "always":
-		return false
-	case "until_after_last_attempt":
-		return quiz.AllowedAttempts > 0 && submission.Attempt >= quiz.AllowedAttempts
-	}
-	return true
+// callerID returns the authenticated user id (0 when absent).
+func callerID(c *fiber.Ctx) uint {
+	id, _ := c.Locals("user_id").(uint)
+	return id
 }
 
 // GetSubmissionQuestions handles GET /courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/questions
@@ -426,7 +432,9 @@ func (h *QuizSubmissionHandler) GetSubmissionQuestions(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not fetch submission questions")
 	}
 
-	showKey := quizCallerIsStaff(c) || answerKeyVisibleAfterAttempt(quiz, submission)
+	// G043: the answer key follows show_correct_answers, its show/hide
+	// dates, "last attempt only", one-time results and hide_results.
+	showKey := quizCallerIsStaff(c) || h.quizService.StudentResultsView(c.Context(), quiz, submission, time.Now()).AnswerKey
 	stimuli := h.quizService.StimuliForQuestions(c.Context(), quiz.CourseID, questions)
 	result := make([]fiber.Map, 0, len(questions))
 	for i := range questions {
@@ -456,7 +464,8 @@ func (h *QuizSubmissionHandler) ListSubmissions(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if _, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID)); wrote {
+	quiz, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID))
+	if wrote {
 		return nil
 	}
 
@@ -478,7 +487,7 @@ func (h *QuizSubmissionHandler) ListSubmissions(c *fiber.Ctx) error {
 		}
 		out := make([]fiber.Map, len(subs))
 		for i := range subs {
-			out[i] = quizSubmissionToJSON(&subs[i])
+			out[i] = h.quizSubmissionForViewer(c, quiz, &subs[i])
 		}
 		return c.JSON(fiber.Map{
 			"quiz_submissions": out,
