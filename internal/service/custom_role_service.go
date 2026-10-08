@@ -352,6 +352,12 @@ func (s *CustomRoleService) CustomRolePermissions(ctx context.Context, enrollmen
 	if err != nil || role == nil || role.WorkflowState != "active" || role.AccountID != accountID {
 		return nil, false, nil
 	}
+	// The role must still fit the enrollment's type: a type change that
+	// left role_id behind (e.g. a teacher-based role on what is now a TA
+	// enrollment) must not carry the old role's permissions across.
+	if role.BaseRoleType != enrollmentTypeToBaseRole(enrollment.Type) {
+		return nil, false, nil
+	}
 
 	perms := make(map[string]bool, len(models.AllPermissionNames()))
 	for _, p := range models.AllPermissionNames() {

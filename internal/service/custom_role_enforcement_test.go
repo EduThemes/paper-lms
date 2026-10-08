@@ -87,6 +87,22 @@ func TestEnrollmentPermissions_ForeignOrDeletedRoleFallsBackToBase(t *testing.T)
 	assert.False(t, active, "another tenant's role is not an active custom role")
 }
 
+func TestCustomRolePermissions_RoleMustFitEnrollmentType(t *testing.T) {
+	// A teacher-based role left on an enrollment whose type became TA
+	// (a type change elsewhere that kept role_id) grants nothing.
+	svc, roles, _ := newRoleSvc()
+	roles.On("FindByID", mock.Anything, uint(5), uint(1)).Return(&models.CustomRole{
+		ID: 5, AccountID: 1, BaseRoleType: "teacher", WorkflowState: "active",
+		Permissions: `{"view_audit_log":true}`,
+	}, nil)
+	_, active, err := svc.CustomRolePermissions(context.Background(), &models.Enrollment{Type: "TaEnrollment", RoleID: uintp(5)}, 1)
+	require.NoError(t, err)
+	assert.False(t, active)
+	perms, err := svc.EnrollmentPermissions(context.Background(), &models.Enrollment{Type: "TaEnrollment", RoleID: uintp(5)}, 1)
+	require.NoError(t, err)
+	assert.False(t, perms[models.PermViewAuditLog], "TA base defaults, not the teacher role's set")
+}
+
 func TestCoursePermissions_DeletedRoleReportsNoCustomRole(t *testing.T) {
 	roles := new(mocks.MockCustomRoleRepository)
 	enrollments := new(mocks.MockEnrollmentRepository)

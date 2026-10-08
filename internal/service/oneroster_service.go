@@ -1010,8 +1010,13 @@ func (s *OneRosterService) syncEnrollments(ctx context.Context, accountID uint, 
 
 		if existing != nil {
 			if existing.Type != enrollType || existing.WorkflowState != models.EnrollmentActive || (existing.CourseSectionID == nil && sectionID != nil) {
-				existing.Type = enrollType
-				existing.Role = enrollType
+				if existing.Type != enrollType {
+					// A new base type drops any custom role (G102): the
+					// role was granted on top of the old type.
+					existing.Type = enrollType
+					existing.Role = enrollType
+					existing.RoleID = nil
+				}
 				existing.WorkflowState = models.EnrollmentActive
 				if existing.CourseSectionID == nil {
 					existing.CourseSectionID = sectionID
