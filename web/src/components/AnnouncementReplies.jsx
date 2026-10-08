@@ -13,11 +13,12 @@ import { textToHtml, threadReplies } from '../utils/notifyInbox';
 
 const formatDate = (s) => (s ? new Date(s).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
 
-// Edits load the stored HTML back into a textarea as text.
+// Edits load the stored HTML back into a textarea as text. DOMParser
+// builds an inert document (no script runs, no image or event handler
+// fires), unlike innerHTML on an element of the live document.
 const htmlToText = (html) => {
-  const div = document.createElement('div');
-  div.innerHTML = String(html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>\s*<p>/gi, '\n\n');
-  return div.textContent || '';
+  const markup = String(html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>\s*<p>/gi, '\n\n');
+  return new DOMParser().parseFromString(markup, 'text/html').body.textContent || '';
 };
 
 const ReplyForm = ({ initial = '', submitLabel, onSubmit, onCancel, pending, autoFocus, label }) => {

@@ -3,7 +3,7 @@
 // replies (G090) and the per-category x per-channel notification
 // preferences (G091). Kept out of api.js so parallel work merges cleanly.
 
-import { api, ApiError, getCSRFToken } from './api';
+import { api, ApiError, getCSRFToken, requestPaged } from './api';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -58,6 +58,11 @@ export const inboxApi = {
 
   contexts: async () => (await data(api.request('/conversations/contexts'))) || [],
 
+  // The "Submission Comments" mailbox: one row per submission comment
+  // thread the caller can read (returns { data, pagination }).
+  submissionComments: ({ page = 1, perPage = 20 } = {}) =>
+    api.request(`/conversations/submission_comments${query({ page, per_page: perPage })}`),
+
   // Address book search. context = course_5 | course_5_students |
   // section_3 | group_7 lists that context's members.
   searchRecipients: async ({ search = '', context = '', perPage = 10 } = {}) =>
@@ -82,9 +87,13 @@ export const inboxApi = {
   },
 };
 
+// Upper bound on the replies one thread loads. The API pages at 100, and
+// a thread is rendered whole, so the list walks every page up to this.
+const MAX_ANNOUNCEMENT_REPLIES = 2000;
+
 export const announcementRepliesApi = {
-  list: async (announcementId, page = 1, perPage = 100) =>
-    (await data(api.request(`/announcements/${announcementId}/replies?page=${page}&per_page=${perPage}`))) || [],
+  list: async (announcementId) =>
+    (await data(requestPaged(`/announcements/${announcementId}/replies`, 1, MAX_ANNOUNCEMENT_REPLIES))) || [],
   create: (announcementId, message, parentId) =>
     data(api.request(`/announcements/${announcementId}/replies`, json('POST', { message, parent_id: parentId || undefined }))),
   update: (announcementId, replyId, message) =>
