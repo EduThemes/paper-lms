@@ -329,6 +329,18 @@ func TestBlueprintLockGuard_RefusesLockedEditsInChildCourses(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode, "a mixed-case path must not slip past the lock")
 	assert.Equal(t, http.StatusForbidden, testutil.MakeRequest(app, http.MethodDelete, upper, nil).StatusCode)
 
+	// encoding/json binds keys case-insensitively; so does the guard.
+	for _, body := range []map[string]any{
+		{"Assignment": map[string]any{"NAME": "Renamed"}},
+		{"assignment": map[string]any{"Name": "Renamed"}},
+		{"assignment": map[string]any{"name": "Essay"}, "ASSIGNMENT": map[string]any{"name": "Renamed"}},
+	} {
+		resp = testutil.MakeRequest(app, http.MethodPut, aPath, testutil.JSONBody(body))
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode, "body %v", body)
+	}
+	resp = testutil.MakeRequest(app, http.MethodPut, aPath, strings.NewReader(`{"assignment":{"name":"Essay","NAME":"Renamed"}}`))
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode, "a differing duplicate key must not hide behind an unchanged one")
+
 	// The write handlers bind form bodies too: they are checked the same way.
 	form := func(contentType, body string) int {
 		req := httptest.NewRequest(http.MethodPut, aPath, strings.NewReader(body))
@@ -372,6 +384,13 @@ func TestBlueprintLockGuard_RefusesLockedEditsInChildCourses(t *testing.T) {
 	bulk := fmt.Sprintf("/api/v1/courses/%d/assignments/bulk_update_dates", child.ID)
 	resp = testutil.MakeRequest(app, http.MethodPost, bulk, testutil.JSONBody(map[string]any{"updates": []map[string]any{{"assignment_id": copyA.ID, "due_at": "2026-12-01T23:59:00Z"}}}))
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp = testutil.MakeRequest(app, http.MethodPost, bulk, testutil.JSONBody(map[string]any{"UPDATES": []map[string]any{{"Assignment_ID": copyA.ID, "DUE_AT": "2026-12-01T23:59:00Z"}}}))
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode, "mixed-case keys bind in the handler")
+	bulkReq := httptest.NewRequest(http.MethodPost, bulk, strings.NewReader("<x/>"))
+	bulkReq.Header.Set("Content-Type", "application/xml")
+	bulkResp, err := app.Test(bulkReq, -1)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, bulkResp.StatusCode, "a body the guard cannot read is refused while a date lock exists")
 	resp = testutil.MakeRequest(app, http.MethodPost, bulk, testutil.JSONBody(map[string]any{"updates": []map[string]any{{"assignment_id": copyA.ID, "due_at": nil}}}))
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	// Content is no longer locked for it: a rename passes.

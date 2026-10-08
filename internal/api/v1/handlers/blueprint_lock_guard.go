@@ -129,35 +129,96 @@ func guardBulkDates(c *fiber.Ctx, d BlueprintLockGuardDeps, courseSeg string) er
 	if err != nil {
 		return c.Next()
 	}
-	var body struct {
-		Updates []map[string]json.RawMessage `json:"updates"`
+	courseID := uint(courseID64)
+	refuse := func(locked *service.BlueprintLockedError) error {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"errors":            []fiber.Map{{"message": locked.Error()}},
+			"locked_attributes": locked.Attributes,
+			"blueprint_locked":  true,
+		})
 	}
-	if json.Unmarshal(c.Body(), &body) != nil {
+
+	// The handler binds with BodyParser: JSON with case-insensitive keys,
+	// but also form and XML bodies. Anything but a JSON body the guard can
+	// read is refused when any assignment copy here has a date lock.
+	var top map[string]json.RawMessage
+	if len(c.Body()) == 0 {
 		return c.Next()
 	}
-	courseID := uint(courseID64)
-	for _, u := range body.Updates {
-		var id uint
-		if raw, ok := u["assignment_id"]; !ok || json.Unmarshal(raw, &id) != nil || id == 0 {
+	if !strings.HasSuffix(guardContentType(c), "json") || json.Unmarshal(c.Body(), &top) != nil {
+		if locked := bulkDateLockedCopies(c, d, courseID); locked != nil && guardCallerIsCourseStaff(c, d, courseID) {
+			return refuse(locked)
+		}
+		return c.Next()
+	}
+	var updates []map[string]json.RawMessage
+	for k, raw := range top {
+		if !strings.EqualFold(k, "updates") {
 			continue
 		}
-		changes := map[string]json.RawMessage{}
-		for _, k := range []string{"due_at", "unlock_at", "lock_at"} {
-			if raw, ok := u[k]; ok {
-				changes[k] = raw
-			}
+		var list []map[string]json.RawMessage
+		if json.Unmarshal(raw, &list) == nil {
+			updates = append(updates, list...)
 		}
-		err := d.Blueprints.CheckChildEdit(c.Context(), courseID, service.ChildEdit{ContentType: "Assignment", ChildID: id, Changes: changes})
-		var locked *service.BlueprintLockedError
-		if errors.As(err, &locked) && guardCallerIsCourseStaff(c, d, courseID) {
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"errors":            []fiber.Map{{"message": locked.Error()}},
-				"locked_attributes": locked.Attributes,
-				"blueprint_locked":  true,
-			})
+	}
+	dateFields := []string{"due_at", "unlock_at", "lock_at"}
+	for _, u := range updates {
+		changes, _ := canonicalLockedChanges(dateFields, u)
+		for k, raw := range u {
+			var id uint
+			if !strings.EqualFold(k, "assignment_id") || json.Unmarshal(raw, &id) != nil || id == 0 {
+				continue
+			}
+			err := d.Blueprints.CheckChildEdit(c.Context(), courseID, service.ChildEdit{ContentType: "Assignment", ChildID: id, Changes: changes})
+			var locked *service.BlueprintLockedError
+			if errors.As(err, &locked) && guardCallerIsCourseStaff(c, d, courseID) {
+				return refuse(locked)
+			}
 		}
 	}
 	return c.Next()
+}
+
+// bulkDateLockedCopies returns a lock error when the course holds an
+// assignment copy whose due or availability dates are locked.
+func bulkDateLockedCopies(c *fiber.Ctx, d BlueprintLockGuardDeps, courseID uint) *service.BlueprintLockedError {
+	items, err := d.Blueprints.ListChildLockedContent(c.Context(), courseID)
+	if err != nil {
+		return nil
+	}
+	cats := map[string]bool{}
+	for _, it := range items {
+		if it.ContentType != "Assignment" {
+			continue
+		}
+		if it.Restrictions.DueDates {
+			cats["due_dates"] = true
+		}
+		if it.Restrictions.AvailabilityDates {
+			cats["availability_dates"] = true
+		}
+	}
+	if len(cats) == 0 {
+		return nil
+	}
+	out := &service.BlueprintLockedError{}
+	for _, cat := range []string{"availability_dates", "due_dates"} {
+		if cats[cat] {
+			out.Attributes = append(out.Attributes, cat)
+		}
+	}
+	return out
+}
+
+// guardContentType resolves the request content type the way
+// BodyParser does: lower-cased, vendor suffix folded ("+json"), without
+// parameters.
+func guardContentType(c *fiber.Ctx) string {
+	ct := utils.ParseVendorSpecificContentType(strings.ToLower(string(c.Request().Header.ContentType())))
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = ct[:i]
+	}
+	return strings.TrimSpace(ct)
 }
 
 // resolveGuardedID turns the route's id segment into the row id. Pages
@@ -191,11 +252,7 @@ func guardBodyChanges(c *fiber.Ctx, contentType string) (changes map[string]json
 		return nil, false
 	}
 	envelope := blueprintGuardEnvelopes[contentType]
-	ct := utils.ParseVendorSpecificContentType(strings.ToLower(string(c.Request().Header.ContentType())))
-	if i := strings.IndexByte(ct, ';'); i >= 0 {
-		ct = ct[:i]
-	}
-	ct = strings.TrimSpace(ct)
+	ct := guardContentType(c)
 	switch {
 	case strings.HasSuffix(ct, "json"):
 	case ct == fiber.MIMEApplicationForm:
@@ -209,13 +266,52 @@ func guardBodyChanges(c *fiber.Ctx, contentType string) (changes map[string]json
 	if err := json.Unmarshal(body, &top); err != nil {
 		return nil, true
 	}
-	if raw, ok := top[envelope]; ok {
+	// encoding/json matches keys case-insensitively, so {"Assignment":
+	// {"NAME": ..}} binds like {"assignment": {"name": ..}}. Read every
+	// envelope spelling and the top level, and fold the keys.
+	objs := []map[string]json.RawMessage{top}
+	for k, raw := range top {
+		if !strings.EqualFold(k, envelope) {
+			continue
+		}
 		var inner map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &inner); err == nil {
-			return inner, false
+			objs = append(objs, inner)
 		}
 	}
-	return top, false
+	return canonicalLockedChanges(service.BlueprintLockedFields(contentType), objs...)
+}
+
+// canonicalLockedChanges maps the keys of decoded JSON objects onto the
+// lockable attribute names (case and underscores ignored). An attribute
+// given more than once is compared as a list of its values, so a
+// differing duplicate is not hidden behind an unchanged one.
+func canonicalLockedChanges(known []string, objs ...map[string]json.RawMessage) (map[string]json.RawMessage, bool) {
+	byLoose := make(map[string]string, len(known))
+	for _, k := range known {
+		byLoose[looseFieldName(k)] = k
+	}
+	values := map[string][]json.RawMessage{}
+	for _, obj := range objs {
+		for k, raw := range obj {
+			if name, ok := byLoose[looseFieldName(k)]; ok {
+				values[name] = append(values[name], raw)
+			}
+		}
+	}
+	out := make(map[string]json.RawMessage, len(values))
+	for name, vs := range values {
+		if len(vs) == 1 {
+			out[name] = vs[0]
+			continue
+		}
+		b, err := json.Marshal(vs)
+		if err != nil {
+			return nil, true
+		}
+		out[name] = b
+	}
+	return out, false
 }
 
 // guardFormChanges maps form fields onto the lockable attribute names.
