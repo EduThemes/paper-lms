@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -43,6 +44,18 @@ func (h *AssignmentOverrideHandler) overrideInCourse(c *fiber.Ctx, override *mod
 	return assignment.CourseID == urlCourseID
 }
 
+// requireAssignmentInCourse loads :assignment_id under the caller's
+// tenant and verifies it belongs to :course_id. Writes a 404 and returns
+// wrote=true on any miss; the caller MUST `return nil`.
+func (h *AssignmentOverrideHandler) requireAssignmentInCourse(c *fiber.Ctx, assignmentID, courseID uint) (*models.Assignment, bool) {
+	assignment, err := h.assignmentService.GetByID(c.Context(), assignmentID, callerAccountID(c))
+	if err != nil || assignment == nil || assignment.CourseID != courseID || assignment.WorkflowState == models.AssignmentDeleted {
+		_ = responses.NotFound(c, "assignment")
+		return nil, true
+	}
+	return assignment, false
+}
+
 func assignmentOverrideToJSON(o *models.AssignmentOverride) fiber.Map {
 	return fiber.Map{
 		"id":                o.ID,
@@ -61,9 +74,18 @@ func assignmentOverrideToJSON(o *models.AssignmentOverride) fiber.Map {
 }
 
 func (h *AssignmentOverrideHandler) ListOverrides(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	assignmentID, err := c.ParamsInt("assignment_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid assignment ID")
+	}
+	// B019: F-013 parent-tie — the assignment must be in :course_id and
+	// the caller's tenant before its overrides (and student ids) are read.
+	if _, wrote := h.requireAssignmentInCourse(c, uint(assignmentID), uint(courseID)); wrote {
+		return nil
 	}
 
 	overrides, err := h.overrideService.ListOverrides(c.Context(), uint(assignmentID))
@@ -89,9 +111,17 @@ func (h *AssignmentOverrideHandler) ListOverrides(c *fiber.Ctx) error {
 }
 
 func (h *AssignmentOverrideHandler) CreateOverride(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	assignmentID, err := c.ParamsInt("assignment_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid assignment ID")
+	}
+	// B019: F-013 parent-tie before attaching anything to the assignment.
+	if _, wrote := h.requireAssignmentInCourse(c, uint(assignmentID), uint(courseID)); wrote {
+		return nil
 	}
 
 	var input struct {
@@ -122,14 +152,29 @@ func (h *AssignmentOverrideHandler) CreateOverride(c *fiber.Ctx) error {
 		CourseSectionID: input.AssignmentOverride.CourseSectionID,
 	}
 
+	// Every listed student must be a student of this course.
+	studentIDs := dedupeUints(input.AssignmentOverride.StudentIDs)
+	for _, studentID := range studentIDs {
+		if !h.overrideService.IsCourseStudent(c.Context(), uint(courseID), studentID, callerAccountID(c)) {
+			return responses.BadRequest(c, fmt.Sprintf("User %d is not a student in this course", studentID))
+		}
+	}
+
 	if err := h.overrideService.CreateOverride(c.Context(), override); err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 
-	// Add students if provided
-	for _, studentID := range input.AssignmentOverride.StudentIDs {
-		_ = h.overrideService.AddStudent(c.Context(), override.ID, studentID, uint(assignmentID))
+	// B112: a failed student insert (e.g. the student already has an
+	// override on this assignment) used to be swallowed while the
+	// response still echoed the id as saved. Now the override is rolled
+	// back and the conflict is reported.
+	for _, studentID := range studentIDs {
+		if err := h.overrideService.AddStudent(c.Context(), override.ID, studentID, uint(assignmentID)); err != nil {
+			_ = h.overrideService.DeleteOverride(c.Context(), override.ID)
+			return responses.Error(c, fiber.StatusConflict, fmt.Sprintf("User %d already has an override for this assignment", studentID))
+		}
 	}
+	input.AssignmentOverride.StudentIDs = studentIDs
 
 	// Build response with student IDs
 	overrideJSON := assignmentOverrideToJSON(override)
@@ -286,4 +331,18 @@ func (h *AssignmentOverrideHandler) DeleteOverride(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"delete": true})
+}
+
+// dedupeUints returns ids with duplicates (and zeros) removed, preserving order.
+func dedupeUints(ids []uint) []uint {
+	seen := make(map[uint]bool, len(ids))
+	out := make([]uint, 0, len(ids))
+	for _, id := range ids {
+		if id == 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
 }

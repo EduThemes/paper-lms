@@ -427,13 +427,19 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 						pending++
 					}
 				}
+				// B110: an observer sees exactly what the student sees — a
+				// grade only once it is posted (grading posts it at once on
+				// an automatic post policy; a manual policy waits for "Post
+				// grades"). Excused work and unpublished assignments never
+				// count.
+				visible := sub.Score != nil && sub.PostedAt != nil && !sub.Excused && assn.IsPublished()
 				// Grade contribution: only graded, posted submissions with score.
-				if sub.Score != nil && assn.PointsPossible != nil && *assn.PointsPossible > 0 && sub.PostedAt != nil {
+				if visible && assn.PointsPossible != nil && *assn.PointsPossible > 0 {
 					earned += *sub.Score
 					possible += *assn.PointsPossible
 				}
-				// Recent grades feed.
-				if sub.GradedAt != nil && sub.Score != nil {
+				// Recent grades feed: hidden (unposted) grades never leak here.
+				if visible && sub.GradedAt != nil {
 					recentGrades = append(recentGrades, RecentGradeItem{
 						SubmissionID:   sub.ID,
 						AssignmentID:   sub.AssignmentID,

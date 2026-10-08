@@ -25,3 +25,23 @@ type Assignment struct {
 	CreatedAt          time.Time          `json:"created_at"`
 	UpdatedAt          time.Time          `json:"updated_at"`
 }
+
+// IsPublished reports whether students may see and submit to the
+// assignment. workflow_state is the source of truth; the legacy
+// Published bool is honored for rows written before the state machine
+// kept both in sync. A deleted assignment is never published.
+func (a *Assignment) IsPublished() bool {
+	if a == nil || a.WorkflowState == AssignmentDeleted {
+		return false
+	}
+	if a.WorkflowState == AssignmentPublished {
+		return true
+	}
+	return a.WorkflowState == "" && a.Published
+}
+
+// UsesManualPostPolicy reports whether grades stay hidden from students
+// until an instructor explicitly posts them.
+func (a *Assignment) UsesManualPostPolicy() bool {
+	return a != nil && a.PostPolicy == "manual"
+}

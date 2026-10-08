@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/gofiber/fiber/v2"
 )
 
 // SpeedGraderHandler handles SpeedGrader-related API endpoints.
@@ -34,6 +34,10 @@ func speedGraderSubmissionJSON(sub *models.Submission) fiber.Map {
 		"url":             sub.URL,
 		"score":           sub.Score,
 		"grade":           sub.Grade,
+		"entered_score":   sub.EnteredScore,
+		"entered_grade":   sub.EnteredGrade,
+		"points_deducted": sub.PointsDeducted,
+		"posted_at":       sub.PostedAt,
 		"graded_at":       sub.GradedAt,
 		"grader_id":       sub.GraderID,
 		"submitted_at":    sub.SubmittedAt,
@@ -66,8 +70,11 @@ func (h *SpeedGraderHandler) GetSpeedGraderData(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid assignment ID")
 	}
 
-	data, err := h.speedGraderService.GetSpeedGraderData(c.Context(), uint(courseID), uint(assignmentID))
+	data, err := h.speedGraderService.GetSpeedGraderData(c.Context(), uint(courseID), uint(assignmentID), callerAccountID(c))
 	if err != nil {
+		if err == service.ErrSpeedGraderAssignmentNotFound {
+			return responses.NotFound(c, "assignment")
+		}
 		return responses.InternalError(c, "Could not fetch SpeedGrader data")
 	}
 
@@ -79,6 +86,12 @@ func (h *SpeedGraderHandler) GetSpeedGraderData(c *fiber.Ctx) error {
 	userNameLookup := data.UserNameMap
 
 	// Build the response with assignment details and students
+	anonymous := data.Assignment.AnonymousGrading
+	studentIDs := make(map[uint]bool, len(data.Students))
+	for _, student := range data.Students {
+		studentIDs[student.UserID] = true
+	}
+
 	studentsJSON := make([]fiber.Map, len(data.Students))
 	for i, student := range data.Students {
 		commentsJSON := make([]fiber.Map, len(student.Comments))
@@ -87,10 +100,16 @@ func (h *SpeedGraderHandler) GetSpeedGraderData(c *fiber.Ctx) error {
 			if authorName == "" {
 				authorName = fmt.Sprintf("User %d", comment.AuthorID)
 			}
+			// B119: under anonymous grading a student author is identified
+			// only by their anonymous label — no real name, no user id.
+			var authorID interface{} = comment.AuthorID
+			if anonymous && studentIDs[comment.AuthorID] {
+				authorID = nil
+			}
 			commentsJSON[j] = fiber.Map{
 				"id":            comment.ID,
 				"submission_id": comment.SubmissionID,
-				"author_id":     comment.AuthorID,
+				"author_id":     authorID,
 				"author_name":   authorName,
 				"comment":       comment.Comment,
 				"draft":         comment.Draft,
@@ -109,15 +128,17 @@ func (h *SpeedGraderHandler) GetSpeedGraderData(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"assignment": fiber.Map{
-			"id":               data.Assignment.ID,
-			"course_id":        data.Assignment.CourseID,
-			"name":             data.Assignment.Name,
-			"description":      data.Assignment.Description,
-			"due_at":           data.Assignment.DueAt,
-			"points_possible":  data.Assignment.PointsPossible,
-			"grading_type":     data.Assignment.GradingType,
-			"submission_types": data.Assignment.SubmissionTypes,
-			"published":        data.Assignment.Published,
+			"id":                data.Assignment.ID,
+			"course_id":         data.Assignment.CourseID,
+			"name":              data.Assignment.Name,
+			"description":       data.Assignment.Description,
+			"due_at":            data.Assignment.DueAt,
+			"points_possible":   data.Assignment.PointsPossible,
+			"grading_type":      data.Assignment.GradingType,
+			"submission_types":  data.Assignment.SubmissionTypes,
+			"published":         data.Assignment.Published,
+			"anonymous_grading": data.Assignment.AnonymousGrading,
+			"post_policy":       data.Assignment.PostPolicy,
 		},
 		"students": studentsJSON,
 	})
@@ -127,7 +148,7 @@ func (h *SpeedGraderHandler) GetSpeedGraderData(c *fiber.Ctx) error {
 // for the given assignment.
 // GET /courses/:course_id/assignments/:assignment_id/speedgrader/submissions/:user_id
 func (h *SpeedGraderHandler) GetStudentSubmission(c *fiber.Ctx) error {
-	_, err := c.ParamsInt("course_id")
+	courseID, err := c.ParamsInt("course_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid course ID")
 	}
@@ -142,10 +163,14 @@ func (h *SpeedGraderHandler) GetStudentSubmission(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid user ID")
 	}
 
-	data, err := h.speedGraderService.GetStudentSubmission(c.Context(), uint(assignmentID), uint(userID))
+	data, err := h.speedGraderService.GetStudentSubmission(c.Context(), uint(courseID), uint(assignmentID), uint(userID), callerAccountID(c))
 	if err != nil {
+		if err == service.ErrSpeedGraderAssignmentNotFound {
+			return responses.NotFound(c, "assignment")
+		}
 		return responses.InternalError(c, "Could not fetch student submission")
 	}
+	anonymous := data.Assignment != nil && data.Assignment.AnonymousGrading
 
 	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
 		_ = h.auditService.LogPIIAccess(c.Context(), callerID, uint(userID), "read", "speedgrader_submission", "assignments", uint(assignmentID), c.IP(), c.Get("User-Agent"))
@@ -153,10 +178,14 @@ func (h *SpeedGraderHandler) GetStudentSubmission(c *fiber.Ctx) error {
 
 	commentsJSON := make([]fiber.Map, len(data.Comments))
 	for i, comment := range data.Comments {
+		var authorID interface{} = comment.AuthorID
+		if anonymous && comment.AuthorID == uint(userID) {
+			authorID = nil
+		}
 		commentsJSON[i] = fiber.Map{
 			"id":            comment.ID,
 			"submission_id": comment.SubmissionID,
-			"author_id":     comment.AuthorID,
+			"author_id":     authorID,
 			"comment":       comment.Comment,
 			"draft":         comment.Draft,
 			"created_at":    comment.CreatedAt,

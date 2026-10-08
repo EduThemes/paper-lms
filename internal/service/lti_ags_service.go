@@ -169,18 +169,32 @@ func (s *LTIAGSService) syncSubmissionScore(ctx context.Context, assignmentID ui
 	if result.ResultScore != nil && result.ResultMaximum != nil && *result.ResultMaximum > 0 {
 		// Scale to assignment's actual points_possible (default 100 if not set)
 		pointsPossible := 100.0
-		if assignment, aErr := s.assignmentRepo.FindByID(ctx, assignmentID, 0); aErr == nil && assignment.PointsPossible != nil && *assignment.PointsPossible > 0 {
-			pointsPossible = *assignment.PointsPossible
+		manualPost := false
+		if assignment, aErr := s.assignmentRepo.FindByID(ctx, assignmentID, 0); aErr == nil {
+			if assignment.PointsPossible != nil && *assignment.PointsPossible > 0 {
+				pointsPossible = *assignment.PointsPossible
+			}
+			manualPost = assignment.UsesManualPostPolicy()
 		}
 		score := *result.ResultScore / *result.ResultMaximum * pointsPossible
 		submission.Score = &score
 
 		gradeStr := fmt.Sprintf("%.2f", score)
 		submission.Grade = &gradeStr
+		// The tool's score is the entered score (no late policy applied).
+		submission.EnteredScore = &score
+		submission.EnteredGrade = &gradeStr
+		submission.PointsDeducted = nil
 
 		now := time.Now()
 		submission.GradedAt = &now
 		submission.WorkflowState = "graded"
+		// Post policy: an automatically-posted assignment releases the
+		// tool's score to the student immediately; a manual one waits
+		// for the instructor to post grades.
+		if !manualPost && submission.PostedAt == nil {
+			submission.PostedAt = &now
+		}
 
 		return s.submissionRepo.Update(ctx, submission)
 	}

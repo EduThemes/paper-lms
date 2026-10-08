@@ -2,7 +2,11 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -25,6 +29,7 @@ type SpeedGraderStudent struct {
 
 // SpeedGraderStudentSubmission holds a single student's submission with comments.
 type SpeedGraderStudentSubmission struct {
+	Assignment *models.Assignment         `json:"-"`
 	Submission *models.Submission         `json:"submission"`
 	Comments   []models.SubmissionComment `json:"comments"`
 }
@@ -58,14 +63,14 @@ func NewSpeedGraderService(
 // GetSpeedGraderData returns the complete SpeedGrader data for an assignment,
 // including the assignment details and all enrolled students with their
 // submissions and comments.
-func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, assignmentID uint) (*SpeedGraderData, error) {
-	// Fetch assignment
-	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, 0)
+func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, assignmentID, accountID uint) (*SpeedGraderData, error) {
+	// Fetch assignment under the caller's tenant and tie it to the course.
+	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, accountID)
 	if err != nil {
-		return nil, fmt.Errorf("assignment not found: %w", err)
+		return nil, ErrSpeedGraderAssignmentNotFound
 	}
-	if assignment.CourseID != courseID {
-		return nil, fmt.Errorf("assignment does not belong to this course")
+	if assignment.CourseID != courseID || assignment.WorkflowState == models.AssignmentDeleted {
+		return nil, ErrSpeedGraderAssignmentNotFound
 	}
 
 	// Fetch all enrollments for the course to get students
@@ -95,18 +100,32 @@ func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, a
 		}
 	}
 
-	// Build student list from enrollments (only StudentEnrollment types)
+	// Build student list from enrollments (only StudentEnrollment types).
+	// For anonymous grading the label order must not follow enrollment
+	// order (that alone can de-anonymize), so students are shuffled
+	// deterministically per assignment before numbering.
+	studentEnrollments := make([]models.Enrollment, 0, len(enrollments.Items))
+	for _, enrollment := range enrollments.Items {
+		if enrollment.Type == "StudentEnrollment" {
+			studentEnrollments = append(studentEnrollments, enrollment)
+		}
+	}
+	if assignment.AnonymousGrading {
+		sort.SliceStable(studentEnrollments, func(i, j int) bool {
+			return anonymousSortKey(assignment.ID, studentEnrollments[i].UserID) < anonymousSortKey(assignment.ID, studentEnrollments[j].UserID)
+		})
+	}
+
 	students := make([]SpeedGraderStudent, 0)
 	anonymousIndex := 0
-	for _, enrollment := range enrollments.Items {
-		if enrollment.Type != "StudentEnrollment" {
-			continue
-		}
-
+	for _, enrollment := range studentEnrollments {
 		anonymousIndex++
 		userName := ""
 		if assignment.AnonymousGrading {
 			userName = fmt.Sprintf("Student %d", anonymousIndex)
+			// B119: a student's own comments must carry the anonymous
+			// label, never the real name from the course roster.
+			userNameMap[enrollment.UserID] = userName
 		} else {
 			if enrollment.User != nil {
 				userName = enrollment.User.Name
@@ -127,7 +146,7 @@ func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, a
 			student.Submission = sub
 
 			// Fetch comments for this submission
-			comments, err := s.submissionCommentRepo.ListBySubmissionID(ctx, sub.ID, 0)
+			comments, err := s.submissionCommentRepo.ListBySubmissionID(ctx, sub.ID, accountID)
 			if err == nil && len(comments) > 0 {
 				student.Comments = comments
 			}
@@ -143,26 +162,49 @@ func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, a
 	}, nil
 }
 
+// ErrSpeedGraderAssignmentNotFound is returned when the assignment is not
+// in the caller's tenant or not in the URL's course. Handlers map it to 404.
+var ErrSpeedGraderAssignmentNotFound = errors.New("assignment not found")
+
 // GetStudentSubmission returns a single student's submission with comments
-// for the given assignment.
-func (s *SpeedGraderService) GetStudentSubmission(ctx context.Context, assignmentID, userID uint) (*SpeedGraderStudentSubmission, error) {
-	// accountID=0: SpeedGrader's tenant scope is verified at the handler when
-	// it loads the parent assignment; this read trusts that upstream check.
-	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, 0)
+// for the given assignment. The assignment is loaded under accountID and
+// must belong to courseID (B010: the handler used to discard course_id
+// and every read here ran with accountID=0, so any instructor could read
+// any tenant's submission and comments).
+func (s *SpeedGraderService) GetStudentSubmission(ctx context.Context, courseID, assignmentID, userID, accountID uint) (*SpeedGraderStudentSubmission, error) {
+	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, accountID)
+	if err != nil || assignment.CourseID != courseID || assignment.WorkflowState == models.AssignmentDeleted {
+		return nil, ErrSpeedGraderAssignmentNotFound
+	}
+
+	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, accountID)
 	if err != nil {
 		return &SpeedGraderStudentSubmission{
+			Assignment: assignment,
 			Submission: nil,
 			Comments:   make([]models.SubmissionComment, 0),
 		}, nil
 	}
 
-	comments, err := s.submissionCommentRepo.ListBySubmissionID(ctx, submission.ID, 0)
+	comments, err := s.submissionCommentRepo.ListBySubmissionID(ctx, submission.ID, accountID)
 	if err != nil {
 		comments = make([]models.SubmissionComment, 0)
 	}
 
 	return &SpeedGraderStudentSubmission{
+		Assignment: assignment,
 		Submission: submission,
 		Comments:   comments,
 	}, nil
+}
+
+// anonymousSortKey gives a stable, per-assignment pseudo-random order for
+// anonymous grading so "Student N" numbering doesn't mirror enrollment
+// order.
+func anonymousSortKey(assignmentID, userID uint) uint64 {
+	var buf [16]byte
+	binary.BigEndian.PutUint64(buf[:8], uint64(assignmentID))
+	binary.BigEndian.PutUint64(buf[8:], uint64(userID))
+	sum := sha256.Sum256(buf[:])
+	return binary.BigEndian.Uint64(sum[:8])
 }

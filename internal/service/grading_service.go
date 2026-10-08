@@ -172,14 +172,14 @@ func (s *GradingService) GetStudentGrade(ctx context.Context, courseID, studentI
 	var finalEarned, finalPossible float64
 
 	for _, a := range assignments.Items {
-		if a.PointsPossible == nil || *a.PointsPossible <= 0 {
+		sub := subByAssignment[a.ID]
+		points, counts := assignmentCounts(&a, sub)
+		if !counts {
 			continue
 		}
-		points := *a.PointsPossible
 		finalPossible += points
 
-		sub, exists := subByAssignment[a.ID]
-		if exists && sub.Score != nil {
+		if sub != nil && sub.Score != nil {
 			currentEarned += *sub.Score
 			currentPossible += points
 			finalEarned += *sub.Score
@@ -202,6 +202,27 @@ func (s *GradingService) GetStudentGrade(ctx context.Context, courseID, studentI
 	}, nil
 }
 
+// assignmentCounts decides whether an assignment takes part in a
+// student's grade and with how many points possible (Canvas grade
+// calculator rules, B115/B206):
+//   - unpublished / deleted assignments and not_graded ones never count;
+//   - an excused submission is dropped from both earned and possible;
+//   - a 0-point (or point-less) assignment counts as extra credit: its
+//     score is added to earned with nothing added to possible.
+func assignmentCounts(a *models.Assignment, sub *models.Submission) (pointsPossible float64, counts bool) {
+	if a == nil || !a.IsPublished() || a.GradingType == "not_graded" {
+		return 0, false
+	}
+	if sub != nil && sub.Excused {
+		return 0, false
+	}
+	if a.PointsPossible != nil && *a.PointsPossible > 0 {
+		return *a.PointsPossible, true
+	}
+	// Extra credit: only meaningful when there is a score to add.
+	return 0, sub != nil && sub.Score != nil
+}
+
 // calculateWeightedGrade computes Canvas-compatible weighted grades.
 // Current score: only considers groups where the student has graded submissions.
 // Final score: treats unsubmitted assignments as 0.
@@ -221,7 +242,8 @@ func (s *GradingService) calculateWeightedGrade(assignments []models.Assignment,
 	totals := make(map[uint]*groupTotals)
 
 	for _, a := range assignments {
-		if a.PointsPossible == nil || *a.PointsPossible <= 0 {
+		points, counts := assignmentCounts(&a, subByAssignment[a.ID])
+		if !counts {
 			continue
 		}
 		groupID := uint(0)
@@ -239,7 +261,6 @@ func (s *GradingService) calculateWeightedGrade(assignments []models.Assignment,
 			totals[groupID] = gt
 		}
 
-		points := *a.PointsPossible
 		gt.finalPossible += points
 
 		sub, hasSub := subByAssignment[a.ID]
