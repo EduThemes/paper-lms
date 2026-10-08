@@ -29,7 +29,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/testutil/mocks"
 )
 
-var errNotFound = errors.New("record not found")
+var contentLaneErrNotFound = errors.New("record not found")
 
 // contentAuthStub stamps the Locals the auth + course middleware set.
 func contentAuthStub(accountID uint, enrollmentType string, isAdmin bool) fiber.Handler {
@@ -70,7 +70,7 @@ func TestCommonsImport_TargetCourseInOtherTenant_404(t *testing.T) {
 		ID: 5, AccountID: 1, ResourceType: "assignment", Visibility: "public",
 		ContentSnapshot: `{"assignment":{"id":3,"name":"Essay 1","course_id":42}}`,
 	}, nil)
-	courses.On("FindByID", mock.Anything, uint(10), uint(1)).Return(nil, errNotFound)
+	courses.On("FindByID", mock.Anything, uint(10), uint(1)).Return(nil, contentLaneErrNotFound)
 
 	app := testutil.SetupTestApp()
 	app.Post("/courses/:course_id/commons/:id/import", contentAuthStub(1, "TeacherEnrollment", false), h.Import)
@@ -148,10 +148,10 @@ func (f *fakeSubRepo) FindByID(_ context.Context, id uint) (*models.BlueprintSub
 			return &r, nil
 		}
 	}
-	return nil, errNotFound
+	return nil, contentLaneErrNotFound
 }
 func (f *fakeSubRepo) FindByTemplateAndChild(_ context.Context, templateID, childCourseID uint) (*models.BlueprintSubscription, error) {
-	return nil, errNotFound
+	return nil, contentLaneErrNotFound
 }
 func (f *fakeSubRepo) Update(_ context.Context, _ *models.BlueprintSubscription) error { return nil }
 func (f *fakeSubRepo) Delete(_ context.Context, id uint) error {
@@ -190,7 +190,7 @@ func (f *fakeSubRepo) ListByChildCourseID(_ context.Context, childCourseID uint,
 func newBlueprintFixture(subs *fakeSubRepo) (*handlers.BlueprintHandler, *mocks.MockCourseRepository, *mocks.MockEnrollmentRepository) {
 	tmpl := new(mocks.MockBlueprintTemplateRepository)
 	tmpl.On("FindByCourseID", mock.Anything, uint(10)).Return(&models.BlueprintTemplate{ID: 3, CourseID: 10, WorkflowState: "active"}, nil)
-	tmpl.On("FindByCourseID", mock.Anything, mock.Anything).Return(nil, errNotFound)
+	tmpl.On("FindByCourseID", mock.Anything, mock.Anything).Return(nil, contentLaneErrNotFound)
 	courses := new(mocks.MockCourseRepository)
 	enrollments := new(mocks.MockEnrollmentRepository)
 	svc := service.NewBlueprintService(tmpl, subs, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -204,7 +204,7 @@ func TestBlueprintAssociations_CrossTenantCourseRejected(t *testing.T) {
 	subs := &fakeSubRepo{}
 	h, courses, _ := newBlueprintFixture(subs)
 	courses.On("FindByID", mock.Anything, uint(10), uint(1)).Return(&models.Course{ID: 10, AccountID: 1}, nil)
-	courses.On("FindByID", mock.Anything, uint(900), uint(1)).Return(nil, errNotFound) // tenant 2's course
+	courses.On("FindByID", mock.Anything, uint(900), uint(1)).Return(nil, contentLaneErrNotFound) // tenant 2's course
 
 	app := testutil.SetupTestApp()
 	app.Put("/courses/:course_id/blueprint_templates/default/associated_courses", contentAuthStub(1, "TeacherEnrollment", false), h.UpdateAssociations)
@@ -221,7 +221,7 @@ func TestBlueprintAssociations_CourseCallerDoesNotTeachRejected(t *testing.T) {
 	h, courses, enrollments := newBlueprintFixture(subs)
 	courses.On("FindByID", mock.Anything, uint(10), uint(1)).Return(&models.Course{ID: 10, AccountID: 1}, nil)
 	courses.On("FindByID", mock.Anything, uint(20), uint(1)).Return(&models.Course{ID: 20, AccountID: 1}, nil)
-	enrollments.On("FindByUserAndCourse", mock.Anything, uint(7), uint(20), uint(1)).Return(nil, errNotFound)
+	enrollments.On("FindByUserAndCourse", mock.Anything, uint(7), uint(20), uint(1)).Return(nil, contentLaneErrNotFound)
 
 	app := testutil.SetupTestApp()
 	app.Put("/courses/:course_id/blueprint_templates/default/associated_courses", contentAuthStub(1, "TeacherEnrollment", false), h.UpdateAssociations)
@@ -524,9 +524,9 @@ func newFileFixture(t *testing.T) (*handlers.FileHandler, *mocks.MockFolderRepos
 // membership.
 func TestListFolderFiles_RequiresTenantAndEnrollment(t *testing.T) {
 	h, folders, attachments, enrollments := newFileFixture(t)
-	folders.On("FindByID", mock.Anything, uint(60), uint(1)).Return(nil, errNotFound) // other tenant
+	folders.On("FindByID", mock.Anything, uint(60), uint(1)).Return(nil, contentLaneErrNotFound) // other tenant
 	folders.On("FindByID", mock.Anything, uint(61), uint(1)).Return(&models.Folder{ID: 61, ContextType: "Course", ContextID: 99, WorkflowState: "visible"}, nil)
-	enrollments.On("FindByUserAndCourse", mock.Anything, uint(7), uint(99), uint(1)).Return(nil, errNotFound)
+	enrollments.On("FindByUserAndCourse", mock.Anything, uint(7), uint(99), uint(1)).Return(nil, contentLaneErrNotFound)
 
 	app := testutil.SetupTestApp()
 	app.Get("/folders/:folder_id/files", contentAuthStub(1, "", false), h.ListFolderFiles)
@@ -596,7 +596,7 @@ func (f *fakeMigrationRepo) FindByID(_ context.Context, id uint) (*models.Conten
 		r := *f.row
 		return &r, nil
 	}
-	return nil, errNotFound
+	return nil, contentLaneErrNotFound
 }
 func (f *fakeMigrationRepo) Update(_ context.Context, _ *models.ContentMigration) error {
 	f.updated = true

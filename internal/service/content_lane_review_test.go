@@ -52,9 +52,9 @@ func TestCommonsPublishModule_SkipsDeletedContent(t *testing.T) {
 	assert.NotContains(t, published.ContentSnapshot, "Deleted answer key")
 }
 
-type emptyAnnouncements struct{}
+type contentLaneEmptyAnnouncements struct{}
 
-func (emptyAnnouncements) ListByCourseID(_ context.Context, _ uint, _ repository.PaginationParams) (*repository.PaginatedResult[models.Announcement], error) {
+func (contentLaneEmptyAnnouncements) ListByCourseID(_ context.Context, _ uint, _ repository.PaginationParams) (*repository.PaginatedResult[models.Announcement], error) {
 	return &repository.PaginatedResult[models.Announcement]{}, nil
 }
 
@@ -91,7 +91,7 @@ func TestObserverOverview_ActivityListsOnlyPublishedPages(t *testing.T) {
 	}, nil).Maybe()
 
 	svc := service.NewObserverService(enrollments, courses, nil)
-	svc.SetOverviewDeps(assignments, submissions, quizzes, emptyAnnouncements{}, pages)
+	svc.SetOverviewDeps(assignments, submissions, quizzes, contentLaneEmptyAnnouncements{}, pages)
 
 	overview, err := svc.GetChildOverview(ctx, 10, childID)
 	require.NoError(t, err)
