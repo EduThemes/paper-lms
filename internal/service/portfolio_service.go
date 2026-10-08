@@ -770,7 +770,8 @@ func (s *PortfolioService) RecordView(ctx context.Context, portfolioID uint) err
 // ---------------------------------------------------------------------------
 
 func (s *PortfolioService) GeneratePublicURL(portfolio *models.Portfolio) string {
-	return fmt.Sprintf("p/%s-%d", portfolio.Slug, portfolio.ID)
+	// Matches the routed public page (/portfolios/public/:slug — B196).
+	return fmt.Sprintf("portfolios/public/%s", portfolio.Slug)
 }
 
 // ---------------------------------------------------------------------------

@@ -50,6 +50,15 @@ import {
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
+import {
+  normalizePortfolio,
+  normalizeSection,
+  parseTags,
+  publicPortfolioPath,
+  toArtifactPayload,
+  toPortfolioPayload,
+  toSectionPayload,
+} from '../utils/portfolio';
 
 /* ═══════════════════════════════════════════════════════
    THEMES
@@ -182,7 +191,7 @@ const PortfolioEditorPage = () => {
      ──────────────────────────────────── */
   const fetchPortfolio = useCallback(async () => {
     try {
-      const data = await api.getPortfolio(portfolioId);
+      const data = normalizePortfolio(await api.getPortfolio(portfolioId));
       setPortfolio(data);
       setSettings({
         contact_email: data.contact_email || '',
@@ -207,8 +216,10 @@ const PortfolioEditorPage = () => {
   const savePortfolio = useCallback(async (data) => {
     setSaving(true);
     try {
-      const updated = await api.updatePortfolio(portfolioId, data);
-      setPortfolio(updated);
+      // The PUT response carries sections + artifacts (B098), so replacing
+      // state with it no longer drops them.
+      const updated = await api.updatePortfolio(portfolioId, toPortfolioPayload(data));
+      setPortfolio(normalizePortfolio(updated));
       setLastSaved(new Date());
       setHasUnsavedChanges(false);
     } catch (err) {
@@ -252,14 +263,13 @@ const PortfolioEditorPage = () => {
     setShowAddSection(false);
     try {
       const sectionType = SECTION_TYPES.find((s) => s.id === type);
-      const data = await api.addPortfolioSection(portfolioId, {
+      const data = normalizeSection(await api.addPortfolioSection(portfolioId, toSectionPayload({
         type,
         title: sectionType?.label || 'New Section',
         layout: 'standard',
         visible: true,
         content: '',
-        order: (portfolio.sections?.length || 0) + 1,
-      });
+      })));
       setPortfolio((prev) => ({
         ...prev,
         sections: [...(prev.sections || []), data],
@@ -272,7 +282,9 @@ const PortfolioEditorPage = () => {
 
   const updateSection = async (sectionId, updates) => {
     try {
-      const data = await api.updatePortfolioSection(portfolioId, sectionId, updates);
+      const data = normalizeSection(
+        await api.updatePortfolioSection(portfolioId, sectionId, toSectionPayload(updates)),
+      );
       setPortfolio((prev) => ({
         ...prev,
         sections: prev.sections.map((s) => (s.id === sectionId ? data : s)),
@@ -303,11 +315,12 @@ const PortfolioEditorPage = () => {
     const newIdx = direction === 'up' ? idx - 1 : idx + 1;
     if (newIdx < 0 || newIdx >= sections.length) return;
     [sections[idx], sections[newIdx]] = [sections[newIdx], sections[idx]];
-    sections.forEach((s, i) => { s.order = i + 1; });
-    setPortfolio((prev) => ({ ...prev, sections }));
+    const reordered = sections.map((s, i) => ({ ...s, order: i, position: i }));
+    setPortfolio((prev) => ({ ...prev, sections: reordered }));
     try {
-      await api.updatePortfolioSection(portfolioId, sections[idx].id, { order: sections[idx].order });
-      await api.updatePortfolioSection(portfolioId, sections[newIdx].id, { order: sections[newIdx].order });
+      // One atomic reorder call (B201) instead of per-section partial
+      // updates, which used to wipe the moved sections (B095).
+      await api.reorderPortfolioSections(portfolioId, reordered.map((s) => s.id));
     } catch (err) {
       setError(err.message);
     }
@@ -319,29 +332,50 @@ const PortfolioEditorPage = () => {
   const handleAddArtifact = async (e) => {
     e.preventDefault();
     try {
-      const payload = {
-        title: artifactData.title,
-        description: artifactData.description,
-        tags: artifactData.tags.split(',').map((t) => t.trim()).filter(Boolean),
-        type: artifactData.type,
-        url: artifactData.url,
-        featured: artifactData.featured,
-        reflection: artifactData.reflection,
-        section_id: artifactData.section_id,
-        course_submission_id: artifactData.course_submission_id || undefined,
-      };
-
-      if (artifactData.type === 'file' && artifactData.file) {
+      // B097: send the backend's field names (artifact_type, content_url,
+      // is_featured) and tags as a JSON string, not an array.
+      let created = [];
+      if (artifactData.type === 'file') {
+        if (!artifactData.file) {
+          setError('Choose a file to upload.');
+          return;
+        }
         const formData = new FormData();
         formData.append('file', artifactData.file);
-        Object.entries(payload).forEach(([k, v]) => {
-          if (v !== undefined && v !== null) {
-            formData.append(k, typeof v === 'object' ? JSON.stringify(v) : v);
-          }
-        });
-        await api.uploadPortfolioArtifact(portfolioId, formData);
+        formData.append('title', artifactData.title);
+        formData.append('description', artifactData.description || '');
+        formData.append('tags', JSON.stringify(parseTags(artifactData.tags)));
+        formData.append('is_featured', artifactData.featured ? 'true' : 'false');
+        if (artifactData.section_id) formData.append('section_id', String(artifactData.section_id));
+        created = [await api.uploadPortfolioArtifact(portfolioId, formData)];
+      } else if (artifactData.type === 'course_submission') {
+        const submissionId = parseInt(artifactData.course_submission_id, 10);
+        if (!submissionId) {
+          setError('Enter the submission ID to import.');
+          return;
+        }
+        const result = await api.importPortfolioFromCourse(portfolioId, 0, [submissionId]);
+        created = result?.artifacts || [];
+        if (created.length === 0) {
+          setError('That submission could not be imported. Only your own submissions can be added.');
+          return;
+        }
+        for (const artifact of created) {
+          const patch = { is_featured: !!artifactData.featured };
+          if (artifactData.section_id) patch.section_id = artifactData.section_id;
+          await api.updatePortfolioArtifact(portfolioId, artifact.id, patch);
+        }
       } else {
-        await api.addPortfolioArtifact(portfolioId, payload);
+        created = [await api.addPortfolioArtifact(portfolioId, toArtifactPayload(artifactData))];
+      }
+
+      const reflection = artifactData.reflection?.trim();
+      if (reflection) {
+        for (const artifact of created) {
+          if (artifact?.id) {
+            await api.addPortfolioReflection(portfolioId, artifact.id, { content: reflection });
+          }
+        }
       }
 
       setArtifactModal(false);
@@ -542,7 +576,7 @@ const PortfolioEditorPage = () => {
             {/* Preview in new tab */}
             {isPublished && (
               <a
-                href={`/p/${portfolio.slug || portfolio.id}`}
+                href={publicPortfolioPath(portfolio)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-text-tertiary hover:bg-surface-2 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -1148,10 +1182,10 @@ const PortfolioEditorPage = () => {
                   <p className="text-sm font-semibold text-accent-success mb-1">Public URL</p>
                   <div className="flex items-center gap-2">
                     <code className="text-xs text-accent-success bg-accent-success/20 px-2 py-1 rounded flex-1 truncate">
-                      {window.location.origin}/p/{portfolio.slug || portfolio.id}
+                      {window.location.origin}{publicPortfolioPath(portfolio)}
                     </code>
                     <button
-                      onClick={() => navigator.clipboard.writeText(`${window.location.origin}/p/${portfolio.slug || portfolio.id}`)}
+                      onClick={() => navigator.clipboard.writeText(`${window.location.origin}${publicPortfolioPath(portfolio)}`)}
                       className="p-1.5 text-accent-success hover:bg-accent-success/20 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-green-500"
                       aria-label="Copy public URL"
                     >

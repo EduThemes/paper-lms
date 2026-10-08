@@ -27,6 +27,12 @@ import {
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
+import {
+  normalizePortfolio,
+  publicPortfolioPath,
+  themeToApi,
+  toPortfolioPayload,
+} from '../utils/portfolio';
 
 /* ───────── Theme meta (shared with editor) ───────── */
 const THEME_META = {
@@ -99,7 +105,8 @@ const PortfoliosPage = () => {
   const fetchPortfolios = useCallback(async () => {
     try {
       const { data } = await api.listPortfolios();
-      setPortfolios(data || []);
+      // The API sends workflow_state / theme_id; the cards read status / theme.
+      setPortfolios((data || []).map(normalizePortfolio));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -119,8 +126,7 @@ const PortfoliosPage = () => {
     try {
       const portfolio = await api.createPortfolio({
         title: createName.trim(),
-        template: createTemplate,
-        theme: createTheme,
+        theme_id: themeToApi(createTheme),
       });
       setShowCreateModal(false);
       setCreateName('');
@@ -150,7 +156,7 @@ const PortfoliosPage = () => {
 
   const handleArchive = async (portfolio) => {
     try {
-      await api.updatePortfolio(portfolio.id, { status: 'archived' });
+      await api.updatePortfolio(portfolio.id, toPortfolioPayload({ status: 'archived' }));
       await fetchPortfolios();
     } catch (err) {
       setError(err.message);
@@ -500,7 +506,7 @@ const PortfoliosPage = () => {
                           </Link>
                           {isPublished && (
                             <Link
-                              to={`/p/${portfolio.slug || portfolio.id}`}
+                              to={publicPortfolioPath(portfolio)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="flex items-center gap-2.5 px-4 py-2 text-sm text-text-secondary hover:bg-surface-1 transition-colors"
