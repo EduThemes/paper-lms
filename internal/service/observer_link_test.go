@@ -96,3 +96,53 @@ func TestObserverLink_FollowsStudentEnrollments(t *testing.T) {
 		t.Fatalf("re-link did not observe the child's current course: %+v", e)
 	}
 }
+
+// An associated ObserverEnrollment created without a durable link (an
+// enrollments.csv row with associated_user_id) still makes the observer
+// an observer of that student once the link store is wired; otherwise
+// the observer dashboard and submission views lost the student.
+func TestObserverLink_AssociatedEnrollmentWithoutLinkStillCounts(t *testing.T) {
+	g, cleanup := freshDB(t)
+	defer cleanup()
+	seedSISTenants(t, g)
+	ctx := context.Background()
+
+	enrollmentRepo := postgres.NewEnrollmentRepository(g)
+	svc := service.NewObserverService(enrollmentRepo, postgres.NewCourseRepository(g), postgres.NewUserRepository(g)).
+		SetObserverLinkStore(postgres.NewObserverLinkRepository(g))
+
+	parent := &models.User{AccountID: 1, Name: "Pat Parent", LoginID: "pat.parent2", Email: "pat.parent2@example.com"}
+	child := &models.User{AccountID: 1, Name: "Casey Child", LoginID: "casey.child2", Email: "casey.child2@example.com"}
+	for _, u := range []*models.User{parent, child} {
+		if err := g.Create(u).Error; err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+	}
+	course := &models.Course{AccountID: 1, Name: "Math", CourseCode: "M1", WorkflowState: models.CourseAvailable}
+	if err := g.Create(course).Error; err != nil {
+		t.Fatalf("seed course: %v", err)
+	}
+	childID := child.ID
+	if err := enrollmentRepo.Create(ctx, &models.Enrollment{
+		UserID: parent.ID, CourseID: course.ID, Type: "ObserverEnrollment", Role: "ObserverEnrollment",
+		WorkflowState: models.EnrollmentActive, AssociatedUserID: &childID,
+	}); err != nil {
+		t.Fatalf("seed observer enrollment: %v", err)
+	}
+
+	if ok, err := svc.IsObserverOf(ctx, parent.ID, child.ID); err != nil || !ok {
+		t.Fatalf("IsObserverOf = %v, %v; want true", ok, err)
+	}
+	ids, err := svc.ListObservedStudents(ctx, parent.ID)
+	if err != nil || len(ids) != 1 || ids[0] != child.ID {
+		t.Fatalf("ListObservedStudents = %v, %v; want [%d]", ids, err, child.ID)
+	}
+
+	// Unlinking still removes it.
+	if err := svc.UnlinkObserver(ctx, parent.ID, child.ID); err != nil {
+		t.Fatalf("unlink: %v", err)
+	}
+	if ok, _ := svc.IsObserverOf(ctx, parent.ID, child.ID); ok {
+		t.Fatal("still an observer after unlink")
+	}
+}

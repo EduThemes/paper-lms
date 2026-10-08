@@ -268,10 +268,39 @@ func (s *ObserverService) UnlinkObserver(ctx context.Context, observerUserID, st
 // ListObservedStudents returns a list of unique student user IDs the observer is
 // linked to, derived from active ObserverEnrollment records where
 // associated_user_id is not null.
+//
+// With the link store wired the durable links come first, followed by any
+// student the observer only observes through an associated enrollment
+// that has no link behind it (e.g. an enrollments.csv row with
+// associated_user_id, which Canvas scopes to that one course).
 func (s *ObserverService) ListObservedStudents(ctx context.Context, observerUserID uint) ([]uint, error) {
-	if s.links != nil {
-		return s.links.ListStudentIDs(ctx, observerUserID)
+	if s.links == nil {
+		return s.enrollmentObservees(ctx, observerUserID)
 	}
+	linked, err := s.links.ListStudentIDs(ctx, observerUserID)
+	if err != nil {
+		return nil, err
+	}
+	viaEnrollment, err := s.enrollmentObservees(ctx, observerUserID)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[uint]bool, len(linked))
+	for _, id := range linked {
+		seen[id] = true
+	}
+	for _, id := range viaEnrollment {
+		if !seen[id] {
+			seen[id] = true
+			linked = append(linked, id)
+		}
+	}
+	return linked, nil
+}
+
+// enrollmentObservees derives observed students from the observer's
+// active ObserverEnrollments that carry an associated student.
+func (s *ObserverService) enrollmentObservees(ctx context.Context, observerUserID uint) ([]uint, error) {
 	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
 	if err != nil {
 		return nil, errors.New("could not fetch observer enrollments")
@@ -301,9 +330,16 @@ func (s *ObserverService) ListObservedStudents(ctx context.Context, observerUser
 
 // IsObserverOf checks whether the observer has an active ObserverEnrollment
 // linked to the given student.
+//
+// With the link store wired an active link is enough; an active
+// associated ObserverEnrollment created without a link (e.g. by an SIS
+// enrollments.csv associated_user_id row) still counts, as it always has.
 func (s *ObserverService) IsObserverOf(ctx context.Context, observerUserID, studentUserID uint) (bool, error) {
 	if s.links != nil {
-		return s.links.IsLinked(ctx, observerUserID, studentUserID)
+		linked, err := s.links.IsLinked(ctx, observerUserID, studentUserID)
+		if err != nil || linked {
+			return linked, err
+		}
 	}
 	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
 	if err != nil {
