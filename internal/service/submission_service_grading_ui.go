@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 
+	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 )
 
@@ -44,4 +45,38 @@ func SortForAnonymity(assignmentID uint, students []CourseStudent) {
 	sort.SliceStable(students, func(i, j int) bool {
 		return anonymousSortKey(assignmentID, students[i].UserID) < anonymousSortKey(assignmentID, students[j].UserID)
 	})
+}
+
+// CourseGradingPeriods returns the active grading periods that apply to
+// a course (its account's active grading period groups), for the
+// gradebook's grading-period filter. accountID scopes the course.
+func (s *SubmissionService) CourseGradingPeriods(ctx context.Context, courseID, accountID uint) ([]models.GradingPeriod, error) {
+	course, err := s.courseRepo.FindByID(ctx, courseID, accountID)
+	if err != nil || course == nil {
+		return nil, ErrAssignmentUnavailable
+	}
+	out := make([]models.GradingPeriod, 0)
+	if s.gradingPeriodGroupRepo == nil || s.gradingPeriodRepo == nil {
+		return out, nil
+	}
+	groups, err := s.gradingPeriodGroupRepo.ListByAccountID(ctx, course.AccountID, repository.PaginationParams{Page: 1, PerPage: 100})
+	if err != nil || groups == nil {
+		return out, nil
+	}
+	for _, g := range groups.Items {
+		if g.WorkflowState != "active" {
+			continue
+		}
+		periods, err := s.gradingPeriodRepo.ListByGroupID(ctx, g.ID, 0)
+		if err != nil {
+			continue
+		}
+		for _, p := range periods {
+			if p.WorkflowState == "active" {
+				out = append(out, p)
+			}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].StartDate.Before(out[j].StartDate) })
+	return out, nil
 }

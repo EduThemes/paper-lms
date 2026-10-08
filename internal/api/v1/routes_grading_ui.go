@@ -51,6 +51,7 @@ func (r *Router) registerGradingUIRoutes(protected fiber.Router, admin, enrolled
 	protected.Put("/accounts/:account_id/custom_grade_statuses/:status_id", admin, h.UpdateCustomGradeStatus)
 	protected.Delete("/accounts/:account_id/custom_grade_statuses/:status_id", admin, h.DeleteCustomGradeStatus)
 	protected.Get("/courses/:course_id/custom_grade_statuses", instructor, h.ListCourseCustomGradeStatuses)
+	protected.Get("/courses/:course_id/grading_periods", instructor, h.ListCourseGradingPeriods)
 
 	// Peer reviews.
 	protected.Post("/courses/:course_id/assignments/:id/peer_reviews/manual", instructor, h.AssignPeerReview)

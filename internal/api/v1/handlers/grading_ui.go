@@ -1018,3 +1018,31 @@ func maskAnonymizedGradebook(c *fiber.Ctx, g *service.GradingUIService, courseID
 	}
 	return out
 }
+
+// ListCourseGradingPeriods lists the grading periods that apply to the
+// course (the account-level period routes are admin-only), for the
+// gradebook's grading-period filter.
+//
+//	GET /courses/:course_id/grading_periods
+func (h *GradingUIHandler) ListCourseGradingPeriods(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
+	periods, err := h.subs.submissionService.CourseGradingPeriods(c.Context(), uint(courseID), callerAccountID(c))
+	if err != nil {
+		return responses.NotFound(c, "course")
+	}
+	out := make([]fiber.Map, 0, len(periods))
+	for _, p := range periods {
+		out = append(out, fiber.Map{
+			"id":         p.ID,
+			"title":      p.Title,
+			"start_date": p.StartDate,
+			"end_date":   p.EndDate,
+			"close_date": p.CloseDate,
+			"is_closed":  p.IsClosed,
+		})
+	}
+	return c.JSON(out)
+}
