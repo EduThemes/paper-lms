@@ -147,15 +147,19 @@ func (r *sisRun) applyDiffing(parsed []*sisParsedFile) error {
 func (r *sisRun) applyBatchMode() error {
 	termID := *r.batch.BatchModeTermID
 	var courseIDs []uint
-	if err := r.db().Model(&models.Course{}).
-		Where("account_id = ? AND enrollment_term_id = ? AND sis_course_id IS NOT NULL AND workflow_state <> ?", r.accountID, termID, models.CourseDeleted).
-		Pluck("id", &courseIDs).Error; err != nil {
-		return err
+	if r.sawCourses {
+		if err := r.db().Model(&models.Course{}).
+			Where("account_id = ? AND enrollment_term_id = ? AND sis_course_id IS NOT NULL AND workflow_state <> ?", r.accountID, termID, models.CourseDeleted).
+			Pluck("id", &courseIDs).Error; err != nil {
+			return err
+		}
 	}
 	var sections []models.CourseSection
-	if err := r.db().Where("sis_section_id IS NOT NULL AND workflow_state <> 'deleted' AND course_id IN (SELECT id FROM courses WHERE account_id = ? AND enrollment_term_id = ?)", r.accountID, termID).
-		Find(&sections).Error; err != nil {
-		return err
+	if r.sawSections {
+		if err := r.db().Where("sis_section_id IS NOT NULL AND workflow_state <> 'deleted' AND course_id IN (SELECT id FROM courses WHERE account_id = ? AND enrollment_term_id = ?)", r.accountID, termID).
+			Find(&sections).Error; err != nil {
+			return err
+		}
 	}
 	var enrollments []models.Enrollment
 	if r.sawEnrollments {

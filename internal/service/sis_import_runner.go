@@ -29,7 +29,12 @@ type sisRun struct {
 	seenCourses     map[uint]bool
 	seenSections    map[uint]bool
 	seenEnrollments map[uint]bool
-	sawEnrollments  bool
+	// Batch mode only removes the kinds of object the batch supplied
+	// (Canvas: supplied_batches), so a batch with just enrollments.csv
+	// never deletes the term's courses.
+	sawCourses     bool
+	sawSections    bool
+	sawEnrollments bool
 }
 
 func newSISRun(ctx context.Context, s *SISImportService, batch *models.SISBatch) *sisRun {
@@ -68,8 +73,10 @@ func (r *sisRun) importFile(pf *sisParsedFile) {
 	case "users":
 		handle = r.importUser
 	case "courses":
+		r.sawCourses = true
 		handle = r.importCourse
 	case "sections":
+		r.sawSections = true
 		handle = r.importSection
 	case "enrollments":
 		r.sawEnrollments = true

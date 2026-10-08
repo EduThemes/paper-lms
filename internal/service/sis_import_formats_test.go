@@ -220,6 +220,18 @@ func TestSISImport_BatchModeAndThreshold(t *testing.T) {
 	manual := &models.Course{AccountID: 1, Name: "Manual", CourseCode: "MAN", WorkflowState: models.CourseAvailable, EnrollmentTermID: &term.ID}
 	g.Create(manual)
 
+	// A batch-mode import without courses.csv never deletes courses.
+	b0 := startSIS(t, svc, 1, service.SISImportOptions{BatchMode: true, BatchModeTermID: &term.ID},
+		service.SISUpload{FileName: "users.csv", Data: []byte("user_id,login_id,first_name,last_name,email\nBM-1,bm.one,Bo,One,bo@example.com\n")})
+	if b0.WorkflowState != "imported" {
+		t.Fatalf("users-only batch state %q: %v", b0.WorkflowState, batchErrors(t, svc, b0))
+	}
+	var gone int64
+	g.Model(&models.Course{}).Where("workflow_state = ?", "deleted").Count(&gone)
+	if gone != 0 {
+		t.Fatalf("a batch without courses.csv deleted %d courses", gone)
+	}
+
 	// Threshold 25%: dropping 3 of 4 is refused, nothing deleted.
 	th := 25
 	b := startSIS(t, svc, 1, service.SISImportOptions{BatchMode: true, BatchModeTermID: &term.ID, ChangeThreshold: &th},
