@@ -38,7 +38,15 @@ func NewAuditLogRepository(db *gorm.DB) *AuditLogRepo {
 
 // Create inserts a new audit log entry.
 func (r *AuditLogRepo) Create(ctx context.Context, log *models.AuditLog) error {
-	return r.db.WithContext(ctx).Create(log).Error
+	q := r.db.WithContext(ctx)
+	if log.UserID == 0 {
+		// System / anonymous events (e.g. auth.login_failed for an unknown
+		// account) have no acting user. audit_logs.user_id references
+		// users(id), so writing 0 violated the FK and the row was silently
+		// lost; omit the column so it is stored as NULL.
+		q = q.Omit("UserID")
+	}
+	return q.Create(log).Error
 }
 
 // ListByFilter returns a paginated list of audit logs matching the given filter.

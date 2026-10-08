@@ -368,3 +368,19 @@ func TestUsers_NoExplicitLocaleIsEmpty(t *testing.T) {
 	require.NoError(t, f.g.First(&again, fxStudent).Error)
 	assert.Equal(t, "es", again.Locale)
 }
+
+// Leftover (core): events with no acting user (failed login for an unknown
+// account) must be stored with user_id NULL instead of failing the
+// audit_logs.user_id FK and being dropped.
+func TestAuditLog_SystemEventWithoutUserIsStored(t *testing.T) {
+	f := newFollowupFixture(t)
+	repo := postgres.NewAuditLogRepository(f.g)
+	svc := service.NewAuditService(repo, nil, nil)
+	require.NoError(t, svc.LogEvent(context.Background(), "auth.login_failed", 0, nil, nil, "User", 0, "login_failed", `{"reason":"unknown_user"}`, "192.0.2.10", "test-agent"))
+	var n int64
+	require.NoError(t, f.g.Model(&models.AuditLog{}).Where("event_type = ? AND user_id IS NULL", "auth.login_failed").Count(&n).Error)
+	assert.Equal(t, int64(1), n)
+	var row models.AuditLog
+	require.NoError(t, f.g.Where("event_type = ?", "auth.login_failed").First(&row).Error, "a NULL user_id row must still load")
+	assert.Equal(t, uint(0), row.UserID)
+}
