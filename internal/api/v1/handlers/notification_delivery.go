@@ -177,9 +177,11 @@ func (h *NotificationDeliveryHandler) CreateChannel(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "channel_type and address are required")
 	}
 
-	// Only channel types the delivery engine can actually send to. There
-	// is no push transport: a "push" channel used to be accepted and then
-	// fail every delivery queued for it.
+	// Only channel types the delivery engine can actually send to. SMS
+	// and push are stub channel types: they are accepted only once a
+	// provider is registered (NotificationDeliveryService.
+	// RegisterChannelSender), otherwise every delivery queued for them
+	// would fail.
 	switch channelType {
 	case "email":
 		parsed, perr := mail.ParseAddress(address)
@@ -190,8 +192,15 @@ func (h *NotificationDeliveryHandler) CreateChannel(c *fiber.Ctx) error {
 		if err := security.ValidateExternalURL(c.Context(), address); err != nil {
 			return responses.BadRequest(c, "webhook address must be a public http(s) URL")
 		}
+	case "sms", "push":
+		if !h.deliveryService.IsDeliverableChannelType(channelType) {
+			return responses.BadRequest(c, "No "+channelType+" provider is configured for this site")
+		}
+		if channelType == "sms" && !isE164Phone(address) {
+			return responses.BadRequest(c, "address must be a phone number in international format, e.g. +15555550100")
+		}
 	default:
-		return responses.BadRequest(c, "channel_type must be one of: email, webhook")
+		return responses.BadRequest(c, "channel_type must be one of: email, webhook, sms, push")
 	}
 
 	// Determine position (next available)
@@ -289,6 +298,7 @@ func (h *NotificationDeliveryHandler) DeleteChannel(c *fiber.Ctx) error {
 	if err := h.channelRepo.Delete(c.Context(), uint(channelID)); err != nil {
 		return responses.InternalError(c, "Could not delete communication channel")
 	}
+	h.deliveryService.ForgetChannelPolicies(c.Context(), userID, uint(channelID))
 
 	return c.JSON(fiber.Map{"success": true})
 }

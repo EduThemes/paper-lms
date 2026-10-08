@@ -85,7 +85,13 @@ func (r *announcementRepo) ListForViewer(ctx context.Context, courseID uint, vie
 			sections = append(sections, fmt.Sprintf("section:%d", id))
 		}
 		if len(sections) > 0 {
-			query = query.Where("(target_audience IS NULL OR target_audience IN ? OR target_audience IN ?)", audiences, sections)
+			// 'section:<id>' is the legacy single-section form;
+			// 'sections' targets the rows of
+			// announcement_section_visibilities (G090).
+			query = query.Where(`(target_audience IS NULL OR target_audience IN ? OR target_audience IN ?
+				OR (target_audience = 'sections' AND id IN (
+					SELECT announcement_id FROM announcement_section_visibilities WHERE course_section_id IN ?)))`,
+				audiences, sections, viewer.SectionIDs)
 		} else {
 			query = query.Where("(target_audience IS NULL OR target_audience IN ?)", audiences)
 		}

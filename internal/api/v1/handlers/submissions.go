@@ -750,9 +750,12 @@ func (h *SubmissionHandler) CreateSubmissionComment(c *fiber.Ctx) error {
 	}
 
 	j := submissionCommentToJSON(comment)
+	authorName := ""
 	if author, err := h.userRepo.FindByID(c.Context(), authorID, callerAccountID(c)); err == nil {
 		j["author_name"] = author.Name
+		authorName = author.Name
 	}
+	h.notifySubmissionComment(c.Context(), assignment, submission, authorID, authorName, comment.Comment) // G091
 	return c.Status(fiber.StatusCreated).JSON(j)
 }
 

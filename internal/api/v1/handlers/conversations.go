@@ -28,6 +28,17 @@ type ConversationHandler struct {
 	notifier service.Notifier
 	// recipientSearch backs GET /search/recipients. Nil → 503.
 	recipientSearch RecipientSearcher
+	// inbox holds the per-participant inbox state (unread / starred /
+	// archived / deleted-for-me), attachments and restricted replies
+	// (G092). Nil keeps the legacy shared-thread behavior (unit tests).
+	inbox InboxStore
+	// addressBook scopes recipients to people who share a course or
+	// group with the sender and expands course/section/group recipients
+	// (G093). Nil keeps only the tenant check (unit tests).
+	addressBook AddressBook
+	// fileService stores and serves message attachments. Nil disables
+	// attachments.
+	fileService *service.FileService
 }
 
 // RecipientSearcher finds users the caller may message (see
@@ -41,12 +52,15 @@ func (h *ConversationHandler) SetRecipientSearch(s RecipientSearcher) {
 	h.recipientSearch = s
 }
 
-// SearchRecipients handles GET /search/recipients?search=<term>&per_page=N.
+// SearchRecipients handles GET /search/recipients?search=<term>&per_page=N
+// and GET /search/recipients?context=course_5[_students]&search=<term>.
 //
 // The inbox recipient picker for every role. GET /users is admin-only, so
 // students and teachers need a scoped search: like Canvas, candidates are
-// the people who share an active course with the caller, within the
-// caller's tenant. Admins may address anyone in their account.
+// the people who share an active course or group with the caller, within
+// the caller's tenant. Admins may address anyone in their account. With
+// context=, the members of that course / section / group the caller
+// belongs to are listed (browsing the address book by context).
 func (h *ConversationHandler) SearchRecipients(c *fiber.Ctx) error {
 	userID, err := getUserID(c)
 	if err != nil {
@@ -59,26 +73,31 @@ func (h *ConversationHandler) SearchRecipients(c *fiber.Ctx) error {
 	if term == "" {
 		term = strings.TrimSpace(c.Query("search_term"))
 	}
-	if len([]rune(term)) < 2 {
-		return c.JSON([]fiber.Map{})
-	}
 	limit := c.QueryInt("per_page", 10)
 	if limit < 1 || limit > 50 {
 		limit = 10
 	}
+	isAdmin := h.callerIsAccountAdmin(c, userID)
 
-	// DB-backed role check (the JWT is_admin hint can be stale).
-	isAdmin := false
-	if h.userService != nil {
-		if me, err := h.userService.GetByID(c.Context(), userID, callerAccountID(c)); err == nil && me != nil {
-			isAdmin = me.Role == "admin" || me.Role == "super_admin"
+	if code := strings.TrimSpace(c.Query("context")); code != "" {
+		users, wrote, err := h.browseContext(c, userID, isAdmin, code, term, limit)
+		if wrote {
+			return err
 		}
+		return c.JSON(recipientsToJSON(users))
+	}
+
+	if len([]rune(term)) < 2 {
+		return c.JSON([]fiber.Map{})
 	}
 	users, err := h.recipientSearch.SearchRecipients(c.Context(), userID, callerAccountID(c), term, isAdmin, limit)
 	if err != nil {
 		return responses.InternalError(c, "Could not search recipients")
 	}
+	return c.JSON(recipientsToJSON(users))
+}
 
+func recipientsToJSON(users []models.User) []fiber.Map {
 	out := make([]fiber.Map, len(users))
 	for i, u := range users {
 		out[i] = fiber.Map{
@@ -88,7 +107,17 @@ func (h *ConversationHandler) SearchRecipients(c *fiber.Ctx) error {
 			"avatar_url":    u.AvatarURL,
 		}
 	}
-	return c.JSON(out)
+	return out
+}
+
+// callerIsAccountAdmin is the DB-backed role check (the JWT is_admin hint
+// can be stale).
+func (h *ConversationHandler) callerIsAccountAdmin(c *fiber.Ctx, userID uint) bool {
+	if h.userService == nil {
+		return false
+	}
+	me, err := h.userService.GetByID(c.Context(), userID, callerAccountID(c))
+	return err == nil && me != nil && (me.Role == "admin" || me.Role == "super_admin")
 }
 
 // SetNotifier wires new-message notifications.
@@ -97,14 +126,22 @@ func (h *ConversationHandler) SetNotifier(n service.Notifier) {
 }
 
 // notifyNewMessage queues a "new_message" notification for every
-// participant except the sender. Best-effort: never fails the request.
-func (h *ConversationHandler) notifyNewMessage(c *fiber.Ctx, conversationID, senderID uint, subject, body string) {
+// participant except the sender — or, for a restricted reply, only the
+// users in onlyTo. Best-effort: never fails the request.
+func (h *ConversationHandler) notifyNewMessage(c *fiber.Ctx, conversationID, senderID uint, subject, body string, onlyTo []uint) {
 	if h.notifier == nil {
 		return
 	}
 	participants, err := h.conversationService.GetParticipants(c.Context(), conversationID)
 	if err != nil {
 		return
+	}
+	var allowed map[uint]bool
+	if len(onlyTo) > 0 {
+		allowed = map[uint]bool{}
+		for _, id := range onlyTo {
+			allowed[id] = true
+		}
 	}
 	senderName := "Someone"
 	if h.userService != nil {
@@ -117,7 +154,7 @@ func (h *ConversationHandler) notifyNewMessage(c *fiber.Ctx, conversationID, sen
 		title += ": " + subject
 	}
 	for _, p := range participants {
-		if p.UserID == senderID {
+		if p.UserID == senderID || (allowed != nil && !allowed[p.UserID]) {
 			continue
 		}
 		// Defense in depth: only notify participants of the sender's
@@ -203,6 +240,9 @@ func conversationToJSON(c *models.Conversation) fiber.Map {
 		"created_by_user_id": c.CreatedByUserID,
 		"last_message_at":    c.LastMessageAt,
 		"workflow_state":     c.WorkflowState,
+		"context_type":       c.ContextType,
+		"context_id":         c.ContextID,
+		"context_code":       contextCode(c.ContextType, c.ContextID),
 		"created_at":         c.CreatedAt,
 		"updated_at":         c.UpdatedAt,
 	}
@@ -267,11 +307,40 @@ func (h *ConversationHandler) resolveParticipants(c *fiber.Ctx, conversationID u
 	return result
 }
 
+// ListConversations handles GET /conversations.
+//
+// With the inbox store wired it accepts Canvas's filters:
+//
+//	scope   = inbox (default) | unread | starred | archived | sent
+//	filter  = course_<id> | group_<id>   (context filter)
+//	search  = subject substring
+//
+// and each row carries the caller's own workflow_state (unread / read /
+// archived), starred, message_count and a last_message preview.
 func (h *ConversationHandler) ListConversations(c *fiber.Ctx) error {
 	userID, _ := c.Locals("user_id").(uint)
 	accountID := callerAccountID(c)
 
 	params := middleware.GetPagination(c)
+
+	if h.inbox != nil {
+		filter, ok := inboxFilterFromQuery(c)
+		if !ok {
+			return responses.BadRequest(c, "Invalid filter; use course_<id> or group_<id>")
+		}
+		rows, total, err := h.inbox.ListForUser(c.Context(), userID, accountID, filter, params)
+		if err != nil {
+			return responses.InternalError(c, "Could not fetch conversations")
+		}
+		responses.SetPaginationHeaders(c, total, params.Page, params.PerPage)
+		out := make([]fiber.Map, len(rows))
+		for i := range rows {
+			j := inboxConversationToJSON(&rows[i])
+			j["participants"] = h.resolveParticipants(c, rows[i].ID)
+			out[i] = j
+		}
+		return c.JSON(out)
+	}
 
 	result, err := h.conversationService.ListByUser(c.Context(), userID, accountID, params)
 	if err != nil {
@@ -315,15 +384,40 @@ func (h *ConversationHandler) GetConversation(c *fiber.Ctx) error {
 	}
 
 	j := conversationToJSON(conv)
+	if h.inbox != nil {
+		userID, _ := c.Locals("user_id").(uint)
+		if row, err := h.inbox.GetForUser(c.Context(), conv.ID, userID, callerAccountID(c)); err == nil && row != nil {
+			j = inboxConversationToJSON(row)
+		}
+	}
 	j["participants"] = h.resolveParticipants(c, conv.ID)
 	return c.JSON(j)
 }
 
+// CreateConversation handles POST /conversations.
+//
+//	{"conversation": {
+//	   "subject": "...",
+//	   "recipients": [12, "course_5_students", "section_3", "group_7"],
+//	   "body": "first message (optional)",
+//	   "attachment_ids": [41],
+//	   "context_code": "course_5",
+//	   "group_conversation": false   // false = one private conversation per recipient
+//	}}
+//
+// Recipients must be in the caller's address book (G093): users who share
+// an active course or group with the caller (admins: anyone in their
+// account). Course / section recipients are for the course's instructors
+// (and admins); a group's members may message the group.
 func (h *ConversationHandler) CreateConversation(c *fiber.Ctx) error {
 	var input struct {
 		Conversation struct {
-			Subject    string `json:"subject"`
-			Recipients []uint `json:"recipients"`
+			Subject           string `json:"subject"`
+			Recipients        []any  `json:"recipients"`
+			Body              string `json:"body"`
+			AttachmentIDs     []uint `json:"attachment_ids"`
+			ContextCode       string `json:"context_code"`
+			GroupConversation *bool  `json:"group_conversation"`
 		} `json:"conversation"`
 	}
 
@@ -332,6 +426,25 @@ func (h *ConversationHandler) CreateConversation(c *fiber.Ctx) error {
 	}
 
 	userID, _ := c.Locals("user_id").(uint)
+	in := input.Conversation
+
+	recipients, ctxType, ctxID, wrote, err := h.resolveRecipients(c, userID, in.Recipients)
+	if wrote {
+		return err
+	}
+	if code := strings.TrimSpace(in.ContextCode); code != "" {
+		t, id, wrote, err := h.resolveContextCode(c, userID, code)
+		if wrote {
+			return err
+		}
+		ctxType, ctxID = t, id
+	}
+	if len(recipients) == 0 {
+		return responses.BadRequest(c, "At least one recipient is required")
+	}
+	if len(recipients) > maxConversationRecipients {
+		return responses.BadRequest(c, "Too many recipients")
+	}
 
 	// 13.4 — COPPA gate. In tenants with coppa_strict=true OR
 	// tenant_mode in {k5,m68}, student-to-student DMs are a non-starter
@@ -343,7 +456,7 @@ func (h *ConversationHandler) CreateConversation(c *fiber.Ctx) error {
 		if accountID > 0 {
 			if account, err := h.accountRepo.FindByID(c.Context(), accountID); err == nil && account != nil {
 				if isCOPPATenant(account) {
-					if !h.senderIsTeacherInSharedCourseWithAll(c, userID, input.Conversation.Recipients) {
+					if !h.senderIsTeacherInSharedCourseWithAll(c, userID, recipients) {
 						return responses.Error(c, fiber.StatusForbidden, "Direct messages between students require parental consent in this school's privacy mode.")
 					}
 				}
@@ -356,7 +469,7 @@ func (h *ConversationHandler) CreateConversation(c *fiber.Ctx) error {
 	// unchecked id would let anyone mail users of another school.
 	// Unknown / other-tenant ids are a 404, never a hint they exist.
 	if h.userService != nil {
-		for _, rid := range input.Conversation.Recipients {
+		for _, rid := range recipients {
 			if rid == userID {
 				continue
 			}
@@ -365,19 +478,68 @@ func (h *ConversationHandler) CreateConversation(c *fiber.Ctx) error {
 			}
 		}
 	}
-
-	conv := &models.Conversation{
-		Subject:         input.Conversation.Subject,
-		CreatedByUserID: userID,
+	// ...and in the caller's address book (G093).
+	if h.addressBook != nil {
+		bad, err := h.addressBook.Unaddressable(c.Context(), userID, callerAccountID(c), recipients, h.callerIsAccountAdmin(c, userID))
+		if err != nil {
+			return responses.InternalError(c, "Could not check recipients")
+		}
+		if len(bad) > 0 {
+			return responses.NotFound(c, "recipient")
+		}
 	}
 
-	if err := h.conversationService.CreateConversation(c.Context(), conv, input.Conversation.Recipients); err != nil {
-		return responses.BadRequest(c, err.Error())
+	attachments, wrote, err := h.ownAttachments(c, userID, in.AttachmentIDs)
+	if wrote {
+		return err
 	}
 
-	return c.Status(fiber.StatusCreated).JSON(conversationToJSON(conv))
+	group := len(recipients) <= maxGroupConversationSize
+	if in.GroupConversation != nil {
+		group = *in.GroupConversation && len(recipients) <= maxGroupConversationSize
+	}
+	sets := [][]uint{recipients}
+	if !group && len(recipients) > 1 {
+		sets = make([][]uint, 0, len(recipients))
+		for _, r := range recipients {
+			sets = append(sets, []uint{r})
+		}
+	}
+
+	var created []*models.Conversation
+	for _, set := range sets {
+		conv := &models.Conversation{
+			Subject:         in.Subject,
+			CreatedByUserID: userID,
+			ContextType:     ctxType,
+			ContextID:       ctxID,
+		}
+		if err := h.conversationService.CreateConversation(c.Context(), conv, set); err != nil {
+			return responses.BadRequest(c, err.Error())
+		}
+		if strings.TrimSpace(in.Body) != "" {
+			if _, err := h.postMessage(c, conv, userID, in.Body, nil, attachments); err != nil {
+				return responses.BadRequest(c, err.Error())
+			}
+		}
+		created = append(created, conv)
+	}
+
+	j := conversationToJSON(created[0])
+	ids := make([]uint, len(created))
+	for i, cv := range created {
+		ids[i] = cv.ID
+	}
+	j["conversation_ids"] = ids
+	return c.Status(fiber.StatusCreated).JSON(j)
 }
 
+// UpdateConversation handles PUT /conversations/:id.
+//
+// subject is shared by every participant. workflow_state ("read",
+// "unread", "archived") and starred are the CALLER's own inbox state
+// (Canvas semantics): they only ever touch the caller's participant row,
+// so one participant can't archive or star the thread for anyone else.
 func (h *ConversationHandler) UpdateConversation(c *fiber.Ctx) error {
 	id, err := c.ParamsInt("id")
 	if err != nil {
@@ -393,14 +555,11 @@ func (h *ConversationHandler) UpdateConversation(c *fiber.Ctx) error {
 		return responses.NotFound(c, "conversation")
 	}
 
-	// WorkflowState is intentionally NOT in this DTO. A conversation's
-	// workflow_state is shared across all participants — letting any one
-	// participant write it would clobber visibility for everyone else.
-	// Read/archive state lives on the per-participant message endpoints
-	// (MarkAsRead) instead. See 2026-05-22 audit finding #3.
 	var input struct {
 		Conversation struct {
-			Subject *string `json:"subject"`
+			Subject       *string `json:"subject"`
+			WorkflowState *string `json:"workflow_state"`
+			Starred       *bool   `json:"starred"`
 		} `json:"conversation"`
 	}
 
@@ -408,15 +567,52 @@ func (h *ConversationHandler) UpdateConversation(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 
+	userID, _ := c.Locals("user_id").(uint)
+	if input.Conversation.WorkflowState != nil || input.Conversation.Starred != nil {
+		if h.inbox == nil {
+			return responses.BadRequest(c, "Inbox state is not available")
+		}
+		var events []string
+		if ws := input.Conversation.WorkflowState; ws != nil {
+			switch *ws {
+			case models.ConversationParticipantRead:
+				events = append(events, inboxEventMarkRead, inboxEventUnarchive)
+			case models.ConversationParticipantUnread:
+				events = append(events, inboxEventMarkUnread)
+			case models.ConversationParticipantArchived:
+				events = append(events, inboxEventArchive)
+			default:
+				return responses.BadRequest(c, "workflow_state must be one of: read, unread, archived")
+			}
+		}
+		if st := input.Conversation.Starred; st != nil {
+			if *st {
+				events = append(events, inboxEventStar)
+			} else {
+				events = append(events, inboxEventUnstar)
+			}
+		}
+		for _, ev := range events {
+			if _, err := h.inbox.UpdateParticipants(c.Context(), userID, []uint{conv.ID}, ev); err != nil {
+				return responses.InternalError(c, "Could not update conversation")
+			}
+		}
+	}
+
 	if input.Conversation.Subject != nil {
 		conv.Subject = *input.Conversation.Subject
+		if err := h.conversationService.UpdateConversation(c.Context(), conv); err != nil {
+			return responses.InternalError(c, "Could not update conversation")
+		}
 	}
 
-	if err := h.conversationService.UpdateConversation(c.Context(), conv); err != nil {
-		return responses.InternalError(c, "Could not update conversation")
+	j := conversationToJSON(conv)
+	if h.inbox != nil {
+		if row, err := h.inbox.GetForUser(c.Context(), conv.ID, userID, callerAccountID(c)); err == nil && row != nil {
+			j = inboxConversationToJSON(row)
+		}
 	}
-
-	return c.JSON(conversationToJSON(conv))
+	return c.JSON(j)
 }
 
 func (h *ConversationHandler) ListMessages(c *fiber.Ctx) error {
@@ -430,22 +626,23 @@ func (h *ConversationHandler) ListMessages(c *fiber.Ctx) error {
 	}
 
 	params := middleware.GetPagination(c)
+	userID, _ := c.Locals("user_id").(uint)
 
-	result, err := h.conversationService.ListMessages(c.Context(), uint(id), params)
+	var result *repository.PaginatedResult[models.ConversationMessage]
+	if h.inbox != nil {
+		// Only the messages this participant can see: not the ones they
+		// deleted, and not "Reply" messages addressed to someone else.
+		result, err = h.inbox.ListVisibleMessages(c.Context(), uint(id), userID, params)
+	} else {
+		result, err = h.conversationService.ListMessages(c.Context(), uint(id), params)
+	}
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch messages")
 	}
 
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
 
-	messages := make([]fiber.Map, len(result.Items))
-	for i, m := range result.Items {
-		j := conversationMessageToJSON(&m)
-		if user, err := h.userService.GetByID(c.Context(), m.UserID, callerAccountID(c)); err == nil {
-			j["user_name"] = user.Name
-		}
-		messages[i] = j
-	}
+	messages := h.messagesToJSON(c, uint(id), result.Items)
 
 	// 13.5 PII audit — bulk-read semantics on a conversation message
 	// list. Same rationale as GetConversation: messages have N
@@ -457,6 +654,49 @@ func (h *ConversationHandler) ListMessages(c *fiber.Ctx) error {
 	return c.JSON(messages)
 }
 
+// messagesToJSON renders messages with their author name, attachments and
+// (for a restricted reply) recipient ids.
+func (h *ConversationHandler) messagesToJSON(c *fiber.Ctx, conversationID uint, msgs []models.ConversationMessage) []fiber.Map {
+	ids := make([]uint, len(msgs))
+	for i, m := range msgs {
+		ids[i] = m.ID
+	}
+	var atts map[uint][]models.Attachment
+	var recips map[uint][]uint
+	if h.inbox != nil && len(ids) > 0 {
+		atts, _ = h.inbox.AttachmentsForMessages(c.Context(), ids)
+		recips, _ = h.inbox.RecipientsForMessages(c.Context(), ids)
+	}
+	names := map[uint]string{}
+	out := make([]fiber.Map, len(msgs))
+	for i := range msgs {
+		m := &msgs[i]
+		j := conversationMessageToJSON(m)
+		name, ok := names[m.UserID]
+		if !ok {
+			if user, err := h.userService.GetByID(c.Context(), m.UserID, callerAccountID(c)); err == nil && user != nil {
+				name = user.Name
+			}
+			names[m.UserID] = name
+		}
+		if name != "" {
+			j["user_name"] = name
+		}
+		j["attachments"] = messageAttachmentsJSON(conversationID, atts[m.ID])
+		if r := recips[m.ID]; len(r) > 0 {
+			j["recipient_ids"] = r
+		}
+		out[i] = j
+	}
+	return out
+}
+
+// CreateMessage handles POST /conversations/:id/messages.
+//
+//	{"message": "...", "attachment_ids": [41], "recipients": [20]}
+//
+// recipients (optional) restricts the message to a subset of the other
+// participants — Canvas's "Reply" as opposed to "Reply all".
 func (h *ConversationHandler) CreateMessage(c *fiber.Ctx) error {
 	id, err := c.ParamsInt("id")
 	if err != nil {
@@ -468,38 +708,63 @@ func (h *ConversationHandler) CreateMessage(c *fiber.Ctx) error {
 	}
 
 	var input struct {
-		Message string `json:"message"`
+		Message       string `json:"message"`
+		Body          string `json:"body"`
+		AttachmentIDs []uint `json:"attachment_ids"`
+		Recipients    []uint `json:"recipients"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
+	if input.Message == "" {
+		input.Message = input.Body
+	}
 
 	userID, _ := c.Locals("user_id").(uint)
 
-	msg := &models.ConversationMessage{
-		ConversationID: uint(id),
-		UserID:         userID,
-		Body:           input.Message,
+	onlyTo, wrote, err := h.replySubset(c, uint(id), userID, input.Recipients)
+	if wrote {
+		return err
+	}
+	attachments, wrote, err := h.ownAttachments(c, userID, input.AttachmentIDs)
+	if wrote {
+		return err
 	}
 
-	if err := h.conversationService.CreateMessage(c.Context(), msg); err != nil {
+	conv, err := h.conversationService.GetConversation(c.Context(), uint(id), callerAccountID(c))
+	if err != nil || conv == nil {
+		// The participant gate passed; fall back to a bare row so the
+		// message can still be written (legacy cross-tenant rows).
+		conv = &models.Conversation{ID: uint(id)}
+	}
+	msg, err := h.postMessage(c, conv, userID, input.Message, onlyTo, attachments)
+	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 
-	if h.notifier != nil {
-		subject := ""
-		if conv, err := h.conversationService.GetConversation(c.Context(), uint(id), callerAccountID(c)); err == nil && conv != nil {
-			subject = conv.Subject
-		}
-		h.notifyNewMessage(c, uint(id), userID, subject, input.Message)
-	}
-
-	j := conversationMessageToJSON(msg)
-	if user, err := h.userService.GetByID(c.Context(), userID, callerAccountID(c)); err == nil {
-		j["user_name"] = user.Name
-	}
+	j := h.messagesToJSON(c, uint(id), []models.ConversationMessage{*msg})[0]
 	return c.Status(fiber.StatusCreated).JSON(j)
+}
+
+// postMessage writes a message, its attachment links and restricted
+// recipients, updates the participants' inbox state and notifies.
+func (h *ConversationHandler) postMessage(c *fiber.Ctx, conv *models.Conversation, senderID uint, body string, onlyTo []uint, attachments []uint) (*models.ConversationMessage, error) {
+	msg := &models.ConversationMessage{
+		ConversationID: conv.ID,
+		UserID:         senderID,
+		Body:           body,
+	}
+	if err := h.conversationService.CreateMessage(c.Context(), msg); err != nil {
+		return nil, err
+	}
+	if h.inbox != nil {
+		_ = h.inbox.AddMessageRecipients(c.Context(), msg.ID, onlyTo)
+		_ = h.inbox.LinkAttachments(c.Context(), msg.ID, attachments)
+		_ = h.inbox.OnNewMessage(c.Context(), conv.ID, senderID, onlyTo)
+	}
+	h.notifyNewMessage(c, conv.ID, senderID, conv.Subject, body, onlyTo)
+	return msg, nil
 }
 
 func (h *ConversationHandler) MarkAsRead(c *fiber.Ctx) error {
