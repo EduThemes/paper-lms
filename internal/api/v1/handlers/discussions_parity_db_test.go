@@ -803,6 +803,54 @@ func TestDiscussionParity_PostingResubscribesAuthor(t *testing.T) {
 		"the author of the post replied to is notified")
 }
 
+// G085: a group gets one child topic even when two requests create it at
+// once (e.g. two members open the discussion right after their group is
+// added to the set).
+func TestDiscussionParity_GroupChildCreatedOnce(t *testing.T) {
+	env := newDiscParityEnv(t)
+	root := env.createTopic(t, map[string]any{"title": "Group plan", "group_category_id": env.category.ID})
+	rootID := idOf(root)
+
+	cid := env.course.ID
+	late := &models.Group{GroupCategoryID: env.category.ID, Name: "Group Three", ContextType: "Course", ContextID: cid, WorkflowState: "available"}
+	require.NoError(t, env.g.Create(late).Error)
+
+	repo := postgres.NewDiscussionParityRepository(env.g)
+	mk := func() *models.DiscussionTopic {
+		gid := late.ID
+		return &models.DiscussionTopic{CourseID: cid, UserID: env.teacher.ID, Title: "Group plan", RootTopicID: &rootID, GroupID: &gid, WorkflowState: models.DiscussionTopicActive}
+	}
+	first, second := mk(), mk()
+	require.NoError(t, repo.CreateChildTopic(context.Background(), first))
+	require.NoError(t, repo.CreateChildTopic(context.Background(), second))
+	assert.NotZero(t, first.ID)
+	assert.Equal(t, first.ID, second.ID, "the second create resolves to the existing child")
+
+	var n int64
+	require.NoError(t, env.g.Model(&models.DiscussionTopic{}).
+		Where("root_topic_id = ? AND group_id = ? AND workflow_state <> 'deleted'", rootID, late.ID).Count(&n).Error)
+	assert.Equal(t, int64(1), n)
+
+	// Concurrent lazy creation through the service also ends with one.
+	later := &models.Group{GroupCategoryID: env.category.ID, Name: "Group Four", ContextType: "Course", ContextID: cid, WorkflowState: "available"}
+	require.NoError(t, env.g.Create(later).Error)
+	var rootTopic models.DiscussionTopic
+	require.NoError(t, env.g.First(&rootTopic, rootID).Error)
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rt := rootTopic
+			_, _ = env.parity.SyncGroupTopics(context.Background(), &rt)
+		}()
+	}
+	wg.Wait()
+	require.NoError(t, env.g.Model(&models.DiscussionTopic{}).
+		Where("root_topic_id = ? AND group_id = ? AND workflow_state <> 'deleted'", rootID, later.ID).Count(&n).Error)
+	assert.Equal(t, int64(1), n)
+}
+
 // G083 + G088: on a "post before seeing replies" topic, a student who
 // subscribed without posting gets no reply notifications (they carry the
 // post's text), until they post themselves.

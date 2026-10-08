@@ -23,8 +23,8 @@ type DiscussionTopic struct {
 	// root, and every group in the set gets its own child topic
 	// (RootTopicID = this id, GroupID = the group) where its members post.
 	GroupCategoryID *uint `json:"group_category_id" gorm:"index"`
-	RootTopicID     *uint `json:"root_topic_id" gorm:"index"`
-	GroupID         *uint `json:"group_id" gorm:"index"`
+	RootTopicID     *uint `json:"root_topic_id" gorm:"index;uniqueIndex:idx_discussion_topics_root_group,priority:1,where:root_topic_id IS NOT NULL AND workflow_state <> 'deleted'"`
+	GroupID         *uint `json:"group_id" gorm:"index;uniqueIndex:idx_discussion_topics_root_group,priority:2,where:root_topic_id IS NOT NULL AND workflow_state <> 'deleted'"`
 	// AnonymousState is nil (names shown), "full_anonymity" (every
 	// author is shown as an anonymous alias) or "partial_anonymity"
 	// (each author chooses per post).

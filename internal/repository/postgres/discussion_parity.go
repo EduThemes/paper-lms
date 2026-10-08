@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -237,8 +238,26 @@ func (r *discussionParityRepo) ListGroupMemberIDs(ctx context.Context, groupID u
 	return ids, err
 }
 
+// CreateChildTopic creates a group's child topic. When a concurrent
+// request created the same (root, group) child first, the unique index
+// idx_discussion_topics_root_group makes this a no-op and topic is
+// loaded from the existing row instead, so a group never gets two copies.
 func (r *discussionParityRepo) CreateChildTopic(ctx context.Context, topic *models.DiscussionTopic) error {
-	return r.db.WithContext(ctx).Create(topic).Error
+	res := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(topic)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 || topic.RootTopicID == nil || topic.GroupID == nil {
+		return nil
+	}
+	var existing models.DiscussionTopic
+	if err := r.db.WithContext(ctx).
+		Where("root_topic_id = ? AND group_id = ? AND workflow_state <> ?", *topic.RootTopicID, *topic.GroupID, "deleted").
+		First(&existing).Error; err != nil {
+		return err
+	}
+	*topic = existing
+	return nil
 }
 
 func (r *discussionParityRepo) UserHasPosted(ctx context.Context, topicID, userID uint) (bool, error) {

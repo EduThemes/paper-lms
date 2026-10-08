@@ -2,6 +2,7 @@
 DROP TABLE IF EXISTS discussion_topic_section_visibilities;
 
 ALTER TABLE discussion_topics DROP CONSTRAINT IF EXISTS chk_discussion_topics_anonymous_state;
+DROP INDEX IF EXISTS idx_discussion_topics_root_group;
 DROP INDEX IF EXISTS idx_discussion_topics_group_id;
 DROP INDEX IF EXISTS idx_discussion_topics_root_topic_id;
 DROP INDEX IF EXISTS idx_discussion_topics_group_category_id;

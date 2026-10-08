@@ -19,6 +19,11 @@ ALTER TABLE discussion_topics ADD COLUMN IF NOT EXISTS is_section_specific boole
 CREATE INDEX IF NOT EXISTS idx_discussion_topics_group_category_id ON discussion_topics(group_category_id);
 CREATE INDEX IF NOT EXISTS idx_discussion_topics_root_topic_id ON discussion_topics(root_topic_id);
 CREATE INDEX IF NOT EXISTS idx_discussion_topics_group_id ON discussion_topics(group_id);
+-- One live child topic per (root, group): two people opening a group
+-- discussion at once must not each create a copy for the same group.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_discussion_topics_root_group
+    ON discussion_topics(root_topic_id, group_id)
+    WHERE root_topic_id IS NOT NULL AND workflow_state <> 'deleted';
 
 ALTER TABLE discussion_topics DROP CONSTRAINT IF EXISTS chk_discussion_topics_anonymous_state;
 ALTER TABLE discussion_topics ADD CONSTRAINT chk_discussion_topics_anonymous_state
