@@ -30,6 +30,17 @@ func (r *Router) registerPagesFilesRoutes(protected fiber.Router, enrolled, inst
 		return
 	}
 
+	// Hidden course tabs (G078): each gate is its own route ahead of the
+	// core list route and continues to it unless the course hides the tab
+	// from this learner. Canvas gates the same index endpoints; single
+	// items stay reachable (e.g. a page linked from a module).
+	if r.PermMiddleware != nil {
+		protected.Get("/courses/:course_id/pages", r.PermMiddleware.RequireCourseTab(middleware.CourseTabPages))
+		protected.Get("/courses/:course_id/files", r.PermMiddleware.RequireCourseTab(middleware.CourseTabFiles))
+		protected.Get("/courses/:course_id/folders", r.PermMiddleware.RequireCourseTab(middleware.CourseTabFiles))
+		protected.Get("/courses/:course_id/quizzes", r.PermMiddleware.RequireCourseTab(middleware.CourseTabQuizzes))
+	}
+
 	// Page revisions: the handler requires edit rights on the page to read
 	// history and course-manager rights to revert.
 	if pf.Revisions != nil {

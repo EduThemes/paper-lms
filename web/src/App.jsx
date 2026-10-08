@@ -82,6 +82,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import { OAuthConsentGate, ResumePendingOAuthConsent } from './components/OAuthConsentResume';
 import SuperAdminGate from './components/SuperAdminGate';
 import { CourseUIProvider } from './contexts/CourseUIContext';
+import CourseTabGate from './components/CourseTabGate';
 import { useAuth } from './contexts/AuthContext';
 import { api } from './services/api';
 const SetupWizardPage = React.lazy(() => import('./pages/SetupWizardPage'));
@@ -185,7 +186,7 @@ const App = () => {
           path="/courses/:courseId"
           element={
             <ProtectedRoute>
-              <CourseUIProvider><Outlet /></CourseUIProvider>
+              <CourseUIProvider><CourseTabGate><Outlet /></CourseTabGate></CourseUIProvider>
             </ProtectedRoute>
           }
         >
