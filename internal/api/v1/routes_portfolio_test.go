@@ -38,7 +38,7 @@ func newPortfolioRouterApp(t *testing.T) (*fiber.App, *mocks.MockPortfolioReposi
 	svc := service.NewPortfolioService(portfolioRepo, sectionRepo, artifactRepo, reflectionRepo,
 		new(mocks.MockPortfolioTemplateRepository), new(mocks.MockPortfolioCommentRepository),
 		new(mocks.MockSubmissionRepository), new(mocks.MockAssignmentRepository))
-	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), new(mocks.MockUserRepository))
+	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), new(mocks.MockUserRepository), new(mocks.MockCourseRepository))
 
 	r := &Router{
 		PortfolioHandler: handlers.NewPortfolioHandler(svc, authz),

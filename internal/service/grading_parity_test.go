@@ -265,7 +265,8 @@ func TestGradingParity_B110_ObserverSeesOnlyPostedGrades(t *testing.T) {
 		{ID: 2, AssignmentID: 2, UserID: child, Score: ptrFloat64(2), GradedAt: &now, SubmittedAt: &now, WorkflowState: models.SubmissionGraded},
 	}, nil)
 	quizRepo.On("ListByCourseID", mock.Anything, uint(1), mock.Anything).Return(&repository.PaginatedResult[models.Quiz]{}, nil)
-	pageRepo.On("ListByCourseID", mock.Anything, uint(1), mock.Anything).Return(&repository.PaginatedResult[models.WikiPage]{}, nil)
+	pageRepo.On("ListByCourseID", mock.Anything, uint(1), mock.Anything).Return(&repository.PaginatedResult[models.WikiPage]{}, nil).Maybe()
+	pageRepo.On("ListPublishedByCourseID", mock.Anything, uint(1), mock.Anything).Return(&repository.PaginatedResult[models.WikiPage]{}, nil).Maybe()
 
 	svc := service.NewObserverService(enrollmentRepo, courseRepo, new(mocks.MockUserRepository))
 	svc.SetOverviewDeps(assignmentRepo, submissionRepo, quizRepo, emptyAnnouncements{}, pageRepo)

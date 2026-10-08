@@ -21,6 +21,8 @@ vi.mock('../../services/api', () => ({
 
 vi.mock('../../hooks/useIsTeacher', () => ({ default: () => true }));
 
+vi.mock('../../hooks/useAccountId', () => ({ default: () => 42 }));
+
 vi.mock('../../components/Layout', () => ({
   default: ({ children }) => <div>{children}</div>,
 }));
@@ -38,7 +40,7 @@ describe('DeveloperKeysPage (B182)', () => {
 
     const { container } = render(<MemoryRouter><DeveloperKeysPage /></MemoryRouter>);
     await waitFor(() => expect(api.getDeveloperKeys).toHaveBeenCalled());
-    expect(api.getDeveloperKeys.mock.calls[0][0]).toBe('self');
+    expect(api.getDeveloperKeys.mock.calls[0][0]).toBe(42);
 
     fireEvent.click(screen.getByRole('button', { name: /Add Developer Key/i }));
     fireEvent.change(container.querySelector('input[name="name"]'), { target: { value: 'Example App' } });
@@ -50,7 +52,7 @@ describe('DeveloperKeysPage (B182)', () => {
 
     await waitFor(() => expect(api.createDeveloperKey).toHaveBeenCalled());
     const [accountId, body] = api.createDeveloperKey.mock.calls[0];
-    expect(accountId).toBe('self');
+    expect(accountId).toBe(42);
     expect(body.redirect_uris).toEqual(['https://app.example.com/a', 'https://app.example.com/b']);
     expect(body.require_scopes).toBe(true);
   });

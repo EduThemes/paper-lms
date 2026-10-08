@@ -68,7 +68,7 @@ func TestObserverOverview_HidesUnpostedGradesAndDraftPages(t *testing.T) {
 		{ID: 9, UserID: 200, AssignmentID: 50, Score: &score, GradedAt: &graded}, // graded, NOT posted
 	}, nil)
 	submissions.On("ListByUserAndCourse", mock.Anything, uint(200), uint(2)).Return([]models.Submission{}, nil)
-	pages.On("ListByCourseID", mock.Anything, mock.Anything, mock.Anything).Return(&repository.PaginatedResult[models.WikiPage]{
+	pages.On("ListPublishedByCourseID", mock.Anything, mock.Anything, mock.Anything).Return(&repository.PaginatedResult[models.WikiPage]{
 		Items: []models.WikiPage{
 			{ID: 1, CourseID: 1, Title: "Secret draft", WorkflowState: "unpublished", UpdatedAt: time.Now()},
 			{ID: 2, CourseID: 1, Title: "Syllabus", WorkflowState: "active", UpdatedAt: time.Now()},
@@ -95,7 +95,7 @@ func TestObserverOverview_SyncsObserverEnrollmentForNewCourse(t *testing.T) {
 		created = append(created, args.Get(1).(*models.Enrollment))
 	}).Return(nil)
 	submissions.On("ListByUserAndCourse", mock.Anything, mock.Anything, mock.Anything).Return([]models.Submission{}, nil)
-	pages.On("ListByCourseID", mock.Anything, mock.Anything, mock.Anything).Return(&repository.PaginatedResult[models.WikiPage]{}, nil)
+	pages.On("ListPublishedByCourseID", mock.Anything, mock.Anything, mock.Anything).Return(&repository.PaginatedResult[models.WikiPage]{}, nil)
 
 	_, err := svc.GetChildOverview(context.Background(), 100, 200)
 	require.NoError(t, err)

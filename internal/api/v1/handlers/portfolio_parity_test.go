@@ -64,7 +64,7 @@ func newPortfolioFixture(t *testing.T, callerID uint) *portfolioFixture {
 	svc := service.NewPortfolioService(f.portfolioRepo, f.sectionRepo, f.artifactRepo, f.reflectionRepo,
 		new(mocks.MockPortfolioTemplateRepository), f.commentRepo, f.submissionRepo, f.assignmentRepo)
 	svc.SetUserRepository(f.userRepo)
-	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), f.userRepo)
+	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), f.userRepo, new(mocks.MockCourseRepository))
 	h := handlers.NewPortfolioHandler(svc, authz)
 
 	app := testutil.SetupTestApp()
@@ -334,7 +334,7 @@ func TestPortfolio_GetPublicPortfolio_BySlug(t *testing.T) {
 	svc := service.NewPortfolioService(portfolioRepo, sectionRepo, artifactRepo, reflectionRepo,
 		new(mocks.MockPortfolioTemplateRepository), new(mocks.MockPortfolioCommentRepository),
 		new(mocks.MockSubmissionRepository), new(mocks.MockAssignmentRepository))
-	h := handlers.NewPortfolioHandler(svc, handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), new(mocks.MockUserRepository)))
+	h := handlers.NewPortfolioHandler(svc, handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), new(mocks.MockUserRepository), new(mocks.MockCourseRepository)))
 	app := testutil.SetupTestApp()
 	app.Get("/portfolios/public/:slug", h.GetPublicPortfolio)
 
