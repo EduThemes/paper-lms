@@ -833,6 +833,8 @@ func main() {
 	accommodationHandler := handlers.NewAccommodationHandler(accommodationService, assignmentService, authz, auditService)
 	attendanceHandler := handlers.NewAttendanceHandler(attendanceService, auditService)
 	portfolioHandler := handlers.NewPortfolioHandler(portfolioService, authz)
+	portfolioHandler.SetFileService(fileService)
+	portfolioService.SetUserRepository(userRepo)
 	courseHomeHandler := handlers.NewCourseHomeHandler(courseHomeService)
 	peerReviewHandler := handlers.NewPeerReviewHandler(peerReviewService, auditService)
 	questionBankHandler := handlers.NewQuestionBankHandler(questionBankService)

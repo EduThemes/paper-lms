@@ -2,6 +2,14 @@ package models
 
 import "time"
 
+// Portfolio workflow states (Portfolio.WorkflowState).
+const (
+	PortfolioDraft     = "draft"
+	PortfolioPublished = "published"
+	PortfolioArchived  = "archived"
+	PortfolioDeleted   = "deleted"
+)
+
 type Portfolio struct {
 	ID             uint       `json:"id" gorm:"column:id;primaryKey"`
 	UserID         uint       `json:"user_id" gorm:"not null;index"`

@@ -1,20 +1,52 @@
 package handlers
 
 import (
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"path/filepath"
+	"strings"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/EduThemes/paper-lms/internal/settingsctx"
+	"github.com/EduThemes/paper-lms/internal/storage"
 )
 
 type PortfolioHandler struct {
 	portfolioService *service.PortfolioService
 	authz            *ResourceAuthorizer
+	// fileService backs artifact file uploads/downloads. Optional: when nil
+	// the upload endpoint reports the feature as unavailable.
+	fileService *service.FileService
 }
 
 func NewPortfolioHandler(portfolioService *service.PortfolioService, authz *ResourceAuthorizer) *PortfolioHandler {
 	return &PortfolioHandler{portfolioService: portfolioService, authz: authz}
+}
+
+// SetFileService wires file storage for portfolio artifact uploads.
+func (h *PortfolioHandler) SetFileService(fs *service.FileService) {
+	h.fileService = fs
+}
+
+// requireOwnerOrAdmin wraps ResourceAuthorizer.RequireOwnerOrAdmin and
+// returns wrote=true whenever a response was emitted — including the case
+// where the authorizer wrote a 403 but returned a nil error — so callers
+// always stop (the (result, wrote, err) pattern).
+func (h *PortfolioHandler) requireOwnerOrAdmin(c *fiber.Ctx, ownerID uint) (bool, error) {
+	if err := h.authz.RequireOwnerOrAdmin(c, ownerID); err != nil {
+		return true, err
+	}
+	if c.Response().StatusCode() == fiber.StatusForbidden {
+		return true, nil
+	}
+	return false, nil
 }
 
 // loadOwnedPortfolio is the repeated load + owner-or-admin authz lift used by
@@ -31,10 +63,61 @@ func (h *PortfolioHandler) loadOwnedPortfolio(c *fiber.Ctx, paramName string) (*
 	if err != nil {
 		return nil, true, responses.NotFound(c, "portfolio")
 	}
-	if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
+	if wrote, err := h.requireOwnerOrAdmin(c, portfolio.UserID); wrote {
 		return nil, true, err
 	}
 	return portfolio, false, nil
+}
+
+// loadViewablePortfolio loads a portfolio the caller may view: the owner or
+// an admin, or anyone in the tenant when it is published and public.
+func (h *PortfolioHandler) loadViewablePortfolio(c *fiber.Ctx, paramName string) (*models.Portfolio, bool, error) {
+	portfolioID, err := c.ParamsInt(paramName)
+	if err != nil {
+		return nil, true, responses.BadRequest(c, "Invalid portfolio ID")
+	}
+	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
+	if err != nil {
+		return nil, true, responses.NotFound(c, "portfolio")
+	}
+	if isPubliclyVisible(portfolio) {
+		return portfolio, false, nil
+	}
+	if wrote, err := h.requireOwnerOrAdmin(c, portfolio.UserID); wrote {
+		return nil, true, err
+	}
+	return portfolio, false, nil
+}
+
+func isPubliclyVisible(p *models.Portfolio) bool {
+	return p.IsPublic && p.WorkflowState == models.PortfolioPublished
+}
+
+// writeChildNotFound maps service errors for section/artifact lookups.
+func writeChildNotFound(c *fiber.Ctx, err error, what string) error {
+	if errors.Is(err, service.ErrPortfolioChildNotFound) {
+		return responses.NotFound(c, what)
+	}
+	return responses.BadRequest(c, err.Error())
+}
+
+// safePortfolioURL accepts http(s) URLs and same-origin absolute paths.
+// Portfolio links are rendered as href/src on the public page, so
+// javascript:/data: URLs would be stored XSS.
+func safePortfolioURL(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return true
+	}
+	if strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, "//") {
+		return true
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	return (scheme == "http" || scheme == "https") && u.Host != ""
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +231,55 @@ func portfolioTemplateToJSON(t *models.PortfolioTemplate) fiber.Map {
 	}
 }
 
+// portfolioDetailJSON is the editor/read shape: the portfolio plus its
+// sections and artifacts (B098 — the editor reads portfolio.sections and
+// portfolio.artifacts on load and replaces its state with the PUT response).
+// publicOnly drops hidden sections (and their artifacts) and rewrites
+// uploaded-file links to the public, slug-scoped download route.
+func (h *PortfolioHandler) portfolioDetailJSON(c *fiber.Ctx, p *models.Portfolio, publicOnly bool) fiber.Map {
+	sections, artifacts, reflections := h.portfolioService.GetPortfolioDetail(c.Context(), p.ID)
+
+	hidden := map[uint]bool{}
+	sectionsJSON := make([]fiber.Map, 0, len(sections))
+	for i := range sections {
+		if publicOnly && !sections[i].IsVisible {
+			hidden[sections[i].ID] = true
+			continue
+		}
+		sectionsJSON = append(sectionsJSON, portfolioSectionToJSON(&sections[i]))
+	}
+
+	artifactsJSON := make([]fiber.Map, 0, len(artifacts))
+	for i := range artifacts {
+		a := &artifacts[i]
+		if a.SectionID != nil && hidden[*a.SectionID] {
+			continue
+		}
+		m := portfolioArtifactToJSON(a)
+		if publicOnly && a.SourceType == "upload" && a.SourceID != nil {
+			m["content_url"] = fmt.Sprintf("/api/v1/portfolios/public/%s/files/%d", url.PathEscape(p.Slug), *a.SourceID)
+		}
+		rs := reflections[a.ID]
+		rsJSON := make([]fiber.Map, len(rs))
+		for j := range rs {
+			rsJSON[j] = portfolioReflectionToJSON(&rs[j])
+		}
+		m["reflections"] = rsJSON
+		if len(rs) > 0 {
+			m["reflection"] = rs[len(rs)-1].Content
+		}
+		artifactsJSON = append(artifactsJSON, m)
+	}
+
+	result := portfolioToJSON(p)
+	result["sections"] = sectionsJSON
+	result["artifacts"] = artifactsJSON
+	if names := h.portfolioService.UserNames(c.Context(), []uint{p.UserID}); names[p.UserID] != "" {
+		result["user_name"] = names[p.UserID]
+	}
+	return result
+}
+
 // ---------------------------------------------------------------------------
 // Portfolio CRUD
 // ---------------------------------------------------------------------------
@@ -199,6 +331,11 @@ func (h *PortfolioHandler) CreatePortfolio(c *fiber.Ctx) error {
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
+	for _, u := range []string{input.Portfolio.HeaderImageURL, input.Portfolio.AvatarURL, input.Portfolio.LinkedInURL, input.Portfolio.WebsiteURL} {
+		if !safePortfolioURL(u) {
+			return responses.BadRequest(c, "URLs must be http(s)")
+		}
+	}
 
 	portfolio := &models.Portfolio{
 		UserID:         uint(userID),
@@ -222,24 +359,13 @@ func (h *PortfolioHandler) CreatePortfolio(c *fiber.Ctx) error {
 }
 
 func (h *PortfolioHandler) GetPortfolio(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
+	// Public portfolios are readable by anyone in the tenant; otherwise
+	// owner or admin only.
+	portfolio, wrote, err := h.loadViewablePortfolio(c, "id")
+	if wrote {
+		return err
 	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	// Public portfolios are readable by anyone; otherwise owner or admin only
-	if !portfolio.IsPublic {
-		if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
-			return err
-		}
-	}
-
-	return c.JSON(portfolioToJSON(portfolio))
+	return c.JSON(h.portfolioDetailJSON(c, portfolio, false))
 }
 
 func (h *PortfolioHandler) UpdatePortfolio(c *fiber.Ctx) error {
@@ -261,14 +387,23 @@ func (h *PortfolioHandler) UpdatePortfolio(c *fiber.Ctx) error {
 			LinkedInURL    *string `json:"linkedin_url"`
 			WebsiteURL     *string `json:"website_url"`
 			CustomDomain   *string `json:"custom_domain"`
+			WorkflowState  *string `json:"workflow_state"`
 		} `json:"portfolio"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
+	for _, u := range []*string{input.Portfolio.HeaderImageURL, input.Portfolio.AvatarURL, input.Portfolio.LinkedInURL, input.Portfolio.WebsiteURL} {
+		if u != nil && !safePortfolioURL(*u) {
+			return responses.BadRequest(c, "URLs must be http(s)")
+		}
+	}
 
 	if input.Portfolio.Title != nil {
+		if strings.TrimSpace(*input.Portfolio.Title) == "" {
+			return responses.BadRequest(c, "portfolio title is required")
+		}
 		portfolio.Title = *input.Portfolio.Title
 	}
 	if input.Portfolio.Description != nil {
@@ -301,12 +436,19 @@ func (h *PortfolioHandler) UpdatePortfolio(c *fiber.Ctx) error {
 	if input.Portfolio.CustomDomain != nil {
 		portfolio.CustomDomain = *input.Portfolio.CustomDomain
 	}
+	// B197: "Archive" sends a workflow_state change, which used to be
+	// silently ignored.
+	if input.Portfolio.WorkflowState != nil {
+		if err := h.portfolioService.SetWorkflowState(portfolio, *input.Portfolio.WorkflowState); err != nil {
+			return responses.BadRequest(c, err.Error())
+		}
+	}
 
 	if err := h.portfolioService.UpdatePortfolio(c.Context(), portfolio, callerAccountID(c)); err != nil {
 		return responses.InternalError(c, "Could not update portfolio")
 	}
 
-	return c.JSON(portfolioToJSON(portfolio))
+	return c.JSON(h.portfolioDetailJSON(c, portfolio, false))
 }
 
 func (h *PortfolioHandler) DeletePortfolio(c *fiber.Ctx) error {
@@ -314,8 +456,8 @@ func (h *PortfolioHandler) DeletePortfolio(c *fiber.Ctx) error {
 	if wrote {
 		return err
 	}
-	if err := h.portfolioService.ArchivePortfolio(c.Context(), portfolio.ID, callerAccountID(c)); err != nil {
-		return responses.InternalError(c, "Could not archive portfolio")
+	if err := h.portfolioService.DeletePortfolio(c.Context(), portfolio.ID, callerAccountID(c)); err != nil {
+		return responses.InternalError(c, "Could not delete portfolio")
 	}
 	return c.JSON(fiber.Map{"delete": true})
 }
@@ -332,39 +474,62 @@ func (h *PortfolioHandler) PublishPortfolio(c *fiber.Ctx) error {
 	return c.JSON(portfolioToJSON(portfolio))
 }
 
+// UnpublishPortfolio handles DELETE /portfolios/:id/publish (B197).
+func (h *PortfolioHandler) UnpublishPortfolio(c *fiber.Ctx) error {
+	existing, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
+		return err
+	}
+	portfolio, err := h.portfolioService.UnpublishPortfolio(c.Context(), existing.ID, callerAccountID(c))
+	if err != nil {
+		return responses.BadRequest(c, err.Error())
+	}
+	return c.JSON(portfolioToJSON(portfolio))
+}
+
+// DuplicatePortfolio handles POST /portfolios/:id/duplicate (B198: the UI's
+// Duplicate used to call the import endpoint).
+func (h *PortfolioHandler) DuplicatePortfolio(c *fiber.Ctx) error {
+	existing, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
+		return err
+	}
+	dup, err := h.portfolioService.DuplicatePortfolio(c.Context(), existing.ID, callerAccountID(c))
+	if err != nil {
+		return responses.InternalError(c, "Could not duplicate portfolio")
+	}
+	return c.Status(fiber.StatusCreated).JSON(portfolioToJSON(dup))
+}
+
+// GetPublicPortfolio handles GET /portfolios/public/:slug (no auth).
+//
+// B094: the handler read c.ParamsInt("id") on a :slug route, so every
+// visitor got 400. It now resolves the slug and only serves published,
+// public portfolios, with hidden sections removed.
 func (h *PortfolioHandler) GetPublicPortfolio(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	// Public endpoint: no auth, no tenant Locals. Pass accountID=0 so the
-	// repo returns the row regardless of owning tenant; the
-	// WorkflowState==published gate below is the visibility check.
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), 0)
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	if portfolio.WorkflowState != "published" {
+	portfolio, ok := h.loadPublicPortfolio(c)
+	if !ok {
 		return responses.NotFound(c, "portfolio")
 	}
 
 	// Record the view
 	_ = h.portfolioService.RecordView(c.Context(), portfolio.ID)
 
-	// Return portfolio with sections and featured artifacts
-	sections, _ := h.portfolioService.ListSections(c.Context(), portfolio.ID)
+	return c.JSON(h.portfolioDetailJSON(c, portfolio, true))
+}
 
-	sectionsJSON := make([]fiber.Map, len(sections))
-	for i, s := range sections {
-		sectionsJSON[i] = portfolioSectionToJSON(&s)
+func (h *PortfolioHandler) loadPublicPortfolio(c *fiber.Ctx) (*models.Portfolio, bool) {
+	slug := strings.TrimSpace(c.Params("slug"))
+	if slug == "" {
+		return nil, false
 	}
-
-	result := portfolioToJSON(portfolio)
-	result["sections"] = sectionsJSON
-
-	return c.JSON(result)
+	// Public endpoint: no auth, no tenant Locals. The slug lookup is
+	// global; the published+public gate below is the visibility check.
+	portfolio, err := h.portfolioService.GetBySlug(c.Context(), slug)
+	if err != nil || !isPubliclyVisible(portfolio) {
+		return nil, false
+	}
+	return portfolio, true
 }
 
 // ---------------------------------------------------------------------------
@@ -410,8 +575,15 @@ func (h *PortfolioHandler) AddSection(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(portfolioSectionToJSON(section))
 }
 
+// UpdateSection handles PUT /portfolios/:id/sections/:section_id.
+//
+// B095: the old code looked the section up with ListSections(sectionID)
+// (a section id passed as a portfolio id) and fell back to an empty
+// &PortfolioSection{ID}, so db.Save zeroed every column the request did not
+// send. B096: the section was never tied to the URL portfolio. The section
+// is now loaded through the portfolio and only the sent fields change.
 func (h *PortfolioHandler) UpdateSection(c *fiber.Ctx) error {
-	_, wrote, err := h.loadOwnedPortfolio(c, "id")
+	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
 	if wrote {
 		return err
 	}
@@ -435,19 +607,9 @@ func (h *PortfolioHandler) UpdateSection(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 
-	// Fetch section to get existing data
-	sections, _ := h.portfolioService.ListSections(c.Context(), uint(sectionID))
-	var section *models.PortfolioSection
-	for _, s := range sections {
-		if s.ID == uint(sectionID) {
-			section = &s
-			break
-		}
-	}
-	// Fallback: direct fetch via service
-	if section == nil {
-		// Build a minimal section to update
-		section = &models.PortfolioSection{ID: uint(sectionID)}
+	section, err := h.portfolioService.GetSection(c.Context(), portfolio.ID, uint(sectionID), callerAccountID(c))
+	if err != nil {
+		return writeChildNotFound(c, err, "section")
 	}
 
 	if input.Section.Title != nil {
@@ -470,15 +632,15 @@ func (h *PortfolioHandler) UpdateSection(c *fiber.Ctx) error {
 		section.Position = *input.Section.Position
 	}
 
-	if err := h.portfolioService.UpdateSection(c.Context(), section, callerAccountID(c)); err != nil {
-		return responses.InternalError(c, "Could not update section")
+	if err := h.portfolioService.UpdateSection(c.Context(), portfolio.ID, section, callerAccountID(c)); err != nil {
+		return writeChildNotFound(c, err, "section")
 	}
 
 	return c.JSON(portfolioSectionToJSON(section))
 }
 
 func (h *PortfolioHandler) DeleteSection(c *fiber.Ctx) error {
-	_, wrote, err := h.loadOwnedPortfolio(c, "id")
+	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
 	if wrote {
 		return err
 	}
@@ -486,7 +648,10 @@ func (h *PortfolioHandler) DeleteSection(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid section ID")
 	}
-	if err := h.portfolioService.RemoveSection(c.Context(), uint(sectionID), callerAccountID(c)); err != nil {
+	if err := h.portfolioService.RemoveSection(c.Context(), portfolio.ID, uint(sectionID), callerAccountID(c)); err != nil {
+		if errors.Is(err, service.ErrPortfolioChildNotFound) {
+			return responses.NotFound(c, "section")
+		}
 		return responses.InternalError(c, "Could not delete section")
 	}
 	return c.JSON(fiber.Map{"delete": true})
@@ -542,6 +707,14 @@ func (h *PortfolioHandler) AddArtifact(c *fiber.Ctx) error {
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
+	if !safePortfolioURL(input.Artifact.ContentURL) || !safePortfolioURL(input.Artifact.ThumbnailURL) {
+		return responses.BadRequest(c, "URLs must be http(s)")
+	}
+	// Uploaded-file artifacts are created only by the upload endpoint,
+	// which ties the stored file to this portfolio.
+	if input.Artifact.SourceType == "upload" {
+		return responses.BadRequest(c, "use the upload endpoint for file artifacts")
+	}
 
 	artifact := &models.PortfolioArtifact{
 		PortfolioID:   portfolio.ID,
@@ -559,15 +732,178 @@ func (h *PortfolioHandler) AddArtifact(c *fiber.Ctx) error {
 		IsFeatured:    input.Artifact.IsFeatured,
 	}
 
-	if err := h.portfolioService.AddArtifact(c.Context(), artifact); err != nil {
+	if err := h.portfolioService.AddArtifact(c.Context(), artifact, callerAccountID(c)); err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(portfolioArtifactToJSON(artifact))
 }
 
+// UploadArtifactFile handles POST /portfolios/:id/artifacts/upload
+// (multipart: file + title, description, tags, section_id, is_featured).
+// The file is stored as the owner's personal attachment and the artifact
+// links it through the portfolio-scoped download route.
+func (h *PortfolioHandler) UploadArtifactFile(c *fiber.Ctx) error {
+	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
+	if wrote {
+		return err
+	}
+	if h.fileService == nil {
+		return responses.InternalError(c, "file uploads are not available")
+	}
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		return responses.BadRequest(c, "File is required")
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		return responses.InternalError(c, "Could not open uploaded file")
+	}
+	defer file.Close()
+
+	var sectionID *uint
+	if raw := strings.TrimSpace(c.FormValue("section_id")); raw != "" && raw != "null" {
+		var v uint
+		if _, err := fmt.Sscanf(raw, "%d", &v); err != nil || v == 0 {
+			return responses.BadRequest(c, "Invalid section ID")
+		}
+		sectionID = &v
+		if _, err := h.portfolioService.GetSection(c.Context(), portfolio.ID, v, callerAccountID(c)); err != nil {
+			return responses.NotFound(c, "section")
+		}
+	}
+	title := strings.TrimSpace(c.FormValue("title"))
+	if title == "" {
+		title = fileHeader.Filename
+	}
+
+	// Same content-type hardening as course uploads: don't trust a claimed
+	// inline-safe image type whose bytes say otherwise.
+	contentType := fileHeader.Header.Get("Content-Type")
+	sniffBuf := make([]byte, 512)
+	n, _ := io.ReadFull(file, sniffBuf)
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return responses.InternalError(c, "Could not read uploaded file")
+	}
+	if n > 0 {
+		sniffed := http.DetectContentType(sniffBuf[:n])
+		if isInlineSafeMIME(contentType) && !isInlineSafeMIME(sniffed) &&
+			!strings.HasPrefix(sniffed, "application/octet-stream") {
+			contentType = sniffed
+		}
+	}
+
+	attachment := &models.Attachment{
+		ContextType: "User",
+		ContextID:   portfolio.UserID,
+		UserID:      portfolio.UserID,
+		DisplayName: fileHeader.Filename,
+		Filename:    fileHeader.Filename,
+		ContentType: contentType,
+		Size:        fileHeader.Size,
+	}
+	uploadCtx := settingsctx.WithAccountID(c.Context(), callerAccountID(c))
+	if err := h.fileService.UploadFile(uploadCtx, attachment, file); err != nil {
+		return responses.BadRequest(c, err.Error())
+	}
+
+	artifactType := "document"
+	switch {
+	case strings.HasPrefix(contentType, "image/"):
+		artifactType = "image"
+	case strings.HasPrefix(contentType, "video/"):
+		artifactType = "video"
+	}
+	attachmentID := attachment.ID
+	artifact := &models.PortfolioArtifact{
+		PortfolioID:   portfolio.ID,
+		SectionID:     sectionID,
+		Title:         title,
+		Description:   service.SanitizeHTML(c.FormValue("description")),
+		ArtifactType:  artifactType,
+		ContentURL:    fmt.Sprintf("/api/v1/portfolios/%d/files/%d", portfolio.ID, attachment.ID),
+		SourceType:    "upload",
+		SourceID:      &attachmentID,
+		FileType:      strings.TrimPrefix(strings.ToLower(filepath.Ext(fileHeader.Filename)), "."),
+		FileSizeBytes: fileHeader.Size,
+		Tags:          c.FormValue("tags"),
+		IsFeatured:    c.FormValue("is_featured") == "true",
+	}
+	if err := h.portfolioService.AddArtifact(c.Context(), artifact, callerAccountID(c)); err != nil {
+		return responses.BadRequest(c, err.Error())
+	}
+	return c.Status(fiber.StatusCreated).JSON(portfolioArtifactToJSON(artifact))
+}
+
+// DownloadArtifactFile handles GET /portfolios/:id/files/:file_id for the
+// owner/admin, or anyone in the tenant once the portfolio is public.
+func (h *PortfolioHandler) DownloadArtifactFile(c *fiber.Ctx) error {
+	portfolio, wrote, err := h.loadViewablePortfolio(c, "id")
+	if wrote {
+		return err
+	}
+	return h.streamPortfolioFile(c, portfolio, callerAccountID(c))
+}
+
+// DownloadPublicArtifactFile handles GET /portfolios/public/:slug/files/:file_id
+// (no auth) for published, public portfolios.
+func (h *PortfolioHandler) DownloadPublicArtifactFile(c *fiber.Ctx) error {
+	portfolio, ok := h.loadPublicPortfolio(c)
+	if !ok {
+		return responses.NotFound(c, "file")
+	}
+	return h.streamPortfolioFile(c, portfolio, 0)
+}
+
+// streamPortfolioFile serves an attachment only when an artifact of this
+// portfolio was created from it by the upload endpoint.
+func (h *PortfolioHandler) streamPortfolioFile(c *fiber.Ctx, portfolio *models.Portfolio, accountID uint) error {
+	if h.fileService == nil {
+		return responses.NotFound(c, "file")
+	}
+	fileID, err := c.ParamsInt("file_id")
+	if err != nil || fileID <= 0 {
+		return responses.BadRequest(c, "Invalid file ID")
+	}
+	if !h.portfolioService.PortfolioHasUpload(c.Context(), portfolio.ID, uint(fileID)) {
+		return responses.NotFound(c, "file")
+	}
+	attachment, err := h.fileService.GetAttachment(c.Context(), uint(fileID), accountID)
+	if err != nil || attachment.ContextType != "User" || attachment.ContextID != portfolio.UserID || attachment.WorkflowState == "deleted" {
+		return responses.NotFound(c, "file")
+	}
+
+	safeName := filepath.Base(attachment.Filename)
+	safeName = strings.NewReplacer("\"", "", "\r", "", "\n", "").Replace(safeName)
+	disposition := "attachment"
+	if isInlineSafeMIME(attachment.ContentType) {
+		disposition = "inline"
+	}
+	c.Set("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"; filename*=UTF-8''%s", disposition, safeName, url.PathEscape(safeName)))
+	c.Set("X-Content-Type-Options", "nosniff")
+
+	backend := h.fileService.StorageBackend()
+	if _, isS3 := backend.(*storage.S3Backend); isS3 {
+		downloadURL, err := h.fileService.GetFileURL(c.Context(), attachment.ID, accountID)
+		if err != nil {
+			return responses.InternalError(c, "Could not generate download URL")
+		}
+		return c.Redirect(downloadURL, fiber.StatusTemporaryRedirect)
+	}
+	reader, err := backend.Get(settingsctx.WithAccountID(c.Context(), accountID), attachment.StoragePath)
+	if err != nil {
+		return responses.InternalError(c, "Could not locate file")
+	}
+	defer reader.Close()
+	c.Set("Content-Type", attachment.ContentType)
+	return c.SendStream(reader)
+}
+
+// UpdateArtifact handles PUT /portfolios/:id/artifacts/:artifact_id.
+// B095/B096: patch the stored artifact (loaded through the portfolio)
+// instead of saving a zero-valued struct over it.
 func (h *PortfolioHandler) UpdateArtifact(c *fiber.Ctx) error {
-	_, wrote, err := h.loadOwnedPortfolio(c, "id")
+	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
 	if wrote {
 		return err
 	}
@@ -596,12 +932,21 @@ func (h *PortfolioHandler) UpdateArtifact(c *fiber.Ctx) error {
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
+	if (input.Artifact.ContentURL != nil && !safePortfolioURL(*input.Artifact.ContentURL)) ||
+		(input.Artifact.ThumbnailURL != nil && !safePortfolioURL(*input.Artifact.ThumbnailURL)) {
+		return responses.BadRequest(c, "URLs must be http(s)")
+	}
 
-	// Build artifact with ID for update
-	artifact := &models.PortfolioArtifact{ID: uint(artifactID)}
+	artifact, err := h.portfolioService.GetArtifact(c.Context(), portfolio.ID, uint(artifactID), callerAccountID(c))
+	if err != nil {
+		return writeChildNotFound(c, err, "artifact")
+	}
 
 	if input.Artifact.SectionID != nil {
 		artifact.SectionID = input.Artifact.SectionID
+		if *input.Artifact.SectionID == 0 {
+			artifact.SectionID = nil
+		}
 	}
 	if input.Artifact.Title != nil {
 		artifact.Title = *input.Artifact.Title
@@ -612,7 +957,7 @@ func (h *PortfolioHandler) UpdateArtifact(c *fiber.Ctx) error {
 	if input.Artifact.ArtifactType != nil {
 		artifact.ArtifactType = *input.Artifact.ArtifactType
 	}
-	if input.Artifact.ContentURL != nil {
+	if input.Artifact.ContentURL != nil && artifact.SourceType != "upload" {
 		artifact.ContentURL = *input.Artifact.ContentURL
 	}
 	if input.Artifact.ThumbnailURL != nil {
@@ -637,15 +982,15 @@ func (h *PortfolioHandler) UpdateArtifact(c *fiber.Ctx) error {
 		artifact.IsFeatured = *input.Artifact.IsFeatured
 	}
 
-	if err := h.portfolioService.UpdateArtifact(c.Context(), artifact, callerAccountID(c)); err != nil {
-		return responses.InternalError(c, "Could not update artifact")
+	if err := h.portfolioService.UpdateArtifact(c.Context(), portfolio.ID, artifact, callerAccountID(c)); err != nil {
+		return writeChildNotFound(c, err, "artifact")
 	}
 
 	return c.JSON(portfolioArtifactToJSON(artifact))
 }
 
 func (h *PortfolioHandler) DeleteArtifact(c *fiber.Ctx) error {
-	_, wrote, err := h.loadOwnedPortfolio(c, "id")
+	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
 	if wrote {
 		return err
 	}
@@ -653,7 +998,10 @@ func (h *PortfolioHandler) DeleteArtifact(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid artifact ID")
 	}
-	if err := h.portfolioService.RemoveArtifact(c.Context(), uint(artifactID), callerAccountID(c)); err != nil {
+	if err := h.portfolioService.RemoveArtifact(c.Context(), portfolio.ID, uint(artifactID), callerAccountID(c)); err != nil {
+		if errors.Is(err, service.ErrPortfolioChildNotFound) {
+			return responses.NotFound(c, "artifact")
+		}
 		return responses.InternalError(c, "Could not delete artifact")
 	}
 	return c.JSON(fiber.Map{"delete": true})
@@ -664,7 +1012,7 @@ func (h *PortfolioHandler) DeleteArtifact(c *fiber.Ctx) error {
 // ---------------------------------------------------------------------------
 
 func (h *PortfolioHandler) AddReflection(c *fiber.Ctx) error {
-	_, wrote, err := h.loadOwnedPortfolio(c, "id")
+	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
 	if wrote {
 		return err
 	}
@@ -672,12 +1020,15 @@ func (h *PortfolioHandler) AddReflection(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid artifact ID")
 	}
+	callerID, ok := c.Locals("user_id").(uint)
+	if !ok || callerID == 0 {
+		return responses.BadRequest(c, "Invalid user ID")
+	}
 
 	var input struct {
 		Reflection struct {
 			PromptText string `json:"prompt_text"`
 			Content    string `json:"content"`
-			UserID     uint   `json:"user_id"`
 		} `json:"reflection"`
 	}
 
@@ -685,15 +1036,16 @@ func (h *PortfolioHandler) AddReflection(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 
+	// B199: the author is the authenticated caller, never a body field.
 	reflection := &models.PortfolioReflection{
 		ArtifactID: uint(artifactID),
-		UserID:     input.Reflection.UserID,
+		UserID:     callerID,
 		PromptText: input.Reflection.PromptText,
 		Content:    input.Reflection.Content,
 	}
 
-	if err := h.portfolioService.AddReflection(c.Context(), reflection, callerAccountID(c)); err != nil {
-		return responses.BadRequest(c, err.Error())
+	if err := h.portfolioService.AddReflection(c.Context(), portfolio.ID, reflection, callerAccountID(c)); err != nil {
+		return writeChildNotFound(c, err, "artifact")
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(portfolioReflectionToJSON(reflection))
@@ -703,17 +1055,21 @@ func (h *PortfolioHandler) AddReflection(c *fiber.Ctx) error {
 // Import from course
 // ---------------------------------------------------------------------------
 
+// ImportFromCourse handles POST /portfolios/:id/import.
+//
+// B198: the route has no :course_id, but the handler read
+// c.ParamsInt("course_id") and required submission_ids the client never
+// sends, so every import returned 400. The course now comes from the body
+// and submission_ids is optional (default: all of the owner's submitted
+// work in that course).
 func (h *PortfolioHandler) ImportFromCourse(c *fiber.Ctx) error {
 	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
 	if wrote {
 		return err
 	}
-	courseID, err := c.ParamsInt("course_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid course ID")
-	}
 
 	var input struct {
+		CourseID      uint   `json:"course_id"`
 		SubmissionIDs []uint `json:"submission_ids"`
 	}
 
@@ -721,11 +1077,11 @@ func (h *PortfolioHandler) ImportFromCourse(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 
-	if len(input.SubmissionIDs) == 0 {
-		return responses.BadRequest(c, "submission_ids is required")
+	if input.CourseID == 0 && len(input.SubmissionIDs) == 0 {
+		return responses.BadRequest(c, "course_id or submission_ids is required")
 	}
 
-	imported, err := h.portfolioService.ImportFromCourse(c.Context(), portfolio.ID, uint(courseID), input.SubmissionIDs, callerAccountID(c))
+	imported, err := h.portfolioService.ImportFromCourse(c.Context(), portfolio.ID, input.CourseID, input.SubmissionIDs, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not import from course")
 	}
@@ -759,35 +1115,46 @@ func (h *PortfolioHandler) ExportAsHTML(c *fiber.Ctx) error {
 	return c.Send(zipData)
 }
 
+// ExportAsPDF returns a real PDF document (B200: it used to return HTML that
+// the client saved under a .pdf name).
 func (h *PortfolioHandler) ExportAsPDF(c *fiber.Ctx) error {
 	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
 	if wrote {
 		return err
 	}
-	htmlData, err := h.portfolioService.ExportAsPDF(c.Context(), portfolio.ID, callerAccountID(c))
+	pdfData, err := h.portfolioService.ExportAsPDF(c.Context(), portfolio.ID, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not export portfolio")
 	}
-	c.Set("Content-Type", "text/html; charset=utf-8")
-	c.Set("Content-Disposition", "attachment; filename=portfolio.html")
-	return c.Send(htmlData)
+	c.Set("Content-Type", "application/pdf")
+	c.Set("Content-Disposition", "attachment; filename=portfolio.pdf")
+	return c.Send(pdfData)
 }
 
 // ---------------------------------------------------------------------------
 // Comments
 // ---------------------------------------------------------------------------
 
+// AddComment handles POST /portfolios/:id/comments.
+//
+// B199: comments are feedback from viewers, but the handler required
+// owner-or-admin (so teachers and peers could never comment) and took the
+// author's user_id from the body (so the owner could post as anyone). Any
+// caller who can view the portfolio may now comment, as themselves.
 func (h *PortfolioHandler) AddComment(c *fiber.Ctx) error {
-	portfolio, wrote, err := h.loadOwnedPortfolio(c, "id")
+	portfolio, wrote, err := h.loadViewablePortfolio(c, "id")
 	if wrote {
 		return err
+	}
+	callerID, ok := c.Locals("user_id").(uint)
+	if !ok || callerID == 0 {
+		return responses.BadRequest(c, "Invalid user ID")
 	}
 
 	var input struct {
 		Comment struct {
 			SectionID  *uint  `json:"section_id"`
 			ArtifactID *uint  `json:"artifact_id"`
-			UserID     uint   `json:"user_id"`
 			Content    string `json:"content"`
 			ParentID   *uint  `json:"parent_id"`
 		} `json:"comment"`
@@ -797,52 +1164,55 @@ func (h *PortfolioHandler) AddComment(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 
+	// Plain-text feedback: rendered as text, never as HTML, so it is not
+	// passed through SanitizeHTML (identifier/plain-text rule).
 	comment := &models.PortfolioComment{
 		PortfolioID: portfolio.ID,
 		SectionID:   input.Comment.SectionID,
 		ArtifactID:  input.Comment.ArtifactID,
-		UserID:      input.Comment.UserID,
+		UserID:      callerID,
 		Content:     input.Comment.Content,
 		ParentID:    input.Comment.ParentID,
 	}
 
-	if err := h.portfolioService.AddComment(c.Context(), comment); err != nil {
+	if err := h.portfolioService.AddComment(c.Context(), comment, callerAccountID(c)); err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 
-	return c.Status(fiber.StatusCreated).JSON(portfolioCommentToJSON(comment))
+	out := portfolioCommentToJSON(comment)
+	if names := h.portfolioService.UserNames(c.Context(), []uint{callerID}); names[callerID] != "" {
+		out["user_name"] = names[callerID]
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
 }
 
 func (h *PortfolioHandler) ListComments(c *fiber.Ctx) error {
-	portfolioID, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid portfolio ID")
-	}
-
-	portfolio, err := h.portfolioService.GetPortfolio(c.Context(), uint(portfolioID), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "portfolio")
-	}
-
-	// Public portfolios' comments are readable by anyone; otherwise owner or admin only
-	if !portfolio.IsPublic {
-		if err := h.authz.RequireOwnerOrAdmin(c, portfolio.UserID); err != nil {
-			return err
-		}
+	portfolio, wrote, err := h.loadViewablePortfolio(c, "id")
+	if wrote {
+		return err
 	}
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.portfolioService.ListComments(c.Context(), uint(portfolioID), params)
+	result, err := h.portfolioService.ListComments(c.Context(), portfolio.ID, params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch comments")
 	}
 
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
 
+	ids := make([]uint, 0, len(result.Items))
+	for _, cm := range result.Items {
+		ids = append(ids, cm.UserID)
+	}
+	names := h.portfolioService.UserNames(c.Context(), ids)
+
 	comments := make([]fiber.Map, len(result.Items))
 	for i, cm := range result.Items {
 		comments[i] = portfolioCommentToJSON(&cm)
+		if n := names[cm.UserID]; n != "" {
+			comments[i]["user_name"] = n
+		}
 	}
 
 	return c.JSON(comments)
@@ -870,25 +1240,21 @@ func (h *PortfolioHandler) ListTemplates(c *fiber.Ctx) error {
 	return c.JSON(templates)
 }
 
+// CreateFromTemplate handles POST /portfolio_templates/:template_id/create.
+// The route parameter is :template_id (the handler used to read :id and
+// always 400), and the new portfolio belongs to the caller — never to a
+// user_id from the body.
 func (h *PortfolioHandler) CreateFromTemplate(c *fiber.Ctx) error {
-	templateID, err := c.ParamsInt("id")
+	templateID, err := c.ParamsInt("template_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid template ID")
 	}
-
-	var input struct {
-		UserID uint `json:"user_id"`
+	callerID, ok := c.Locals("user_id").(uint)
+	if !ok || callerID == 0 {
+		return responses.BadRequest(c, "Invalid user ID")
 	}
 
-	if err := c.BodyParser(&input); err != nil {
-		return responses.BadRequest(c, "Invalid input")
-	}
-
-	if input.UserID == 0 {
-		return responses.BadRequest(c, "user_id is required")
-	}
-
-	portfolio, err := h.portfolioService.CreateFromTemplate(c.Context(), uint(templateID), callerAccountID(c), input.UserID)
+	portfolio, err := h.portfolioService.CreateFromTemplate(c.Context(), uint(templateID), callerAccountID(c), callerID)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}

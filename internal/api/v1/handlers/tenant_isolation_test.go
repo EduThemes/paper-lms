@@ -966,6 +966,10 @@ func TestTenantIsolation_GetPortfolio(t *testing.T) {
 			Title: "P", Slug: "p", WorkflowState: "published", IsPublic: true,
 		}
 		expectAccountIDPassThrough(&portfolioRepo.Mock, "FindByID", resourceID, ownerOf(resourceID), row)
+		// GetPortfolio now returns sections + artifacts (B098).
+		sectionRepo.On("ListByPortfolioID", mock.Anything, resourceID).Return([]models.PortfolioSection{}, nil).Maybe()
+		artifactRepo.On("ListByPortfolioID", mock.Anything, resourceID, mock.Anything).
+			Return(&repository.PaginatedResult[models.PortfolioArtifact]{}, nil).Maybe()
 
 		svc := service.NewPortfolioService(portfolioRepo, sectionRepo, artifactRepo, reflectionRepo, templateRepo, commentRepo, submissionRepo, assignmentRepo)
 		authz := handlers.NewResourceAuthorizer(enrollRepo, userRepo)
