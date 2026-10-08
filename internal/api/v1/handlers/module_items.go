@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"strings"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
@@ -24,7 +26,12 @@ func NewModuleItemHandler(moduleService *service.ModuleService, pageService *ser
 // route middleware only guards :course_id.
 func (h *ModuleItemHandler) requireModuleInCourse(c *fiber.Ctx, moduleID, courseID uint) bool {
 	module, err := h.moduleService.GetByID(c.Context(), moduleID, callerAccountID(c))
-	if err != nil || module == nil || module.CourseID != courseID {
+	if err != nil || module == nil || module.CourseID != courseID || module.WorkflowState == "deleted" {
+		_ = responses.NotFound(c, "module")
+		return true
+	}
+	// B045: an unpublished module is invisible to students/observers.
+	if module.WorkflowState != "active" && !canViewUnpublishedContent(c) {
 		_ = responses.NotFound(c, "module")
 		return true
 	}
@@ -54,7 +61,12 @@ func (h *ModuleItemHandler) scopedModuleItem(c *fiber.Ctx) (*models.ContentTag, 
 		return nil, true
 	}
 	item, err := h.moduleService.GetItem(c.Context(), uint(itemID))
-	if err != nil || item.ContextModuleID != uint(moduleID) {
+	if err != nil || item.ContextModuleID != uint(moduleID) || item.WorkflowState == models.ContentTagDeleted {
+		_ = responses.NotFound(c, "module item")
+		return nil, true
+	}
+	// B045: unpublished items are invisible to students/observers.
+	if item.WorkflowState != models.ContentTagActive && !canViewUnpublishedContent(c) {
 		_ = responses.NotFound(c, "module item")
 		return nil, true
 	}
@@ -76,7 +88,11 @@ func (h *ModuleItemHandler) ListModuleItems(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.moduleService.ListItems(c.Context(), uint(moduleID), params)
+	list := h.moduleService.ListPublishedItems
+	if canViewUnpublishedContent(c) {
+		list = h.moduleService.ListItems
+	}
+	result, err := list(c.Context(), uint(moduleID), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch module items")
 	}
@@ -124,6 +140,9 @@ func (h *ModuleItemHandler) CreateModuleItem(c *fiber.Ctx) error {
 			NewTab      bool   `json:"new_tab"`
 			Position    int    `json:"position"`
 			Indent      int    `json:"indent"`
+			// Optional completion requirement (Canvas completion_requirement).
+			CompletionType *string  `json:"completion_type"`
+			MinScore       *float64 `json:"min_score"`
 		} `json:"module_item"`
 	}
 
@@ -132,14 +151,40 @@ func (h *ModuleItemHandler) CreateModuleItem(c *fiber.Ctx) error {
 	}
 
 	contentType := itemTypeToContentType(input.ModuleItem.Type)
+	input.ModuleItem.Title = strings.TrimSpace(input.ModuleItem.Title)
+
+	// B042: Assignment / Quiz / Discussion items are links to existing
+	// content. Canvas requires content_id for them; without it the item
+	// is a dead row that pacing, blueprint sync and the student view all
+	// skip. The content must also live in this course (a foreign id
+	// would otherwise link — and expose — another course's content).
+	switch input.ModuleItem.Type {
+	case "Assignment", "Quiz", "Discussion":
+		if input.ModuleItem.ContentID == nil || *input.ModuleItem.ContentID == 0 {
+			return responses.BadRequest(c, "content_id is required for "+input.ModuleItem.Type+" items")
+		}
+		name, err := h.moduleService.ValidateItemContent(c.Context(), contentType, *input.ModuleItem.ContentID, uint(courseID), callerAccountID(c))
+		if err != nil {
+			return responses.BadRequest(c, "content_id does not name a "+strings.ToLower(input.ModuleItem.Type)+" in this course")
+		}
+		if input.ModuleItem.Title == "" {
+			input.ModuleItem.Title = name
+		}
+	}
 
 	// For Page items: resolve page_url to content_id, or auto-create a page
 	var pageSlug string
 	if input.ModuleItem.Type == "Page" && h.pageService != nil {
 		if input.ModuleItem.ContentID != nil {
-			// Look up existing page to get its slug
-			if page, err := h.pageService.GetByID(c.Context(), *input.ModuleItem.ContentID, callerAccountID(c)); err == nil {
-				pageSlug = page.URL
+			// Look up existing page to get its slug — it must be a live
+			// page of this course.
+			page, err := h.pageService.GetByID(c.Context(), *input.ModuleItem.ContentID, callerAccountID(c))
+			if err != nil || page == nil || page.CourseID != uint(courseID) || page.WorkflowState == "deleted" {
+				return responses.BadRequest(c, "content_id does not name a page in this course")
+			}
+			pageSlug = page.URL
+			if input.ModuleItem.Title == "" {
+				input.ModuleItem.Title = page.Title
 			}
 		} else if input.ModuleItem.PageURL != "" {
 			// Look up existing page by URL slug
@@ -181,12 +226,51 @@ func (h *ModuleItemHandler) CreateModuleItem(c *fiber.Ctx) error {
 		Indent:          input.ModuleItem.Indent,
 		WorkflowState:   models.ContentTagActive,
 	}
+	if input.ModuleItem.CompletionType != nil {
+		if msg := applyCompletionRequirement(item, *input.ModuleItem.CompletionType, input.ModuleItem.MinScore); msg != "" {
+			return responses.BadRequest(c, msg)
+		}
+	}
 
 	if err := h.moduleService.CreateItem(c.Context(), item); err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(moduleItemToJSON(item))
+}
+
+// applyCompletionRequirement validates and sets a completion requirement
+// on item (B043). completionType "" clears it. Returns a non-empty
+// message when the type is not allowed for the item's content type or
+// min_score is missing/invalid; the caller writes the 400.
+func applyCompletionRequirement(item *models.ContentTag, completionType string, minScore *float64) string {
+	completionType = strings.TrimSpace(completionType)
+	if completionType == "" {
+		item.CompletionType = ""
+		item.MinScore = nil
+		return ""
+	}
+	allowed := false
+	for _, t := range models.ValidCompletionTypesFor(item.ContentType) {
+		if t == completionType {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return "completion_type " + completionType + " is not valid for this item"
+	}
+	if completionType == models.ModuleCompletionMinScore {
+		if minScore == nil || *minScore < 0 {
+			return "min_score is required for a min_score requirement"
+		}
+		v := *minScore
+		item.MinScore = &v
+	} else {
+		item.MinScore = nil
+	}
+	item.CompletionType = completionType
+	return ""
 }
 
 func (h *ModuleItemHandler) UpdateModuleItem(c *fiber.Ctx) error {
@@ -201,11 +285,25 @@ func (h *ModuleItemHandler) UpdateModuleItem(c *fiber.Ctx) error {
 			Position  *int    `json:"position"`
 			Indent    *int    `json:"indent"`
 			Published *bool   `json:"published"`
+			// B043: completion requirement. Pre-fix these were silently
+			// dropped (200 + optimistic UI, nothing persisted).
+			CompletionType *string  `json:"completion_type"`
+			MinScore       *float64 `json:"min_score"`
 		} `json:"module_item"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
+	}
+
+	if input.ModuleItem.CompletionType != nil {
+		if msg := applyCompletionRequirement(item, *input.ModuleItem.CompletionType, input.ModuleItem.MinScore); msg != "" {
+			return responses.BadRequest(c, msg)
+		}
+	} else if input.ModuleItem.MinScore != nil && item.CompletionType == models.ModuleCompletionMinScore {
+		if msg := applyCompletionRequirement(item, item.CompletionType, input.ModuleItem.MinScore); msg != "" {
+			return responses.BadRequest(c, msg)
+		}
 	}
 
 	if input.ModuleItem.Title != nil {
