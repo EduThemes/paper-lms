@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { FileText, Plus, Eye, EyeOff } from 'lucide-react';
+import { FileText, Plus, Eye, EyeOff, Home, Trash2 } from 'lucide-react';
+import { canDeletePage, canUnpublishPage } from '../utils/pageManagement';
 import { api } from '../services/api';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
@@ -65,6 +66,37 @@ const PagesPage = () => {
       setError(err.message);
     } finally {
       setCreating(false);
+    }
+  };
+
+  // G074: publish / unpublish and delete straight from the list.
+  const [busyId, setBusyId] = useState(null);
+  const [actionError, setActionError] = useState(null);
+
+  const handleTogglePublished = async (target) => {
+    setBusyId(target.page_id);
+    setActionError(null);
+    try {
+      const updated = await api.updatePage(courseId, target.page_id, { published: !target.published });
+      setPages((prev) => prev.map((p) => (p.page_id === target.page_id ? { ...p, ...(updated || {}) } : p)));
+    } catch (err) {
+      setActionError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleDeletePage = async (target) => {
+    if (!window.confirm(`Delete "${target.title}"?`)) return;
+    setBusyId(target.page_id);
+    setActionError(null);
+    try {
+      await api.deletePage(courseId, target.page_id);
+      setPages((prev) => prev.filter((p) => p.page_id !== target.page_id));
+    } catch (err) {
+      setActionError(err.message);
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -172,44 +204,66 @@ const PagesPage = () => {
       <div className="bg-surface-0 rounded-lg shadow">
         <div className="p-4 border-b">
           <h3 className="font-semibold">All Pages</h3>
+          {actionError && <p role="alert" className="text-sm text-accent-danger mt-1">{actionError}</p>}
         </div>
         {pages.length === 0 ? (
           <div className="p-6 text-center text-text-tertiary">No pages yet.</div>
         ) : (
           <div className="divide-y">
             {pages.map((page) => (
-              <Link
-                key={page.page_id || page.url}
-                to={`/courses/${courseId}/pages/${page.url}`}
-                className="flex items-center justify-between p-4 hover:bg-surface-1"
-              >
-                <div className="flex items-center space-x-3 min-w-0">
+              <div key={page.page_id || page.url} className="flex items-center justify-between p-4 hover:bg-surface-1">
+                <Link
+                  to={`/courses/${courseId}/pages/${page.url}`}
+                  className="flex items-center space-x-3 min-w-0 flex-1"
+                >
                   <FileText className="w-5 h-5 text-text-disabled flex-shrink-0" />
                   <div className="min-w-0">
-                    <span className="font-medium text-text-primary truncate block">{page.title}</span>
+                    <span className="font-medium text-text-primary truncate block">
+                      {page.title}
+                      {page.front_page && (
+                        <span className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-brand-700 bg-brand-50 px-2 py-0.5 rounded-full align-middle">
+                          <Home className="w-3 h-3" aria-hidden="true" /> Front Page
+                        </span>
+                      )}
+                    </span>
                     {page.updated_at && (
                       <span className="text-xs text-text-disabled">
                         Last edited {formatDate(page.updated_at)}
                       </span>
                     )}
-                  </div>
-                </div>
-                {isTeacher && (
-                  <div className="flex items-center space-x-3 flex-shrink-0 ml-4">
-                    {page.published ? (
-                      <span className="inline-flex items-center space-x-1 text-xs text-accent-success bg-accent-success/10 px-2 py-0.5 rounded-full">
-                        <Eye className="w-3 h-3" />
-                        <span>Published</span>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center space-x-1 text-xs text-text-tertiary bg-surface-2 px-2 py-0.5 rounded-full">
-                        <EyeOff className="w-3 h-3" />
-                        <span>Unpublished</span>
-                      </span>
+                    {page.todo_date && (
+                      <span className="text-xs text-text-tertiary ml-2">To do {formatDate(page.todo_date)}</span>
                     )}
                   </div>
+                </Link>
+                {isTeacher && (
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+                    <button
+                      type="button"
+                      onClick={() => handleTogglePublished(page)}
+                      disabled={busyId === page.page_id || (page.published && !canUnpublishPage(page))}
+                      aria-label={`${page.published ? 'Unpublish' : 'Publish'} ${page.title}`}
+                      title={page.published && !canUnpublishPage(page) ? 'The front page must stay published' : undefined}
+                      className={`inline-flex items-center space-x-1 text-xs px-2 py-0.5 rounded-full disabled:opacity-60 ${
+                        page.published ? 'text-accent-success bg-accent-success/10' : 'text-text-tertiary bg-surface-2'
+                      }`}
+                    >
+                      {page.published ? <Eye className="w-3 h-3" aria-hidden="true" /> : <EyeOff className="w-3 h-3" aria-hidden="true" />}
+                      <span>{page.published ? 'Published' : 'Unpublished'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeletePage(page)}
+                      disabled={busyId === page.page_id || !canDeletePage(page)}
+                      aria-label={`Delete ${page.title}`}
+                      title={!canDeletePage(page) ? 'Choose another front page before deleting this one' : 'Delete page'}
+                      className="p-1 text-text-disabled hover:text-accent-danger disabled:opacity-40"
+                    >
+                      <Trash2 className="w-4 h-4" aria-hidden="true" />
+                    </button>
+                  </div>
                 )}
-              </Link>
+              </div>
             ))}
           </div>
         )}

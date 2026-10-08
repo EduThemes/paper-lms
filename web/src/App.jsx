@@ -20,6 +20,7 @@ const FilesPage = React.lazy(() => import('./pages/FilesPage'));
 const SISImportPage = React.lazy(() => import('./pages/SISImportPage'));
 const PagesPage = React.lazy(() => import('./pages/PagesPage'));
 const PageDetailPage = React.lazy(() => import('./pages/PageDetailPage'));
+const PageHistoryPage = React.lazy(() => import('./pages/PageHistoryPage'));
 const QuizzesPage = React.lazy(() => import('./pages/QuizzesPage'));
 const QuizTakePage = React.lazy(() => import('./pages/QuizTakePage'));
 const QuizReviewPage = React.lazy(() => import('./pages/QuizReviewPage'));
@@ -201,6 +202,7 @@ const App = () => {
           <Route path="people" element={<PeoplePage />} />
           <Route path="pages" element={<PagesPage />} />
           <Route path="pages/:slug" element={<PageDetailPage />} />
+          <Route path="pages/:slug/revisions" element={<PageHistoryPage />} />
           <Route path="quizzes" element={<QuizzesPage />} />
           <Route path="quizzes/:quizId" element={<Navigate to="take" replace />} />
           <Route path="quizzes/:quizId/take" element={<QuizTakePage />} />
