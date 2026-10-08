@@ -93,16 +93,22 @@ func (h *ObserverHandler) ListObservees(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid user ID")
 	}
 
-	studentIDs, err := h.observerService.ListObservedStudents(c.Context(), uint(userID))
+	// B202: include the student's name so the parent's child picker can
+	// show it (it rendered "Student #<id>").
+	students, err := h.observerService.ListObservedStudentProfiles(c.Context(), uint(userID))
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch observees")
 	}
 
-	observees := make([]fiber.Map, len(studentIDs))
-	for i, sid := range studentIDs {
+	observees := make([]fiber.Map, len(students))
+	for i, st := range students {
 		observees[i] = fiber.Map{
-			"id":          sid,
-			"observer_id": userID,
+			"id":            st.ID,
+			"observer_id":   userID,
+			"name":          st.Name,
+			"sortable_name": st.SortableName,
+			"short_name":    st.ShortName,
+			"avatar_url":    st.AvatarURL,
 		}
 	}
 

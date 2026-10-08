@@ -569,6 +569,8 @@ func TestListOutcomeResults_PerUser_FiresLogPIIAccess(t *testing.T) {
 
 	app := testutil.SetupTestApp()
 	installAuthAndPagination(app, 7)
+	// B087: only course staff may read another student's results.
+	app.Use(func(c *fiber.Ctx) error { c.Locals("enrollment_type", "TeacherEnrollment"); return c.Next() })
 	app.Get("/api/v1/courses/:course_id/outcome_results", h.ListResults)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/courses/101/outcome_results?user_id=42", nil)
@@ -588,6 +590,7 @@ func TestGetMasteryGradebook_FiresBulkLogPIIAccess(t *testing.T) {
 
 	app := testutil.SetupTestApp()
 	installAuthAndPagination(app, 7)
+	app.Use(func(c *fiber.Ctx) error { c.Locals("enrollment_type", "TeacherEnrollment"); return c.Next() })
 	app.Get("/api/v1/courses/:course_id/outcome_rollups", h.GetMasteryGradebook)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/courses/101/outcome_rollups", nil)

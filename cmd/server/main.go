@@ -856,6 +856,8 @@ func main() {
 	// handlers
 	contentMigrationHandler := handlers.NewContentMigrationHandler(contentMigrationService)
 	learningOutcomeHandler := handlers.NewLearningOutcomeHandler(learningOutcomeService, outcomeAlignmentRepo, auditService)
+	learningOutcomeHandler.SetEnrollmentRepo(enrollmentRepo)
+	learningOutcomeHandler.SetAssignmentRepo(assignmentRepo)
 	speedGraderHandler := handlers.NewSpeedGraderHandler(speedGraderService, auditService)
 	// handlers
 	groupHandler := handlers.NewGroupHandler(groupService, authz, auditService)
@@ -899,6 +901,8 @@ func main() {
 	accommodationHandler := handlers.NewAccommodationHandler(accommodationService, assignmentService, authz, auditService)
 	attendanceHandler := handlers.NewAttendanceHandler(attendanceService, auditService)
 	portfolioHandler := handlers.NewPortfolioHandler(portfolioService, authz)
+	portfolioHandler.SetFileService(fileService)
+	portfolioService.SetUserRepository(userRepo)
 	courseHomeHandler := handlers.NewCourseHomeHandler(courseHomeService)
 	peerReviewHandler := handlers.NewPeerReviewHandler(peerReviewService, auditService)
 	peerReviewHandler.SetAssignmentService(assignmentService)

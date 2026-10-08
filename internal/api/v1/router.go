@@ -806,11 +806,16 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Put("/portfolios/:id", r.PortfolioHandler.UpdatePortfolio)
 	protected.Delete("/portfolios/:id", r.PortfolioHandler.DeletePortfolio)
 	protected.Post("/portfolios/:id/publish", r.PortfolioHandler.PublishPortfolio)
+	protected.Delete("/portfolios/:id/publish", r.PortfolioHandler.UnpublishPortfolio)
+	protected.Post("/portfolios/:id/duplicate", r.PortfolioHandler.DuplicatePortfolio)
 	protected.Post("/portfolios/:id/sections", r.PortfolioHandler.AddSection)
+	// reorder must be registered before :section_id, which would match it.
+	protected.Put("/portfolios/:id/sections/reorder", r.PortfolioHandler.ReorderSections)
 	protected.Put("/portfolios/:id/sections/:section_id", r.PortfolioHandler.UpdateSection)
 	protected.Delete("/portfolios/:id/sections/:section_id", r.PortfolioHandler.DeleteSection)
-	protected.Put("/portfolios/:id/sections/reorder", r.PortfolioHandler.ReorderSections)
 	protected.Post("/portfolios/:id/artifacts", r.PortfolioHandler.AddArtifact)
+	protected.Post("/portfolios/:id/artifacts/upload", middleware.UploadRateLimit(), middleware.EnforceUploadSize(r.SettingsLookup), r.PortfolioHandler.UploadArtifactFile)
+	protected.Get("/portfolios/:id/files/:file_id", r.PortfolioHandler.DownloadArtifactFile)
 	protected.Put("/portfolios/:id/artifacts/:artifact_id", r.PortfolioHandler.UpdateArtifact)
 	protected.Delete("/portfolios/:id/artifacts/:artifact_id", r.PortfolioHandler.DeleteArtifact)
 	protected.Post("/portfolios/:id/artifacts/:artifact_id/reflections", r.PortfolioHandler.AddReflection)
@@ -843,9 +848,6 @@ func (r *Router) Register(app *fiber.App) {
 	// Module Prerequisites (view: enrolled; manage: instructor)
 	protected.Get("/courses/:course_id/modules/:id/prerequisites", enrolled, r.ModuleHandler.GetPrerequisites)
 	protected.Put("/courses/:course_id/modules/:id/prerequisites", instructor, r.ModuleHandler.SetPrerequisites)
-
-	// Public portfolio view (no auth required)
-	api.Get("/portfolios/public/:slug", r.PortfolioHandler.GetPublicPortfolio)
 
 	r.registerP3FeatureRoutes(protected, admin, enrolled, instructor)
 	r.registerQuizExtensionRoutes(protected, enrolled, instructor)

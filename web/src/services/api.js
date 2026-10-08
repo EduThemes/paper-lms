@@ -1367,8 +1367,8 @@ export const api = {
     });
     return data;
   },
-  getOutcomeRollups: async (courseId) => {
-    const { data } = await request(`/courses/${courseId}/outcome_rollups`);
+  getOutcomeRollups: async (courseId, page = 1, perPage = 100) => {
+    const { data } = await request(`/courses/${courseId}/outcome_rollups?page=${page}&per_page=${perPage}`);
     return data;
   },
 
@@ -2259,6 +2259,16 @@ export const api = {
     });
     return data;
   },
+  // multipart: file + title, description, tags, section_id, is_featured
+  uploadPortfolioArtifact: async (id, formData) => {
+    return uploadFile(`/portfolios/${id}/artifacts/upload`, formData);
+  },
+  reorderPortfolioSections: async (id, order) => {
+    const { data } = await request(`/portfolios/${id}/sections/reorder`, {
+      method: 'PUT', body: JSON.stringify({ order }),
+    });
+    return data;
+  },
   updatePortfolioArtifact: async (id, artifactId, artifact) => {
     const { data } = await request(`/portfolios/${id}/artifacts/${artifactId}`, {
       method: 'PUT', body: JSON.stringify({ artifact }),
@@ -2275,9 +2285,13 @@ export const api = {
     });
     return data;
   },
-  importPortfolioFromCourse: async (id, courseId) => {
+  // courseId alone imports all of the owner's submitted work in the course;
+  // submissionIds narrows it to specific submissions.
+  importPortfolioFromCourse: async (id, courseId, submissionIds) => {
+    const body = { course_id: courseId || 0 };
+    if (submissionIds?.length) body.submission_ids = submissionIds;
     const { data } = await request(`/portfolios/${id}/import`, {
-      method: 'POST', body: JSON.stringify({ course_id: courseId }),
+      method: 'POST', body: JSON.stringify(body),
     });
     return data;
   },
@@ -2309,14 +2323,8 @@ export const api = {
     const { data } = await request(`/portfolios/public/${slug}`);
     return data;
   },
-  recordPortfolioView: async (slug) => {
-    const { data } = await request(`/portfolios/public/${slug}`, { method: 'POST' });
-    return data;
-  },
   duplicatePortfolio: async (id) => {
-    const { data } = await request(`/portfolios/${id}/import`, {
-      method: 'POST', body: JSON.stringify({ duplicate: true }),
-    });
+    const { data } = await request(`/portfolios/${id}/duplicate`, { method: 'POST' });
     return data;
   },
 

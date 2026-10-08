@@ -25,3 +25,13 @@ export function dateTimeLocalToISO(local) {
   if (Number.isNaN(d.getTime())) return '';
   return d.toISOString();
 }
+
+// Aliases used by the learner-side forms (B208). Same conversions, but
+// empty/invalid input yields null so callers can send "clear this date".
+export function isoToDatetimeLocal(iso) {
+  return isoToDateTimeLocal(iso);
+}
+
+export function datetimeLocalToISO(value) {
+  return dateTimeLocalToISO(value) || null;
+}

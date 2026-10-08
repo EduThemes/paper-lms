@@ -103,6 +103,14 @@ func (r *pageViewRepo) CountByContextGrouped(ctx context.Context, contextType st
 	return results, nil
 }
 
+func (r *pageViewRepo) CountByUserAndContext(ctx context.Context, userID uint, contextType string, contextID uint) (int64, error) {
+	var total int64
+	err := r.db.WithContext(ctx).Model(&models.PageView{}).
+		Where("user_id = ? AND context_type = ? AND context_id = ?", userID, contextType, contextID).
+		Count(&total).Error
+	return total, err
+}
+
 func (r *pageViewRepo) SumInteractionByUserAndContext(ctx context.Context, userID uint, contextType string, contextID uint) (int64, error) {
 	var total int64
 	err := r.db.WithContext(ctx).Model(&models.PageView{}).

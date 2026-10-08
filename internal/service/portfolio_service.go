@@ -24,6 +24,7 @@ type PortfolioService struct {
 	commentRepo     repository.PortfolioCommentRepository
 	submissionRepo  repository.SubmissionRepository
 	assignmentRepo  repository.AssignmentRepository
+	userRepo        repository.UserRepository
 }
 
 func NewPortfolioService(
@@ -76,7 +77,7 @@ func (s *PortfolioService) CreatePortfolio(ctx context.Context, portfolio *model
 // handler-routed callers MUST pass callerAccountID(c).
 func (s *PortfolioService) GetPortfolio(ctx context.Context, id, accountID uint) (*models.Portfolio, error) {
 	portfolio, err := s.portfolioRepo.FindByID(ctx, id, accountID)
-	if err != nil {
+	if err != nil || portfolio.WorkflowState == models.PortfolioDeleted {
 		return nil, errors.New("portfolio not found")
 	}
 	return portfolio, nil
@@ -84,10 +85,75 @@ func (s *PortfolioService) GetPortfolio(ctx context.Context, id, accountID uint)
 
 func (s *PortfolioService) GetBySlug(ctx context.Context, slug string) (*models.Portfolio, error) {
 	portfolio, err := s.portfolioRepo.FindBySlug(ctx, slug)
-	if err != nil {
+	if err != nil || portfolio.WorkflowState == models.PortfolioDeleted {
 		return nil, errors.New("portfolio not found")
 	}
 	return portfolio, nil
+}
+
+// SetUserRepository wires the user lookup used to show owner/commenter
+// names. Optional.
+func (s *PortfolioService) SetUserRepository(repo repository.UserRepository) {
+	s.userRepo = repo
+}
+
+// UserNames resolves display names for the given user ids (best effort; an
+// empty map when no user repository is wired). Lookups are by id only —
+// callers pass ids they already took from tenant-scoped rows.
+func (s *PortfolioService) UserNames(ctx context.Context, ids []uint) map[uint]string {
+	names := map[uint]string{}
+	if s.userRepo == nil || len(ids) == 0 {
+		return names
+	}
+	// accountID=0: ids come from rows already loaded under the caller's
+	// tenant scope (or a published public portfolio); only names are read.
+	users, err := s.userRepo.FindByIDs(ctx, ids, 0)
+	if err != nil {
+		return names
+	}
+	for _, u := range users {
+		names[u.ID] = u.Name
+	}
+	return names
+}
+
+// PortfolioUploadURL is the owner/tenant download route of an uploaded
+// artifact file (the public view rewrites it to the slug-scoped route).
+func PortfolioUploadURL(portfolioID, attachmentID uint) string {
+	return fmt.Sprintf("/api/v1/portfolios/%d/files/%d", portfolioID, attachmentID)
+}
+
+// PortfolioHasUpload reports whether an artifact of the portfolio was
+// created by the upload endpoint from the given attachment. visibleOnly
+// (public viewers) ignores artifacts in a hidden section, so a hidden
+// section's files cannot be downloaded by guessing their id.
+func (s *PortfolioService) PortfolioHasUpload(ctx context.Context, portfolioID, attachmentID uint, visibleOnly bool) bool {
+	res, err := s.artifactRepo.ListByPortfolioID(ctx, portfolioID, repository.PaginationParams{Page: 1, PerPage: 1000})
+	if err != nil || res == nil {
+		return false
+	}
+	hidden := map[uint]bool{}
+	if visibleOnly {
+		sections, err := s.sectionRepo.ListByPortfolioID(ctx, portfolioID)
+		if err != nil {
+			return false
+		}
+		for _, sec := range sections {
+			if !sec.IsVisible {
+				hidden[sec.ID] = true
+			}
+		}
+	}
+	for _, a := range res.Items {
+		if a.SourceType != "upload" || a.SourceID == nil || *a.SourceID != attachmentID {
+			continue
+		}
+		if a.SectionID != nil && hidden[*a.SectionID] {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func (s *PortfolioService) GetByPublicURL(ctx context.Context, url string) (*models.Portfolio, error) {
@@ -124,15 +190,138 @@ func (s *PortfolioService) PublishPortfolio(ctx context.Context, id, accountID u
 	return portfolio, nil
 }
 
+// UnpublishPortfolio takes a published portfolio back to draft and hides it
+// from the public URL (B197: DELETE /portfolios/:id/publish had no route).
+func (s *PortfolioService) UnpublishPortfolio(ctx context.Context, id, accountID uint) (*models.Portfolio, error) {
+	portfolio, err := s.portfolioRepo.FindByID(ctx, id, accountID)
+	if err != nil {
+		return nil, errors.New("portfolio not found")
+	}
+	portfolio.WorkflowState = models.PortfolioDraft
+	portfolio.IsPublic = false
+	if err := s.portfolioRepo.Update(ctx, portfolio); err != nil {
+		return nil, err
+	}
+	return portfolio, nil
+}
+
 func (s *PortfolioService) ArchivePortfolio(ctx context.Context, id, accountID uint) error {
 	portfolio, err := s.portfolioRepo.FindByID(ctx, id, accountID)
 	if err != nil {
 		return errors.New("portfolio not found")
 	}
 
-	portfolio.WorkflowState = "archived"
+	portfolio.WorkflowState = models.PortfolioArchived
 	portfolio.IsPublic = false
 	return s.portfolioRepo.Update(ctx, portfolio)
+}
+
+// DeletePortfolio soft-deletes the portfolio (workflow_state=deleted), which
+// removes it from the owner's list and from the public URL.
+func (s *PortfolioService) DeletePortfolio(ctx context.Context, id, accountID uint) error {
+	if _, err := s.portfolioRepo.FindByID(ctx, id, accountID); err != nil {
+		return errors.New("portfolio not found")
+	}
+	return s.portfolioRepo.Delete(ctx, id)
+}
+
+// SetWorkflowState applies an owner-requested state change through
+// PUT /portfolios/:id. Only draft <-> archived is accepted here; publishing
+// goes through PublishPortfolio so the public URL is generated.
+func (s *PortfolioService) SetWorkflowState(portfolio *models.Portfolio, state string) error {
+	switch state {
+	case models.PortfolioArchived:
+		portfolio.WorkflowState = models.PortfolioArchived
+		portfolio.IsPublic = false
+	case models.PortfolioDraft:
+		portfolio.WorkflowState = models.PortfolioDraft
+		portfolio.IsPublic = false
+	case models.PortfolioPublished:
+		if portfolio.WorkflowState != models.PortfolioPublished {
+			return errors.New("use POST /portfolios/:id/publish to publish")
+		}
+	default:
+		return fmt.Errorf("invalid workflow_state %q", state)
+	}
+	return nil
+}
+
+// GetPortfolioDetail returns the portfolio's sections, artifacts and each
+// artifact's reflections (B098: the editor needs them on load and after
+// every save).
+func (s *PortfolioService) GetPortfolioDetail(ctx context.Context, portfolioID uint) ([]models.PortfolioSection, []models.PortfolioArtifact, map[uint][]models.PortfolioReflection) {
+	sections, _ := s.sectionRepo.ListByPortfolioID(ctx, portfolioID)
+	var artifacts []models.PortfolioArtifact
+	if res, err := s.artifactRepo.ListByPortfolioID(ctx, portfolioID, repository.PaginationParams{Page: 1, PerPage: 1000}); err == nil && res != nil {
+		artifacts = res.Items
+	}
+	reflections := map[uint][]models.PortfolioReflection{}
+	if s.reflectionRepo != nil {
+		for _, a := range artifacts {
+			if rs, err := s.reflectionRepo.ListByArtifactID(ctx, a.ID); err == nil && len(rs) > 0 {
+				reflections[a.ID] = rs
+			}
+		}
+	}
+	return sections, artifacts, reflections
+}
+
+// DuplicatePortfolio copies a portfolio with its sections and artifacts into
+// a new draft owned by the same user.
+func (s *PortfolioService) DuplicatePortfolio(ctx context.Context, id, accountID uint) (*models.Portfolio, error) {
+	src, err := s.portfolioRepo.FindByID(ctx, id, accountID)
+	if err != nil {
+		return nil, errors.New("portfolio not found")
+	}
+	dup := *src
+	dup.ID = 0
+	dup.Title = src.Title + " (Copy)"
+	dup.Slug = generateSlug(dup.Title)
+	dup.WorkflowState = models.PortfolioDraft
+	dup.IsPublic = false
+	dup.PublicURL = ""
+	dup.CustomDomain = ""
+	dup.ViewCount = 0
+	dup.LastExportedAt = nil
+	dup.CreatedAt = time.Time{}
+	dup.UpdatedAt = time.Time{}
+	if err := s.portfolioRepo.Create(ctx, &dup); err != nil {
+		return nil, err
+	}
+
+	sections, artifacts, _ := s.GetPortfolioDetail(ctx, src.ID)
+	sectionMap := map[uint]uint{}
+	for _, sec := range sections {
+		oldID := sec.ID
+		sec.ID = 0
+		sec.PortfolioID = dup.ID
+		sec.CreatedAt, sec.UpdatedAt = time.Time{}, time.Time{}
+		if err := s.sectionRepo.Create(ctx, &sec); err != nil {
+			return nil, err
+		}
+		sectionMap[oldID] = sec.ID
+	}
+	for _, art := range artifacts {
+		art.ID = 0
+		art.PortfolioID = dup.ID
+		if art.SectionID != nil {
+			if newID, ok := sectionMap[*art.SectionID]; ok {
+				art.SectionID = &newID
+			} else {
+				art.SectionID = nil
+			}
+		}
+		// An uploaded file's link names its portfolio; point the copy at the
+		// duplicate so it keeps working once the original is deleted.
+		if art.SourceType == "upload" && art.SourceID != nil {
+			art.ContentURL = PortfolioUploadURL(dup.ID, *art.SourceID)
+		}
+		art.CreatedAt, art.UpdatedAt = time.Time{}, time.Time{}
+		if err := s.artifactRepo.Create(ctx, &art); err != nil {
+			return nil, err
+		}
+	}
+	return &dup, nil
 }
 
 func (s *PortfolioService) ListUserPortfolios(ctx context.Context, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Portfolio], error) {
@@ -170,18 +359,55 @@ func (s *PortfolioService) AddSection(ctx context.Context, section *models.Portf
 	return s.sectionRepo.Create(ctx, section)
 }
 
-func (s *PortfolioService) UpdateSection(ctx context.Context, section *models.PortfolioSection, accountID uint) error {
-	_, err := s.sectionRepo.FindByID(ctx, section.ID, accountID)
+// ErrPortfolioChildNotFound is returned when a section/artifact does not
+// exist, is in another tenant, or belongs to a different portfolio than the
+// one in the URL. Handlers map it to 404.
+var ErrPortfolioChildNotFound = errors.New("not found in this portfolio")
+
+// GetSection loads a section and verifies it belongs to portfolioID (B096:
+// the owner of portfolio 10 could otherwise edit/delete a section of another
+// user's portfolio by putting its id in the URL).
+func (s *PortfolioService) GetSection(ctx context.Context, portfolioID, sectionID, accountID uint) (*models.PortfolioSection, error) {
+	section, err := s.sectionRepo.FindByID(ctx, sectionID, accountID)
+	if err != nil || section.PortfolioID != portfolioID {
+		return nil, ErrPortfolioChildNotFound
+	}
+	return section, nil
+}
+
+// UpdateSection saves a section that was loaded with GetSection and patched.
+// The parent tie is re-checked and the portfolio_id cannot be changed.
+func (s *PortfolioService) UpdateSection(ctx context.Context, portfolioID uint, section *models.PortfolioSection, accountID uint) error {
+	existing, err := s.GetSection(ctx, portfolioID, section.ID, accountID)
 	if err != nil {
-		return errors.New("section not found")
+		return err
+	}
+	section.PortfolioID = existing.PortfolioID
+	section.CreatedAt = existing.CreatedAt
+	if section.Title == "" {
+		return errors.New("section title is required")
+	}
+	if section.SectionType == "" {
+		return errors.New("section_type is required")
 	}
 	return s.sectionRepo.Update(ctx, section)
 }
 
-func (s *PortfolioService) RemoveSection(ctx context.Context, id, accountID uint) error {
-	_, err := s.sectionRepo.FindByID(ctx, id, accountID)
-	if err != nil {
-		return errors.New("section not found")
+func (s *PortfolioService) RemoveSection(ctx context.Context, portfolioID, id, accountID uint) error {
+	if _, err := s.GetSection(ctx, portfolioID, id, accountID); err != nil {
+		return err
+	}
+	// Unlink (not delete) the section's artifacts.
+	if artifacts, err := s.artifactRepo.ListBySectionID(ctx, id); err == nil {
+		for i := range artifacts {
+			if artifacts[i].PortfolioID != portfolioID {
+				continue
+			}
+			artifacts[i].SectionID = nil
+			if err := s.artifactRepo.Update(ctx, &artifacts[i]); err != nil {
+				return err
+			}
+		}
 	}
 	return s.sectionRepo.Delete(ctx, id)
 }
@@ -211,7 +437,7 @@ func (s *PortfolioService) ListSections(ctx context.Context, portfolioID uint) (
 // Artifacts
 // ---------------------------------------------------------------------------
 
-func (s *PortfolioService) AddArtifact(ctx context.Context, artifact *models.PortfolioArtifact) error {
+func (s *PortfolioService) AddArtifact(ctx context.Context, artifact *models.PortfolioArtifact, accountID uint) error {
 	if artifact.Title == "" {
 		return errors.New("artifact title is required")
 	}
@@ -221,21 +447,49 @@ func (s *PortfolioService) AddArtifact(ctx context.Context, artifact *models.Por
 	if artifact.PortfolioID == 0 {
 		return errors.New("portfolio_id is required")
 	}
+	if artifact.SectionID != nil {
+		if _, err := s.GetSection(ctx, artifact.PortfolioID, *artifact.SectionID, accountID); err != nil {
+			return errors.New("section not found in this portfolio")
+		}
+	}
+	if artifact.Position == 0 {
+		if existing, err := s.artifactRepo.ListByPortfolioID(ctx, artifact.PortfolioID, repository.PaginationParams{Page: 1, PerPage: 1}); err == nil && existing != nil {
+			artifact.Position = int(existing.TotalCount)
+		}
+	}
 	return s.artifactRepo.Create(ctx, artifact)
 }
 
-func (s *PortfolioService) UpdateArtifact(ctx context.Context, artifact *models.PortfolioArtifact, accountID uint) error {
-	_, err := s.artifactRepo.FindByID(ctx, artifact.ID, accountID)
+// GetArtifact loads an artifact and verifies it belongs to portfolioID (B096).
+func (s *PortfolioService) GetArtifact(ctx context.Context, portfolioID, artifactID, accountID uint) (*models.PortfolioArtifact, error) {
+	artifact, err := s.artifactRepo.FindByID(ctx, artifactID, accountID)
+	if err != nil || artifact.PortfolioID != portfolioID {
+		return nil, ErrPortfolioChildNotFound
+	}
+	return artifact, nil
+}
+
+// UpdateArtifact saves an artifact that was loaded with GetArtifact and
+// patched; the parent tie is re-checked and a new section must belong to the
+// same portfolio.
+func (s *PortfolioService) UpdateArtifact(ctx context.Context, portfolioID uint, artifact *models.PortfolioArtifact, accountID uint) error {
+	existing, err := s.GetArtifact(ctx, portfolioID, artifact.ID, accountID)
 	if err != nil {
-		return errors.New("artifact not found")
+		return err
+	}
+	artifact.PortfolioID = existing.PortfolioID
+	artifact.CreatedAt = existing.CreatedAt
+	if artifact.SectionID != nil {
+		if _, err := s.GetSection(ctx, portfolioID, *artifact.SectionID, accountID); err != nil {
+			return errors.New("section not found in this portfolio")
+		}
 	}
 	return s.artifactRepo.Update(ctx, artifact)
 }
 
-func (s *PortfolioService) RemoveArtifact(ctx context.Context, id, accountID uint) error {
-	_, err := s.artifactRepo.FindByID(ctx, id, accountID)
-	if err != nil {
-		return errors.New("artifact not found")
+func (s *PortfolioService) RemoveArtifact(ctx context.Context, portfolioID, id, accountID uint) error {
+	if _, err := s.GetArtifact(ctx, portfolioID, id, accountID); err != nil {
+		return err
 	}
 	return s.artifactRepo.Delete(ctx, id)
 }
@@ -244,28 +498,65 @@ func (s *PortfolioService) ListArtifacts(ctx context.Context, portfolioID uint, 
 	return s.artifactRepo.ListByPortfolioID(ctx, portfolioID, params)
 }
 
+// ImportFromCourse turns the portfolio owner's course submissions into
+// course_work artifacts. With no submissionIDs every submitted submission of
+// the owner in courseID is imported (the "Import from course" button sends
+// only a course id — B198). Submissions that belong to anyone other than the
+// portfolio owner, or to a different course than courseID (when given), are
+// skipped so a student cannot copy a classmate's work into their portfolio.
 func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uint, courseID uint, submissionIDs []uint, accountID uint) ([]models.PortfolioArtifact, error) {
 	portfolio, err := s.portfolioRepo.FindByID(ctx, portfolioID, accountID)
 	if err != nil {
 		return nil, errors.New("portfolio not found")
 	}
 
-	var imported []models.PortfolioArtifact
-
-	for _, submissionID := range submissionIDs {
-		submission, err := s.submissionRepo.FindByID(ctx, submissionID, accountID)
-		if err != nil {
-			continue // skip submissions that can't be found
+	var submissions []models.Submission
+	if len(submissionIDs) == 0 {
+		if courseID == 0 {
+			return nil, errors.New("course_id or submission_ids is required")
 		}
+		subs, err := s.submissionRepo.ListByUserAndCourse(ctx, portfolio.UserID, courseID)
+		if err != nil {
+			return nil, err
+		}
+		for _, sub := range subs {
+			if sub.SubmittedAt != nil {
+				submissions = append(submissions, sub)
+			}
+		}
+	} else {
+		for _, submissionID := range submissionIDs {
+			sub, err := s.submissionRepo.FindByID(ctx, submissionID, accountID)
+			if err != nil {
+				continue // skip submissions that can't be found
+			}
+			submissions = append(submissions, *sub)
+		}
+	}
+
+	imported := []models.PortfolioArtifact{}
+
+	for i := range submissions {
+		submission := &submissions[i]
+		if submission.UserID != portfolio.UserID {
+			continue
+		}
+		submissionID := submission.ID
 
 		// Look up the assignment name for the artifact title
 		artifactTitle := fmt.Sprintf("Submission #%d", submissionID)
+		sourceCourseID := courseID
 		assignment, assignErr := s.assignmentRepo.FindByID(ctx, submission.AssignmentID, accountID)
 		if assignErr == nil {
+			if courseID != 0 && assignment.CourseID != courseID {
+				continue
+			}
 			artifactTitle = assignment.Name
+			sourceCourseID = assignment.CourseID
+		} else if courseID == 0 {
+			continue
 		}
 
-		sourceCourseID := courseID
 		sourceID := submissionID
 		artifact := models.PortfolioArtifact{
 			PortfolioID:    portfolio.ID,
@@ -276,9 +567,12 @@ func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uin
 			SourceID:       &sourceID,
 		}
 
-		// Copy submission URL if available
+		// Copy submission URL / text body if available
 		if submission.URL != nil {
 			artifact.ContentURL = *submission.URL
+		}
+		if submission.Body != nil {
+			artifact.Description = SanitizeHTML(*submission.Body)
 		}
 
 		if err := s.artifactRepo.Create(ctx, &artifact); err != nil {
@@ -295,7 +589,7 @@ func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uin
 // Reflections
 // ---------------------------------------------------------------------------
 
-func (s *PortfolioService) AddReflection(ctx context.Context, reflection *models.PortfolioReflection, accountID uint) error {
+func (s *PortfolioService) AddReflection(ctx context.Context, portfolioID uint, reflection *models.PortfolioReflection, accountID uint) error {
 	if reflection.Content == "" {
 		return errors.New("reflection content is required")
 	}
@@ -306,9 +600,8 @@ func (s *PortfolioService) AddReflection(ctx context.Context, reflection *models
 		return errors.New("user_id is required")
 	}
 
-	_, err := s.artifactRepo.FindByID(ctx, reflection.ArtifactID, accountID)
-	if err != nil {
-		return errors.New("artifact not found")
+	if _, err := s.GetArtifact(ctx, portfolioID, reflection.ArtifactID, accountID); err != nil {
+		return err
 	}
 
 	return s.reflectionRepo.Create(ctx, reflection)
@@ -330,7 +623,8 @@ func (s *PortfolioService) ListReflections(ctx context.Context, artifactID uint)
 // Comments
 // ---------------------------------------------------------------------------
 
-func (s *PortfolioService) AddComment(ctx context.Context, comment *models.PortfolioComment) error {
+func (s *PortfolioService) AddComment(ctx context.Context, comment *models.PortfolioComment, accountID uint) error {
+	comment.Content = strings.TrimSpace(comment.Content)
 	if comment.Content == "" {
 		return errors.New("comment content is required")
 	}
@@ -339,6 +633,22 @@ func (s *PortfolioService) AddComment(ctx context.Context, comment *models.Portf
 	}
 	if comment.UserID == 0 {
 		return errors.New("user_id is required")
+	}
+	if comment.SectionID != nil {
+		if _, err := s.GetSection(ctx, comment.PortfolioID, *comment.SectionID, accountID); err != nil {
+			return errors.New("section not found in this portfolio")
+		}
+	}
+	if comment.ArtifactID != nil {
+		if _, err := s.GetArtifact(ctx, comment.PortfolioID, *comment.ArtifactID, accountID); err != nil {
+			return errors.New("artifact not found in this portfolio")
+		}
+	}
+	if comment.ParentID != nil {
+		parent, err := s.commentRepo.FindByID(ctx, *comment.ParentID, accountID)
+		if err != nil || parent.PortfolioID != comment.PortfolioID {
+			return errors.New("parent comment not found in this portfolio")
+		}
 	}
 	return s.commentRepo.Create(ctx, comment)
 }
@@ -472,10 +782,8 @@ func (s *PortfolioService) ExportAsPDF(ctx context.Context, portfolioID, account
 		artifacts = allArtifacts.Items
 	}
 
-	// Generate a print-ready HTML document that can be saved as PDF via browser
-	html := s.generatePrintHTML(portfolio, sections, artifacts)
-
-	return []byte(html), nil
+	// B200: return a real PDF document (application/pdf), not print HTML.
+	return renderPDF(portfolio.Title, s.portfolioPDFLines(portfolio, sections, artifacts)), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -491,7 +799,8 @@ func (s *PortfolioService) RecordView(ctx context.Context, portfolioID uint) err
 // ---------------------------------------------------------------------------
 
 func (s *PortfolioService) GeneratePublicURL(portfolio *models.Portfolio) string {
-	return fmt.Sprintf("p/%s-%d", portfolio.Slug, portfolio.ID)
+	// Matches the routed public page (/portfolios/public/:slug — B196).
+	return fmt.Sprintf("portfolios/public/%s", portfolio.Slug)
 }
 
 // ---------------------------------------------------------------------------
@@ -665,53 +974,6 @@ func (s *PortfolioService) generateContactHTML(portfolio *models.Portfolio) stri
 		return ""
 	}
 	return fmt.Sprintf(`      <nav class="contact-links">%s</nav>`, strings.Join(links, " | "))
-}
-
-func (s *PortfolioService) generatePrintHTML(portfolio *models.Portfolio, sections []models.PortfolioSection, artifacts []models.PortfolioArtifact) string {
-	var sectionsHTML strings.Builder
-	for _, sec := range sections {
-		if !sec.IsVisible {
-			continue
-		}
-		sectionsHTML.WriteString(fmt.Sprintf(`<section class="print-section"><h2>%s</h2><div>%s</div>`, escapeHTML(sec.Title), sec.Content))
-		for _, art := range artifacts {
-			if art.SectionID != nil && *art.SectionID == sec.ID {
-				sectionsHTML.WriteString(fmt.Sprintf(`<div class="print-artifact"><h3>%s</h3><p>%s</p></div>`, escapeHTML(art.Title), escapeHTML(art.Description)))
-			}
-		}
-		sectionsHTML.WriteString(`</section>`)
-	}
-
-	return fmt.Sprintf(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>%s</title>
-  <style>
-    @page { margin: 1in; }
-    body { font-family: Georgia, 'Times New Roman', serif; color: #222; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }
-    h1 { font-size: 2em; border-bottom: 2px solid #333; padding-bottom: 0.3em; }
-    h2 { font-size: 1.4em; color: #444; margin-top: 1.5em; border-bottom: 1px solid #ccc; padding-bottom: 0.2em; }
-    h3 { font-size: 1.1em; color: #555; }
-    .print-section { page-break-inside: avoid; margin-bottom: 1.5em; }
-    .print-artifact { margin-left: 1em; margin-bottom: 1em; }
-    .tagline { font-style: italic; color: #666; }
-    @media print { body { max-width: 100%%; padding: 0; } }
-  </style>
-</head>
-<body>
-  <h1>%s</h1>
-  <p class="tagline">%s</p>
-  <p>%s</p>
-  %s
-</body>
-</html>
-`, escapeHTML(portfolio.Title),
-		escapeHTML(portfolio.Title),
-		escapeHTML(portfolio.Tagline),
-		escapeHTML(portfolio.Description),
-		sectionsHTML.String(),
-	)
 }
 
 func (s *PortfolioService) getThemeCSS(themeID string, customCSS string) string {

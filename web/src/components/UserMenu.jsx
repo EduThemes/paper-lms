@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { User, Settings, Shield, KeyRound, Bell, Key, ShieldCheck, LogOut, ServerCog } from 'lucide-react';
+import { User, Settings, Shield, KeyRound, Bell, Key, ShieldCheck, LogOut, ServerCog, Eye } from 'lucide-react';
 import { useClickOutside } from '../hooks/useClickOutside';
 
 // Compact dropdown anchored to the user-icon in the global sidebar.
@@ -20,6 +20,10 @@ export default function UserMenu({ user, onLogout }) {
     { to: '/settings/tokens', icon: Key, label: 'Access tokens' },
     { to: '/settings/notifications', icon: Bell, label: 'Notification preferences' },
     { to: '/profile/settings?tab=privacy', icon: Shield, label: 'Data & privacy' },
+    // B099: every user can reach the observer page to redeem a pairing
+    // code (like Canvas's "Observing" settings); linked parents also get
+    // it in the sidebar.
+    { to: '/observer', icon: Eye, label: 'Students I observe' },
   ];
 
   // Super-Admin entry — only visible when the logged-in user is a

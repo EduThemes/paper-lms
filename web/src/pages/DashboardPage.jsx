@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
+import { buildRecentGrades } from '../utils/dashboard';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import useDocumentTitle from '../hooks/useDocumentTitle';
@@ -545,7 +546,7 @@ const DashboardPage = () => {
 
       const fetches = cohort.map(async (course) => {
         const [assignResult, announcementResult, subResult] = await Promise.allSettled([
-          api.getAssignments(course.id, 1, 25),
+          api.getAssignments(course.id, 1, 100),
           api.getCourseAnnouncements(course.id, 1, 5),
           api.getCourseSubmissions(course.id, 1, 1000, 'self').catch(() => ({ data: [] })),
         ]);
@@ -555,20 +556,14 @@ const DashboardPage = () => {
         let totalGradeable = 0;
         if (subResult.status === 'fulfilled') {
           const subs = subResult.value?.data || subResult.value || [];
-          (Array.isArray(subs) ? subs : []).forEach((s) => {
+          const subList = Array.isArray(subs) ? subs : [];
+          subList.forEach((s) => {
             if (s.assignment_id) subMap[s.assignment_id] = s;
-            if (s.workflow_state === 'graded' && s.score != null) {
-              allGrades.push({
-                id: s.id,
-                assignment_id: s.assignment_id,
-                title: s.assignment_name || 'Assignment',
-                score: s.score,
-                graded_at: s.graded_at || s.updated_at,
-                course_name: course.name,
-                course_id: course.id,
-              });
-            }
           });
+          // B207: submissions carry only assignment_id; the helper resolves
+          // each title from the course's assignments.
+          const assignments = assignResult.status === 'fulfilled' ? assignResult.value?.data || [] : [];
+          allGrades.push(...buildRecentGrades(subList, assignments, course));
         }
 
         if (assignResult.status === 'fulfilled') {

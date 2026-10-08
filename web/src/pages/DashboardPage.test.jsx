@@ -5,7 +5,12 @@ import DashboardPage from './DashboardPage';
 import { api } from '../services/api';
 
 vi.mock('../services/api', () => ({
-  api: { getCourses: vi.fn() },
+  api: {
+    getCourses: vi.fn(),
+    getAssignments: vi.fn(),
+    getCourseAnnouncements: vi.fn(),
+    getCourseSubmissions: vi.fn(),
+  },
 }));
 
 vi.mock('../contexts/AuthContext', () => ({
@@ -37,6 +42,24 @@ function renderDashboard() {
 describe('DashboardPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    api.getAssignments.mockResolvedValue({ data: [] });
+    api.getCourseAnnouncements.mockResolvedValue({ data: [] });
+    api.getCourseSubmissions.mockResolvedValue({ data: [] });
+  });
+
+  // B207: submissions carry only assignment_id; the recent-grades row must
+  // show the assignment's name, not the generic fallback.
+  test('recent grades show the assignment name', async () => {
+    api.getCourses.mockResolvedValue({ data: [{ id: 1, name: 'Math', course_code: 'MTH101' }] });
+    api.getAssignments.mockResolvedValue({ data: [{ id: 7, name: 'Fractions Quiz', points_possible: 10 }] });
+    api.getCourseSubmissions.mockResolvedValue({
+      data: [{ id: 3, assignment_id: 7, workflow_state: 'graded', score: 9, graded_at: '2026-01-02T00:00:00Z' }],
+    });
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Fractions Quiz')).toBeInTheDocument();
+    });
   });
 
   test('shows loading skeleton while courses are being fetched', () => {
