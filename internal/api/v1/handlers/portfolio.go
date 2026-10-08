@@ -858,7 +858,7 @@ func (h *PortfolioHandler) UploadArtifactFile(c *fiber.Ctx) error {
 		PortfolioID:   portfolio.ID,
 		SectionID:     sectionID,
 		Title:         title,
-		Description:   service.SanitizeHTML(c.FormValue("description")),
+		Description:   service.SanitizePlainText(c.FormValue("description")),
 		ArtifactType:  artifactType,
 		ContentURL:    service.PortfolioUploadURL(portfolio.ID, attachment.ID),
 		SourceType:    "upload",

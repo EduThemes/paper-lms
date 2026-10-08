@@ -572,7 +572,9 @@ func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uin
 			artifact.ContentURL = *submission.URL
 		}
 		if submission.Body != nil {
-			artifact.Description = SanitizeHTML(*submission.Body)
+			// Artifact descriptions are rendered as text (B005): keep the
+			// submission's words, drop its markup.
+			artifact.Description = SanitizePlainText(*submission.Body)
 		}
 
 		if err := s.artifactRepo.Create(ctx, &artifact); err != nil {

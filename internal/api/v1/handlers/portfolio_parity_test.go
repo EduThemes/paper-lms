@@ -352,3 +352,25 @@ func TestPortfolio_GetPublicPortfolio_BySlug(t *testing.T) {
 	resp = testutil.MakeRequest(app, http.MethodGet, "/portfolios/public/draft-1", nil)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
+
+// F15: artifact descriptions are rendered as text, so a submission body
+// imported from a course keeps its words and drops its markup, with no
+// entity encoding (B005 rule).
+func TestPortfolio_ImportFromCourse_DescriptionIsPlainText(t *testing.T) {
+	f := newPortfolioFixture(t, 5)
+	now := time.Now()
+	html := "<p>Don't forget <strong>A &amp; B</strong></p>"
+	f.submissionRepo.On("ListByUserAndCourse", mock.Anything, uint(5), uint(300)).Return([]models.Submission{
+		{ID: 1, UserID: 5, AssignmentID: 40, SubmittedAt: &now, Body: &html},
+	}, nil)
+	f.assignmentRepo.On("FindByID", mock.Anything, uint(40), uint(1)).Return(&models.Assignment{ID: 40, CourseID: 300, Name: "Lab report"}, nil)
+	var saved *models.PortfolioArtifact
+	f.artifactRepo.On("Create", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		saved = args.Get(1).(*models.PortfolioArtifact)
+	}).Return(nil)
+
+	resp := testutil.MakeRequest(f.app, http.MethodPost, "/portfolios/10/import", body(`{"course_id":300}`))
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	require.NotNil(t, saved)
+	assert.Equal(t, "Don't forget A & B", saved.Description)
+}
