@@ -52,6 +52,6 @@ func (r *Router) registerQuizExtensionRoutes(protected fiber.Router, enrolled, i
 	// Canvas-sized exports complete in well under a second.
 	if r.QTIImportHandler != nil {
 		protected.Post("/courses/:course_id/qti_import", instructor, r.QTIImportHandler.Import)
-		protected.Get("/quizzes/:quiz_id/export.imscc", instructor, r.QTIImportHandler.Export)
+		protected.Get("/courses/:course_id/quizzes/:quiz_id/export.imscc", instructor, r.QTIImportHandler.Export)
 	}
 }

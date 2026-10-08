@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"path/filepath"
 
 	"github.com/gofiber/fiber/v2"
@@ -53,14 +54,23 @@ func (h *QTIImportHandler) Import(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(summary)
 }
 
-// Export accepts `GET /api/v1/quizzes/:quiz_id/export.imscc` and
+// Export accepts `GET /api/v1/courses/:course_id/quizzes/:quiz_id/export.imscc` and
 // returns the quiz as a Canvas-Classic-compatible .imscc zip.
 func (h *QTIImportHandler) Export(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil || courseID <= 0 {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil || quizID <= 0 {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	data, err := h.svc.ExportQuiz(c.Context(), uint(quizID))
+	// The export carries the full answer key: the quiz must live in the
+	// URL's course and the caller's tenant (cross-tenant → 404).
+	data, err := h.svc.ExportQuizInCourse(c.Context(), uint(quizID), uint(courseID), callerAccountID(c))
+	if errors.Is(err, service.ErrQuizNotInCourse) {
+		return responses.NotFound(c, "quiz")
+	}
 	if err != nil {
 		return responses.InternalError(c, "Export failed: "+err.Error())
 	}
