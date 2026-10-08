@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -263,16 +264,38 @@ type gatedRoute struct {
 // gatedRoutes are the content reads/writes a locked module item must
 // close for a student: opening the content, and submitting/posting to
 // it. Paths are matched with or without the /api/v1 prefix.
+//
+// The patterns must accept every spelling Fiber routes to the content
+// handler: the app uses Fiber's default (non-strict, case-insensitive)
+// routing, so a trailing slash and any letter case reach the same
+// handler (matchGatedRoute trims the slash, (?i) handles case), and id
+// segments are captured loosely and parsed with strconv.Atoi exactly as
+// c.ParamsInt does ("+5" is 5).
 var gatedRoutes = []gatedRoute{
-	{method: fiber.MethodGet, re: regexp.MustCompile(`^(?:/api/v1)?/courses/(\d+)/assignments/(\d+)$`), kind: service.GatedAssignment, view: true},
-	{method: fiber.MethodPost, re: regexp.MustCompile(`^(?:/api/v1)?/courses/(\d+)/assignments/(\d+)/submissions(?:/self/files)?$`), kind: service.GatedAssignment},
-	{method: fiber.MethodGet, re: regexp.MustCompile(`^(?:/api/v1)?/courses/(\d+)/pages/([^/]+)$`), kind: service.GatedPage, view: true},
-	{method: fiber.MethodGet, re: regexp.MustCompile(`^(?:/api/v1)?/courses/(\d+)/quizzes/(\d+)$`), kind: service.GatedQuiz, view: true},
-	{method: fiber.MethodPost, re: regexp.MustCompile(`^(?:/api/v1)?/courses/(\d+)/quizzes/(\d+)/submissions$`), kind: service.GatedQuiz},
-	{method: fiber.MethodGet, re: regexp.MustCompile(`^(?:/api/v1)?/courses/(\d+)/discussion_topics/(\d+)(?:/view)?$`), kind: service.GatedDiscussion, view: true},
-	{method: fiber.MethodPost, re: regexp.MustCompile(`^(?:/api/v1)?/courses/(\d+)/discussion_topics/(\d+)/entries(?:/\d+/replies)?$`), kind: service.GatedDiscussion},
-	{method: fiber.MethodGet, re: regexp.MustCompile(`^(?:/api/v1)?/courses/(\d+)/files/(\d+)$`), kind: service.GatedFile, view: true},
-	{method: fiber.MethodGet, re: regexp.MustCompile(`^(?:/api/v1)?/files/(\d+)/download$`), kind: service.GatedFile, view: true, file: true},
+	{method: fiber.MethodGet, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/assignments/([^/]+)$`), kind: service.GatedAssignment, view: true},
+	{method: fiber.MethodPost, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/assignments/([^/]+)/submissions(?:/self/files)?$`), kind: service.GatedAssignment},
+	{method: fiber.MethodGet, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/pages/([^/]+)$`), kind: service.GatedPage, view: true},
+	{method: fiber.MethodGet, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/quizzes/([^/]+)$`), kind: service.GatedQuiz, view: true},
+	{method: fiber.MethodPost, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/quizzes/([^/]+)/submissions$`), kind: service.GatedQuiz},
+	// The topic and its full views (/view, /view_v2 — the discussion
+	// page reads view_v2) count as opening it.
+	{method: fiber.MethodGet, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/discussion_topics/([^/]+)(?:/view|/view_v2)?$`), kind: service.GatedDiscussion, view: true},
+	// Every other read under the topic (entries, replies, versions,
+	// unread counts) exposes its content too.
+	{method: fiber.MethodGet, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/discussion_topics/([^/]+)/.+$`), kind: service.GatedDiscussion},
+	{method: fiber.MethodPost, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/discussion_topics/([^/]+)/entries(?:/[^/]+/replies)?$`), kind: service.GatedDiscussion},
+	{method: fiber.MethodGet, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/files/([^/]+)$`), kind: service.GatedFile, view: true},
+	{method: fiber.MethodGet, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/files/([^/]+)/download$`), kind: service.GatedFile, view: true, file: true},
+}
+
+// gateParamID parses a captured id segment the way c.ParamsInt does. ok
+// is false for anything the content handler would itself reject.
+func gateParamID(s string) (uint, bool) {
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return uint(n), true
 }
 
 // ContentGate enforces module locks server-side (G061): a student may
@@ -300,26 +323,45 @@ func (h *ModuleProgressionHandler) ContentGate() fiber.Handler {
 		}
 		ctx := c.Context()
 
+		// An id the handler cannot parse is rejected by the handler, and
+		// content that does not exist has nothing to protect: both pass.
 		var courseID, contentID uint
 		if route.file {
-			id, _ := strconv.ParseUint(m[1], 10, 64)
-			cid, ok, err := h.svc.AttachmentCourseID(ctx, uint(id))
-			if err != nil || !ok {
+			id, ok := gateParamID(m[1])
+			if !ok {
 				return c.Next()
 			}
-			courseID, contentID = cid, uint(id)
+			cid, found, err := h.svc.AttachmentCourseID(ctx, id)
+			if err != nil {
+				slog.Warn("module content gate: attachment lookup failed", "attachment_id", id, "err", err)
+				return responses.InternalError(c, "Could not check module access")
+			}
+			if !found {
+				return c.Next()
+			}
+			courseID, contentID = cid, id
 		} else {
-			cid, _ := strconv.ParseUint(m[1], 10, 64)
-			courseID = uint(cid)
+			cid, ok := gateParamID(m[1])
+			if !ok {
+				return c.Next()
+			}
+			courseID = cid
 			if route.kind == service.GatedPage {
-				pid, ok, err := h.svc.ResolvePageID(ctx, courseID, m[2])
-				if err != nil || !ok {
+				pid, found, err := h.svc.ResolvePageID(ctx, courseID, m[2])
+				if err != nil {
+					slog.Warn("module content gate: page lookup failed", "course_id", courseID, "err", err)
+					return responses.InternalError(c, "Could not check module access")
+				}
+				if !found {
 					return c.Next()
 				}
 				contentID = pid
 			} else {
-				id, _ := strconv.ParseUint(m[2], 10, 64)
-				contentID = uint(id)
+				id, ok := gateParamID(m[2])
+				if !ok {
+					return c.Next()
+				}
+				contentID = id
 			}
 		}
 
@@ -364,6 +406,8 @@ func (h *ModuleProgressionHandler) ContentGate() fiber.Handler {
 }
 
 func matchGatedRoute(method, path string) (*gatedRoute, []string) {
+	// Non-strict routing sends "/x/" to the "/x" handler.
+	path = strings.TrimRight(path, "/")
 	for i := range gatedRoutes {
 		r := &gatedRoutes[i]
 		if r.method != method {

@@ -563,3 +563,61 @@ func TestModuleItems_DraftContentHiddenFromStudents(t *testing.T) {
 	assert.True(t, student[pageItem.ID])
 	assert.False(t, student[assignmentItem.ID])
 }
+
+// The content gate matches request paths the way Fiber routes them:
+// Fiber's default routing ignores a trailing slash and letter case, and
+// ParamsInt accepts a leading "+", so each of those spellings reaches
+// the content handler and must be gated too. The discussion page the UI
+// renders reads /view_v2 and the entry lists, which are gated as well.
+func TestModuleContentGate_PathVariantsAndDiscussionReads(t *testing.T) {
+	f := newMPFixture(t)
+	g := f.g
+	cid := f.course.ID
+
+	topic := &models.DiscussionTopic{CourseID: cid, Title: "Week 2 debate", Message: "prompt", WorkflowState: "active"}
+	require.NoError(t, g.Create(topic).Error)
+	mpItem(t, g, f.m2.ID, 2, "DiscussionTopic", topic.ID, "", "")
+
+	student := f.app(f.student, 1, "StudentEnrollment")
+	ok := func(c *fiber.Ctx) error { return c.JSON(fiber.Map{"ok": true}) }
+	student.Get("/courses/:course_id/discussion_topics/:topic_id", ok)
+	student.Get("/courses/:course_id/discussion_topics/:topic_id/view_v2", ok)
+	student.Get("/courses/:course_id/discussion_topics/:topic_id/entries", ok)
+	student.Get("/courses/:course_id/discussion_topics/:topic_id/entries/:entry_id/replies", ok)
+
+	// Week 2 is locked behind Week 1, so every spelling is refused.
+	for _, path := range []string{
+		fmt.Sprintf("/courses/%d/assignments/%d", cid, f.a2.ID),
+		fmt.Sprintf("/courses/%d/assignments/%d/", cid, f.a2.ID),
+		fmt.Sprintf("/Courses/%d/Assignments/%d", cid, f.a2.ID),
+		fmt.Sprintf("/courses/%d/assignments/+%d", cid, f.a2.ID),
+		fmt.Sprintf("/courses/%d/discussion_topics/%d", cid, topic.ID),
+		fmt.Sprintf("/courses/%d/discussion_topics/%d/view_v2", cid, topic.ID),
+		fmt.Sprintf("/courses/%d/discussion_topics/%d/entries", cid, topic.ID),
+		fmt.Sprintf("/courses/%d/discussion_topics/%d/entries/1/replies", cid, topic.ID),
+	} {
+		resp := testutil.MakeRequest(student, http.MethodGet, path, nil)
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode, "GET %s must be gated", path)
+	}
+	resp := testutil.MakeRequest(student, http.MethodPost, fmt.Sprintf("/courses/%d/assignments/%d/submissions/", cid, f.a2.ID), nil)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+
+	// A numeric page key is the page id, exactly as the page handler
+	// reads it ("+id" included), even when another page's slug is that
+	// number.
+	locked := &models.WikiPage{CourseID: cid, Title: "Week 2 notes", URL: "week-2-notes", WorkflowState: "active"}
+	require.NoError(t, g.Create(locked).Error)
+	mpItem(t, g, f.m2.ID, 3, "WikiPage", locked.ID, "", "week-2-notes")
+	decoy := &models.WikiPage{CourseID: cid, Title: "Decoy", URL: fmt.Sprint(locked.ID), WorkflowState: "active"}
+	require.NoError(t, g.Create(decoy).Error)
+	for _, key := range []string{fmt.Sprint(locked.ID), fmt.Sprintf("+%d", locked.ID), "week-2-notes"} {
+		resp = testutil.MakeRequest(student, http.MethodGet, fmt.Sprintf("/courses/%d/pages/%s", cid, key), nil)
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode, "page key %q must be gated", key)
+	}
+
+	// Staff are never gated.
+	teacher := f.app(f.teacher, 1, "TeacherEnrollment")
+	teacher.Get("/courses/:course_id/discussion_topics/:topic_id/view_v2", ok)
+	resp = testutil.MakeRequest(teacher, http.MethodGet, fmt.Sprintf("/courses/%d/discussion_topics/%d/view_v2", cid, topic.ID), nil)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}

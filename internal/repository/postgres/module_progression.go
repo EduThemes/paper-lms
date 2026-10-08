@@ -333,13 +333,18 @@ func (r *ModuleProgressionRepository) ListItemsForContent(ctx context.Context, c
 	return items, err
 }
 
-// ResolvePageID maps a page key from a URL (slug or numeric id) to the
-// id of a live page of the course.
+// ResolvePageID maps a page key from a URL to the id of a live page of
+// the course, reading it exactly as PageHandler.GetPage does: a key
+// strconv.Atoi accepts is a page id (never a slug), anything else is
+// the slug.
 func (r *ModuleProgressionRepository) ResolvePageID(ctx context.Context, courseID uint, key string) (uint, bool, error) {
 	q := r.db.WithContext(ctx).Table("wiki_pages").
 		Where("course_id = ? AND workflow_state <> ?", courseID, "deleted")
-	if n, err := strconv.ParseUint(key, 10, 64); err == nil {
-		q = q.Where("url = ? OR id = ?", key, n)
+	if n, err := strconv.Atoi(key); err == nil {
+		if n <= 0 {
+			return 0, false, nil
+		}
+		q = q.Where("id = ?", n)
 	} else {
 		q = q.Where("url = ?", key)
 	}
