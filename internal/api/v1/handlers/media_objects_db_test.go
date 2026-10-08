@@ -233,6 +233,9 @@ func TestMediaObjects_UploadStreamAndCaptions(t *testing.T) {
 	var mine []map[string]any
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&mine))
 	require.Len(t, mine, 1)
+	// The teacher may fix captions but not delete a student's recording.
+	resp = f.do(t, f.teacher, http.MethodDelete, "/media_objects/"+mediaID, nil, "")
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	resp = f.do(t, f.student, http.MethodDelete, "/media_objects/"+mediaID, nil, "")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	resp = f.do(t, f.teacher, http.MethodGet, "/media_objects/"+mediaID+"/stream", nil, "")

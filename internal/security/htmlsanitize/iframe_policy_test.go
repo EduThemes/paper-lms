@@ -126,3 +126,24 @@ func TestTrustedIframeHosts_EndHostWithSlash(t *testing.T) {
 		}
 	}
 }
+
+// The editor's media and equation nodes (G002, G007) survive the server
+// sanitizer as written, so the player, its media id and the equation's
+// LaTeX reach every display surface.
+func TestSanitize_KeepsEditorMediaAndEquations(t *testing.T) {
+	in := `<video src="/api/v1/media_objects/m-0123456789abcdef0123456789abcdef/stream" controls="controls" preload="metadata" data-media-id="m-0123456789abcdef0123456789abcdef" title="Lab" style="max-width: 100%"></video>` +
+		`<audio src="https://cdn.example/a.mp3" controls="controls" preload="metadata"><track kind="captions" srclang="en" label="English" src="https://cdn.example/a.vtt"></audio>` +
+		`<p><span class="math-tex" data-latex="\pi r^2" data-display="block">\[\pi r^2\]</span></p>`
+	out := Sanitize(in)
+	for _, want := range []string{
+		`src="/api/v1/media_objects/m-0123456789abcdef0123456789abcdef/stream"`,
+		`data-media-id="m-0123456789abcdef0123456789abcdef"`,
+		`controls="controls"`, `preload="metadata"`, `max-width: 100%`,
+		`kind="captions"`, `srclang="en"`, `label="English"`, `src="https://cdn.example/a.vtt"`,
+		`class="math-tex"`, `data-latex="\pi r^2"`, `data-display="block"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sanitized output lost %q\nout: %s", want, out)
+		}
+	}
+}

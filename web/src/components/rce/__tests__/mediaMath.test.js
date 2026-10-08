@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
+import Image from '@tiptap/extension-image';
 import { MathInline, findTextEquations } from '../extensions/MathInline';
 import { Media } from '../extensions/Media';
 import { sanitizeHTML } from '../../RichContentViewer';
@@ -18,7 +19,7 @@ vi.mock('../../../services/api_rce_media', () => ({
 let editor;
 function makeEditor(content = '') {
   editor = new Editor({
-    extensions: [StarterKit.configure({ link: false }), Link.configure({ openOnClick: false }), MathInline, Media],
+    extensions: [StarterKit.configure({ link: false }), Link.configure({ openOnClick: false }), Image, MathInline, Media],
     content,
   });
   return editor;

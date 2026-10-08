@@ -67,9 +67,11 @@ export const MathInline = Node.create({
 
   parseHTML() {
     return [
-      { tag: 'span.math-tex', getAttrs: mathAttrs },
-      { tag: 'span.math_equation_latex', getAttrs: mathAttrs },
-      { tag: 'img[data-equation-content]', getAttrs: mathAttrs },
+      // Ahead of the Image extension's img rule, so an equation image is
+      // an equation, not a broken picture.
+      { tag: 'span.math-tex', getAttrs: mathAttrs, priority: 100 },
+      { tag: 'span.math_equation_latex', getAttrs: mathAttrs, priority: 100 },
+      { tag: 'img[data-equation-content]', getAttrs: mathAttrs, priority: 100 },
     ];
   },
 

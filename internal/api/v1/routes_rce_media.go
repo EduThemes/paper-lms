@@ -11,8 +11,9 @@ import (
 //
 // None of these routes carry :course_id, so the handler authorizes: media
 // is loaded under the caller's tenant (404 otherwise); playback needs only
-// the unguessable media id; changes need the owner, a tenant admin or an
-// instructor of the course the media was uploaded in.
+// the unguessable media id; title and caption changes need the owner, a
+// tenant admin or an instructor of the course the media was uploaded in;
+// deleting needs the owner or a tenant admin.
 func (r *Router) registerRCEMediaRoutes(protected fiber.Router) {
 	if r.MediaObjectHandler == nil {
 		return

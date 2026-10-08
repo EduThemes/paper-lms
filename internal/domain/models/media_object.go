@@ -23,8 +23,9 @@ const (
 // Access model (mirrors Canvas, whose media ids are effectively public
 // identifiers): any signed-in user of the same tenant who has the media id
 // can play it — they saw it in content they were allowed to read. Editing
-// (title, captions, delete) is limited to the owner, tenant admins and, for
-// media uploaded in a course, that course's instructors.
+// the title and captions is limited to the owner, tenant admins and, for
+// media uploaded in a course, that course's instructors; deleting to the
+// owner and tenant admins.
 type MediaObject struct {
 	ID           uint   `json:"id" gorm:"column:id;primaryKey"`
 	AccountID    uint   `json:"-" gorm:"not null;index"`

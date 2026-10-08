@@ -226,7 +226,9 @@ func (h *MediaObjectHandler) Delete(c *fiber.Ctx) error {
 	if wrote || err != nil {
 		return err
 	}
-	if !h.canEdit(c, m) {
+	// Deleting breaks every embed of the clip (a student's recorded answer
+	// included), so course instructors, who may fix captions, may not.
+	if uid, _ := c.Locals("user_id").(uint); uid != m.UserID && !callerIsAdmin(c, h.authz) {
 		return mediaForbidden()
 	}
 	if err := h.svc.Delete(c.Context(), m); err != nil {
