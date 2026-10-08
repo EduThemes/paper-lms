@@ -341,21 +341,28 @@ func (s *ModuleProgressionService) buildFacts(ctx context.Context, userID uint, 
 // Evaluate computes the student's progress through the course's modules
 // and records it in context_module_progressions.
 func (s *ModuleProgressionService) Evaluate(ctx context.Context, courseID, userID uint) (*CourseProgress, error) {
+	progress, _, err := s.evaluate(ctx, courseID, userID)
+	return progress, err
+}
+
+// evaluate is Evaluate that also returns the module structure (the
+// student-visible items) the progress was computed from.
+func (s *ModuleProgressionService) evaluate(ctx context.Context, courseID, userID uint) (*CourseProgress, []models.ContextModule, error) {
 	mods, prereqs, err := s.loadStructure(ctx, courseID, userID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	facts, err := s.buildFacts(ctx, userID, mods)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	now := s.now()
 	progress := EvaluateModuleProgress(ModuleEvalInput{Now: now, Modules: mods, Prerequisites: prereqs, Facts: facts})
 
 	if err := s.persist(ctx, userID, progress, now); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &CourseProgress{UserID: userID, Modules: progress}, nil
+	return &CourseProgress{UserID: userID, Modules: progress}, mods, nil
 }
 
 // persist upserts the evaluated progressions, keeping the first
@@ -586,14 +593,77 @@ func (s *ModuleProgressionService) CheckContentAccess(ctx context.Context, cours
 	acc.Locked = true
 	acc.ModuleID = firstLocked.ModuleID
 	acc.UnlockAt = firstLocked.UnlockAt
-	if firstLocked.State == models.ModuleProgressionLocked {
-		acc.Explanation = "This content is part of the module \"" + firstLocked.Name + "\", which is locked. " +
-			firstLocked.LockExplanation(progress.ModuleNamer())
-	} else {
-		acc.Explanation = "This content is part of the module \"" + firstLocked.Name +
-			"\". Complete the earlier items of the module first."
-	}
+	acc.Explanation = contentLockExplanation(firstLocked, progress.ModuleNamer())
 	return acc, nil
+}
+
+// contentLockExplanation explains why content in a locked item of mp is
+// closed to the student.
+func contentLockExplanation(mp *ModuleProgress, namer func(uint) string) string {
+	if mp.State == models.ModuleProgressionLocked {
+		return "This content is part of the module \"" + mp.Name + "\", which is locked. " + mp.LockExplanation(namer)
+	}
+	return "This content is part of the module \"" + mp.Name + "\". Complete the earlier items of the module first."
+}
+
+// LockedContent returns the course content the student may not open
+// because of module locks, keyed by gated kind (GatedAssignment, …) and
+// content id, with the lock explanation. As in CheckContentAccess,
+// content is locked only when it is linked by at least one visible
+// module item and every such item is locked. Index endpoints use it to
+// withhold the bodies of locked content (Canvas locked_for_user).
+func (s *ModuleProgressionService) LockedContent(ctx context.Context, courseID, userID uint) (map[string]map[uint]string, error) {
+	progress, mods, err := s.evaluate(ctx, courseID, userID)
+	if err != nil {
+		return nil, err
+	}
+	namer := progress.ModuleNamer()
+	type state struct {
+		open        bool
+		explanation string
+	}
+	seen := map[string]map[uint]*state{}
+	for _, m := range mods {
+		for _, it := range m.Items {
+			if it.ContentID == nil {
+				continue
+			}
+			kind := contentKind(it.ContentType)
+			if kind == "" {
+				continue
+			}
+			mp, ip := progress.Item(it.ID)
+			if ip == nil {
+				continue
+			}
+			if seen[kind] == nil {
+				seen[kind] = map[uint]*state{}
+			}
+			st := seen[kind][*it.ContentID]
+			if st == nil {
+				st = &state{}
+				seen[kind][*it.ContentID] = st
+			}
+			if !ip.Locked {
+				st.open = true
+			} else if st.explanation == "" {
+				st.explanation = contentLockExplanation(mp, namer)
+			}
+		}
+	}
+	out := map[string]map[uint]string{}
+	for kind, byID := range seen {
+		for id, st := range byID {
+			if st.open {
+				continue
+			}
+			if out[kind] == nil {
+				out[kind] = map[uint]string{}
+			}
+			out[kind][id] = st.explanation
+		}
+	}
+	return out, nil
 }
 
 // RecordContentView records must_view on the given module items after

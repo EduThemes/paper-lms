@@ -615,6 +615,43 @@ func TestModuleContentGate_PathVariantsAndDiscussionReads(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, resp.StatusCode, "page key %q must be gated", key)
 	}
 
+	// The indexes keep a locked row's title but not its body.
+	require.NoError(t, g.Model(f.a2).Update("description", "<p>Week 2 instructions</p>").Error)
+	require.NoError(t, g.Model(f.a1).Update("description", "<p>Lab steps</p>").Error)
+	assignmentHandler := handlers.NewAssignmentHandler(service.NewAssignmentService(postgres.NewAssignmentRepository(g)))
+	listApp := func(userID uint, enrollment string) *fiber.App {
+		app := f.app(userID, 1, enrollment)
+		app.Get("/courses/:course_id/assignments", assignmentHandler.ListAssignments)
+		app.Get("/courses/:course_id/pages", func(c *fiber.Ctx) error {
+			return c.JSON([]fiber.Map{{"page_id": locked.ID, "title": locked.Title, "body": "<p>notes</p>"}, {"page_id": f.p1.ID, "title": f.p1.Title, "body": "<p>hi</p>"}})
+		})
+		return app
+	}
+	rowsOf := func(app *fiber.App, path, idField string) map[uint]map[string]interface{} {
+		resp := testutil.MakeRequest(app, http.MethodGet, path, nil)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		rows, err := testutil.ParseJSONArray(resp)
+		require.NoError(t, err)
+		out := map[uint]map[string]interface{}{}
+		for _, r := range rows {
+			out[uint(r[idField].(float64))] = r
+		}
+		return out
+	}
+	rows := rowsOf(listApp(f.student, "StudentEnrollment"), fmt.Sprintf("/courses/%d/assignments?per_page=100", cid), "id")
+	require.Contains(t, rows, f.a2.ID)
+	assert.Equal(t, f.a2.Name, rows[f.a2.ID]["name"])
+	assert.Equal(t, "", rows[f.a2.ID]["description"], "a locked assignment's description is withheld")
+	assert.Equal(t, true, rows[f.a2.ID]["locked_for_user"])
+	assert.Contains(t, fmt.Sprint(rows[f.a2.ID]["lock_explanation"]), "Week 2")
+	assert.Equal(t, "", rows[f.a1.ID]["description"], "sequential progress locks the lab too")
+	pages := rowsOf(listApp(f.student, "StudentEnrollment"), fmt.Sprintf("/courses/%d/pages/", cid), "page_id")
+	assert.Equal(t, "", pages[locked.ID]["body"])
+	assert.Equal(t, "<p>hi</p>", pages[f.p1.ID]["body"], "open content keeps its body")
+	assert.Nil(t, pages[f.p1.ID]["locked_for_user"])
+	rows = rowsOf(listApp(f.teacher, "TeacherEnrollment"), fmt.Sprintf("/courses/%d/assignments?per_page=100", cid), "id")
+	assert.Equal(t, "<p>Week 2 instructions</p>", rows[f.a2.ID]["description"], "staff see everything")
+
 	// Staff are never gated.
 	teacher := f.app(f.teacher, 1, "TeacherEnrollment")
 	teacher.Get("/courses/:course_id/discussion_topics/:topic_id/view_v2", ok)

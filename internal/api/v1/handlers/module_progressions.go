@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"regexp"
@@ -313,6 +315,9 @@ func (h *ModuleProgressionHandler) ContentGate() fiber.Handler {
 		if h == nil || h.svc == nil {
 			return c.Next()
 		}
+		if idx, m := matchGatedIndex(c.Method(), c.Path()); idx != nil {
+			return h.redactLockedIndex(c, idx, m)
+		}
 		route, m := matchGatedRoute(c.Method(), c.Path())
 		if route == nil {
 			return c.Next()
@@ -403,6 +408,100 @@ func (h *ModuleProgressionHandler) ContentGate() fiber.Handler {
 		}
 		return nil
 	}
+}
+
+// gatedIndex is a course content index whose rows carry the content's
+// body. A locked row keeps its title and dates but loses the body, as
+// Canvas withholds a locked item's description from the student.
+type gatedIndex struct {
+	re      *regexp.Regexp
+	kind    string
+	idField string
+	body    string
+}
+
+var gatedIndexes = []gatedIndex{
+	{re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/assignments$`), kind: service.GatedAssignment, idField: "id", body: "description"},
+	{re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/quizzes$`), kind: service.GatedQuiz, idField: "id", body: "description"},
+	{re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/discussion_topics$`), kind: service.GatedDiscussion, idField: "id", body: "message"},
+	{re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/pages$`), kind: service.GatedPage, idField: "page_id", body: "body"},
+}
+
+func matchGatedIndex(method, path string) (*gatedIndex, []string) {
+	if method != fiber.MethodGet {
+		return nil, nil
+	}
+	path = strings.TrimRight(path, "/")
+	for i := range gatedIndexes {
+		if m := gatedIndexes[i].re.FindStringSubmatch(path); m != nil {
+			return &gatedIndexes[i], m
+		}
+	}
+	return nil, nil
+}
+
+// redactLockedIndex runs the index handler, then, for a student of the
+// course, blanks the body of every row whose content is module-locked
+// and marks it locked_for_user with the lock explanation. The opening
+// routes refuse such content outright (ContentGate); without this the
+// index would hand the same body over.
+func (h *ModuleProgressionHandler) redactLockedIndex(c *fiber.Ctx, idx *gatedIndex, m []string) error {
+	if err := c.Next(); err != nil {
+		return err
+	}
+	userID := callerUserID(c)
+	courseID, ok := gateParamID(m[1])
+	if userID == 0 || !ok || c.Response().StatusCode() != fiber.StatusOK {
+		return nil
+	}
+	ctx := c.Context()
+	learner, err := h.svc.IsLearner(ctx, userID, courseID)
+	if err != nil || !learner {
+		if err != nil {
+			slog.Warn("module content gate: enrollment lookup failed", "course_id", courseID, "err", err)
+			return responses.InternalError(c, "Could not check module access")
+		}
+		return nil
+	}
+	var rows []map[string]interface{}
+	dec := json.NewDecoder(bytes.NewReader(c.Response().Body()))
+	dec.UseNumber()
+	if err := dec.Decode(&rows); err != nil || len(rows) == 0 {
+		// Not a JSON array of rows (an error body, an empty page).
+		return nil
+	}
+	locked, err := h.svc.LockedContent(ctx, courseID, userID)
+	if err != nil {
+		slog.Warn("module content gate: evaluation failed", "course_id", courseID, "err", err)
+		return responses.InternalError(c, "Could not check module access")
+	}
+	byID := locked[idx.kind]
+	if len(byID) == 0 {
+		return nil
+	}
+	changed := false
+	for _, row := range rows {
+		n, ok := row[idx.idField].(json.Number)
+		if !ok {
+			continue
+		}
+		id, err := strconv.ParseUint(n.String(), 10, 64)
+		if err != nil {
+			continue
+		}
+		explanation, isLocked := byID[uint(id)]
+		if !isLocked {
+			continue
+		}
+		row[idx.body] = ""
+		row["locked_for_user"] = true
+		row["lock_explanation"] = explanation
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return c.JSON(rows)
 }
 
 func matchGatedRoute(method, path string) (*gatedRoute, []string) {
