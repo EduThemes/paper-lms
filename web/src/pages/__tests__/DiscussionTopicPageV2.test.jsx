@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import DiscussionTopicPageV2 from '../DiscussionTopicPageV2';
 import { api } from '../../services/api';
+import { discussionsApi } from '../../services/api_discussions';
 
 vi.mock('../../services/api', () => ({
   api: {
@@ -23,6 +24,22 @@ vi.mock('../../services/api', () => ({
     deleteDiscussionCheckpoint: vi.fn(),
     getDiscussionCheckpointProgress: vi.fn(),
   },
+}));
+
+vi.mock('../../services/api_discussions', () => ({
+  discussionsApi: {
+    createEntry: vi.fn(),
+    createReply: vi.fn(),
+    updateEntry: vi.fn(),
+    uploadAttachment: vi.fn(),
+    mentionableUsers: vi.fn(() => Promise.resolve([])),
+  },
+}));
+
+vi.mock('../../components/rce/RichContentEditorV2', () => ({
+  default: ({ value, onChange, placeholder }) => (
+    <textarea aria-label={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
+  ),
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -97,6 +114,7 @@ function renderPage() {
     <MemoryRouter initialEntries={['/courses/1/discussions/5']}>
       <Routes>
         <Route path="/courses/:courseId/discussions/:topicId" element={<DiscussionTopicPageV2 />} />
+        <Route path="/courses/:courseId/discussions/88" element={<div>group topic page</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -207,5 +225,73 @@ describe('DiscussionTopicPageV2', () => {
     expect(screen.queryByRole('button', { name: /new reply/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /reply to this post/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /delete this post/i })).not.toBeInTheDocument();
+  });
+
+  test('posts go through the rich composer with mentions picked (G086, G088)', async () => {
+    api.getDiscussionFullViewV2.mockResolvedValue(view({ entries: [] }));
+    discussionsApi.createEntry.mockResolvedValue({ id: 9 });
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/No replies yet/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /write a reply/i }));
+    fireEvent.change(screen.getByLabelText('Share your thoughts...'), { target: { value: '<p>Great point</p>' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Post Reply' }));
+    await waitFor(() => expect(discussionsApi.createEntry).toHaveBeenCalledWith('1', '5', { message: '<p>Great point</p>' }));
+  });
+
+  test('a post\'s attachment is linked (G086)', async () => {
+    api.getDiscussionFullViewV2.mockResolvedValue(view({
+      entries: [entry({
+        id: 1,
+        message: 'see file',
+        attachment: { id: 3, display_name: 'notes.pdf', size: 2048, url: '/api/v1/courses/1/discussion_topics/5/entries/1/attachment' },
+      })],
+    }));
+    renderPage();
+    const link = await screen.findByRole('link', { name: /notes\.pdf/ });
+    expect(link).toHaveAttribute('href', '/api/v1/courses/1/discussion_topics/5/entries/1/attachment');
+  });
+
+  test('post-first topics explain why replies are hidden (G083)', async () => {
+    api.getDiscussionFullViewV2.mockResolvedValue(view({ topic: { initial_post_required: true }, entries: [] }));
+    renderPage();
+    expect(await screen.findByText(/Post your reply first to see what others wrote/)).toBeInTheDocument();
+  });
+
+  test('graded and partially anonymous topics say so (G084, G087)', async () => {
+    api.getDiscussionFullViewV2.mockResolvedValue(view({
+      topic: { assignment: { id: 2, points_possible: 10 }, anonymous_state: 'partial_anonymity' },
+      entries: [entry({ id: 1, message: 'first' })],
+    }));
+    renderPage();
+    expect(await screen.findByText(/Graded discussion · 10 points/)).toBeInTheDocument();
+    expect(screen.getByText('You can choose to post anonymously.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Post anonymously')).toBeInTheDocument();
+  });
+
+  test('a student opening a group discussion lands in their group (G085)', async () => {
+    api.getDiscussionFullViewV2.mockResolvedValue(view({
+      topic: { is_group_root: true, group_category_id: 4, group_topic_id: 88, can_post: false },
+    }));
+    renderPage();
+    expect(await screen.findByText('group topic page')).toBeInTheDocument();
+  });
+
+  test('staff see the group topics of a group discussion (G085)', async () => {
+    mockIsTeacher = true;
+    api.getDiscussionFullViewV2.mockResolvedValue(view({
+      topic: {
+        is_group_root: true,
+        group_category_id: 4,
+        can_post: false,
+        group_topics: [
+          { id: 88, group_id: 1, group_name: 'Group One', entry_count: 2, unread_count: 1 },
+          { id: 89, group_id: 2, group_name: 'Group Two', entry_count: 0, unread_count: 0 },
+        ],
+      },
+    }));
+    renderPage();
+    expect(await screen.findByRole('link', { name: /Group One/ })).toHaveAttribute('href', '/courses/1/discussions/88');
+    expect(screen.getByText('2 posts · 1 unread')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /new reply/i })).not.toBeInTheDocument();
   });
 });

@@ -130,6 +130,7 @@ type Router struct {
 
 	// Discussion checkpoints, smart search, commons, AI assist
 	DiscussionCheckpointHandler *handlers.DiscussionCheckpointHandler
+	DiscussionParityHandler     *handlers.DiscussionParityHandler
 	SmartSearchHandler          *handlers.SmartSearchHandler
 	CommonsHandler              *handlers.CommonsHandler
 	AIAssistHandler             *handlers.AIAssistHandler
@@ -871,6 +872,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Put("/courses/:course_id/modules/:id/prerequisites", instructor, r.ModuleHandler.SetPrerequisites)
 
 	r.registerP3FeatureRoutes(protected, admin, enrolled, instructor)
+	r.registerDiscussionParityRoutes(protected, enrolled, instructor)
 	r.registerQuizExtensionRoutes(protected, enrolled, instructor)
 	r.registerQuizEngineRoutes(protected, enrolled, instructor)
 	r.registerQuizItemsRoutes(protected, enrolled, instructor)

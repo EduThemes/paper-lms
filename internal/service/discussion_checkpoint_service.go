@@ -17,6 +17,7 @@ const pointsTolerance = 0.001
 // DiscussionCheckpointService provides business logic for Canvas-compatible
 // discussion checkpoints (multi-deadline thread participation).
 type DiscussionCheckpointService struct {
+	discussionAudienceHolder
 	checkpointRepo repository.DiscussionCheckpointRepository
 	submissionRepo repository.DiscussionCheckpointSubmissionRepository
 	topicRepo      repository.DiscussionTopicRepository
