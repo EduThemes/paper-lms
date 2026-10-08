@@ -1,100 +1,136 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { MessageSquare, Pin, Plus, X, Edit2, Trash2 } from 'lucide-react';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { MessageSquare, Pin, Plus, X, Edit2, Trash2, Search } from 'lucide-react';
 import { api } from '../services/api';
+import { discussionsApi } from '../services/api_discussions';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
-import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
-import { clearRceDraft } from '../components/rce/rceDrafts';
-import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
-import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
+import DiscussionTopicForm from '../components/discussions/DiscussionTopicForm';
 import { Skeleton } from '@/components/ui/skeleton';
-import { fetchAllPages } from '../utils/fetchAllPages';
+import { topicStatusBadges } from '../utils/discussionTopicForm';
+
+const PER_PAGE = 20;
+
+const toneClass = {
+  muted: 'bg-surface-2 text-text-tertiary',
+  info: 'bg-brand-50 text-brand-700',
+  success: 'bg-accent-success/15 text-accent-success',
+};
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return '';
+  return new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
+function TopicRow({ topic, courseId, isTeacher, onEdit, onDelete, onTogglePublished }) {
+  const replies = Number(topic.discussion_subentry_count || 0);
+  const unread = Number(topic.unread_count || 0);
+  const badges = topicStatusBadges(topic);
+  const typeLabel = topic.discussion_type === 'side_comment'
+    ? 'Side Comment'
+    : topic.discussion_type === 'threaded'
+      ? 'Threaded'
+      : topic.discussion_type;
+
+  return (
+    <li className="flex items-center justify-between p-4 hover:bg-surface-1 group">
+      <Link to={`/courses/${courseId}/discussions/${topic.id}`} className="flex items-start gap-3 min-w-0 flex-1">
+        <MessageSquare className={`w-5 h-5 mt-0.5 flex-shrink-0 ${unread > 0 ? 'text-brand-500' : 'text-text-disabled'}`} aria-hidden="true" />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`text-text-primary truncate ${unread > 0 ? 'font-semibold' : 'font-medium'}`}>{topic.title}</span>
+            {topic.pinned && <Pin className="w-3.5 h-3.5 text-brand-500 flex-shrink-0" aria-label="Pinned" />}
+            {badges.map((b) => (
+              <span key={b.key} className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${toneClass[b.tone] || toneClass.muted}`}>
+                {b.label}
+              </span>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 text-xs text-text-disabled mt-0.5">
+            {typeLabel && <span>{typeLabel}</span>}
+            <span>{replies} {replies === 1 ? 'reply' : 'replies'}</span>
+            {unread > 0 && (
+              <span className="px-1.5 rounded-full bg-brand-500 text-white font-semibold" aria-label={`${unread} unread`}>
+                {unread} unread
+              </span>
+            )}
+            {topic.last_reply_at && <span>Last post {formatDate(topic.last_reply_at)}</span>}
+            {topic.assignment?.due_at && <span>Due {formatDate(topic.assignment.due_at)}</span>}
+          </div>
+        </div>
+      </Link>
+      <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+        <span className="text-xs text-text-disabled hidden sm:inline">{formatDate(topic.created_at)}</span>
+        {isTeacher && (
+          <>
+            <button
+              type="button"
+              onClick={() => onTogglePublished(topic)}
+              className="px-2 py-0.5 text-xs rounded border border-border-default text-text-secondary hover:text-brand-600"
+            >
+              {topic.published === false ? 'Publish' : 'Unpublish'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onEdit(topic)}
+              className="p-1 text-text-disabled hover:text-brand-600 opacity-0 group-hover:opacity-100 focus:opacity-100"
+              aria-label={`Edit ${topic.title}`}
+            >
+              <Edit2 className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete(topic)}
+              className="p-1 text-text-disabled hover:text-accent-danger opacity-0 group-hover:opacity-100 focus:opacity-100"
+              aria-label={`Delete ${topic.title}`}
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </>
+        )}
+      </div>
+    </li>
+  );
+}
 
 const DiscussionsPage = () => {
   const { courseId } = useParams();
   const isTeacher = useIsTeacher(courseId);
-  const [topics, setTopics] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [formData, setFormData] = useState({
-    title: '',
-    message: '',
-    discussion_type: 'side_comment',
-    pinned: false,
-  });
-  const [creating, setCreating] = useState(false);
-  const { issues: crossCourseIssues, checkAndSave, dismiss: dismissCrossCourse, confirm: confirmCrossCourse } = useCrossCourseCheck(courseId);
+  const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [editor, setEditor] = useState(null); // null | { id?: number }
+  const [actionError, setActionError] = useState(null);
 
-  const fetchTopics = async () => {
-    try {
-      // Walk every page (the endpoint defaults to 20 per page) so topic
-      // 21+ isn't silently dropped.
-      const all = await fetchAllPages((page) => api.getDiscussionTopics(courseId, page, 100));
-      setTopics(all);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Debounce the search box; a new search starts at page 1.
   useEffect(() => {
-    fetchTopics();
-  }, [courseId]);
+    const t = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
-  const resetForm = () => {
-    setFormData({ title: '', message: '', discussion_type: 'side_comment', pinned: false });
-    setEditingId(null);
-  };
+  const query = useQuery({
+    queryKey: ['discussions', String(courseId), 'index', { page, search, filter }],
+    queryFn: () => discussionsApi.listTopics(courseId, { page, perPage: PER_PAGE, search, filter }),
+    placeholderData: keepPreviousData,
+  });
 
-  const doCreate = async () => {
-    setCreating(true);
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['discussions', String(courseId)] });
+
+  const handleDelete = async (topic) => {
+    if (!window.confirm(`Delete "${topic.title}"?`)) return;
     try {
-      if (editingId) {
-        await api.updateDiscussionTopic(courseId, editingId, formData);
-      } else {
-        await api.createDiscussionTopic(courseId, formData);
-      }
-      clearRceDraft(`discussion-${courseId}-${editingId || 'new'}-message`);
-      resetForm();
-      setShowForm(false);
-      setLoading(true);
-      await fetchTopics();
+      await api.deleteDiscussionTopic(courseId, topic.id);
+      setActionError(null);
+      refresh();
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const handleCreate = (e) => {
-    e.preventDefault();
-    checkAndSave(formData.message, doCreate);
-  };
-
-  const handleEdit = (topic) => {
-    setFormData({
-      title: topic.title || '',
-      message: topic.message || '',
-      discussion_type: topic.discussion_type || 'side_comment',
-      pinned: topic.pinned || false,
-    });
-    setEditingId(topic.id);
-    setShowForm(true);
-  };
-
-  const handleDelete = async (topicId) => {
-    if (!window.confirm('Delete this discussion topic?')) return;
-    try {
-      await api.deleteDiscussionTopic(courseId, topicId);
-      setLoading(true);
-      await fetchTopics();
-    } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     }
   };
 
@@ -102,42 +138,18 @@ const DiscussionsPage = () => {
   // import created), so teachers need a way to release them.
   const handleTogglePublished = async (topic) => {
     try {
-      await api.updateDiscussionTopic(courseId, topic.id, { published: topic.published === false });
-      await fetchTopics();
+      await discussionsApi.updateTopic(courseId, topic.id, { published: topic.published === false });
+      setActionError(null);
+      refresh();
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     }
   };
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return '';
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  };
-
-  if (loading) {
-    return (
-      <Layout>
-        <CourseNav />
-        <div className="space-y-3 p-6">
-          <Skeleton className="h-9 w-48" />
-          <Skeleton className="h-12 w-full" />
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-16 w-full" />
-          ))}
-        </div>
-      </Layout>
-    );
-  }
-  if (error) {
-    return <Layout><div className="text-center py-12">
-  <p className="text-accent-danger mb-3">{error}</p>
-  <button onClick={() => window.location.reload()} className="text-brand-600 hover:text-brand-800 text-sm font-medium">Try Again</button>
-</div></Layout>;
-  }
+  const result = query.data;
+  const topics = result?.topics || [];
+  const lastPage = result?.lastPage || 1;
+  const filtering = search !== '' || filter !== 'all';
 
   return (
     <Layout>
@@ -150,155 +162,126 @@ const DiscussionsPage = () => {
           <h2 className="text-2xl font-bold text-text-primary">Discussions</h2>
           {isTeacher && (
             <button
-              onClick={() => {
-                if (showForm) { resetForm(); }
-                setShowForm(!showForm);
-              }}
+              type="button"
+              onClick={() => setEditor(editor ? null : {})}
               className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
             >
-              {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              <span>{showForm ? 'Cancel' : 'New Discussion'}</span>
+              {editor ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              <span>{editor ? 'Cancel' : 'New Discussion'}</span>
             </button>
           )}
         </div>
       </div>
 
-      {showForm && (
-        <div className="bg-surface-0 rounded-lg shadow p-6 mb-6">
-          <h3 className="font-semibold mb-4">{editingId ? 'Edit Discussion Topic' : 'Create Discussion Topic'}</h3>
-          <form onSubmit={handleCreate} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Title</label>
-              <input
-                type="text"
-                value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Message</label>
-              <RichContentEditorV2
-                value={formData.message}
-                onChange={(html) => setFormData((prev) => ({ ...prev, message: html }))}
-                placeholder="Discussion topic content..."
-                minHeight="160px"
-                courseId={courseId}
-                autoSaveKey={`discussion-${courseId}-${editingId || 'new'}-message`}
-              />
-            </div>
-            <div className="flex items-center space-x-6">
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-1">Discussion Type</label>
-                <select
-                  value={formData.discussion_type}
-                  onChange={(e) => setFormData({ ...formData, discussion_type: e.target.value })}
-                  className="border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                >
-                  <option value="side_comment">Side Comment</option>
-                  <option value="threaded">Threaded</option>
-                </select>
-              </div>
-              <div className="flex items-center space-x-2 pt-5">
-                <input
-                  type="checkbox"
-                  id="pinned"
-                  checked={formData.pinned}
-                  onChange={(e) => setFormData({ ...formData, pinned: e.target.checked })}
-                  className="rounded border-border-strong"
-                />
-                <label htmlFor="pinned" className="text-sm text-text-secondary">Pinned</label>
-              </div>
-            </div>
-            <div className="flex justify-end space-x-3">
-              <button
-                type="button"
-                onClick={() => { resetForm(); setShowForm(false); }}
-                className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={creating}
-                className="bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
-              >
-                {creating ? 'Saving...' : editingId ? 'Update Topic' : 'Create Topic'}
-              </button>
-            </div>
-          </form>
-        </div>
+      {editor && (
+        <DiscussionTopicForm
+          key={editor.id || 'new'}
+          courseId={courseId}
+          topicId={editor.id}
+          onCancel={() => setEditor(null)}
+          onSaved={() => {
+            setEditor(null);
+            refresh();
+          }}
+        />
       )}
+
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="relative flex-1 min-w-[12rem]">
+          <Search className="w-4 h-4 text-text-disabled absolute left-2.5 top-2.5" aria-hidden="true" />
+          <input
+            type="search"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search discussions"
+            aria-label="Search discussions"
+            className="w-full border border-border-strong rounded-md pl-8 pr-3 py-2 text-sm bg-surface-0 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          />
+        </div>
+        <div className="inline-flex rounded-md border border-border-strong overflow-hidden" role="group" aria-label="Filter discussions">
+          {[
+            ['all', 'All'],
+            ['unread', 'Unread'],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => {
+                setFilter(value);
+                setPage(1);
+              }}
+              aria-pressed={filter === value}
+              className={`px-3 py-2 text-sm ${filter === value ? 'bg-brand-600 text-white' : 'bg-surface-0 text-text-secondary hover:bg-surface-1'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {actionError && <p className="mb-3 text-sm text-accent-danger" role="alert">{actionError}</p>}
 
       <div className="bg-surface-0 rounded-lg shadow">
         <div className="p-4 border-b">
           <h3 className="font-semibold">Topics</h3>
         </div>
-        {topics.length === 0 ? (
-          <div className="p-6 text-center text-text-tertiary">No discussions yet.</div>
-        ) : (
-          <div className="divide-y">
-            {topics.map((topic) => (
-              <div key={topic.id} className="flex items-center justify-between p-4 hover:bg-surface-1 group">
-                <Link
-                  to={`/courses/${courseId}/discussions/${topic.id}`}
-                  className="flex items-center space-x-3 min-w-0 flex-1"
-                >
-                  <MessageSquare className="w-5 h-5 text-text-disabled flex-shrink-0" />
-                  <div className="min-w-0">
-                    <div className="flex items-center space-x-2">
-                      <span className="font-medium text-text-primary truncate">{topic.title}</span>
-                      {topic.pinned && (
-                        <Pin className="w-3.5 h-3.5 text-brand-500 flex-shrink-0" />
-                      )}
-                      {topic.published === false && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-surface-2 text-text-tertiary flex-shrink-0">
-                          Unpublished
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-xs text-text-disabled">
-                      {topic.discussion_type === 'side_comment' ? 'Side Comment' : topic.discussion_type === 'threaded' ? 'Threaded' : topic.discussion_type}
-                    </span>
-                  </div>
-                </Link>
-                <div className="flex items-center gap-2 flex-shrink-0 ml-4">
-                  <span className="text-xs text-text-disabled">
-                    {formatDate(topic.created_at)}
-                  </span>
-                  {isTeacher && (
-                    <>
-                      <button
-                        onClick={(e) => { e.preventDefault(); handleTogglePublished(topic); }}
-                        className="px-2 py-0.5 text-xs rounded border border-border-default text-text-secondary hover:text-brand-600"
-                        title={topic.published === false ? 'Publish' : 'Unpublish'}
-                      >
-                        {topic.published === false ? 'Publish' : 'Unpublish'}
-                      </button>
-                      <button
-                        onClick={(e) => { e.preventDefault(); handleEdit(topic); }}
-                        className="p-1 text-text-disabled hover:text-brand-600 opacity-0 group-hover:opacity-100"
-                        title="Edit"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={(e) => { e.preventDefault(); handleDelete(topic.id); }}
-                        className="p-1 text-text-disabled hover:text-accent-danger opacity-0 group-hover:opacity-100"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
+        {query.isLoading ? (
+          <div className="space-y-3 p-4">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-14 w-full" />
             ))}
           </div>
+        ) : query.isError ? (
+          <div className="text-center py-12">
+            <p className="text-accent-danger mb-3">{query.error?.message || 'Could not load discussions'}</p>
+            <button type="button" onClick={() => query.refetch()} className="text-brand-600 hover:text-brand-800 text-sm font-medium">
+              Try Again
+            </button>
+          </div>
+        ) : topics.length === 0 ? (
+          <div className="p-6 text-center text-text-tertiary">
+            {filtering ? 'No discussions match.' : 'No discussions yet.'}
+          </div>
+        ) : (
+          <ul className="divide-y">
+            {topics.map((topic) => (
+              <TopicRow
+                key={topic.id}
+                topic={topic}
+                courseId={courseId}
+                isTeacher={!!isTeacher}
+                onEdit={(t) => setEditor({ id: t.id })}
+                onDelete={handleDelete}
+                onTogglePublished={handleTogglePublished}
+              />
+            ))}
+          </ul>
         )}
       </div>
-      <CrossCourseWarningDialog issues={crossCourseIssues} onGoBack={dismissCrossCourse} onSaveAnyway={confirmCrossCourse} />
+
+      {(page > 1 || result?.hasNext) && (
+        <nav aria-label="Discussion pages" className="flex items-center justify-between mt-4 text-sm">
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+            className="px-3 py-1.5 rounded-md border border-border-strong text-text-secondary hover:bg-surface-1 disabled:opacity-40"
+          >
+            Previous
+          </button>
+          <span className="text-text-tertiary" aria-live="polite">
+            Page {page} of {Math.max(lastPage, page)}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage((p) => p + 1)}
+            disabled={!result?.hasNext}
+            className="px-3 py-1.5 rounded-md border border-border-strong text-text-secondary hover:bg-surface-1 disabled:opacity-40"
+          >
+            Next
+          </button>
+        </nav>
+      )}
     </Layout>
   );
 };

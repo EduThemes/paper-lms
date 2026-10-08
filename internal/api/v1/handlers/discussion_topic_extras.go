@@ -60,6 +60,11 @@ func addDiscussionTopicExtras(c *fiber.Ctx, svc interface{}, parity *service.Dis
 		out["graded"] = false
 	}
 
+	if staff {
+		// The editor locks the group set and anonymity once people post.
+		posted, _ := parity.TopicHasPosts(ctx, topic)
+		out["has_posts"] = posted
+	}
 	if staff && topic.IsSectionSpecific {
 		out["section_ids"] = parity.TopicSectionIDs(ctx, []uint{topic.ID})[topic.ID]
 	}
