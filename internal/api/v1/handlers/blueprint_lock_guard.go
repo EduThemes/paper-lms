@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/utils"
 
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
@@ -97,7 +98,7 @@ func NewBlueprintLockGuard(d BlueprintLockGuardDeps) fiber.Handler {
 		case method == fiber.MethodDelete:
 			edit.Delete = true
 		default:
-			edit.Changes = guardBodyChanges(c, contentType)
+			edit.Changes, edit.Opaque = guardBodyChanges(c, contentType)
 		}
 
 		checkErr := d.Blueprints.CheckChildEdit(c.Context(), courseID, edit)
@@ -180,74 +181,98 @@ func resolveGuardedID(c *fiber.Ctx, d BlueprintLockGuardDeps, courseID uint, con
 // the common case, but the write handlers' BodyParser binds
 // form-encoded and multipart bodies too (assignment[name]=...,
 // assignment.name=...), so those are decoded as well — otherwise a form
-// post would slip past the lock check.
-func guardBodyChanges(c *fiber.Ctx, contentType string) map[string]json.RawMessage {
+// post would slip past the lock check. The content type is resolved the
+// way BodyParser resolves it (vendor suffixes, parameters). A body the
+// guard cannot read but the handler might bind (XML, malformed JSON) is
+// reported as opaque: it is refused for any locked copy.
+func guardBodyChanges(c *fiber.Ctx, contentType string) (changes map[string]json.RawMessage, opaque bool) {
 	body := c.Body()
 	if len(body) == 0 {
-		return nil
+		return nil, false
 	}
 	envelope := blueprintGuardEnvelopes[contentType]
-	ct := strings.ToLower(string(c.Request().Header.ContentType()))
-	if strings.HasPrefix(ct, fiber.MIMEApplicationForm) || strings.HasPrefix(ct, fiber.MIMEMultipartForm) {
-		return guardFormChanges(c, contentType, strings.HasPrefix(ct, fiber.MIMEMultipartForm))
+	ct := utils.ParseVendorSpecificContentType(strings.ToLower(string(c.Request().Header.ContentType())))
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = ct[:i]
+	}
+	ct = strings.TrimSpace(ct)
+	switch {
+	case strings.HasSuffix(ct, "json"):
+	case ct == fiber.MIMEApplicationForm:
+		return guardFormChanges(c, contentType, false)
+	case ct == fiber.MIMEMultipartForm:
+		return guardFormChanges(c, contentType, true)
+	default:
+		return nil, true
 	}
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil {
-		return nil
+		return nil, true
 	}
 	if raw, ok := top[envelope]; ok {
 		var inner map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &inner); err == nil {
-			return inner
+			return inner, false
 		}
 	}
-	return top
+	return top, false
 }
 
 // guardFormChanges maps form fields onto the lockable attribute names.
 // Fiber's form binder matches a field case-insensitively, through any
 // envelope prefix ("assignment[name]", "Assignment.PointsPossible",
 // "name"), so the leaf key is compared loosely: case and underscores
-// ignored.
-func guardFormChanges(c *fiber.Ctx, contentType string, multipart bool) map[string]json.RawMessage {
+// ignored. A field sent more than once is compared as a list, so any
+// differing value counts as a change.
+func guardFormChanges(c *fiber.Ctx, contentType string, multipart bool) (map[string]json.RawMessage, bool) {
 	known := service.BlueprintLockedFields(contentType)
 	if len(known) == 0 {
-		return nil
+		return nil, false
 	}
 	byLoose := make(map[string]string, len(known))
 	for _, k := range known {
 		byLoose[looseFieldName(k)] = k
 	}
-	out := map[string]json.RawMessage{}
+	values := map[string][]string{}
 	add := func(key, value string) {
 		leaf := strings.TrimRight(key, "]")
 		if i := strings.LastIndexAny(leaf, "[."); i >= 0 {
 			leaf = leaf[i+1:]
 		}
-		name, ok := byLoose[looseFieldName(leaf)]
-		if !ok {
-			return
-		}
-		if b, err := json.Marshal(value); err == nil {
-			out[name] = b
+		if name, ok := byLoose[looseFieldName(leaf)]; ok {
+			values[name] = append(values[name], value)
 		}
 	}
 	if multipart {
 		form, err := c.MultipartForm()
 		if err != nil || form == nil {
-			return nil
+			return nil, true
 		}
 		for k, vs := range form.Value {
-			if len(vs) > 0 {
-				add(k, vs[len(vs)-1])
+			for _, v := range vs {
+				add(k, v)
 			}
 		}
-		return out
+	} else {
+		c.Request().PostArgs().VisitAll(func(k, v []byte) {
+			add(string(k), string(v))
+		})
 	}
-	c.Request().PostArgs().VisitAll(func(k, v []byte) {
-		add(string(k), string(v))
-	})
-	return out
+	out := make(map[string]json.RawMessage, len(values))
+	for name, vs := range values {
+		var b []byte
+		var err error
+		if len(vs) == 1 {
+			b, err = json.Marshal(vs[0])
+		} else {
+			b, err = json.Marshal(vs)
+		}
+		if err != nil {
+			return nil, true
+		}
+		out[name] = b
+	}
+	return out, false
 }
 
 func looseFieldName(s string) string {

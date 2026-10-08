@@ -340,6 +340,9 @@ func TestBlueprintLockGuard_RefusesLockedEditsInChildCourses(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, form("application/x-www-form-urlencoded", "assignment%5Bname%5D=Renamed"))
 	assert.Equal(t, http.StatusForbidden, form("application/x-www-form-urlencoded", "Assignment.Name=Renamed"))
 	assert.Equal(t, http.StatusOK, form("application/x-www-form-urlencoded", "assignment%5Bname%5D=Essay"))
+	assert.Equal(t, http.StatusForbidden, form("application/x-www-form-urlencoded", "assignment%5Bname%5D=Essay&assignment%5Bname%5D=Renamed"))
+	// BodyParser binds XML too; the guard cannot read it, so it is refused.
+	assert.Equal(t, http.StatusForbidden, form("application/xml", "<x><Assignment><Name>Renamed</Name></Assignment></x>"))
 	var mp bytes.Buffer
 	mw := multipart.NewWriter(&mp)
 	require.NoError(t, mw.WriteField("assignment[name]", "Renamed"))

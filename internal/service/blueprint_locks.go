@@ -306,8 +306,12 @@ type ChildEdit struct {
 	// questions and question groups).
 	ContentWrite bool
 	// Changes is the write body's attribute map (already unwrapped from
-	// its {"assignment": {...}} envelope); nil when not JSON.
+	// its {"assignment": {...}} envelope).
 	Changes map[string]json.RawMessage
+	// Opaque marks a body that could not be read (an XML or malformed
+	// body the handler may still bind): it may touch any attribute, so
+	// it is refused when anything is locked.
+	Opaque bool
 }
 
 // CheckChildEdit returns a *BlueprintLockedError when the edit touches a
@@ -327,6 +331,15 @@ func (s *BlueprintService) CheckChildEdit(ctx context.Context, childCourseID uin
 			return &BlueprintLockedError{Attributes: []string{"content"}}
 		}
 		return nil
+	}
+	if e.Opaque {
+		var cats []string
+		for _, cat := range []string{"availability_dates", "content", "due_dates", "points"} {
+			if r.has(cat) {
+				cats = append(cats, cat)
+			}
+		}
+		return &BlueprintLockedError{Attributes: cats}
 	}
 	if len(e.Changes) == 0 {
 		return nil
