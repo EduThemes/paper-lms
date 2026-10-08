@@ -16,6 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { rollupResponseToView } from '../utils/outcomeRollups';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 
@@ -129,7 +130,7 @@ const LearningOutcomesPage = () => {
   const handleCreateGroup = async (e) => {
     e.preventDefault();
     try {
-      await api.createOutcomeGroup(courseId, {
+      await api.createCourseOutcomeGroup(courseId, {
         title: newGroupTitle,
         description: newGroupDescription,
       });
@@ -145,7 +146,7 @@ const LearningOutcomesPage = () => {
   const handleDeleteGroup = async (groupId) => {
     if (!window.confirm('Delete this outcome group and all its outcomes?')) return;
     try {
-      await api.deleteOutcomeGroup(courseId, groupId);
+      await api.deleteCourseOutcomeGroup(courseId, groupId);
       fetchGroups();
     } catch (err) {
       setError(err.message);
@@ -192,7 +193,9 @@ const LearningOutcomesPage = () => {
   const handleDeleteOutcome = async (groupId, outcomeId) => {
     if (!window.confirm('Delete this outcome?')) return;
     try {
-      await api.deleteOutcome(courseId, groupId, outcomeId);
+      // deleteOutcome(courseId, outcomeId) — the group id is only used to
+      // refresh the list below; passing it here deleted the wrong outcome.
+      await api.deleteOutcome(courseId, outcomeId);
       // Refresh outcomes for this group
       try {
         const result = await api.getOutcomeGroupOutcomes(courseId, groupId);
@@ -216,8 +219,11 @@ const LearningOutcomesPage = () => {
     if (!showRollup && !rollupData) {
       setRollupLoading(true);
       try {
-        const result = await api.getOutcomeRollup(courseId);
-        setRollupData(result);
+        const [result, enrollmentResult] = await Promise.all([
+          api.getOutcomeRollups(courseId),
+          api.getEnrollments(courseId, 1, 200).catch(() => null),
+        ]);
+        setRollupData(rollupResponseToView(result, enrollmentResult?.data || []));
       } catch (err) {
         setError('Could not load outcome rollup: ' + err.message);
       } finally {
@@ -418,7 +424,8 @@ const LearningOutcomesPage = () => {
                             {(rollupData.outcomes || []).map((outcome) => {
                               const score = student.scores?.[outcome.id];
                               const mastery = outcome.mastery_points || 3;
-                              const isMastered = score !== null && score !== undefined && score >= mastery;
+                              const isMastered = score !== null && score !== undefined &&
+                                (student.mastery?.[outcome.id] ?? score >= mastery);
                               return (
                                 <td
                                   key={`${student.user_id}-${outcome.id}`}
@@ -476,7 +483,7 @@ const LearningOutcomesPage = () => {
                           const score = student.scores?.[outcome.id];
                           const mastery = outcome.mastery_points || 3;
                           const hasScore = score !== null && score !== undefined;
-                          const isMastered = hasScore && score >= mastery;
+                          const isMastered = hasScore && (student.mastery?.[outcome.id] ?? score >= mastery);
                           return (
                             <div
                               key={`${student.user_id}-${outcome.id}`}

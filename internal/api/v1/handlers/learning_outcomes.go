@@ -17,10 +17,60 @@ type LearningOutcomeHandler struct {
 	// reads are ListResults (per-user outcome attainment) and
 	// GetMasteryGradebook (per-student mastery rollups).
 	auditService *service.AuditService
+	// enrollmentRepo resolves an observer's linked students in a course
+	// (B087). Optional: when nil, observers see no results.
+	enrollmentRepo repository.EnrollmentRepository
 }
 
 func NewLearningOutcomeHandler(outcomeService *service.LearningOutcomeService, alignmentRepo repository.OutcomeAlignmentRepository, auditService *service.AuditService) *LearningOutcomeHandler {
 	return &LearningOutcomeHandler{outcomeService: outcomeService, alignmentRepo: alignmentRepo, auditService: auditService}
+}
+
+// SetEnrollmentRepo wires the enrollment lookup used to let an observer read
+// their linked students' outcome results.
+func (h *LearningOutcomeHandler) SetEnrollmentRepo(repo repository.EnrollmentRepository) {
+	h.enrollmentRepo = repo
+}
+
+// outcomeResultAudience reports which students' outcome results the caller
+// may read in the course. staff=true (teacher/TA/admin) means every student.
+// Otherwise the caller sees only their own results, plus — for an observer —
+// the students they are linked to in this course (Canvas outcome_results /
+// outcome_rollups restrict students to themselves; B087).
+func (h *LearningOutcomeHandler) outcomeResultAudience(c *fiber.Ctx, courseID uint) (allowed []uint, staff bool) {
+	if callerIsCourseStaff(c) {
+		return nil, true
+	}
+	callerID, _ := c.Locals("user_id").(uint)
+	if callerID == 0 {
+		return nil, false
+	}
+	allowed = []uint{callerID}
+	if et, _ := c.Locals("enrollment_type").(string); et == "ObserverEnrollment" && h.enrollmentRepo != nil {
+		enrollments, err := h.enrollmentRepo.ListByUserID(c.Context(), callerID, callerAccountID(c))
+		if err == nil {
+			seen := map[uint]bool{callerID: true}
+			for _, e := range enrollments {
+				if e.CourseID != courseID || e.Type != "ObserverEnrollment" || e.WorkflowState != models.EnrollmentActive || e.AssociatedUserID == nil {
+					continue
+				}
+				if !seen[*e.AssociatedUserID] {
+					seen[*e.AssociatedUserID] = true
+					allowed = append(allowed, *e.AssociatedUserID)
+				}
+			}
+		}
+	}
+	return allowed, false
+}
+
+func containsUint(ids []uint, id uint) bool {
+	for _, v := range ids {
+		if v == id {
+			return true
+		}
+	}
+	return false
 }
 
 func outcomeGroupToJSON(g *models.LearningOutcomeGroup) fiber.Map {
@@ -401,7 +451,30 @@ func (h *LearningOutcomeHandler) ListResults(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid course ID")
 	}
 
+	// SECURITY (B087): the route is `enrolled`, so a student could read
+	// every classmate's outcome scores (no user_id) or any one classmate's
+	// (user_id=<classmate>). Only course staff see other students; students
+	// see themselves and observers their linked students. A disallowed
+	// user_id is a 404, matching the existence-leak contract.
+	allowed, staff := h.outcomeResultAudience(c, uint(courseID))
+
 	userID := c.QueryInt("user_id", 0)
+	if userID > 0 && !staff && !containsUint(allowed, uint(userID)) {
+		return responses.NotFound(c, "outcome results")
+	}
+	if userID == 0 && !staff {
+		items := []fiber.Map{}
+		for _, uid := range allowed {
+			results, err := h.outcomeService.ListResultsByUserAndContext(c.Context(), uid, "Course", uint(courseID))
+			if err != nil {
+				return responses.InternalError(c, "Could not fetch outcome results")
+			}
+			for i := range results {
+				items = append(items, outcomeResultToJSON(&results[i]))
+			}
+		}
+		return c.JSON(fiber.Map{"outcome_results": items})
+	}
 	if userID > 0 {
 		results, err := h.outcomeService.ListResultsByUserAndContext(c.Context(), uint(userID), "Course", uint(courseID))
 		if err != nil {
@@ -507,7 +580,18 @@ func (h *LearningOutcomeHandler) GetMasteryGradebook(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	rollups, outcomes, err := h.outcomeService.GetMasteryGradebook(c.Context(), uint(courseID), callerAccountID(c), params)
+	// SECURITY (B087): non-staff callers get only their own rollups (or,
+	// for observers, their linked students'), never the whole class.
+	allowed, staff := h.outcomeResultAudience(c, uint(courseID))
+	var (
+		rollups  []service.MasteryRollup
+		outcomes []models.LearningOutcome
+	)
+	if staff {
+		rollups, outcomes, err = h.outcomeService.GetMasteryGradebook(c.Context(), uint(courseID), callerAccountID(c), params)
+	} else {
+		rollups, outcomes, err = h.outcomeService.GetMasteryGradebookForUsers(c.Context(), uint(courseID), callerAccountID(c), allowed, params)
+	}
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch mastery gradebook")
 	}
@@ -543,7 +627,16 @@ func (h *LearningOutcomeHandler) GetMasteryGradebook(c *fiber.Ctx) error {
 	// rollups across every outcome — bulk read of academic-record
 	// data. studentID=0 per the bulk convention.
 	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
-		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "mastery_gradebook", "courses", uint(courseID), c.IP(), c.Get("User-Agent"))
+		if staff {
+			_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "mastery_gradebook", "courses", uint(courseID), c.IP(), c.Get("User-Agent"))
+		} else {
+			// Observer reading a linked student's rollups.
+			for _, uid := range allowed {
+				if uid != callerID {
+					_ = h.auditService.LogPIIAccess(c.Context(), callerID, uid, "read", "mastery_gradebook", "courses", uint(courseID), c.IP(), c.Get("User-Agent"))
+				}
+			}
+		}
 	}
 
 	return c.JSON(fiber.Map{
