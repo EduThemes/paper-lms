@@ -72,6 +72,41 @@ func (h *CalendarEventHandler) ListEvents(c *fiber.Ctx) error {
 	return c.JSON(events)
 }
 
+// authorizeEventRead enforces who may read a single calendar event (the
+// repo lookup has already applied the tenant filter). It returns
+// wrote=true after writing the refusal; the caller MUST return err.
+//
+//   - User context: a personal calendar — the owner (or an admin) only.
+//     Anyone else gets the same 404 as a missing event.
+//   - Course context: course members (enrolled, or admin).
+//   - Account context: everyone in the tenant.
+//   - Group / anything else: the creator or an admin.
+func (h *CalendarEventHandler) authorizeEventRead(c *fiber.Ctx, event *models.CalendarEvent) (bool, error) {
+	userID, _ := c.Locals("user_id").(uint)
+	switch event.ContextType {
+	case "User":
+		if event.ContextID == userID || event.CreatedByUserID == userID {
+			return false, nil
+		}
+		if callerIsAdmin(c, h.authz) {
+			return false, nil
+		}
+		return true, responses.NotFound(c, "calendar event")
+	case "Course":
+		if err := h.authz.RequireCourseEnrolled(c, event.ContextID); authzDenied(c, err) {
+			return true, err
+		}
+		return false, nil
+	case "Account":
+		return false, nil
+	default:
+		if event.CreatedByUserID == userID || callerIsAdmin(c, h.authz) {
+			return false, nil
+		}
+		return true, responses.NotFound(c, "calendar event")
+	}
+}
+
 func (h *CalendarEventHandler) GetEvent(c *fiber.Ctx) error {
 	id, err := c.ParamsInt("id")
 	if err != nil {
@@ -82,8 +117,48 @@ func (h *CalendarEventHandler) GetEvent(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.NotFound(c, "calendar event")
 	}
+	if wrote, err := h.authorizeEventRead(c, event); wrote {
+		return err
+	}
 
 	return c.JSON(calendarEventToJSON(event))
+}
+
+// authorizeEventCreate enforces where the caller may create an event,
+// mirroring Canvas's manage_calendar rules. It returns wrote=true after
+// writing the refusal; the caller MUST return err.
+//
+//   - User: only the caller's own calendar.
+//   - Course: an instructor (teacher/TA) of the course, or an admin.
+//   - Account: an admin of that account (the caller's tenant).
+//   - Anything else is refused.
+func (h *CalendarEventHandler) authorizeEventCreate(c *fiber.Ctx, event *models.CalendarEvent) (bool, error) {
+	userID, _ := c.Locals("user_id").(uint)
+	switch event.ContextType {
+	case "User":
+		if event.ContextID != userID {
+			return true, responses.Forbidden(c, "you can only add events to your own calendar")
+		}
+		return false, nil
+	case "Course":
+		if event.ContextID == 0 {
+			return true, responses.BadRequest(c, "context_id is required")
+		}
+		if err := h.authz.RequireCourseInstructor(c, event.ContextID); authzDenied(c, err) {
+			return true, err
+		}
+		return false, nil
+	case "Account":
+		if event.ContextID != callerAccountID(c) {
+			return true, responses.NotFound(c, "account")
+		}
+		if !callerIsAdmin(c, h.authz) {
+			return true, responses.Forbidden(c, "admin access required")
+		}
+		return false, nil
+	default:
+		return true, responses.BadRequest(c, "context_type must be one of: User, Course, Account")
+	}
 }
 
 func (h *CalendarEventHandler) CreateEvent(c *fiber.Ctx) error {
@@ -107,9 +182,19 @@ func (h *CalendarEventHandler) CreateEvent(c *fiber.Ctx) error {
 
 	userID, _ := c.Locals("user_id").(uint)
 
+	// No context means the caller's personal calendar.
+	contextType := input.CalendarEvent.ContextType
+	contextID := input.CalendarEvent.ContextID
+	if contextType == "" {
+		contextType = "User"
+		if contextID == 0 {
+			contextID = userID
+		}
+	}
+
 	event := &models.CalendarEvent{
-		ContextType:     input.CalendarEvent.ContextType,
-		ContextID:       input.CalendarEvent.ContextID,
+		ContextType:     contextType,
+		ContextID:       contextID,
 		Title:           input.CalendarEvent.Title,
 		Description:     service.SanitizeHTML(input.CalendarEvent.Description),
 		StartAt:         input.CalendarEvent.StartAt,
@@ -118,6 +203,10 @@ func (h *CalendarEventHandler) CreateEvent(c *fiber.Ctx) error {
 		LocationAddress: input.CalendarEvent.LocationAddress,
 		AllDay:          input.CalendarEvent.AllDay,
 		CreatedByUserID: userID,
+	}
+
+	if wrote, err := h.authorizeEventCreate(c, event); wrote {
+		return err
 	}
 
 	if err := h.calendarService.Create(c.Context(), event); err != nil {
@@ -139,7 +228,7 @@ func (h *CalendarEventHandler) UpdateEvent(c *fiber.Ctx) error {
 	}
 
 	// Authorization: only the event creator or admin can update
-	if err := h.authz.RequireOwnerOrAdmin(c, event.CreatedByUserID); err != nil {
+	if err := h.authz.RequireOwnerOrAdmin(c, event.CreatedByUserID); authzDenied(c, err) {
 		return err
 	}
 
@@ -199,7 +288,7 @@ func (h *CalendarEventHandler) DeleteEvent(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.NotFound(c, "calendar event")
 	}
-	if err := h.authz.RequireOwnerOrAdmin(c, event.CreatedByUserID); err != nil {
+	if err := h.authz.RequireOwnerOrAdmin(c, event.CreatedByUserID); authzDenied(c, err) {
 		return err
 	}
 

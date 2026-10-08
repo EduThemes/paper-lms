@@ -2549,7 +2549,7 @@ export const api = {
   cancelAppointmentReservation: (id, slotId, reservationId) =>
     request(`/appointment_groups/${id}/appointments/${slotId}/reservations/${reservationId}`, { method: 'DELETE' }),
   listMyAppointmentReservations: () =>
-    request(`/users/self/appointments`).catch(() => ({ data: [] })),
+    request(`/users/self/appointments`),
 
   // ==========================================================================
   // P3 Features: Outcome Proficiency + Learning Mastery Gradebook

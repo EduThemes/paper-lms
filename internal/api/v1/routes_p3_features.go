@@ -57,6 +57,7 @@ func (r *Router) registerP3FeatureRoutes(protected fiber.Router, admin, enrolled
 	protected.Get("/appointment_groups/:id/appointments/:slot_id/reservations", r.AppointmentGroupHandler.ListReservations)
 	protected.Post("/appointment_groups/:id/appointments/:slot_id/reservations", r.AppointmentGroupHandler.Reserve)
 	protected.Delete("/appointment_groups/:id/appointments/:slot_id/reservations/:reservation_id", r.AppointmentGroupHandler.CancelReservation)
+	protected.Get("/users/self/appointments", r.AppointmentGroupHandler.ListMyReservations)
 
 	// Outcome Proficiency — Account scope
 	protected.Get("/accounts/:id/outcome_proficiency", admin, r.OutcomeProficiencyHandler.GetForAccount)

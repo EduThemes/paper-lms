@@ -206,10 +206,11 @@ const GroupsPage = () => {
     }
   };
 
-  const handleRemoveMember = async (membershipId) => {
+  // api.deleteGroupMembership takes (groupId, membershipId).
+  const handleRemoveMember = async (groupId, membershipId) => {
     if (!window.confirm('Remove this member from the group?')) return;
     try {
-      await api.deleteGroupMembership(membershipId);
+      await api.deleteGroupMembership(groupId, membershipId);
       setLoading(true);
       await fetchData();
     } catch (err) {
@@ -219,6 +220,38 @@ const GroupsPage = () => {
 
   const getMembersInGroup = (groupId) => {
     return membersByGroup[groupId] || [];
+  };
+
+  const myMembershipIn = (groupId) =>
+    getMembersInGroup(groupId).find((m) => m.user_id === user?.id || m.user?.id === user?.id);
+
+  // Student self sign-up (group sets with self_signup enabled/restricted).
+  // Joining a group moves the student out of any other group in the set.
+  const handleJoinGroup = async (groupId) => {
+    setSaving(true);
+    try {
+      await api.createGroupMembership(groupId, {});
+      setLoading(true);
+      await fetchData();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLeaveGroup = async (groupId, membershipId) => {
+    if (!window.confirm('Leave this group?')) return;
+    setSaving(true);
+    try {
+      await api.deleteGroupMembership(groupId, membershipId);
+      setLoading(true);
+      await fetchData();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const getAvailableUsers = (groupId) => {
@@ -355,6 +388,25 @@ const GroupsPage = () => {
                             </span>
                           )}
                         </div>
+                        {isTeacher === false && (cat.self_signup === 'enabled' || cat.self_signup === 'restricted') && (
+                          myMembershipIn(group.id) ? (
+                            <button
+                              onClick={() => handleLeaveGroup(group.id, myMembershipIn(group.id).id)}
+                              disabled={saving}
+                              className="text-sm text-accent-danger hover:underline disabled:opacity-50"
+                            >
+                              Leave
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleJoinGroup(group.id)}
+                              disabled={saving}
+                              className="text-sm text-brand-600 hover:underline disabled:opacity-50"
+                            >
+                              Join
+                            </button>
+                          )
+                        )}
                         {isTeacher && (
                           <div className="flex items-center space-x-2">
                             <button
@@ -434,7 +486,7 @@ const GroupsPage = () => {
                               )}
                               {isTeacher && (
                                 <button
-                                  onClick={() => handleRemoveMember(member.id)}
+                                  onClick={() => handleRemoveMember(group.id, member.id)}
                                   className="text-text-disabled hover:text-accent-danger ml-1"
                                   title="Remove member"
                                 >

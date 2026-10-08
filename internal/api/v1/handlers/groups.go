@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"strconv"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
@@ -555,8 +557,25 @@ func (h *GroupHandler) CreateGroupMembership(c *fiber.Ctx) error {
 	}
 
 	if courseID != 0 {
-		if err := h.authz.RequireCourseInstructor(c, courseID); err != nil {
-			return err
+		if !callerIsCourseInstructor(c, h.authz, courseID) {
+			// Self-signup (Canvas Group#allow_self_signup?): a student may
+			// add only themselves, as a plain accepted member, to a group
+			// whose set has self sign-up enabled. Everything else needs an
+			// instructor.
+			if userID != callerID || input.Membership.Moderator ||
+				(input.Membership.WorkflowState != "" && input.Membership.WorkflowState != "accepted") {
+				return responses.Forbidden(c, "instructor access required")
+			}
+			if err := h.authz.RequireCourseEnrolled(c, courseID); authzDenied(c, err) {
+				return err
+			}
+			group, gerr := h.groupService.GetGroup(c.Context(), uint(groupID), callerAccountID(c))
+			if gerr != nil {
+				return responses.NotFound(c, "group")
+			}
+			if err := h.groupService.CheckSelfSignup(c.Context(), group, callerID, courseID); err != nil {
+				return responses.Forbidden(c, err.Error())
+			}
 		}
 	} else {
 		// Non-course group. Self-signup is OK with constrained fields;
@@ -627,7 +646,7 @@ func (h *GroupHandler) UpdateGroupMembership(c *fiber.Ctx) error {
 	}
 
 	membership, err := h.groupService.GetMembership(c.Context(), uint(membershipID), callerAccountID(c))
-	if err != nil {
+	if err != nil || (c.Params("group_id") != "" && c.Params("group_id") != strconv.FormatUint(uint64(membership.GroupID), 10)) {
 		return responses.NotFound(c, "group membership")
 	}
 
@@ -687,7 +706,7 @@ func (h *GroupHandler) DeleteGroupMembership(c *fiber.Ctx) error {
 
 	// Fetch first to check authorization
 	membership, err := h.groupService.GetMembership(c.Context(), uint(membershipID), callerAccountID(c))
-	if err != nil {
+	if err != nil || (c.Params("group_id") != "" && c.Params("group_id") != strconv.FormatUint(uint64(membership.GroupID), 10)) {
 		return responses.NotFound(c, "group membership")
 	}
 
