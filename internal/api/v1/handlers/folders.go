@@ -140,7 +140,7 @@ func (h *FolderHandler) UpdateFolder(c *fiber.Ctx) error {
 		if err := h.authz.RequireCourseInstructor(c, folder.ContextID); err != nil {
 			return err
 		}
-	} else if !canManageNonCourseFolder(c, folder) {
+	} else if !h.canManageNonCourseFolder(c, folder) {
 		return responses.NotFound(c, "folder")
 	}
 
@@ -182,7 +182,7 @@ func (h *FolderHandler) DeleteFolder(c *fiber.Ctx) error {
 		if err := h.authz.RequireCourseInstructor(c, folder.ContextID); err != nil {
 			return err
 		}
-	} else if !canManageNonCourseFolder(c, folder) {
+	} else if !h.canManageNonCourseFolder(c, folder) {
 		return responses.NotFound(c, "folder")
 	}
 
@@ -233,8 +233,9 @@ func (h *FolderHandler) ListSubfolders(c *fiber.Ctx) error {
 // was already loaded under the caller's tenant). Pre-fix UpdateFolder and
 // DeleteFolder checked only Course folders, so any authenticated user in
 // the tenant could rename or delete another user's or a group's folder.
-func canManageNonCourseFolder(c *fiber.Ctx, folder *models.Folder) bool {
-	if isAdmin, _ := c.Locals("is_admin").(bool); isAdmin {
+func (h *FolderHandler) canManageNonCourseFolder(c *fiber.Ctx, folder *models.Folder) bool {
+	// DB-backed role (masquerade-capped), not the JWT is_admin hint.
+	if callerIsAdmin(c, h.authz) {
 		return true
 	}
 	userID, _ := c.Locals("user_id").(uint)

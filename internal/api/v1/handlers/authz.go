@@ -137,3 +137,28 @@ func (a *ResourceAuthorizer) RequireOwnerOrAdmin(c *fiber.Ctx, ownerUserID uint)
 	}
 	return authzForbidden("you can only access your own resources")
 }
+
+// RequireUserInTenant returns a 404 unless userID names a user in the
+// caller's tenant. A super_admin crosses tenants by design. Use it on
+// admin-gated routes keyed by a bare user id (the `admin` middleware only
+// checks the tenant when the URL carries :account_id).
+func (a *ResourceAuthorizer) RequireUserInTenant(c *fiber.Ctx, userID uint) error {
+	if userID == 0 || a.userRepo == nil {
+		return authzNotFound("user")
+	}
+	scope := callerAccountID(c)
+	if middleware.EffectiveRole(c, a.userRepo) == middleware.RoleSuperAdmin {
+		scope = 0
+	}
+	if u, err := a.userRepo.FindByID(c.Context(), userID, scope); err != nil || u == nil {
+		return authzNotFound("user")
+	}
+	return nil
+}
+
+// RequireCourseInTenant returns a 404 unless courseID names a course in the
+// caller's tenant (any course for a super_admin). It checks no enrollment.
+func (a *ResourceAuthorizer) RequireCourseInTenant(c *fiber.Ctx, courseID uint) error {
+	_, err := a.loadCourse(c, middleware.EffectiveRole(c, a.userRepo), courseID)
+	return err
+}

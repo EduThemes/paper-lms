@@ -625,6 +625,10 @@ func TestListGroupMemberships_FiresBulkLogPIIAccess(t *testing.T) {
 		PerPage:    25,
 	}, nil)
 
+	// The caller is a same-tenant admin (DB role): only staff and admins
+	// get members' email/login_id, so only their reads are PII accesses.
+	userRepo.On("FindByID", mock.Anything, uint(7), uint(0)).Return(&models.User{ID: 7, AccountID: 1, Role: "admin"}, nil)
+
 	groupSvc := service.NewGroupService(catRepo, groupRepo, membershipRepo, enrollmentRepo)
 	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo, new(mocks.MockCourseRepository))
 	sink := newPIISink()

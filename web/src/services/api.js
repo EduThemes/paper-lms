@@ -2086,14 +2086,15 @@ export const api = {
   },
 
   // COPPA / Parental Consent
-  requestConsent: async (userId) => {
-    const { data } = await request('/consent/request', {
-      method: 'POST', body: JSON.stringify({ user_id: userId }),
+  requestConsent: async (userId, parentEmail, consentType = 'data_collection') => {
+    const { data } = await request(`/users/${userId}/parental_consent`, {
+      method: 'POST', body: JSON.stringify({ parent_email: parentEmail, consent_type: consentType }),
     });
     return data;
   },
-  listConsents: async (page = 1, perPage = 20) => {
-    return request(`/consent?page=${page}&per_page=${perPage}`);
+  listConsents: async (userId) => {
+    const { data } = await request(`/users/${userId}/parental_consent`);
+    return data;
   },
   verifyConsent: async (token, granted) => {
     const { data } = await request(`/consent/verify/${token}`, {

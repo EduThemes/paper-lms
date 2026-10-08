@@ -802,7 +802,7 @@ func main() {
 	userHandler := handlers.NewUserHandler(userService, cfg.JWTSecret, cfg.Environment, tokenBlacklist, auditService, loginPipeline).
 		WithCOPPADeps(accountRepo, ageVerificationRepo, parentalConsentRepo, authAudit)
 	accountHandler := handlers.NewAccountHandler(accountRepo)
-	courseHandler := handlers.NewCourseHandler(courseService, enrollmentService)
+	courseHandler := handlers.NewCourseHandler(courseService, enrollmentService).SetUserRepo(userRepo)
 	// sectionHandler is constructed below, after `authz` is available.
 	// See the NewResourceAuthorizer line further down in this same
 	// init block. Section authz piggy-backs on RequireCourseEnrolled.
@@ -835,6 +835,7 @@ func main() {
 	discussionEntryHandler := handlers.NewDiscussionEntryHandler(discussionService)
 	fileHandler := handlers.NewFileHandler(fileService, enrollmentRepo, groupMembershipRepo, auditService)
 	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo, courseRepo)
+	fileHandler.SetAuthorizer(authz)
 	folderHandler := handlers.NewFolderHandler(fileService, authz)
 	sectionHandler = handlers.NewSectionHandler(sectionRepo, authz)
 	sisImportHandler := handlers.NewSISImportHandler(sisImportService)
@@ -890,14 +891,14 @@ func main() {
 	// handlers
 	customRoleHandler := handlers.NewCustomRoleHandler(customRoleService)
 	onerosterHandler := handlers.NewOneRosterHandler(onerosterService)
-	documentAnnotationHandler := handlers.NewDocumentAnnotationHandler(documentAnnotationService, submissionService, assignmentRepo, submissionRepo, authz)
+	documentAnnotationHandler := handlers.NewDocumentAnnotationHandler(documentAnnotationService, submissionService, assignmentRepo, submissionRepo, authz).SetObserverService(observerService)
 	// handlers
 	discussionV2Handler := handlers.NewDiscussionV2Handler(discussionV2Service)
 	contentImportHandler := handlers.NewContentImportHandler(imsccParser, contentMigrationService, cfg.FileStoragePath)
 	batchHandler := handlers.NewBatchHandler(batchService, authz)
 	// handlers
-	coppaHandler := handlers.NewCOPPAHandler(coppaService)
-	ferpaHandler := handlers.NewFERPAHandler(ferpaService)
+	coppaHandler := handlers.NewCOPPAHandler(coppaService).SetAuthorizer(authz)
+	ferpaHandler := handlers.NewFERPAHandler(ferpaService).SetAuthorizer(authz)
 	accommodationHandler := handlers.NewAccommodationHandler(accommodationService, assignmentService, authz, auditService)
 	attendanceHandler := handlers.NewAttendanceHandler(attendanceService, auditService)
 	portfolioHandler := handlers.NewPortfolioHandler(portfolioService, authz)
@@ -946,7 +947,7 @@ func main() {
 	quizItemBankService.SetQuizRepo(quizRepo)
 	quizStimulusService := service.NewQuizStimulusService(quizStimulusRepo, quizQuestionRepo)
 	quizStimulusService.SetQuizRepo(quizRepo)
-	quizOutcomeAlignmentService := service.NewQuizOutcomeAlignmentService(quizQuestionOutcomeAlignmentRepo, quizQuestionRepo, outcomeRepo)
+	quizOutcomeAlignmentService := service.NewQuizOutcomeAlignmentService(quizQuestionOutcomeAlignmentRepo, quizQuestionRepo, outcomeRepo).SetQuizRepo(quizRepo)
 	quizItemBankHandler := handlers.NewQuizItemBankHandler(quizItemBankService)
 	quizStimulusHandler := handlers.NewQuizStimulusHandler(quizStimulusService)
 	quizOutcomeAlignmentHandler := handlers.NewQuizOutcomeAlignmentHandler(quizOutcomeAlignmentService)

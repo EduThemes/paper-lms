@@ -24,6 +24,15 @@ type FileHandler struct {
 	enrollmentRepo      repository.EnrollmentRepository
 	groupMembershipRepo repository.GroupMembershipRepository
 	auditService        *service.AuditService
+	// authz supplies the DB-backed admin role and the course gate used by
+	// canReadContextFiles. Nil means no admin bypass.
+	authz *ResourceAuthorizer
+}
+
+// SetAuthorizer wires the DB-backed role / course checks.
+func (h *FileHandler) SetAuthorizer(a *ResourceAuthorizer) *FileHandler {
+	h.authz = a
+	return h
 }
 
 // NewFileHandler wires the file-handler dependencies. groupMembershipRepo
@@ -322,21 +331,23 @@ func (h *FileHandler) DownloadFile(c *fiber.Ctx) error {
 // context types.
 func (h *FileHandler) canReadContextFiles(c *fiber.Ctx, contextType string, contextID uint) bool {
 	userID, _ := c.Locals("user_id").(uint)
-	isAdmin, _ := c.Locals("is_admin").(bool)
+	// DB-backed role (masquerade-capped). The JWT is_admin Locals is only
+	// a hint: these routes have no permission gate to refresh it, so a
+	// demoted admin's unexpired token would still carry it.
+	isAdmin := callerIsAdmin(c, h.authz)
 	switch contextType {
 	case "Course":
-		// Same-tenant admins manage every course without an enrollment
-		// (the attachment/folder was already loaded under the caller's
-		// tenant); without this an admin browsing a course's Files got
-		// a 404 on every folder listing.
-		if isAdmin {
-			return true
+		// Same rule as the course routes: same-tenant admins, or an active
+		// enrollment — and students/observers are refused while the course
+		// is unpublished.
+		if h.authz != nil {
+			return h.authz.RequireCourseEnrolled(c, contextID) == nil
 		}
 		enrollment, _ := h.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, contextID, callerAccountID(c))
 		return enrollment != nil && enrollment.WorkflowState == "active"
 	case "User":
 		// Personal files: only the owner. Admins of the same tenant
-		// retain access via the tenant gate + is_admin Locals; that
+		// retain access via the tenant gate + the DB admin role; that
 		// combination is intentionally permissive for FERPA /
 		// data-export workflows.
 		return isAdmin || contextID == userID

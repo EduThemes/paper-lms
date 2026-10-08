@@ -151,8 +151,27 @@ func (r *Resolver) resolveCourse(ctx context.Context, userID uint, args map[stri
 	if err != nil {
 		return nil, fmt.Errorf("course not found: %w", err)
 	}
+	// REST courseGate parity: students and observers can't reach a course
+	// that has not been published yet.
+	if !isAdmin && learnerBlockedFromCourse(course, role) {
+		return nil, fmt.Errorf("not authorized to view this course")
+	}
 
 	return r.buildCourseMap(ctx, course, isAdmin || isStaffEnrollmentType(role), subFields, variables)
+}
+
+// learnerBlockedFromCourse reports whether a student/observer enrollment
+// is refused because the course is still unpublished (claimed, created or
+// unpublished) — the same rule as the REST course gate.
+func learnerBlockedFromCourse(course *models.Course, enrollmentType string) bool {
+	if enrollmentType != "StudentEnrollment" && enrollmentType != "ObserverEnrollment" {
+		return false
+	}
+	switch course.WorkflowState {
+	case models.CourseClaimed, models.CourseCreated, models.CourseUnpublished:
+		return true
+	}
+	return false
 }
 
 // isStaffEnrollmentType reports whether an enrollment type may see a
@@ -206,6 +225,9 @@ func (r *Resolver) resolveAllCourses(ctx context.Context, userID uint, args map[
 			role, roleErr := r.enrollmentService.GetUserRole(ctx, userID, course.ID, AccountIDFromContext(ctx))
 			if roleErr != nil {
 				// Not (or no longer) enrolled: never expose the course.
+				continue
+			}
+			if learnerBlockedFromCourse(course, role) {
 				continue
 			}
 			staff = isStaffEnrollmentType(role)
@@ -328,7 +350,7 @@ func (r *Resolver) buildCourseMap(ctx context.Context, course *models.Course, vi
 			result["enrollments"] = enrollments
 		case "modules":
 			resolvedArgs := resolveVariables(f.Arguments, variables)
-			modules, err := r.resolveCourseModules(ctx, course.ID, resolvedArgs, f.Fields)
+			modules, err := r.resolveCourseModules(ctx, course.ID, viewerIsStaff, resolvedArgs, f.Fields)
 			if err != nil {
 				return nil, err
 			}
@@ -550,12 +572,20 @@ func (r *Resolver) resolveCourseEnrollments(ctx context.Context, courseID uint, 
 	return items, nil
 }
 
-func (r *Resolver) resolveCourseModules(ctx context.Context, courseID uint, args map[string]interface{}, subFields []Field) (interface{}, error) {
+// resolveCourseModules lists a course's modules. Students and observers get
+// published modules only (REST B045 parity); staff see drafts too.
+func (r *Resolver) resolveCourseModules(ctx context.Context, courseID uint, viewerIsStaff bool, args map[string]interface{}, subFields []Field) (interface{}, error) {
 	page := getIntArgOr(args, "page", 1)
 	perPage := getIntArgOr(args, "perPage", 100)
 
 	params := repository.PaginationParams{Page: page, PerPage: perPage}
-	result, err := r.moduleService.ListByCourse(ctx, courseID, params)
+	var result *repository.PaginatedResult[models.ContextModule]
+	var err error
+	if viewerIsStaff {
+		result, err = r.moduleService.ListByCourse(ctx, courseID, params)
+	} else {
+		result, err = r.moduleService.ListPublishedByCourse(ctx, courseID, params)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to list modules for course %d: %w", courseID, err)
 	}

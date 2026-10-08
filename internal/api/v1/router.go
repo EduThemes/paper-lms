@@ -756,12 +756,12 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Post("/annotations/:id/replies", r.DocumentAnnotationHandler.ReplyToAnnotation)
 
 	// COPPA / Parental Consent (admin + public verify)
-	protected.Post("/consent/request", admin, r.COPPAHandler.RequestConsent)
-	protected.Get("/consent", admin, r.COPPAHandler.ListConsents)
+	protected.Post("/users/:user_id/parental_consent", admin, r.COPPAHandler.RequestConsent)
+	protected.Get("/users/:user_id/parental_consent", admin, r.COPPAHandler.ListConsents)
 	protected.Post("/consent/verify/:token", r.COPPAHandler.VerifyConsent)
 	protected.Delete("/consent/:id", admin, r.COPPAHandler.RevokeConsent)
-	protected.Get("/data_processing_agreements", admin, r.COPPAHandler.ListDPAs)
-	protected.Post("/data_processing_agreements", admin, r.COPPAHandler.CreateDPA)
+	protected.Get("/accounts/:account_id/data_processing_agreements", admin, r.COPPAHandler.ListDPAs)
+	protected.Post("/accounts/:account_id/data_processing_agreements", admin, r.COPPAHandler.CreateDPA)
 	protected.Put("/data_processing_agreements/:id", admin, r.COPPAHandler.UpdateDPA)
 
 	// FERPA Compliance (self/admin)

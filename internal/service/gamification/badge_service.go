@@ -239,6 +239,19 @@ func (s *BadgeService) Revoke(ctx context.Context, userID, badgeID uint) error {
 	return s.awardRepo.Revoke(ctx, userID, badgeID)
 }
 
+// RevokeInTenant revokes the award only when the badge belongs to the
+// caller's tenant (ErrBadgeWrongTenant otherwise).
+func (s *BadgeService) RevokeInTenant(ctx context.Context, userID, badgeID, callerTenantID uint) error {
+	badge, err := s.FindByID(ctx, badgeID)
+	if err != nil {
+		return err
+	}
+	if badge.TenantID != callerTenantID {
+		return ErrBadgeWrongTenant
+	}
+	return s.awardRepo.Revoke(ctx, userID, badgeID)
+}
+
 // LookupBadgesByIDs fetches badges in bulk by ID, returning a map keyed by
 // badge.ID. Missing IDs simply aren't in the map (used to surface flattened
 // award rows where the badge has been deleted).

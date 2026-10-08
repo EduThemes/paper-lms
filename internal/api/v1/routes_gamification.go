@@ -76,8 +76,10 @@ func (r *Router) registerGamificationRoutes(protected fiber.Router, admin, instr
 	protected.Get("/users/:id/badges", selfOrAdmin, r.GamificationHandler.ListUserBadges)
 	// Manual award / revoke. Admin only at the route level today;
 	// instructor-flow lands when course-scope role check matures.
-	protected.Post("/users/:user_id/badges", admin, r.GamificationHandler.AwardBadgeToUser)
-	protected.Delete("/users/:user_id/badges/:badge_id", admin, r.GamificationHandler.RevokeBadgeFromUser)
+	// selfOrAdmin after admin ties :user_id to the caller's tenant (the
+	// `admin` gate checks the tenant only on /accounts/:account_id).
+	protected.Post("/users/:user_id/badges", admin, selfOrAdmin, r.GamificationHandler.AwardBadgeToUser)
+	protected.Delete("/users/:user_id/badges/:badge_id", admin, selfOrAdmin, r.GamificationHandler.RevokeBadgeFromUser)
 
 	// W3-A — course leaderboard. W3-B widened access to enrolled
 	// students with server-side pseudonym substitution + tenant-mode

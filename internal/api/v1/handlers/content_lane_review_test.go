@@ -22,6 +22,10 @@ import (
 // course folder's files; the new gate must not lock admins out.
 func TestListFolderFiles_SameTenantAdminAllowed(t *testing.T) {
 	h, folders, attachments, enrollments := newFileFixture(t)
+	// The admin role comes from the DB (EffectiveRole), not the JWT hint.
+	courses := new(mocks.MockCourseRepository)
+	courses.On("FindByID", mock.Anything, uint(99), uint(1)).Return(&models.Course{ID: 99, AccountID: 1, WorkflowState: models.CourseAvailable}, nil)
+	h.SetAuthorizer(handlers.NewResourceAuthorizer(enrollments, roleUserRepo(7, "admin"), courses))
 	folders.On("FindByID", mock.Anything, uint(61), uint(1)).Return(&models.Folder{ID: 61, ContextType: "Course", ContextID: 99, WorkflowState: "visible"}, nil)
 	enrollments.On("FindByUserAndCourse", mock.Anything, uint(7), uint(99), uint(1)).Return(nil, errNotFound).Maybe()
 	attachments.On("ListByFolderID", mock.Anything, uint(61), mock.Anything).Return(&repository.PaginatedResult[models.Attachment]{Page: 1, PerPage: 10}, nil)
@@ -37,6 +41,14 @@ func newFolderFixture(t *testing.T) (*handlers.FolderHandler, *mocks.MockFolderR
 	attachments := new(mocks.MockAttachmentRepository)
 	svc := service.NewFileService(folders, attachments, t.TempDir())
 	return handlers.NewFolderHandler(svc, nil), folders
+}
+
+// roleUserRepo is a user repository whose only user has the given DB role,
+// for handlers that read the role through middleware.EffectiveRole.
+func roleUserRepo(userID uint, role string) *mocks.MockUserRepository {
+	users := new(mocks.MockUserRepository)
+	users.On("FindByID", mock.Anything, userID, uint(0)).Return(&models.User{ID: userID, AccountID: 1, Role: role}, nil)
+	return users
 }
 
 // A new course folder's parent must be a folder of the same course;
@@ -83,8 +95,15 @@ func TestUpdateDeleteFolder_NonCourseFolderOwnerOnly(t *testing.T) {
 	assert.Equal(t, http.StatusOK, testutil.MakeRequest(app, http.MethodPut, "/folders/81", testutil.JSONBody(map[string]any{"name": "renamed"})).StatusCode)
 	assert.Equal(t, http.StatusOK, testutil.MakeRequest(app, http.MethodDelete, "/folders/81", nil).StatusCode)
 
+	// A stale JWT is_admin hint is not enough (F9): the DB role decides.
+	stale := testutil.SetupTestApp()
+	stale.Put("/folders/:id", contentAuthStub(1, "", true), h.UpdateFolder)
+	assert.Equal(t, http.StatusNotFound, testutil.MakeRequest(stale, http.MethodPut, "/folders/82", testutil.JSONBody(map[string]any{"name": "y"})).StatusCode)
+
+	adminH := handlers.NewFolderHandler(service.NewFileService(folders, new(mocks.MockAttachmentRepository), t.TempDir()),
+		handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), roleUserRepo(7, "admin"), new(mocks.MockCourseRepository)))
 	admin := testutil.SetupTestApp()
-	admin.Put("/folders/:id", contentAuthStub(1, "", true), h.UpdateFolder)
+	admin.Put("/folders/:id", contentAuthStub(1, "", true), adminH.UpdateFolder)
 	assert.Equal(t, http.StatusOK, testutil.MakeRequest(admin, http.MethodPut, "/folders/82", testutil.JSONBody(map[string]any{"name": "y"})).StatusCode)
 }
 

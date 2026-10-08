@@ -41,11 +41,13 @@ func (r *Router) registerQuizExtensionRoutes(protected fiber.Router, enrolled, i
 	protected.Post("/courses/:course_id/quiz_stimuli/:stimulus_id/questions/:question_id", instructor, r.QuizStimulusHandler.LinkQuestion)
 	protected.Delete("/courses/:course_id/quiz_stimuli/:stimulus_id/questions/:question_id", instructor, r.QuizStimulusHandler.UnlinkQuestion)
 
-	// Per-question outcome alignment (data layer only — grader does not consume yet).
-	protected.Get("/quiz_questions/:question_id/outcome_alignments", r.QuizOutcomeAlignmentHandler.ListByQuestion)
-	protected.Post("/quiz_questions/:question_id/outcome_alignments", instructor, r.QuizOutcomeAlignmentHandler.Align)
-	protected.Delete("/quiz_questions/:question_id/outcome_alignments/:outcome_id", instructor, r.QuizOutcomeAlignmentHandler.Unalign)
-	protected.Get("/learning_outcomes/:outcome_id/quiz_question_alignments", r.QuizOutcomeAlignmentHandler.ListByOutcome)
+	// Per-question outcome alignment (data layer only — grader does not
+	// consume yet). Course-scoped and instructor-only; the handler ties
+	// question -> quiz -> course and outcome -> course/tenant.
+	protected.Get("/courses/:course_id/quizzes/:quiz_id/questions/:question_id/outcome_alignments", instructor, r.QuizOutcomeAlignmentHandler.ListByQuestion)
+	protected.Post("/courses/:course_id/quizzes/:quiz_id/questions/:question_id/outcome_alignments", instructor, r.QuizOutcomeAlignmentHandler.Align)
+	protected.Delete("/courses/:course_id/quizzes/:quiz_id/questions/:question_id/outcome_alignments/:outcome_id", instructor, r.QuizOutcomeAlignmentHandler.Unalign)
+	protected.Get("/courses/:course_id/outcomes/:outcome_id/quiz_question_alignments", instructor, r.QuizOutcomeAlignmentHandler.ListByOutcome)
 
 	// Wave B: Canvas QTI / IMSCC import + export.
 	// Sync-only in v1. The handler blocks while parsing + persisting;
