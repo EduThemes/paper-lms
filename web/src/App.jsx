@@ -73,6 +73,10 @@ const AdminHomePage = React.lazy(() => import('./pages/AdminHomePage'));
 const AdminCoursesPage = React.lazy(() => import('./pages/AdminCoursesPage'));
 const AdminPeoplePage = React.lazy(() => import('./pages/AdminPeoplePage'));
 const AdminSettingsPage = React.lazy(() => import('./pages/AdminSettingsPage'));
+const AdminUserDetailPage = React.lazy(() => import('./pages/AdminUserDetailPage'));
+const AccountReportsPage = React.lazy(() => import('./pages/AccountReportsPage'));
+const ThemeEditorPage = React.lazy(() => import('./pages/ThemeEditorPage'));
+const AdminToolsPage = React.lazy(() => import('./pages/AdminToolsPage'));
 const SuperAdminSettingsPage = React.lazy(() => import('./pages/SuperAdminSettingsPage'));
 import PublicPageView from './pages/PublicPageView';
 import NotFoundPage from './pages/NotFoundPage';
@@ -422,6 +426,10 @@ const App = () => {
             </ProtectedRoute>
           }
         />
+        <Route path="/admin/users/:userId" element={<ProtectedRoute><AdminUserDetailPage /></ProtectedRoute>} />
+        <Route path="/admin/reports" element={<ProtectedRoute><AccountReportsPage /></ProtectedRoute>} />
+        <Route path="/admin/theme" element={<ProtectedRoute><ThemeEditorPage /></ProtectedRoute>} />
+        <Route path="/admin/tools" element={<ProtectedRoute><AdminToolsPage /></ProtectedRoute>} />
         {/*
           Super-Admin Settings Engine. ProtectedRoute (session check)
           + SuperAdminGate (role==='super_admin' check) are layered;

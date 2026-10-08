@@ -14,6 +14,7 @@ import { ThemeProvider } from './contexts/ThemeContext'
 import { ReadingPrefsProvider } from './contexts/ReadingPrefsContext'
 import { registerServiceWorker } from './service-worker-register'
 import { queryClient } from './lib/queryClient'
+import BrandThemeLoader from './components/brand/BrandThemeLoader'
 
 registerServiceWorker()
 
@@ -28,6 +29,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
                 <TooltipProvider delayDuration={200}>
                   <App />
                   <Toaster />
+                  <BrandThemeLoader />
                 </TooltipProvider>
               </LiveRegionProvider>
             </AuthProvider>

@@ -21,6 +21,7 @@ const EMPTY_FORM = {
   scope: 'https://purl.imsglobal.org/spec/or/v1p1/scope/roster-core.readonly',
   auto_sync: false,
   auto_sync_interval: 24,
+  deprovision_enabled: false,
 };
 
 const STATUS_BADGES = {
@@ -137,6 +138,7 @@ const OneRosterPage = () => {
       scope: conn.scope || '',
       auto_sync: conn.auto_sync || false,
       auto_sync_interval: conn.auto_sync_interval || 24,
+      deprovision_enabled: !!conn.deprovision_enabled,
     });
     setEditingId(conn.id);
     setShowForm(true);
@@ -485,6 +487,23 @@ const OneRosterPage = () => {
               )}
             </div>
 
+            {/* G112: opt-in deprovisioning on full syncs. */}
+            <div className="flex items-start gap-2 mt-3">
+              <input
+                type="checkbox"
+                id="deprovision_enabled"
+                checked={!!formData.deprovision_enabled}
+                onChange={(e) => setFormData({ ...formData, deprovision_enabled: e.target.checked })}
+                className="mt-0.5 rounded border-border-strong text-brand-600 focus:ring-brand-500"
+              />
+              <label htmlFor="deprovision_enabled" className="text-sm text-text-secondary">
+                <span className="font-medium">Deprovision on full sync</span>
+                <span className="block text-xs text-text-tertiary">
+                  Suspend roster users and drop enrollments the SIS no longer lists. Guarded: an empty roster or an unusually large removal aborts the pass.
+                </span>
+              </label>
+            </div>
+
             <div className="flex gap-3 pt-2">
               <button
                 type="submit"
@@ -578,6 +597,11 @@ const OneRosterPage = () => {
                       {conn.auto_sync && (
                         <span className="text-xs px-2 py-1 rounded-full bg-indigo-100 text-indigo-700 font-medium">
                           Auto every {conn.auto_sync_interval}h
+                        </span>
+                      )}
+                      {conn.deprovision_enabled && (
+                        <span className="text-xs px-2 py-1 rounded-full bg-accent-warning/20 text-accent-warning font-medium">
+                          Deprovisioning
                         </span>
                       )}
                     </div>
