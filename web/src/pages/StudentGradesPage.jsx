@@ -7,6 +7,7 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import { getLetterGrade, gradeColor, assignmentGradeWeight } from '../utils/grading';
 import { Calculator, RotateCcw } from 'lucide-react';
+import { gradingPolicyApi } from '../services/api_grading_policy';
 
 const isRecentlyGraded = (sub) => {
   if (!sub?.graded_at) return false;
@@ -16,6 +17,9 @@ const isRecentlyGraded = (sub) => {
 };
 
 const statusBadge = (sub) => {
+  if (sub?.excused) return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">Excused</span>;
+  if (sub?.missing) return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700">Missing</span>;
+  if (sub?.late) return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-red-50 text-red-700">Late</span>;
   if (!sub) return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500">Not submitted</span>;
   if (sub.workflow_state === 'graded') return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">Graded</span>;
   if (sub.workflow_state === 'submitted' || sub.submitted_at) return <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-yellow-100 text-yellow-700">Submitted</span>;
@@ -48,6 +52,13 @@ const StudentGradesPage = () => {
   const [gradingScale, setGradingScale] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Server-computed grade (G020/G021/G024/G025/G029) and the student's
+  // own effective dates (G019/G040).
+  const [serverGrade, setServerGrade] = useState(null);
+  const [gradingPeriods, setGradingPeriods] = useState([]);
+  const [periodFilter, setPeriodFilter] = useState('all');
+  const [myDates, setMyDates] = useState(null); // assignment id -> dates
 
   // What-If grade calculator state
   const [whatIfMode, setWhatIfMode] = useState(false);
@@ -123,6 +134,19 @@ const StudentGradesPage = () => {
         }
         setSubmissions(subMap);
 
+        try {
+          const [gradeRes, datesRes] = await Promise.all([
+            gradingPolicyApi.getCourseGrades(courseId, isObserverView ? { userId: targetUserId } : {}),
+            gradingPolicyApi.getAssignmentDates(courseId, isObserverView ? targetUserId : undefined),
+          ]);
+          setServerGrade((gradeRes?.students || [])[0] || null);
+          setGradingPeriods(Array.isArray(gradeRes?.grading_periods) ? gradeRes.grading_periods : []);
+          setMyDates(datesRes?.assignments || null);
+        } catch {
+          setServerGrade(null);
+          setMyDates(null);
+        }
+
         // Fetch quiz submissions for student
         if (publishedQuizzes.length > 0) {
           const qsMap = {};
@@ -151,8 +175,25 @@ const StudentGradesPage = () => {
     fetchData();
   }, [courseId, user, targetUserId]);
 
+  // G019: assignments not assigned to this student are hidden; G025:
+  // a selected grading period shows only work due in it.
+  const visibleAssignments = assignments.filter((a) => {
+    if (!myDates) return true;
+    const d = myDates[String(a.id)];
+    if (!d) return false;
+    return periodFilter === 'all' || String(d.grading_period_id || '') === String(periodFilter);
+  });
+  const droppedIds = new Set();
+  {
+    const src = periodFilter === 'all'
+      ? serverGrade
+      : (serverGrade?.grading_periods || []).find((p) => String(p.grading_period_id) === String(periodFilter));
+    for (const g of src?.assignment_groups || []) for (const id of g.dropped || []) droppedIds.add(id);
+  }
+
   // Group assignments by assignment_group_id
   const getGrouped = () => {
+    const assignments = visibleAssignments;
     if (groups.length === 0) {
       return [{ id: null, name: 'Assignments', weight: null, items: assignments }];
     }
@@ -381,8 +422,38 @@ const StudentGradesPage = () => {
   }
 
   const grouped = getGrouped();
-  const totals = whatIfMode ? calcWhatIfTotals() : calcTotals();
-  const letter = getLetterGrade(totals.pct, gradingScale);
+  let totals = whatIfMode ? calcWhatIfTotals() : calcTotals();
+  let letter = getLetterGrade(totals.pct, gradingScale);
+  let overrideNote = null;
+  if (!whatIfMode && serverGrade) {
+    const set = periodFilter === 'all'
+      ? serverGrade
+      : (serverGrade.grading_periods || []).find((p) => String(p.grading_period_id) === String(periodFilter));
+    if (set && set.current_score !== null && set.current_score !== undefined) {
+      totals = {
+        earned: Math.round((set.current_points || 0) * 100) / 100,
+        possible: Math.round((set.current_possible || 0) * 100) / 100,
+        pct: Number(set.current_score).toFixed(1),
+      };
+      letter = periodFilter === 'all' && serverGrade.current_grade ? serverGrade.current_grade : getLetterGrade(totals.pct, gradingScale);
+    } else if (set) {
+      totals = { earned: 0, possible: 0, pct: null };
+      letter = '-';
+    }
+    // A final grade override replaces the computed grade (G029).
+    const ov = periodFilter === 'all'
+      ? serverGrade.override_score
+      : serverGrade.period_overrides?.[periodFilter];
+    if (ov !== null && ov !== undefined) {
+      overrideNote = totals.pct;
+      totals = { ...totals, pct: Number(ov).toFixed(1) };
+      letter = periodFilter === 'all' && serverGrade.override_grade ? serverGrade.override_grade : getLetterGrade(totals.pct, gradingScale);
+    }
+  }
+  // G024: quizzes graded through an assignment are already listed (and
+  // counted) as assignments.
+  const assignmentIds = new Set(assignments.map((a) => a.id));
+  const standaloneQuizzes = quizzes.filter((q) => !q.assignment_id || !assignmentIds.has(q.assignment_id));
 
   return (
     <Layout>
@@ -456,7 +527,25 @@ const StudentGradesPage = () => {
             <div className="text-sm text-gray-500 mt-1">
               {totals.earned} / {totals.possible} points earned
             </div>
+            {overrideNote !== null && (
+              <div className="text-xs text-gray-500 mt-1">
+                Final grade set by your instructor (calculated: {overrideNote ?? '—'}%)
+              </div>
+            )}
           </div>
+          {gradingPeriods.length > 0 && !whatIfMode && (
+            <select
+              value={periodFilter}
+              onChange={(e) => setPeriodFilter(e.target.value)}
+              aria-label="Grading period"
+              className="border border-gray-300 rounded-md px-2 py-1.5 text-sm"
+            >
+              <option value="all">All grading periods</option>
+              {gradingPeriods.map((p) => (
+                <option key={p.id} value={p.id}>{p.title}</option>
+              ))}
+            </select>
+          )}
           <div className="text-right text-sm text-gray-500">
             {assignments.length} assignment{assignments.length !== 1 ? 's' : ''}
             {quizzes.length > 0 && (<>, {quizzes.length} quiz{quizzes.length !== 1 ? 'zes' : ''}</>)}
@@ -506,6 +595,11 @@ const StudentGradesPage = () => {
                           >
                             {a.name}
                           </Link>
+                          {droppedIds.has(a.id) && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 text-xs rounded bg-gray-100 text-gray-600" title="This score does not count toward your grade">
+                              Dropped
+                            </span>
+                          )}
                           {isRecentlyGraded(sub) && (
                             <span className="inline-flex items-center px-1.5 py-0.5 text-xs font-semibold rounded bg-orange-100 text-orange-700 animate-pulse">
                               New
@@ -514,7 +608,7 @@ const StudentGradesPage = () => {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
-                        {formatDate(a.due_at)}
+                        {formatDate(myDates?.[String(a.id)]?.due_at ?? a.due_at)}
                       </td>
                       <td className="px-4 py-3 text-center">
                         {statusBadge(sub)}
@@ -551,6 +645,8 @@ const StudentGradesPage = () => {
                             <span className="text-xs text-gray-500 italic">Excused</span>
                           ) : !scoreVisible && a.post_policy === 'manual' && sub?.submitted_at ? (
                             <span className="text-xs text-gray-400 italic">Not posted</span>
+                          ) : score !== null && score !== undefined && ['letter_grade', 'gpa_scale', 'pass_fail', 'percent'].includes(a.grading_type) && sub?.grade ? (
+                            <span className="text-sm font-semibold text-gray-900">{sub.grade}</span>
                           ) : score !== null && score !== undefined ? (
                             <div>
                               <span className="text-sm font-semibold text-gray-900">
@@ -578,7 +674,7 @@ const StudentGradesPage = () => {
       ))}
 
       {/* Quizzes */}
-      {quizzes.length > 0 && (
+      {standaloneQuizzes.length > 0 && (
         <div className="mb-6">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-lg font-semibold text-gray-800">Quizzes</h3>
@@ -596,7 +692,7 @@ const StudentGradesPage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {quizzes.map(q => {
+                {standaloneQuizzes.map(q => {
                   const qs = quizSubmissions[q.id];
                   const score = qs?.score;
                   const pts = q.points_possible ?? 0;

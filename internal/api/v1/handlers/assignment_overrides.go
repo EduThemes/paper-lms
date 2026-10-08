@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -324,6 +326,27 @@ func (h *AssignmentOverrideHandler) UpdateOverride(c *fiber.Ctx) error {
 	}
 	if input.AssignmentOverride.CourseSectionID != nil {
 		override.CourseSectionID = nonZeroUint(input.AssignmentOverride.CourseSectionID)
+	}
+	// An explicit null clears a date or the section (G019).
+	var raw struct {
+		AssignmentOverride map[string]json.RawMessage `json:"assignment_override"`
+	}
+	_ = json.Unmarshal(c.Body(), &raw)
+	isNull := func(k string) bool {
+		v, ok := raw.AssignmentOverride[k]
+		return ok && strings.TrimSpace(string(v)) == "null"
+	}
+	if isNull("due_at") {
+		override.DueAt = nil
+	}
+	if isNull("unlock_at") {
+		override.UnlockAt = nil
+	}
+	if isNull("lock_at") {
+		override.LockAt = nil
+	}
+	if isNull("course_section_id") {
+		override.CourseSectionID = nil
 	}
 
 	if err := h.overrideService.UpdateOverride(c.Context(), override); err != nil {

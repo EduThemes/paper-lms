@@ -15,6 +15,9 @@ import { SubmissionBody } from '../components/SafeHTML';
 import RichContentEditor from '../components/RichContentEditor';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
+import SubmissionHistoryPanel from '../components/grading/SubmissionHistoryPanel';
+import AccommodationExtensionsPanel from '../components/grading/AccommodationExtensionsPanel';
+import { gradingPolicyApi, GRADING_TYPES } from '../services/api_grading_policy';
 
 function toLocalDatetimeValue(date) {
   const y = date.getFullYear();
@@ -62,6 +65,10 @@ const AssignmentPage = () => {
   const [courseOutcomes, setCourseOutcomes] = useState([]);
   const [selectedOutcomeId, setSelectedOutcomeId] = useState('');
   const [addingAlignment, setAddingAlignment] = useState(false);
+  // Grading policy: the student's own effective dates (overrides and
+  // accommodations) and the schemes a letter-graded assignment can use.
+  const [myDates, setMyDates] = useState(null);
+  const [gradingSchemes, setGradingSchemes] = useState([]);
 
   useUnsavedChanges(isDirty);
   const { issues: crossCourseIssues, checkAndSave, dismiss: dismissCrossCourse, confirm: confirmCrossCourse } = useCrossCourseCheck(courseId);
@@ -97,6 +104,9 @@ const AssignmentPage = () => {
           if (groupCatsData.status === 'fulfilled') {
             setGroupCategories(groupCatsData.value?.data || []);
           }
+          gradingPolicyApi.getCourseGradingSchemes(courseId)
+            .then((gs) => setGradingSchemes(gs?.grading_schemes || []))
+            .catch(() => setGradingSchemes([]));
           try {
             const submissionResult = await api.getSubmissions(courseId, assignmentId, 1, 100);
             setSubmissions(submissionResult.data || []);
@@ -117,6 +127,9 @@ const AssignmentPage = () => {
           } catch {
             setMySubmission(null);
           }
+          gradingPolicyApi.getAssignmentDates(courseId)
+            .then((d) => setMyDates(d?.assignments?.[String(assignmentId)] || null))
+            .catch(() => setMyDates(null));
           // Fetch my peer reviews for students
           try {
             const myReviews = await api.listMyPeerReviews(courseId, assignmentId);
@@ -218,6 +231,9 @@ const AssignmentPage = () => {
       assignment_group_id: assignment.assignment_group_id || '',
       anonymous_grading: assignment.anonymous_grading || false,
       post_policy: assignment.post_policy || 'automatic',
+      grading_type: assignment.grading_type || 'points',
+      grading_standard_id: assignment.grading_standard_id ? String(assignment.grading_standard_id) : '',
+      only_visible_to_overrides: !!assignment.only_visible_to_overrides,
       is_group_assignment: assignment.is_group_assignment || false,
       group_category_id: assignment.group_category_id || '',
     });
@@ -235,6 +251,9 @@ const AssignmentPage = () => {
         submission_types: editForm.submission_types,
         anonymous_grading: editForm.anonymous_grading,
         post_policy: editForm.post_policy,
+        grading_type: editForm.grading_type,
+        grading_standard_id: editForm.grading_standard_id ? Number(editForm.grading_standard_id) : null,
+        only_visible_to_overrides: !!editForm.only_visible_to_overrides,
       };
       if (editForm.assignment_group_id) {
         payload.assignment_group_id = Number(editForm.assignment_group_id);
@@ -483,6 +502,53 @@ const AssignmentPage = () => {
               </select>
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="edit-grading-type" className="block text-sm font-medium text-text-secondary mb-1">Display grade as</label>
+              <select
+                id="edit-grading-type"
+                value={editForm.grading_type}
+                onChange={(e) => { setEditForm({ ...editForm, grading_type: e.target.value }); setIsDirty(true); }}
+                className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
+              >
+                {GRADING_TYPES.map((g) => (
+                  <option key={g.value} value={g.value}>{g.label}</option>
+                ))}
+              </select>
+            </div>
+            {(editForm.grading_type === 'letter_grade' || editForm.grading_type === 'gpa_scale') && (
+              <div>
+                <label htmlFor="edit-grading-scheme" className="block text-sm font-medium text-text-secondary mb-1">Grading scheme</label>
+                <select
+                  id="edit-grading-scheme"
+                  value={editForm.grading_standard_id}
+                  onChange={(e) => { setEditForm({ ...editForm, grading_standard_id: e.target.value }); setIsDirty(true); }}
+                  className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
+                >
+                  <option value="">Course scheme</option>
+                  {gradingSchemes.map((gs) => (
+                    <option key={gs.id} value={gs.id}>{gs.title}{gs.context_type === 'Account' ? ' (account)' : ''}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+          <div>
+            <label className="flex items-start gap-2 text-sm text-text-secondary">
+              <input
+                type="checkbox"
+                checked={!!editForm.only_visible_to_overrides}
+                onChange={(e) => { setEditForm({ ...editForm, only_visible_to_overrides: e.target.checked }); setIsDirty(true); }}
+                className="mt-0.5 rounded border-border-strong"
+              />
+              <span>
+                Assign only to the sections and students in its date overrides
+                <Link to={`/courses/${courseId}/assignments/${assignmentId}/overrides`} className="ml-2 text-brand-600 hover:underline">
+                  Manage assign-to
+                </Link>
+              </span>
+            </label>
+          </div>
           <div>
             <label className="flex items-center gap-2 text-sm text-text-secondary">
               <input
@@ -570,8 +636,16 @@ const AssignmentPage = () => {
           <div className="flex flex-wrap items-center gap-4 text-sm text-text-tertiary mb-4">
             <div className="flex items-center space-x-1">
               <Calendar className="w-4 h-4" />
-              <span>Due: {formatDate(assignment.due_at)}</span>
+              <span>Due: {formatDate(!isTeacher && myDates ? myDates.due_at : assignment.due_at)}</span>
+              {!isTeacher && myDates?.extra_days > 0 && (
+                <span className="ml-1 text-xs text-text-disabled">(includes a {myDates.extra_days}-day extension)</span>
+              )}
             </div>
+            {assignment.only_visible_to_overrides && isTeacher && (
+              <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-surface-2 text-text-secondary">
+                Assigned to specific students
+              </span>
+            )}
             <div className="flex items-center space-x-1">
               <Award className="w-4 h-4" />
               <span>{assignment.points_possible ?? 0} points</span>
@@ -656,6 +730,17 @@ const AssignmentPage = () => {
             Manage section dates
           </Link>
         </div>
+      )}
+
+      {/* Accommodation extensions (teacher only, G040) */}
+      {isTeacher && assignment.due_at && (
+        <AccommodationExtensionsPanel
+          courseId={courseId}
+          assignmentId={assignmentId}
+          students={enrollments
+            .filter((e) => e.type === 'StudentEnrollment' || e.role === 'StudentEnrollment')
+            .map((e) => ({ id: e.user_id || e.user?.id, name: e.user?.name || `User ${e.user_id}` }))}
+        />
       )}
 
       {/* Aligned Outcomes (teacher only) */}
@@ -745,9 +830,19 @@ const AssignmentPage = () => {
                       <span className={`text-sm font-medium px-2 py-1 rounded ${config.color}`}>
                         {config.label}
                       </span>
-                      {mySubmission.grade !== null && mySubmission.grade !== undefined && (
+                      {mySubmission.late && (
+                        <span className="text-xs font-medium px-2 py-0.5 rounded bg-accent-danger/10 text-accent-danger">Late</span>
+                      )}
+                      {mySubmission.missing && (
+                        <span className="text-xs font-medium px-2 py-0.5 rounded bg-accent-danger/10 text-accent-danger">Missing</span>
+                      )}
+                      {mySubmission.excused ? (
+                        <span className="ml-auto text-lg font-semibold text-text-secondary">Excused</span>
+                      ) : mySubmission.grade !== null && mySubmission.grade !== undefined && (
                         <span className="ml-auto text-lg font-semibold text-brand-600">
-                          {mySubmission.score ?? mySubmission.grade} / {assignment.points_possible}
+                          {['letter_grade', 'gpa_scale', 'pass_fail', 'percent'].includes(assignment.grading_type)
+                            ? mySubmission.grade
+                            : `${mySubmission.score ?? mySubmission.grade} / ${assignment.points_possible}`}
                         </span>
                       )}
                     </>
@@ -795,6 +890,16 @@ const AssignmentPage = () => {
                 isTeacher={false}
               />
             </div>
+          )}
+
+          {/* Earlier attempts (G028) */}
+          {mySubmission && mySubmission.attempt > 1 && (
+            <SubmissionHistoryPanel
+              courseId={courseId}
+              assignmentId={assignmentId}
+              userId={user?.id}
+              refreshKey={mySubmission.attempt}
+            />
           )}
 
           {/* My Peer Reviews (Student) */}

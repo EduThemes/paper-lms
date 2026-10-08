@@ -1,8 +1,9 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import GradebookPage from '../GradebookPage';
 import { api } from '../../services/api';
+import { gradingPolicyApi } from '../../services/api_grading_policy';
 
 vi.mock('../../services/api', () => ({
   api: {
@@ -14,6 +15,15 @@ vi.mock('../../services/api', () => ({
     getGradebook: vi.fn(),
     getCourseSubmissions: vi.fn(),
   },
+}));
+
+vi.mock('../../services/api_grading_policy', () => ({
+  gradingPolicyApi: {
+    getCourseGrades: vi.fn(),
+    getEffectiveDueDates: vi.fn(),
+    getSections: vi.fn(),
+  },
+  LATE_STATUSES: [],
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -70,6 +80,8 @@ describe('GradebookPage', () => {
     api.getGradingStandards.mockResolvedValue([]);
     api.getGradebook.mockResolvedValue({});
     api.getCourseSubmissions.mockResolvedValue({ data: [] });
+    gradingPolicyApi.getCourseGrades.mockRejectedValue(new Error('unavailable'));
+    gradingPolicyApi.getEffectiveDueDates.mockResolvedValue({});
   });
 
   test('shows skeleton while data is loading', () => {
@@ -138,5 +150,50 @@ describe('GradebookPage', () => {
       expect(screen.getByText(/250 students/i)).toBeInTheDocument();
     });
     expect(api.getAllEnrollments).toHaveBeenCalledWith('1');
+  });
+
+  // G020/G025/G029: the total column shows the server's grade (drop
+  // rules, grading periods) and a final grade override; a grading period
+  // filter narrows the columns to work due in it.
+  test('shows server totals, overrides and filters by grading period', async () => {
+    api.getCourse.mockResolvedValue({ id: 1, name: 'Calculus I' });
+    api.getAssignments.mockResolvedValue({
+      data: [
+        { id: 100, name: 'Problem Set 1', points_possible: 10 },
+        { id: 101, name: 'Problem Set 2', points_possible: 10 },
+      ],
+    });
+    api.getAllEnrollments.mockResolvedValue({
+      data: [{ user_id: 7, type: 'StudentEnrollment', user: { id: 7, name: 'Jane Doe', sortable_name: 'Doe, Jane' } }],
+    });
+    api.getAssignmentGroups.mockResolvedValue({ data: [] });
+    gradingPolicyApi.getCourseGrades.mockResolvedValue({
+      grading_periods: [{ id: 50, title: 'Quarter 1' }],
+      students: [
+        {
+          user_id: 7,
+          current_score: 87.5,
+          current_points: 17.5,
+          current_possible: 20,
+          current_grade: 'B+',
+          override_score: 95,
+          override_grade: 'A',
+          grading_periods: [{ grading_period_id: 50, current_score: 90, current_points: 9, current_possible: 10 }],
+        },
+      ],
+    });
+    gradingPolicyApi.getEffectiveDueDates.mockResolvedValue({
+      100: { 7: { grading_period_id: 50 } },
+      101: { 7: { grading_period_id: 51 } },
+    });
+
+    renderPage();
+    expect(await screen.findByText('B+')).toBeInTheDocument();
+    expect(screen.getByText('(87.5%)')).toBeInTheDocument();
+    expect(screen.getByTitle('Final grade override')).toHaveTextContent('A');
+
+    const select = await screen.findByLabelText('Grading period');
+    fireEvent.change(select, { target: { value: '50' } });
+    expect(await screen.findByText('(90.0%)')).toBeInTheDocument();
   });
 });

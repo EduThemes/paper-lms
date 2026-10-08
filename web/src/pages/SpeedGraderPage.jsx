@@ -34,6 +34,8 @@ import {
   TooltipTrigger,
 } from '../components/ui/tooltip';
 import { normalizeRubricScores } from '../utils/grading';
+import SubmissionHistoryPanel from '../components/grading/SubmissionHistoryPanel';
+import { gradingPolicyApi, LATE_STATUSES } from '../services/api_grading_policy';
 
 const STATUS_CONFIG = {
   submitted: { label: 'Submitted', color: 'bg-brand-100 text-brand-800', icon: CheckCircle, dot: 'bg-brand-500' },
@@ -485,6 +487,30 @@ const SpeedGraderPage = () => {
   }, [students, selectedIndex, announce]);
 
   const handleScoreChange = useCallback((e) => setGradeInput(e.target.value), []);
+
+  // G021 / G022: excuse and manual late / missing status from SpeedGrader.
+  const [statusBusy, setStatusBusy] = useState(false);
+  const applySubmissionUpdate = useCallback(async (fn, message) => {
+    if (!selectedStudent) return;
+    setStatusBusy(true);
+    try {
+      const saved = await fn();
+      if (saved && typeof saved === 'object') {
+        setStudents((prev) => {
+          const updated = [...prev];
+          const student = { ...updated[selectedIndex] };
+          student.submission = { ...(student.submission || { user_id: student.user_id }), ...saved };
+          updated[selectedIndex] = student;
+          return updated;
+        });
+      }
+      announce(message);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setStatusBusy(false);
+    }
+  }, [selectedStudent, selectedIndex, announce]);
   const handleCommentChange = useCallback((e) => setCommentText(e.target.value), []);
 
   const handlePost = useCallback(async (e) => {
@@ -746,6 +772,14 @@ const SpeedGraderPage = () => {
             </Card>
 
             <SubmissionPreview student={selectedStudent} />
+            {selectedStudent && selectedStudent.submission?.attempt > 1 && (
+              <SubmissionHistoryPanel
+                courseId={courseId}
+                assignmentId={assignmentId}
+                userId={selectedStudent.user_id}
+                refreshKey={selectedStudent.submission?.attempt}
+              />
+            )}
           </div>
 
           {/* Right rail: sticky grade entry & rubric */}
@@ -761,10 +795,8 @@ const SpeedGraderPage = () => {
               <form onSubmit={handlePost} className="space-y-3">
                 <div className="flex items-center space-x-2">
                   <input
-                    type="number"
-                    step="any"
-                    min="0"
-                    max={assignment.points_possible ?? undefined}
+                    type="text"
+                    inputMode={['letter_grade', 'gpa_scale', 'pass_fail', 'percent'].includes(assignment.grading_type) ? 'text' : 'decimal'}
                     value={gradeInput}
                     onChange={handleScoreChange}
                     placeholder="Score"
@@ -777,7 +809,7 @@ const SpeedGraderPage = () => {
                   </span>
                 </div>
 
-                {assignment.points_possible > 0 && gradeInput !== '' && (
+                {assignment.points_possible > 0 && gradeInput !== '' && !Number.isNaN(Number(gradeInput)) && (!assignment.grading_type || assignment.grading_type === 'points') && (
                   <div className="text-xs text-text-tertiary">
                     {((parseFloat(gradeInput) / assignment.points_possible) * 100).toFixed(1)}%
                   </div>
@@ -786,6 +818,44 @@ const SpeedGraderPage = () => {
                   <div className="text-xs text-accent-danger">
                     Late penalty -{selectedStudent.submission.points_deducted} pts (final score{' '}
                     {selectedStudent.submission.score})
+                  </div>
+                )}
+
+                {selectedStudent && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <label className="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={!!selectedStudent.submission?.excused}
+                        disabled={statusBusy}
+                        onChange={(e) =>
+                          applySubmissionUpdate(
+                            () => gradingPolicyApi.setExcused(courseId, assignmentId, selectedStudent.user_id, e.target.checked),
+                            e.target.checked ? 'Student excused.' : 'Excusal removed.'
+                          )
+                        }
+                      />
+                      Excused
+                    </label>
+                    <label className="flex items-center gap-1 ml-auto">
+                      Status
+                      <select
+                        value={selectedStudent.submission?.late_policy_status ?? ''}
+                        disabled={statusBusy}
+                        onChange={(e) =>
+                          applySubmissionUpdate(
+                            () => gradingPolicyApi.setLatePolicyStatus(courseId, assignmentId, selectedStudent.user_id, e.target.value || null),
+                            'Status updated.'
+                          )
+                        }
+                        className="border border-border-strong rounded px-1 py-0.5"
+                        aria-label="Submission status"
+                      >
+                        {LATE_STATUSES.map((st) => (
+                          <option key={String(st.value)} value={st.value ?? ''}>{st.label}</option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
                 )}
 
