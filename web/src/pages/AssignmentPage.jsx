@@ -9,6 +9,7 @@ import useUnsavedChanges from '../hooks/useUnsavedChanges';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import SubmissionForm from '../components/SubmissionForm';
+import GradedDiscussionLink, { isDiscussionAssignment } from '../components/discussions/GradedDiscussionLink';
 import SubmissionComments from '../components/SubmissionComments';
 import RichContentViewer from '../components/RichContentViewer';
 import { SubmissionBody } from '../components/SafeHTML';
@@ -762,6 +763,7 @@ const AssignmentPage = () => {
             const types = Array.isArray(assignment.submission_types)
               ? assignment.submission_types
               : String(assignment.submission_types || '').split(',').map(t => t.trim());
+            if (isDiscussionAssignment(assignment)) return <GradedDiscussionLink courseId={courseId} assignment={assignment} />;
             const isOnPaperOrNone = types.every(t => t === 'on_paper' || t === 'none' || t === '');
             if (isOnPaperOrNone) {
               return (

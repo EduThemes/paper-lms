@@ -34,6 +34,7 @@ import {
   TooltipTrigger,
 } from '../components/ui/tooltip';
 import { normalizeRubricScores } from '../utils/grading';
+import DiscussionSubmissionPosts from '../components/discussions/DiscussionSubmissionPosts';
 
 const STATUS_CONFIG = {
   submitted: { label: 'Submitted', color: 'bg-brand-100 text-brand-800', icon: CheckCircle, dot: 'bg-brand-500' },
@@ -180,7 +181,7 @@ const RubricCriterionRow = React.memo(
   }
 );
 
-const SubmissionPreview = React.memo(function SubmissionPreview({ student }) {
+const SubmissionPreview = React.memo(function SubmissionPreview({ student, courseId, assignmentId }) {
   if (!student) {
     return (
       <Card className="flex-1 flex items-center justify-center text-text-secondary p-6">
@@ -236,6 +237,10 @@ const SubmissionPreview = React.memo(function SubmissionPreview({ student }) {
 
             {sub.body && (
               <SubmissionBody className="prose max-w-none text-text-secondary" body={sub.body} />
+            )}
+
+            {sub.submission_type === 'discussion_topic' && (
+              <DiscussionSubmissionPosts courseId={courseId} assignmentId={assignmentId} userId={student.user_id} />
             )}
 
             {sub.url && (
@@ -745,7 +750,7 @@ const SpeedGraderPage = () => {
               </Tooltip>
             </Card>
 
-            <SubmissionPreview student={selectedStudent} />
+            <SubmissionPreview student={selectedStudent} courseId={courseId} assignmentId={assignmentId} />
           </div>
 
           {/* Right rail: sticky grade entry & rubric */}
