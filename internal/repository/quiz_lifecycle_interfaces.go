@@ -32,3 +32,11 @@ type QuizQuestionRegradeRepository interface {
 type QuizOverdueSubmissionFinder interface {
 	ListOverdueUntaken(ctx context.Context, cutoff time.Time, limit int) ([]models.QuizSubmission, error)
 }
+
+// QuizUnlinkedGradedFinder lists live graded quizzes (quiz_type
+// assignment / graded_survey) that have no gradebook assignment yet:
+// quizzes created before the gradebook link existed, or copied / imported
+// without one.
+type QuizUnlinkedGradedFinder interface {
+	ListGradedWithoutAssignment(ctx context.Context, limit int) ([]models.Quiz, error)
+}

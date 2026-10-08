@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -62,6 +63,8 @@ type QuizLifecycleDeps struct {
 	Regrades         repository.QuizQuestionRegradeRepository
 	Overdue          repository.QuizOverdueSubmissionFinder
 	Enrollments      repository.EnrollmentRepository
+	// Unlinked finds graded quizzes that still need their assignment.
+	Unlinked repository.QuizUnlinkedGradedFinder
 }
 
 // WithQuizLifecycle enables the quiz lifecycle features.
@@ -250,7 +253,7 @@ func (s *QuizService) pushGradebookScore(ctx context.Context, quiz *models.Quiz,
 	if latest.FinishedAt != nil {
 		submittedAt = *latest.FinishedAt
 	}
-	_, err := s.lifecycle.Gradebook.RecordQuizScore(ctx, a, QuizScoreRecord{
+	gbSub, err := s.lifecycle.Gradebook.RecordQuizScore(ctx, a, QuizScoreRecord{
 		UserID:        latest.UserID,
 		Score:         kept,
 		SubmittedAt:   submittedAt,
@@ -260,6 +263,16 @@ func (s *QuizService) pushGradebookScore(ctx context.Context, quiz *models.Quiz,
 	})
 	if err != nil {
 		slog.Warn("quiz gradebook: record score", "quiz_id", quiz.ID, "user_id", latest.UserID, "err", err)
+		return
+	}
+	// Link the attempt to the gradebook submission it fed (Canvas
+	// quiz_submissions.submission_id).
+	if gbSub != nil && gbSub.ID != 0 && (latest.SubmissionID == nil || *latest.SubmissionID != gbSub.ID) {
+		id := gbSub.ID
+		latest.SubmissionID = &id
+		if err := s.submissionRepo.Update(ctx, latest); err != nil {
+			slog.Warn("quiz gradebook: link attempt", "quiz_submission_id", latest.ID, "err", err)
+		}
 	}
 }
 
@@ -315,12 +328,17 @@ func (s *QuizService) SyncQuizAssignment(ctx context.Context, quiz *models.Quiz,
 	}
 
 	a := s.linkedAssignment(ctx, quiz)
-	created := false
+	created, adopted := false, false
 	if a == nil {
-		a = &models.Assignment{CourseID: quiz.CourseID, GradingType: "points"}
-		created = true
-		if opts == nil || opts.AssignmentGroupID == nil {
-			a.AssignmentGroupID = s.defaultAssignmentGroup(ctx, quiz.CourseID)
+		if orphan := s.orphanQuizAssignment(ctx, quiz); orphan != nil {
+			a = orphan
+			adopted = true
+		} else {
+			a = &models.Assignment{CourseID: quiz.CourseID, GradingType: "points"}
+			created = true
+			if opts == nil || opts.AssignmentGroupID == nil {
+				a.AssignmentGroupID = s.defaultAssignmentGroup(ctx, quiz.CourseID)
+			}
 		}
 	}
 	a.Name = quiz.Title
@@ -340,8 +358,12 @@ func (s *QuizService) SyncQuizAssignment(ctx context.Context, quiz *models.Quiz,
 		a.Published = false
 	}
 
-	if created {
-		if err := repo.Create(ctx, a); err != nil {
+	if created || adopted {
+		if created {
+			if err := repo.Create(ctx, a); err != nil {
+				return nil, err
+			}
+		} else if err := repo.Update(ctx, a); err != nil {
 			return nil, err
 		}
 		id := a.ID
@@ -357,6 +379,92 @@ func (s *QuizService) SyncQuizAssignment(ctx context.Context, quiz *models.Quiz,
 		return nil, err
 	}
 	return a, nil
+}
+
+// orphanQuizAssignment finds a live online_quiz assignment in the quiz's
+// course, titled like the quiz, that no quiz links to: the gradebook side
+// of a quiz that a course copy or blueprint sync brought over without its
+// link. Reusing it keeps one gradebook column per quiz (and any overrides
+// or grades already on it).
+func (s *QuizService) orphanQuizAssignment(ctx context.Context, quiz *models.Quiz) *models.Assignment {
+	all := repository.PaginationParams{Page: 1, PerPage: 10000}
+	assignments, err := s.lifecycle.Assignments.ListByCourseID(ctx, quiz.CourseID, all)
+	if err != nil || assignments == nil {
+		return nil
+	}
+	var candidates []models.Assignment
+	for _, a := range assignments.Items {
+		if a.CourseID == quiz.CourseID && a.Name == quiz.Title &&
+			a.WorkflowState != models.AssignmentDeleted && hasSubmissionType(a.SubmissionTypes, quizSubmissionType) {
+			candidates = append(candidates, a)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	quizzes, err := s.quizRepo.ListByCourseID(ctx, quiz.CourseID, all)
+	if err != nil || quizzes == nil {
+		return nil
+	}
+	linked := map[uint]bool{}
+	for _, q := range quizzes.Items {
+		if q.ID != quiz.ID && q.AssignmentID != nil {
+			linked[*q.AssignmentID] = true
+		}
+	}
+	for i := range candidates {
+		if !linked[candidates[i].ID] {
+			a := candidates[i]
+			return &a
+		}
+	}
+	return nil
+}
+
+// hasSubmissionType reports whether a comma-separated submission_types
+// value contains want.
+func hasSubmissionType(types, want string) bool {
+	for _, t := range strings.Split(types, ",") {
+		if strings.TrimSpace(t) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// LinkGradedQuizzes gives every live graded quiz without a gradebook
+// assignment its online_quiz assignment (and pushes the scores of
+// students who already took it). Quizzes from before the gradebook link,
+// and quizzes copied or imported without one, are picked up here rather
+// than waiting for their next edit or attempt. Returns how many were
+// linked.
+func (s *QuizService) LinkGradedQuizzes(ctx context.Context) (int, error) {
+	if s.lifecycle == nil || s.lifecycle.Unlinked == nil || s.lifecycle.Assignments == nil {
+		return 0, nil
+	}
+	linked := 0
+	for batch := 0; batch < 50; batch++ {
+		quizzes, err := s.lifecycle.Unlinked.ListGradedWithoutAssignment(ctx, 100)
+		if err != nil {
+			return linked, err
+		}
+		progressed := 0
+		for i := range quizzes {
+			q := quizzes[i]
+			a, err := s.SyncQuizAssignment(ctx, &q, nil)
+			if err != nil || a == nil {
+				slog.Warn("quiz gradebook: link graded quiz", "quiz_id", q.ID, "err", err)
+				continue
+			}
+			linked++
+			progressed++
+		}
+		// Stop when nothing is left, or only quizzes that keep failing.
+		if progressed == 0 {
+			return linked, nil
+		}
+	}
+	return linked, nil
 }
 
 // defaultAssignmentGroup is the course's first assignment group (Canvas

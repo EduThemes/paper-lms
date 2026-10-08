@@ -115,3 +115,21 @@ func (r *quizSubmissionRepo) ListOverdueUntaken(ctx context.Context, cutoff time
 		Find(&out).Error
 	return out, err
 }
+
+// ---- graded quizzes without a gradebook assignment (quizzes) ----
+
+// ListGradedWithoutAssignment returns live graded quizzes with no
+// assignment_id, oldest first.
+func (r *quizRepo) ListGradedWithoutAssignment(ctx context.Context, limit int) ([]models.Quiz, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var out []models.Quiz
+	err := r.db.WithContext(ctx).
+		Where("assignment_id IS NULL AND workflow_state <> ?", "deleted").
+		Where("(quiz_type IN (?, ?) OR quiz_type = '' OR quiz_type IS NULL)", models.QuizTypeAssignment, models.QuizTypeGradedSurvey).
+		Order("id ASC").
+		Limit(limit).
+		Find(&out).Error
+	return out, err
+}

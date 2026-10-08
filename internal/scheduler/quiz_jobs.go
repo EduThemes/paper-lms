@@ -27,3 +27,25 @@ func NewQuizAutoSubmitJob(svc QuizAutoSubmitter) JobFunc {
 		return err
 	}
 }
+
+// QuizAssignmentLinker is the slice of QuizService the gradebook-link job
+// needs.
+type QuizAssignmentLinker interface {
+	LinkGradedQuizzes(ctx context.Context) (int, error)
+}
+
+// NewQuizAssignmentLinkJob gives graded quizzes that predate the
+// gradebook link (or were copied / imported without one) their
+// online_quiz assignment (G041). Runs on the hourly scheduler.
+func NewQuizAssignmentLinkJob(svc QuizAssignmentLinker) JobFunc {
+	return func(ctx context.Context) error {
+		if svc == nil {
+			return nil
+		}
+		n, err := svc.LinkGradedQuizzes(ctx)
+		if n > 0 {
+			slog.Info("graded quizzes linked to the gradebook", "count", n)
+		}
+		return err
+	}
+}

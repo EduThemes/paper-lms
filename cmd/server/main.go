@@ -448,6 +448,7 @@ func main() {
 			Assignments: assignmentRepo, AssignmentGroups: assignmentGroupRepo, Gradebook: submissionService,
 			Extensions: postgres.NewQuizExtensionRepository(database), Events: postgres.NewQuizSubmissionEventRepository(database),
 			Regrades: postgres.NewQuizQuestionRegradeRepository(database), Overdue: quizSubmissionRepo, Enrollments: enrollmentRepo,
+			Unlinked: quizRepo,
 		}),
 	)
 	// Phase 6 Wave 1 Sprint D-1: register every gamification emit
@@ -1219,6 +1220,7 @@ func main() {
 		sched.Register("weeklyDigest", scheduler.WeeklyAt(time.Monday, 7), weeklyJob)
 		sched.Register("dailyDigest", scheduler.DailyAt(7), dailyJob)
 		sched.Register("onerosterAutoSync", scheduler.EveryTick(), scheduler.NewOneRosterAutoSyncJob(onerosterService))
+		sched.Register("linkGradedQuizzes", scheduler.EveryTick(), scheduler.NewQuizAssignmentLinkJob(quizService))
 
 		schedCtx, schedCancel := context.WithCancel(context.Background())
 		defer schedCancel()

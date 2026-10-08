@@ -234,3 +234,32 @@ func TestQuizReview_AnswerKeyWaitsForReleaseDate(t *testing.T) {
 		})
 	}
 }
+
+// G046: the availability window is checked against the dates in the same
+// request: moving both dates later is accepted, a window that ends
+// before it starts is not.
+func TestQuizSettings_DateWindowUsesTheNewDates(t *testing.T) {
+	stored := func() *models.Quiz {
+		unlock := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+		lock := time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC)
+		return &models.Quiz{ID: 5, CourseID: 7, QuizType: "practice_quiz", WorkflowState: "unpublished", UnlockAt: &unlock, LockAt: &lock}
+	}
+
+	t.Run("both dates moved later", func(t *testing.T) {
+		app, d := lifecycleApp("TeacherEnrollment", 2)
+		d.quizRepo.On("FindByID", mock.Anything, uint(5), uint(1)).Return(stored(), nil)
+		d.quizRepo.On("Update", mock.Anything, mock.Anything).Return(nil)
+		body := `{"quiz":{"unlock_at":"2026-04-10T00:00:00Z","lock_at":"2026-04-17T00:00:00Z"}}`
+		resp := testutil.MakeRequest(app, http.MethodPut, "/courses/7/quizzes/5", strings.NewReader(body))
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("lock before unlock", func(t *testing.T) {
+		app, d := lifecycleApp("TeacherEnrollment", 2)
+		d.quizRepo.On("FindByID", mock.Anything, uint(5), uint(1)).Return(stored(), nil)
+		body := `{"quiz":{"lock_at":"2026-02-01T00:00:00Z"}}`
+		resp := testutil.MakeRequest(app, http.MethodPut, "/courses/7/quizzes/5", strings.NewReader(body))
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		d.quizRepo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
+	})
+}

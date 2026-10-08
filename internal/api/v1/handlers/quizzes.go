@@ -269,13 +269,6 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 		}
 		quiz.QuizType = *input.Quiz.QuizType
 	}
-	if msg := input.Quiz.quizLifecycleInput.apply(quiz); msg != "" {
-		return responses.BadRequest(c, msg)
-	}
-	opts, wrote := h.assignmentOptions(c, input.Quiz.AssignmentGroupID, uint(courseID))
-	if wrote {
-		return nil
-	}
 	if input.Quiz.TimeLimit.Set {
 		if input.Quiz.TimeLimit.Null || input.Quiz.TimeLimit.Value <= 0 {
 			quiz.TimeLimit = nil
@@ -300,6 +293,15 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 		} else {
 			quiz.WorkflowState = "unpublished"
 		}
+	}
+
+	// Applied after the dates so the window checks see the new values.
+	if msg := input.Quiz.quizLifecycleInput.apply(quiz); msg != "" {
+		return responses.BadRequest(c, msg)
+	}
+	opts, wrote := h.assignmentOptions(c, input.Quiz.AssignmentGroupID, uint(courseID))
+	if wrote {
+		return nil
 	}
 
 	if err := h.quizRepo.Update(c.Context(), quiz); err != nil {

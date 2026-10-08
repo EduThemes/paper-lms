@@ -85,6 +85,7 @@ func newLifecycleFixture(t *testing.T, nStudents int) *lifecycleFixture {
 			Regrades:         postgres.NewQuizQuestionRegradeRepository(g),
 			Overdue:          submissionRepo,
 			Enrollments:      enrollmentRepo,
+			Unlinked:         postgres.NewQuizRepository(g),
 		}),
 	)
 	return f
@@ -550,4 +551,91 @@ func TestQuizLifecycle_LazyAssignmentForUnlinkedQuiz(t *testing.T) {
 	sub := f.gradebook(t, quiz, f.students[0])
 	require.NotNil(t, sub)
 	assert.InDelta(t, 1.0, *sub.Score, 1e-9)
+}
+
+// G041: the hourly link job gives graded quizzes that predate the
+// gradebook link their assignment and pushes existing scores; practice
+// quizzes and deleted quizzes are left alone, and the attempt records the
+// gradebook submission it fed.
+func TestQuizLifecycle_LinkGradedQuizzesBackfill(t *testing.T) {
+	f := newLifecycleFixture(t, 1)
+	ctx := context.Background()
+	one := 1.0
+	mk := func(title, quizType, state string) *models.Quiz {
+		q := &models.Quiz{CourseID: f.courseID, Title: title, QuizType: quizType, AllowedAttempts: 1,
+			Published: state == "published", WorkflowState: state, PointsPossible: &one}
+		require.NoError(t, f.g.Create(q).Error)
+		return q
+	}
+	graded := mk("Old graded quiz", "assignment", "published")
+	practice := mk("Practice", "practice_quiz", "published")
+	deleted := mk("Deleted", "assignment", "deleted")
+
+	// A finished attempt from before the link existed.
+	finished := time.Now().Add(-time.Hour)
+	attempt := &models.QuizSubmission{QuizID: graded.ID, UserID: f.students[0], Attempt: 1, Score: &one, KeptScore: &one,
+		StartedAt: &finished, FinishedAt: &finished, ValidationToken: "tok-backfill", WorkflowState: "complete"}
+	require.NoError(t, f.g.Create(attempt).Error)
+
+	n, err := f.svc.LinkGradedQuizzes(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+
+	sub := f.gradebook(t, graded, f.students[0])
+	require.NotNil(t, sub, "the earlier attempt's score reaches the gradebook")
+	assert.InDelta(t, 1.0, *sub.Score, 1e-9)
+	var reloadedAttempt models.QuizSubmission
+	require.NoError(t, f.g.First(&reloadedAttempt, attempt.ID).Error)
+	require.NotNil(t, reloadedAttempt.SubmissionID)
+	assert.Equal(t, sub.ID, *reloadedAttempt.SubmissionID)
+
+	for _, q := range []*models.Quiz{practice, deleted} {
+		var r models.Quiz
+		require.NoError(t, f.g.First(&r, q.ID).Error)
+		assert.Nil(t, r.AssignmentID, "quiz %q must not get an assignment", q.Title)
+	}
+
+	// Idempotent: nothing left to link.
+	n, err = f.svc.LinkGradedQuizzes(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+}
+
+// G041: a course copy brings a quiz over without its link but with its
+// online_quiz assignment; linking the copied quiz reuses that assignment
+// instead of adding a second gradebook column.
+func TestQuizLifecycle_LinkAdoptsCopiedQuizAssignment(t *testing.T) {
+	f := newLifecycleFixture(t, 0)
+	ctx := context.Background()
+	one := 1.0
+	orphan := &models.Assignment{CourseID: f.courseID, Name: "Copied quiz", SubmissionTypes: "online_quiz",
+		GradingType: "points", PointsPossible: &one, WorkflowState: models.AssignmentUnpublished}
+	require.NoError(t, f.g.Create(orphan).Error)
+	quiz := &models.Quiz{CourseID: f.courseID, Title: "Copied quiz", QuizType: "assignment", AllowedAttempts: 1,
+		WorkflowState: "unpublished", PointsPossible: &one}
+	require.NoError(t, f.g.Create(quiz).Error)
+
+	n, err := f.svc.LinkGradedQuizzes(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+
+	var reloaded models.Quiz
+	require.NoError(t, f.g.First(&reloaded, quiz.ID).Error)
+	require.NotNil(t, reloaded.AssignmentID)
+	assert.Equal(t, orphan.ID, *reloaded.AssignmentID)
+	var count int64
+	require.NoError(t, f.g.Model(&models.Assignment{}).
+		Where("course_id = ? AND submission_types = ? AND workflow_state <> ?", f.courseID, "online_quiz", "deleted").
+		Count(&count).Error)
+	assert.Equal(t, int64(1), count, "one gradebook column per quiz")
+
+	// A second quiz with the same title gets its own assignment: the
+	// orphan is now linked.
+	twin := &models.Quiz{CourseID: f.courseID, Title: "Copied quiz", QuizType: "assignment", AllowedAttempts: 1,
+		WorkflowState: "unpublished", PointsPossible: &one}
+	require.NoError(t, f.g.Create(twin).Error)
+	a, err := f.svc.SyncQuizAssignment(ctx, twin, nil)
+	require.NoError(t, err)
+	require.NotNil(t, a)
+	assert.NotEqual(t, orphan.ID, a.ID)
 }
