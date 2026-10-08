@@ -51,10 +51,16 @@ func sisRowKey(importType string, row sisRow) string {
 	return strings.Join(parts, "\x1f")
 }
 
-// sisRowFingerprint is a column-order-independent rendering of a row.
+// sisRowFingerprint is a column-order-independent rendering of a row. The
+// password column is left out: stored batches have it scrubbed
+// (scrubBatchPasswords), and a row that carries a password is always
+// re-applied instead.
 func sisRowFingerprint(row sisRow) string {
 	keys := make([]string, 0, len(row.values))
 	for k := range row.values {
+		if k == sisPasswordColumn {
+			continue
+		}
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
@@ -111,7 +117,9 @@ func (r *sisRun) applyDiffing(parsed []*sisParsedFile) error {
 		for _, row := range pf.rows {
 			key := sisRowKey(pf.importType, row)
 			seen[key] = true
-			if o, ok := oldByKey[key]; ok && sisRowFingerprint(o) == sisRowFingerprint(row) {
+			// A row with a password can't be compared (the stored copy is
+			// scrubbed), so it is always applied.
+			if o, ok := oldByKey[key]; ok && row.get(sisPasswordColumn) == "" && sisRowFingerprint(o) == sisRowFingerprint(row) {
 				continue // unchanged since the last batch
 			}
 			kept = append(kept, row)

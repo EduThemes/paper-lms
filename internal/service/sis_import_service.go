@@ -497,6 +497,9 @@ func (s *SISImportService) finish(ctx context.Context, run *sisRun, runErr error
 	default:
 		batch.WorkflowState = "imported"
 	}
+	// The stored CSVs outlive the run (diffing baseline, file listing):
+	// drop the plaintext passwords users.csv / logins.csv carried.
+	s.scrubBatchPasswords(ctx, batch.ID)
 	if err := s.batchRepo.Update(ctx, batch); err != nil {
 		return err
 	}

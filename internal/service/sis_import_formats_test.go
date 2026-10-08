@@ -338,6 +338,52 @@ func TestSISImport_NeverTouchesSuperAdmin(t *testing.T) {
 	}
 }
 
+func TestSISImport_StoredFilesHoldNoPasswords(t *testing.T) {
+	g, cleanup := freshDB(t)
+	defer cleanup()
+	seedSISTenants(t, g)
+	svc := newSISServiceWithObservers(g)
+	ctx := context.Background()
+
+	const pw = "Plain-Text-Pass-1"
+	opts := service.SISImportOptions{DiffingDataSetIdentifier: "nightly"}
+	body := "user_id,login_id,password,first_name,last_name,email\nP-1,pia.one," + pw + ",Pia,One,pia@example.com\n"
+	b := startSIS(t, svc, 1, opts, service.SISUpload{FileName: "users.csv", Data: []byte(body)})
+	if errs := batchErrors(t, svc, b); len(errs) != 0 {
+		t.Fatalf("import errors: %v", errs)
+	}
+	// The password was applied...
+	userSvc := service.NewUserService(postgres.NewUserRepository(g))
+	if _, err := userSvc.Authenticate(ctx, "pia.one", pw); err != nil {
+		t.Fatalf("imported password does not sign in: %v", err)
+	}
+	// ...but is not kept at rest in the stored CSV.
+	var files []models.SISBatchFile
+	g.Where("sis_batch_id = ?", b.ID).Find(&files)
+	if len(files) != 1 {
+		t.Fatalf("want 1 stored file, got %d", len(files))
+	}
+	if bytes.Contains(files[0].Content, []byte(pw)) {
+		t.Fatal("stored SIS file still holds the plaintext password")
+	}
+	if !bytes.Contains(files[0].Content, []byte("pia.one")) {
+		t.Fatal("scrub dropped the rest of the row")
+	}
+
+	// Diffing against the scrubbed baseline still applies a row that
+	// carries a password (it can't be compared), and drops unchanged rows
+	// without one.
+	b2 := startSIS(t, svc, 1, opts, service.SISUpload{FileName: "users.csv", Data: []byte(body)})
+	if b2.ProcessedRows != 1 {
+		t.Fatalf("row with a password processed %d times, want 1", b2.ProcessedRows)
+	}
+	noPW := "user_id,login_id,first_name,last_name,email\nP-1,pia.one,Pia,One,pia@example.com\n"
+	b3 := startSIS(t, svc, 1, opts, service.SISUpload{FileName: "users.csv", Data: []byte(noPW)})
+	if b3.ProcessedRows != 0 {
+		t.Fatalf("unchanged row without a password processed %d times, want 0", b3.ProcessedRows)
+	}
+}
+
 func TestSISImport_LoginIDUniqueAcrossExtraLogins(t *testing.T) {
 	g, cleanup := freshDB(t)
 	defer cleanup()
