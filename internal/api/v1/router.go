@@ -281,6 +281,8 @@ func (r *Router) Register(app *fiber.App) {
 	// Enrollments (view: enrolled; create: instructor)
 	protected.Get("/courses/:course_id/enrollments", enrolled, r.EnrollmentHandler.ListEnrollments)
 	protected.Post("/courses/:course_id/enrollments", instructor, r.EnrollmentHandler.CreateEnrollment)
+	protected.Get("/courses/:course_id/enrollments/self", enrolled, r.EnrollmentHandler.MyCourseEnrollments)
+	protected.Get("/courses/:course_id/enrollable_users", instructor, r.EnrollmentHandler.SearchEnrollableUsers)
 
 	// Modules (view: enrolled; manage: instructor)
 	protected.Get("/courses/:course_id/modules", enrolled, r.ModuleHandler.ListModules)

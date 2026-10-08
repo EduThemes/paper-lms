@@ -1,26 +1,10 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { Link, useParams, useLocation } from 'react-router-dom';
 import { ChevronDown, Home, CheckSquare, BarChart2 } from 'lucide-react';
 import { useCourseUI } from '../contexts/CourseUIContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useClickOutside } from '../hooks/useClickOutside';
-import { api } from '../services/api';
-
-const isInstructorOrAdmin = (user, enrollments) => {
-  if (!user) return false;
-  if (user.role === 'admin') return true;
-  if (enrollments) {
-    // Only check the current user's enrollment, not all enrollments in the course
-    const myEnrollment = enrollments.find(e =>
-      e.user_id === user.id || e.user?.id === user.id
-    );
-    if (myEnrollment) {
-      return myEnrollment.type === 'TeacherEnrollment' || myEnrollment.type === 'TaEnrollment' ||
-        myEnrollment.role === 'TeacherEnrollment' || myEnrollment.role === 'TaEnrollment';
-    }
-  }
-  return false;
-};
+import useIsTeacher from '../hooks/useIsTeacher';
 
 // Complete map of tab id -> path/label for all available tabs
 const TAB_REGISTRY = {
@@ -85,18 +69,13 @@ const CourseNav = () => {
   const { courseId } = useParams();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
-  const [enrollments, setEnrollments] = useState(null);
   const moreRef = useRef(null);
   const { course, isK2, is35 } = useCourseUI();
   const { user } = useAuth();
-
-  useEffect(() => {
-    if (!courseId || !user) return;
-    // Fetch enrollments to determine role; cache in state
-    api.getEnrollments(courseId, 1, 10)
-      .then(result => setEnrollments(result.data || []))
-      .catch(() => setEnrollments([]));
-  }, [courseId, user]);
+  // The caller's own course role (B072). This used to scan the first 10
+  // roster rows for the caller, so teacher tabs vanished in any course
+  // where the teacher's enrollment was not among the first ten.
+  const isTeacherInCourse = useIsTeacher(courseId);
 
   // Close the "More" dropdown on outside click / Escape. Hook must sit above
   // the conditional `return null` paths below to keep hook order stable.
@@ -108,7 +87,7 @@ const CourseNav = () => {
   // K-2 mode: no course navigation at all
   if (isK2) return null;
 
-  const isTeacher = isInstructorOrAdmin(user, enrollments);
+  const isTeacher = Boolean(user) && isTeacherInCourse === true;
   const gradesPath = isTeacher ? '/gradebook' : '/grades';
   const simplifiedTabs = getSimplifiedTabs(gradesPath);
 

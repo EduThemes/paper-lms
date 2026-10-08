@@ -120,3 +120,57 @@ func TestListEnrollments_HidesContactInfoFromStudents(t *testing.T) {
 		assert.Equal(t, "Jane Doe", user["name"])
 	}
 }
+
+// B072: the caller's own enrollments in a course come from a dedicated
+// endpoint, independent of roster size or page caps.
+func TestMyCourseEnrollments_ReturnsCallersRowsOnly(t *testing.T) {
+	f := newEnrollmentFixture()
+	f.enrollments.On("ListByUserID", mock.Anything, uint(10), uint(1)).Return([]models.Enrollment{
+		{ID: 1, UserID: 10, CourseID: 7, Type: "TeacherEnrollment", WorkflowState: models.EnrollmentActive},
+		{ID: 2, UserID: 10, CourseID: 8, Type: "StudentEnrollment", WorkflowState: models.EnrollmentActive},
+	}, nil)
+
+	app := testutil.SetupTestApp()
+	app.Get("/courses/:course_id/enrollments/self", courseCallerStub("TeacherEnrollment"), f.handler.MyCourseEnrollments)
+	resp := testutil.MakeRequest(app, http.MethodGet, "/courses/7/enrollments/self", nil)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body, err := testutil.ParseJSONMap(resp)
+	assert.NoError(t, err)
+	rows := body["enrollments"].([]any)
+	assert.Len(t, rows, 1)
+	assert.Equal(t, "TeacherEnrollment", rows[0].(map[string]any)["type"])
+	assert.Equal(t, false, body["is_admin"])
+}
+
+// B073: course staff can look up a person to add by exact email / login /
+// SIS id inside the course's tenant; other tenants' users and partial
+// matches are not returned.
+func TestSearchEnrollableUsers_ExactMatchInTenant(t *testing.T) {
+	f := newEnrollmentFixture()
+	f.users.On("FindByLoginID", mock.Anything, "sam@example.com").Return(nil, errors.New("not found"))
+	f.users.On("FindBySISUserID", mock.Anything, "sam@example.com").Return(nil, errors.New("not found"))
+	f.users.On("Search", mock.Anything, "sam@example.com", uint(1), mock.Anything).Return(&repository.PaginatedResult[models.User]{
+		Items: []models.User{
+			{ID: 5, AccountID: 1, Name: "Sam Student", Email: "Sam@Example.com"},
+			{ID: 6, AccountID: 1, Name: "Samantha", Email: "xsam@example.com"},
+		},
+	}, nil)
+	// An identically-named login in another tenant must not leak.
+	f.users.On("FindByLoginID", mock.Anything, "other").Return(&models.User{ID: 9, AccountID: 2, LoginID: "other"}, nil)
+	f.users.On("FindBySISUserID", mock.Anything, "other").Return(nil, errors.New("not found"))
+	f.users.On("Search", mock.Anything, "other", uint(1), mock.Anything).Return(&repository.PaginatedResult[models.User]{}, nil)
+
+	app := testutil.SetupTestApp()
+	app.Get("/courses/:course_id/enrollable_users", courseCallerStub("TeacherEnrollment"), f.handler.SearchEnrollableUsers)
+
+	resp := testutil.MakeRequest(app, http.MethodGet, "/courses/7/enrollable_users?search_term=sam@example.com", nil)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	rows, err := testutil.ParseJSONArray(resp)
+	assert.NoError(t, err)
+	assert.Len(t, rows, 1)
+	assert.EqualValues(t, 5, rows[0]["id"])
+
+	resp = testutil.MakeRequest(app, http.MethodGet, "/courses/7/enrollable_users?search_term=other", nil)
+	rows, _ = testutil.ParseJSONArray(resp)
+	assert.Len(t, rows, 0)
+}

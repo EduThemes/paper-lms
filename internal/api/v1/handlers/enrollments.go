@@ -105,6 +105,69 @@ func (h *EnrollmentHandler) ListEnrollments(c *fiber.Ctx) error {
 	return c.JSON(enrollments)
 }
 
+// MyCourseEnrollments handles GET /courses/:course_id/enrollments/self —
+// the caller's own enrollments in the course plus whether they act as an
+// admin there (B072). The UI previously scanned the first page of the
+// whole roster for the caller's row; the server caps per_page at 100, so
+// in a large course a later-created teacher row was never found and the
+// teacher lost every editing control.
+func (h *EnrollmentHandler) MyCourseEnrollments(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
+	userID, err := getUserID(c)
+	if err != nil {
+		return err
+	}
+
+	all, err := h.enrollmentService.ListByUser(c.Context(), userID, callerAccountID(c))
+	if err != nil {
+		return responses.InternalError(c, "Could not fetch enrollments")
+	}
+	mine := make([]fiber.Map, 0)
+	for i := range all {
+		if all[i].CourseID == uint(courseID) {
+			mine = append(mine, enrollmentToJSON(&all[i], true))
+		}
+	}
+
+	isAdmin, _ := c.Locals("is_admin").(bool)
+	isSuper, _ := c.Locals("is_super_admin").(bool)
+	return c.JSON(fiber.Map{
+		"enrollments": mine,
+		"is_admin":    isAdmin || isSuper,
+	})
+}
+
+// SearchEnrollableUsers handles GET /courses/:course_id/enrollable_users?search_term=
+// for the course "Add People" form (B073). GET /users is admin-only, so
+// teachers could never find anyone to add. Matches are exact (email,
+// login ID or SIS ID) within the course's tenant — see
+// EnrollmentService.FindEnrollableUsers.
+func (h *EnrollmentHandler) SearchEnrollableUsers(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
+	term := c.Query("search_term")
+	users, err := h.enrollmentService.FindEnrollableUsers(c.Context(), uint(courseID), term, enrollmentCourseScope(c))
+	if err != nil {
+		return responses.NotFound(c, "course")
+	}
+	out := make([]fiber.Map, len(users))
+	for i, u := range users {
+		out[i] = fiber.Map{
+			"id":            u.ID,
+			"name":          u.Name,
+			"sortable_name": u.SortableName,
+			"login_id":      u.LoginID,
+			"email":         u.Email,
+		}
+	}
+	return c.JSON(out)
+}
+
 func (h *EnrollmentHandler) CreateEnrollment(c *fiber.Ctx) error {
 	courseID, err := c.ParamsInt("course_id")
 	if err != nil {

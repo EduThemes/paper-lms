@@ -307,6 +307,33 @@ export const api = {
     return request(`/courses/${courseId}/enrollments?page=${page}&per_page=${perPage}`);
   },
 
+  // The whole roster. The server caps per_page at 100, so a single
+  // per_page=200 request silently truncated large courses (B072).
+  getAllEnrollments: async (courseId) => {
+    const all = [];
+    for (let page = 1; page <= 200; page += 1) {
+      const { data, pagination } = await request(`/courses/${courseId}/enrollments?page=${page}&per_page=100`);
+      const rows = data || [];
+      all.push(...rows);
+      if (rows.length === 0) break;
+      if (pagination?.next) continue;
+      if (rows.length < 100) break;
+    }
+    return { data: all };
+  },
+
+  // The caller's own enrollments in a course + whether they act as admin.
+  getMyCourseEnrollments: async (courseId) => {
+    const { data } = await request(`/courses/${courseId}/enrollments/self`);
+    return data;
+  },
+
+  // Exact email / login ID / SIS ID lookup for the course Add People form.
+  searchEnrollableUsers: async (courseId, searchTerm) => {
+    const { data } = await request(`/courses/${courseId}/enrollable_users?search_term=${encodeURIComponent(searchTerm)}`);
+    return data || [];
+  },
+
   createEnrollment: async (courseId, enrollment) => {
     const { data } = await request(`/courses/${courseId}/enrollments`, {
       method: 'POST',

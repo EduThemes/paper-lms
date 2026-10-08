@@ -119,7 +119,7 @@ const OneRosterPage = () => {
         clearInterval(pollRef.current);
       }
     };
-  }, [fetchConnections]);
+  }, [ACCOUNT_ID, fetchConnections]);
 
   const resetForm = () => {
     setFormData({ ...EMPTY_FORM });
