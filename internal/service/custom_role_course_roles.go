@@ -22,6 +22,20 @@ func (s *CustomRoleService) ListActiveCourseRoles(ctx context.Context, accountID
 	return out, nil
 }
 
+// CoursePermissions resolves the caller's permission map in a course and
+// the custom role (if any) their enrollment carries.
+func (s *CustomRoleService) CoursePermissions(ctx context.Context, userID, courseID, accountID uint) (map[string]bool, *uint, error) {
+	enrollment, err := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID, accountID)
+	if err != nil || enrollment == nil {
+		return nil, nil, ErrNotEnrolled
+	}
+	perms, err := s.EnrollmentPermissions(ctx, enrollment, accountID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return perms, enrollment.RoleID, nil
+}
+
 // BaseRoleEnrollmentType maps a custom role's base role onto the
 // enrollment type it is given with.
 func BaseRoleEnrollmentType(baseRoleType string) string {

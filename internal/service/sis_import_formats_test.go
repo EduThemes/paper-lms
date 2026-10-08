@@ -68,14 +68,14 @@ func TestDetectSISImportType(t *testing.T) {
 		"section_id,course_id,name,status":                             "sections",
 		"course_id,user_id,role,section_id,status":                     "enrollments",
 		"observer_id,student_id,status":                                "user_observers",
-		"old_id,new_id,type":                                            "change_sis_id",
+		"old_id,new_id,type":                                           "change_sis_id",
 		"group_id,group_category_id,course_id,name,status":             "groups",
 		"group_category_id,course_id,category_name,status":             "group_categories",
-		"group_id,user_id,status":                                       "group_memberships",
+		"group_id,user_id,status":                                      "group_memberships",
 		"user_id,login_id,authentication_provider_id,existing_user_id": "logins",
 		"user_id,account_id,role,status":                               "admins",
 		"account_id,parent_account_id,name,status":                     "accounts",
-		"foo,bar":                                                       "",
+		"foo,bar": "",
 	}
 	for header, want := range cases {
 		if got := service.DetectSISImportType(strings.Split(header, ",")); got != want {
@@ -95,14 +95,14 @@ func TestSISImport_ZipWithEveryFormat(t *testing.T) {
 			"U-1,sam.student,Sam,Student,sam@example.com,active\n" +
 			"P-1,pat.parent,Pat,Parent,pat@example.com,active\n" +
 			"T-1,tia.teacher,Tia,Teacher,tia@example.com,active\n",
-		"terms.csv":   "term_id,name,status,start_date,end_date\nFA26,Fall 2026,active,2026-08-20,2026-12-15\n",
-		"courses.csv": "course_id,short_name,long_name,account_id,term_id,status,start_date\nBIO-1,BIO1,Biology,,FA26,active,2026-08-21T08:00:00Z\n",
+		"terms.csv":    "term_id,name,status,start_date,end_date\nFA26,Fall 2026,active,2026-08-20,2026-12-15\n",
+		"courses.csv":  "course_id,short_name,long_name,account_id,term_id,status,start_date\nBIO-1,BIO1,Biology,,FA26,active,2026-08-21T08:00:00Z\n",
 		"sections.csv": "section_id,course_id,name,status\nBIO-1-A,BIO-1,Period A,active\n",
 		// Enrollment named by section only (course_id blank).
-		"enrollments.csv": "course_id,user_id,role,section_id,status\n,U-1,student,BIO-1-A,active\nBIO-1,T-1,teacher,,active\n",
-		"user_observers.csv":   "observer_id,student_id,status\nP-1,U-1,active\n",
-		"group_categories.csv": "group_category_id,course_id,category_name,status\nGC-1,BIO-1,Lab Teams,active\n",
-		"groups.csv":           "group_id,group_category_id,course_id,name,status\nG-1,GC-1,BIO-1,Team One,available\nG-2,,BIO-1,Team Two,available\n",
+		"enrollments.csv":       "course_id,user_id,role,section_id,status\n,U-1,student,BIO-1-A,active\nBIO-1,T-1,teacher,,active\n",
+		"user_observers.csv":    "observer_id,student_id,status\nP-1,U-1,active\n",
+		"group_categories.csv":  "group_category_id,course_id,category_name,status\nGC-1,BIO-1,Lab Teams,active\n",
+		"groups.csv":            "group_id,group_category_id,course_id,name,status\nG-1,GC-1,BIO-1,Team One,available\nG-2,,BIO-1,Team Two,available\n",
 		"group_memberships.csv": "group_id,user_id,status\nG-1,U-1,accepted\n",
 		"logins.csv":            "user_id,login_id,authentication_provider_id,existing_user_id\nU-1-ALT,sam.alt,,U-1\n",
 		"admins.csv":            "user_id,account_id,role,status\nT-1,,AccountAdmin,active\n",

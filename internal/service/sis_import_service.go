@@ -294,7 +294,7 @@ func expandUpload(uploads []SISUpload) ([]models.SISBatchFile, error) {
 				return nil, fmt.Errorf("%s: %w", f.Name, err)
 			}
 			data, err := io.ReadAll(io.LimitReader(rc, sisMaxUncompressedMB*1024*1024+1))
-			rc.Close()
+			_ = rc.Close()
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", f.Name, err)
 			}
@@ -578,7 +578,7 @@ func (s *SISImportService) ExportUsersCSV(ctx context.Context, accountID uint) (
 	writer := csv.NewWriter(&buf)
 
 	// Write header
-	writer.Write([]string{"user_id", "login_id", "first_name", "last_name", "email", "status"})
+	_ = writer.Write([]string{"user_id", "login_id", "first_name", "last_name", "email", "status"})
 
 	for _, u := range users {
 		sisID := ""
@@ -619,7 +619,7 @@ func (s *SISImportService) ExportCoursesCSV(ctx context.Context, accountID uint)
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 
-	writer.Write([]string{"course_id", "short_name", "long_name", "account_id", "status"})
+	_ = writer.Write([]string{"course_id", "short_name", "long_name", "account_id", "status"})
 
 	for _, c := range courses {
 		sisID := ""
@@ -665,7 +665,7 @@ func (s *SISImportService) ExportSectionsCSV(ctx context.Context, accountID uint
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 
-	writer.Write([]string{"section_id", "course_id", "name", "status"})
+	_ = writer.Write([]string{"section_id", "course_id", "name", "status"})
 
 	for _, sec := range sections {
 		sisSectionID := ""
@@ -737,7 +737,7 @@ func (s *SISImportService) ExportEnrollmentsCSV(ctx context.Context, accountID u
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 
-	writer.Write([]string{"course_id", "user_id", "role", "section_id", "status"})
+	_ = writer.Write([]string{"course_id", "user_id", "role", "section_id", "status"})
 
 	for _, e := range enrollments {
 		sisCourseID := courseMap[e.CourseID]
@@ -846,25 +846,10 @@ func (s *SISImportService) recordError(ctx context.Context, batchID uint, row in
 		Message:    message,
 		File:       file,
 	}
-	s.errorRepo.Create(ctx, batchError)
+	_ = s.errorRepo.Create(ctx, batchError)
 }
 
 // Utility functions
-
-func buildColumnIndex(header []string) map[string]int {
-	index := make(map[string]int)
-	for i, col := range header {
-		index[strings.TrimSpace(strings.ToLower(col))] = i
-	}
-	return index
-}
-
-func getColumn(record []string, colIndex map[string]int, name string) string {
-	if idx, ok := colIndex[name]; ok && idx < len(record) {
-		return strings.TrimSpace(record[idx])
-	}
-	return ""
-}
 
 func splitName(name string) (string, string) {
 	parts := strings.SplitN(strings.TrimSpace(name), " ", 2)

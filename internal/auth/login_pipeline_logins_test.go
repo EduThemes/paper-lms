@@ -29,7 +29,9 @@ func (f *fakeProviderLogins) FindForProvider(_ context.Context, providerID, acco
 	return nil, errors.New("not found")
 }
 
-func (f *fakeProviderLogins) TouchLastLogin(_ context.Context, id uint) { f.touched = append(f.touched, id) }
+func (f *fakeProviderLogins) TouchLastLogin(_ context.Context, id uint) {
+	f.touched = append(f.touched, id)
+}
 
 func TestPipeline_ProviderLogin_ResolvesBySubjectOrLoginID(t *testing.T) {
 	h := newHarness(t, "off")

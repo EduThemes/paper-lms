@@ -694,11 +694,11 @@ func (s *AccountReportService) provGroups(ctx context.Context, accountID uint, p
 
 func (s *AccountReportService) provGroupMemberships(ctx context.Context, accountID uint, sisOnly bool) (reportFile, error) {
 	type row struct {
-		GroupID   uint
-		GroupSIS  *string
-		UserID    uint
-		UserSIS   *string
-		State     string
+		GroupID  uint
+		GroupSIS *string
+		UserID   uint
+		UserSIS  *string
+		State    string
 	}
 	q := `SELECT gm.group_id, g.sis_source_id AS group_sis, gm.user_id, u.sis_user_id AS user_sis, gm.workflow_state AS state
 	      FROM group_memberships gm

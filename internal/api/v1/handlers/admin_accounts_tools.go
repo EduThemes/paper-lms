@@ -23,18 +23,18 @@ func accountReportJSON(r *models.AccountReport) fiber.Map {
 	var params map[string]interface{}
 	_ = json.Unmarshal([]byte(r.Parameters), &params)
 	out := fiber.Map{
-		"id":          r.ID,
-		"report":      r.ReportType,
-		"status":      r.WorkflowState,
-		"progress":    r.Progress,
-		"message":     r.Message,
-		"row_count":   r.RowCount,
-		"parameters":  params,
-		"user_id":     r.UserID,
-		"created_at":  r.CreatedAt,
-		"started_at":  r.StartedAt,
-		"ended_at":    r.EndedAt,
-		"file_name":   r.FileName,
+		"id":           r.ID,
+		"report":       r.ReportType,
+		"status":       r.WorkflowState,
+		"progress":     r.Progress,
+		"message":      r.Message,
+		"row_count":    r.RowCount,
+		"parameters":   params,
+		"user_id":      r.UserID,
+		"created_at":   r.CreatedAt,
+		"started_at":   r.StartedAt,
+		"ended_at":     r.EndedAt,
+		"file_name":    r.FileName,
 		"downloadable": r.WorkflowState == models.AccountReportComplete,
 	}
 	return out
@@ -248,7 +248,7 @@ func (h *AdminAccountsHandler) UploadBrandLogo(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.InternalError(c, "Could not read the logo")
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	data, err := io.ReadAll(io.LimitReader(f, service.MaxBrandLogoBytes+1))
 	if err != nil {
 		return responses.InternalError(c, "Could not read the logo")

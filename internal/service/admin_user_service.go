@@ -238,20 +238,20 @@ func (s *AdminUserService) UpdateUser(ctx context.Context, u *models.User, in Ad
 
 // AdminUserEnrollment is one enrollment row on the user detail page.
 type AdminUserEnrollment struct {
-	ID              uint       `json:"id"`
-	CourseID        uint       `json:"course_id"`
-	CourseName      string     `json:"course_name"`
-	CourseCode      string     `json:"course_code"`
-	CourseState     string     `json:"course_workflow_state"`
-	SectionID       *uint      `json:"course_section_id"`
-	SectionName     string     `json:"section_name"`
-	Type            string     `json:"type"`
-	Role            string     `json:"role"`
-	RoleID          *uint      `json:"role_id"`
-	WorkflowState   string     `json:"enrollment_state"`
-	AssociatedUser  *uint      `json:"associated_user_id"`
-	LastActivityAt  *time.Time `json:"last_activity_at"`
-	CreatedAt       time.Time  `json:"created_at"`
+	ID             uint       `json:"id"`
+	CourseID       uint       `json:"course_id"`
+	CourseName     string     `json:"course_name"`
+	CourseCode     string     `json:"course_code"`
+	CourseState    string     `json:"course_workflow_state"`
+	SectionID      *uint      `json:"course_section_id"`
+	SectionName    string     `json:"section_name"`
+	Type           string     `json:"type"`
+	Role           string     `json:"role"`
+	RoleID         *uint      `json:"role_id"`
+	WorkflowState  string     `json:"enrollment_state"`
+	AssociatedUser *uint      `json:"associated_user_id"`
+	LastActivityAt *time.Time `json:"last_activity_at"`
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 // ListEnrollments returns every enrollment of a user of accountID, in any
@@ -274,10 +274,10 @@ func (s *AdminUserService) ListEnrollments(ctx context.Context, userID, accountI
 
 // ObserverLinkRow is one observer pairing on the user detail page.
 type ObserverLinkRow struct {
-	UserID    uint      `json:"id"`
-	Name      string    `json:"name"`
-	Email     string    `json:"email"`
-	LinkedAt  time.Time `json:"linked_at"`
+	UserID   uint      `json:"id"`
+	Name     string    `json:"name"`
+	Email    string    `json:"email"`
+	LinkedAt time.Time `json:"linked_at"`
 }
 
 // ListObservees returns the students a user observes (active links).

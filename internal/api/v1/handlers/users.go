@@ -977,6 +977,9 @@ func (h *UserHandler) ListUsers(c *fiber.Ctx) error {
 			"locale":        u.Locale,
 			"role":          u.Role,
 			"created_at":    u.CreatedAt,
+			// G114: the admin People page shows and bulk-edits suspension.
+			"sis_user_id": u.SISUserID,
+			"suspended":   u.Suspended,
 		}
 	}
 

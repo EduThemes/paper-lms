@@ -35,8 +35,8 @@ const (
 	AccountReportError    = "error"
 )
 
-// BeforeCreate mirrors the SQL DEFAULTs (GORM writes '' for zero strings,
-// and '' is not valid jsonb).
+// BeforeCreate mirrors the SQL DEFAULTs (GORM writes an empty string for
+// zero strings, and an empty string is not valid jsonb).
 func (r *AccountReport) BeforeCreate(tx *gorm.DB) error {
 	if r.Parameters == "" {
 		r.Parameters = "{}"

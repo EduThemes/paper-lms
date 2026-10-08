@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	"gorm.io/gorm"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // UserLogin is an additional login (Canvas: pseudonym) for a user (G115).
@@ -55,7 +55,7 @@ func NormalizeLoginID(s string) string {
 }
 
 // BeforeSave keeps the normalized column in step and mirrors the SQL
-// DEFAULT on workflow_state (GORM writes '' for a zero string).
+// DEFAULT on workflow_state (GORM writes an empty string, not the default).
 func (l *UserLogin) BeforeSave(tx *gorm.DB) error {
 	l.UniqueID = strings.TrimSpace(l.UniqueID)
 	l.UniqueIDNormalized = NormalizeLoginID(l.UniqueID)
