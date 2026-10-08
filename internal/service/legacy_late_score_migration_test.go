@@ -42,8 +42,16 @@ func TestMigration000077_RecoversEnteredScoreOfLegacyLateGrades(t *testing.T) {
 		GradedAt: &graded, PostedAt: &graded, WorkflowState: models.SubmissionGraded}
 	require.NoError(t, g.Create(sub).Error)
 
-	// Re-apply 000077 on top of the row.
-	require.NoError(t, db.MigrateDown(g, 1))
+	// Re-apply 000077 on top of the row (rolling back every later
+	// migration first; numbers are not contiguous across lanes).
+	for {
+		v, _, err := db.MigrateVersion(g)
+		require.NoError(t, err)
+		if v < 77 {
+			break
+		}
+		require.NoError(t, db.MigrateDown(g, 1))
+	}
 	require.NoError(t, db.MigrateUp(g))
 
 	var got models.Submission
