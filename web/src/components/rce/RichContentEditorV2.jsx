@@ -73,6 +73,7 @@ export default function RichContentEditorV2({
   // Editor chrome
   const [sourceMode, setSourceMode] = useState(false);
   const [sourceHtml, setSourceHtml] = useState('');
+  const sourceOriginalRef = useRef('');
   const [fullscreen, setFullscreen] = useState(false);
   const [a11yOpen, setA11yOpen] = useState(false);
   const [a11yCount, setA11yCount] = useState(0);
@@ -236,14 +237,19 @@ export default function RichContentEditorV2({
   const toggleSource = useCallback(() => {
     if (!editor) return;
     if (!sourceMode) {
-      setSourceHtml(formatHtml(sanitizeHTML(editor.getHTML())));
+      const formatted = formatHtml(sanitizeHTML(editor.getHTML()));
+      sourceOriginalRef.current = formatted;
+      setSourceHtml(formatted);
       setFindOpen(false);
       setSourceMode(true);
       return;
     }
-    // Back to the rich view: parse the edited source. emitUpdate makes the
-    // parent receive the editor's normalized HTML.
-    editor.commands.setContent(prepareEditorHtml(sanitizeHTML(sourceHtml)), { emitUpdate: true });
+    // Back to the rich view: parse the edited source (if it was edited, so
+    // just looking at the HTML does not mark the form dirty). emitUpdate
+    // makes the parent receive the editor's normalized HTML.
+    if (sourceHtml !== sourceOriginalRef.current) {
+      editor.commands.setContent(prepareEditorHtml(sanitizeHTML(sourceHtml)), { emitUpdate: true });
+    }
     setSourceMode(false);
     setTimeout(() => editor.commands.focus(), 0);
   }, [editor, sourceMode, sourceHtml]);

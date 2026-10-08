@@ -116,8 +116,10 @@ describe('rce drafts (B103, G012)', () => {
     scheduleRceDraftWrite('page-1-new-body', '<p>typed</p>', 2000);
     vi.advanceTimersByTime(2000);
     vi.useRealTimers();
-    await settle();
-    expect((await readRceDraft('page-1-new-body'))?.html).toBe('<p>typed</p>');
+    // The write encrypts asynchronously after the timer fires.
+    await vi.waitFor(async () => {
+      expect((await readRceDraft('page-1-new-body'))?.html).toBe('<p>typed</p>');
+    });
   });
 
   it('clearAllRceDrafts removes only editor drafts and forgets the key (logout)', async () => {

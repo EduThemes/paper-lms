@@ -85,6 +85,19 @@ describe('RichContentEditorV2 HTML source view (G004)', () => {
   });
 });
 
+describe('RichContentEditorV2 HTML view without edits', () => {
+  it('does not report a change when the source was only looked at', () => {
+    const onChange = vi.fn();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => { root.render(<RichContentEditorV2 value="<h2>Unit</h2><p>Hello</p>" onChange={onChange} />); });
+    click(byLabel('Switch to the HTML editor'));
+    click(byLabel('Switch to the rich text editor'));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
 describe('RichContentEditorV2 status bar (G005, G016)', () => {
   it('counts words and characters', () => {
     mount('<p>one two three</p>');
