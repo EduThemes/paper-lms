@@ -17,7 +17,7 @@ import KeyboardShortcutsDialog from './KeyboardShortcutsDialog';
 import { buildRceExtensions } from './extensions';
 import { checkDocument } from './a11yRules';
 import { countWords } from './findReplace';
-import { prepareEditorHtml, formatHtml } from './contentTransforms';
+import { prepareEditorHtml, formatHtml, cleanPastedHtml } from './contentTransforms';
 import { readRceDraft, scheduleRceDraftWrite, cancelRceDraftWrite, clearRceDraft } from './rceDrafts';
 import { normalizeHTML, plainTextToHtml } from '../../utils/html';
 
@@ -106,6 +106,7 @@ export default function RichContentEditorV2({
         'aria-multiline': 'true',
         'aria-label': label,
       },
+      transformPastedHTML: (html) => cleanPastedHtml(html),
       // Pasted / dropped image files are uploaded to the course files and
       // inserted (G006). Without this they were silently dropped.
       handlePaste: (view, event) => {
@@ -302,6 +303,9 @@ export default function RichContentEditorV2({
 
   // ----- Keyboard shortcuts (G016) ------------------------------------------
   const onKeyDown = useCallback((e) => {
+    // React bubbles events out of portaled dialogs too; only handle keys
+    // pressed in the editor itself.
+    if (!wrapperRef.current?.contains(e.target)) return;
     const mod = e.metaKey || e.ctrlKey;
     if (e.altKey && !mod && (e.key === '0' || e.code === 'Digit0')) {
       e.preventDefault(); setShortcutsOpen(true);

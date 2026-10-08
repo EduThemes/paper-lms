@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { Editor } from '@tiptap/react';
 import { buildRceExtensions } from '../extensions';
 import { sanitizeHTML } from '../../RichContentViewer';
-import { prepareEditorHtml, formatHtml } from '../contentTransforms';
+import { prepareEditorHtml, formatHtml, cleanPastedHtml } from '../contentTransforms';
 
 let editor;
 function load(html) {
@@ -198,5 +198,23 @@ describe('formatHtml (source view)', () => {
     const a = load(html).getHTML();
     editor.destroy();
     expect(load(pretty).getHTML()).toBe(a);
+  });
+});
+
+describe('cleanPastedHtml (Google Docs / Word paste)', () => {
+  it('drops default-restating styles but keeps real formatting', () => {
+    const pasted = '<b style="font-weight:normal;" id="docs-internal-guid-abc"><p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;">'
+      + '<span style="font-size:11pt;font-family:Arial,sans-serif;color:#000000;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre-wrap;">plain </span>'
+      + '<span style="font-size:11pt;font-family:Arial,sans-serif;color:#ff0000;background-color:#ffff00;font-weight:700;white-space:pre-wrap;">red</span></p></b>';
+    const cleaned = cleanPastedHtml(pasted);
+    expect(cleaned).not.toContain('docs-internal-guid');
+    expect(cleaned).not.toContain('white-space');
+    expect(cleaned).not.toContain('font-family');
+    const html = load(cleaned).getHTML();
+    expect(html).toMatch(/<p dir="ltr">plain <(strong|span)/);
+    expect(html).toMatch(/color: (#ff0000|rgb\(255, 0, 0\))/);
+    expect(html).toMatch(/background-color: (#ffff00|rgb\(255, 255, 0\))/);
+    // The unformatted run is not wrapped in a span.
+    expect(html).not.toMatch(/<span[^>]*>plain/);
   });
 });

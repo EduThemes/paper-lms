@@ -21,6 +21,73 @@ export function prepareEditorHtml(html) {
   return tpl.innerHTML;
 }
 
+// Inline declarations word processors (Google Docs, Word) put on every run
+// of pasted text that only restate the defaults. Kept, they would bloat
+// every paste with spans now that the editor preserves inline styles.
+const NOISE_STYLE = {
+  'background-color': /^(transparent|rgba\(0,\s*0,\s*0,\s*0\)|initial|inherit)$/i,
+  'font-weight': /^(400|normal|inherit)$/i,
+  'font-style': /^(normal|inherit)$/i,
+  'font-variant': /./,
+  'font-variant-ligatures': /./,
+  'font-variant-caps': /./,
+  'font-variant-east-asian': /./,
+  'font-variant-alternates': /./,
+  'font-variant-numeric': /./,
+  'font-variant-position': /./,
+  'text-decoration': /^(none|inherit)$/i,
+  'text-decoration-line': /^none$/i,
+  'vertical-align': /^baseline$/i,
+  'white-space': /./,
+  'white-space-collapse': /./,
+  'text-wrap': /./,
+  'color': /^(#000000|#000|rgb\(0,\s*0,\s*0\)|windowtext|inherit)$/i,
+  'font-family': /./,
+  'font-size': /^(11pt|12pt|medium|inherit)$/i,
+  'line-height': /./,
+  'margin-top': /^0(pt|px)?$/i,
+  'margin-bottom': /^0(pt|px)?$/i,
+};
+
+function isNoise(prop, value) {
+  if (prop.startsWith('mso-') || prop.startsWith('-webkit-')) return true;
+  const re = NOISE_STYLE[prop];
+  return !!(re && re.test(value));
+}
+
+/**
+ * Clean HTML pasted from word processors before the editor parses it:
+ * drops default-restating inline styles and Google Docs' wrapper ids, so a
+ * paste keeps real formatting (colours, highlights, sizes) without a span
+ * around every run.
+ */
+export function cleanPastedHtml(html) {
+  if (!html || typeof document === 'undefined') return html;
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  // Google Docs wraps the whole paste in <b style="font-weight:normal"
+  // id="docs-internal-guid-...">; unwrap it (before the style pass would
+  // turn it into a real <b> around everything).
+  tpl.content.querySelectorAll('[id^="docs-internal-guid"]').forEach((el) => {
+    if (el.tagName === 'B' || el.tagName === 'SPAN') el.replaceWith(...el.childNodes);
+    else el.removeAttribute('id');
+  });
+  tpl.content.querySelectorAll('[style]').forEach((el) => {
+    const kept = (el.getAttribute('style') || '').split(';').map((d) => {
+      const i = d.indexOf(':');
+      if (i === -1) return null;
+      const prop = d.slice(0, i).trim().toLowerCase();
+      const value = d.slice(i + 1).trim();
+      return prop && value && !isNoise(prop, value) ? `${prop}: ${value}` : null;
+    }).filter(Boolean);
+    if (kept.length) el.setAttribute('style', kept.join('; '));
+    else el.removeAttribute('style');
+  });
+
+  tpl.content.querySelectorAll('[class^="Mso"], [class*=" Mso"]').forEach((el) => el.removeAttribute('class'));
+  return tpl.innerHTML;
+}
+
 /**
  * Pretty-print editor HTML for the source view: each block element starts on
  * its own line, nested blocks are indented, and a block that holds only

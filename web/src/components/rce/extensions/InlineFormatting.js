@@ -19,7 +19,9 @@ const STYLE_PROPS = {
   fontSize: 'font-size',
   fontFamily: 'font-family',
 };
-const OWNED_STYLE = new Set(Object.values(STYLE_PROPS));
+// Owned by this mark's attributes, or by the bold / italic / underline /
+// strike marks that parse the same declarations.
+const OWNED_STYLE = new Set([...Object.values(STYLE_PROPS), 'font-weight', 'font-style', 'text-decoration', 'text-decoration-line']);
 
 // <font size="1..7"> to the CSS sizes browsers use for them.
 const FONT_SIZE_MAP = { 1: '10px', 2: '13px', 3: '16px', 4: '18px', 5: '24px', 6: '32px', 7: '48px' };
@@ -74,8 +76,13 @@ export const TextStyle = Mark.create({
 
   parseHTML() {
     return [
-      // A bare <span> carries nothing worth keeping; let its text through.
-      { tag: 'span', getAttrs: (el) => (el.attributes.length > 0 ? null : false) },
+      // A span with nothing worth keeping (no style, no preserved
+      // attribute) is unwrapped; its text comes through unformatted.
+      {
+        tag: 'span',
+        getAttrs: (el) => (parseStyle(el.getAttribute('style')).length > 0
+          || collectExtraAttrs(el, { skipStyle: () => true }) ? null : false),
+      },
       { tag: 'font' },
     ];
   },
