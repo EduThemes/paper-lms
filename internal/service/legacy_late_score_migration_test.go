@@ -43,7 +43,8 @@ func TestMigration000077_RecoversEnteredScoreOfLegacyLateGrades(t *testing.T) {
 	require.NoError(t, g.Create(sub).Error)
 
 	// Re-apply 000077 on top of the row.
-	require.NoError(t, db.MigrateDown(g, 1))
+	// Roll back to 76 (later lanes add migrations above 77), then up.
+	require.NoError(t, db.MigrateDown(g, migrationsAbove(t, 76)))
 	require.NoError(t, db.MigrateUp(g))
 
 	var got models.Submission
