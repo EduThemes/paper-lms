@@ -146,3 +146,60 @@ func TestObserverLink_AssociatedEnrollmentWithoutLinkStillCounts(t *testing.T) {
 		t.Fatal("still an observer after unlink")
 	}
 }
+
+// F12: with the link store wired, an enrollment-only pairing (an SIS
+// associated_user_id row in one course) stays limited to that course. The
+// observer dashboard must not create ObserverEnrollments in the child's
+// other courses (nothing would ever remove them) nor list those courses.
+func TestObserverLink_EnrollmentOnlyPairingStaysInItsCourse(t *testing.T) {
+	g, cleanup := freshDB(t)
+	defer cleanup()
+	seedSISTenants(t, g)
+	ctx := context.Background()
+
+	enrollmentRepo := postgres.NewEnrollmentRepository(g)
+	svc := service.NewObserverService(enrollmentRepo, postgres.NewCourseRepository(g), postgres.NewUserRepository(g)).
+		SetObserverLinkStore(postgres.NewObserverLinkRepository(g))
+
+	parent := &models.User{AccountID: 1, Name: "Pat Parent", LoginID: "pat.parent3", Email: "pat.parent3@example.com"}
+	child := &models.User{AccountID: 1, Name: "Casey Child", LoginID: "casey.child3", Email: "casey.child3@example.com"}
+	for _, u := range []*models.User{parent, child} {
+		if err := g.Create(u).Error; err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+	}
+	math := &models.Course{AccountID: 1, Name: "Math", CourseCode: "M1", WorkflowState: models.CourseAvailable}
+	art := &models.Course{AccountID: 1, Name: "Art", CourseCode: "A1", WorkflowState: models.CourseAvailable}
+	for _, c := range []*models.Course{math, art} {
+		if err := g.Create(c).Error; err != nil {
+			t.Fatalf("seed course: %v", err)
+		}
+	}
+	for _, cid := range []uint{math.ID, art.ID} {
+		if err := enrollmentRepo.Create(ctx, &models.Enrollment{
+			UserID: child.ID, CourseID: cid, Type: "StudentEnrollment", Role: "StudentEnrollment", WorkflowState: models.EnrollmentActive,
+		}); err != nil {
+			t.Fatalf("enroll child: %v", err)
+		}
+	}
+	childID := child.ID
+	if err := enrollmentRepo.Create(ctx, &models.Enrollment{
+		UserID: parent.ID, CourseID: math.ID, Type: "ObserverEnrollment", Role: "ObserverEnrollment",
+		WorkflowState: models.EnrollmentActive, AssociatedUserID: &childID,
+	}); err != nil {
+		t.Fatalf("seed observer enrollment: %v", err)
+	}
+
+	courses, err := svc.GetObserveeCourses(ctx, parent.ID, child.ID)
+	if err != nil {
+		t.Fatalf("GetObserveeCourses: %v", err)
+	}
+	if len(courses) != 1 || courses[0].ID != math.ID {
+		t.Fatalf("GetObserveeCourses = %+v; want only Math", courses)
+	}
+	var n int64
+	g.Model(&models.Enrollment{}).Where("user_id = ? AND course_id = ? AND type = ?", parent.ID, art.ID, "ObserverEnrollment").Count(&n)
+	if n != 0 {
+		t.Fatalf("observer enrollment created in Art for an enrollment-only pairing (%d rows)", n)
+	}
+}

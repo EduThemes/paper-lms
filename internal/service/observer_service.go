@@ -376,7 +376,18 @@ func (s *ObserverService) ListObservedStudentProfiles(ctx context.Context, obser
 // later was invisible to the parent and failed course authorization
 // (B204). Canvas keeps observers enrolled in all of an observee's courses.
 // Best effort: failures leave the existing enrollments untouched.
+//
+// Only without the observer-link store: with it wired, ObserverLink
+// activation plus Enrollment.AfterSave (SyncObserverEnrollmentsForStudent)
+// keep linked observers enrolled — and remove them when the student
+// leaves — while an enrollment-only pairing (e.g. an SIS
+// associated_user_id row) must stay limited to its own course. Creating
+// link-less ObserverEnrollments here would spread such a pairing to every
+// course and leave rows nothing ever removes.
 func (s *ObserverService) syncObserverEnrollments(ctx context.Context, observerUserID, studentUserID uint, studentEnrollments []models.Enrollment) {
+	if s.links != nil {
+		return
+	}
 	observerEnrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
 	if err != nil {
 		return
@@ -443,6 +454,32 @@ func (s *ObserverService) IsObserverOf(ctx context.Context, observerUserID, stud
 	return false, nil
 }
 
+// observedCourseScope reports which of the student's courses the observer
+// may see. all=true for a link-store pairing (or the legacy model, where
+// syncObserverEnrollments enrolls the observer everywhere). For an
+// enrollment-only pairing under the link store, only the courses where the
+// observer holds an active ObserverEnrollment associated with the student.
+func (s *ObserverService) observedCourseScope(ctx context.Context, observerUserID, studentUserID uint) (courses map[uint]bool, all bool) {
+	if s.links == nil {
+		return nil, true
+	}
+	if linked, err := s.links.IsLinked(ctx, observerUserID, studentUserID); err == nil && linked {
+		return nil, true
+	}
+	courses = map[uint]bool{}
+	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
+	if err != nil {
+		return courses, false
+	}
+	for _, e := range enrollments {
+		if e.Type == "ObserverEnrollment" && e.WorkflowState == models.EnrollmentActive &&
+			e.AssociatedUserID != nil && *e.AssociatedUserID == studentUserID {
+			courses[e.CourseID] = true
+		}
+	}
+	return courses, false
+}
+
 // GetObserveeCourses returns the courses a specific observed student is enrolled
 // in where the observer also has an active ObserverEnrollment linked to that student.
 func (s *ObserverService) GetObserveeCourses(ctx context.Context, observerUserID, studentUserID uint) ([]models.Course, error) {
@@ -461,12 +498,16 @@ func (s *ObserverService) GetObserveeCourses(ctx context.Context, observerUserID
 		return nil, errors.New("could not fetch student enrollments")
 	}
 	s.syncObserverEnrollments(ctx, observerUserID, studentUserID, studentEnrollments)
+	visible, all := s.observedCourseScope(ctx, observerUserID, studentUserID)
 
 	seen := make(map[uint]bool)
 	var courses []models.Course
 
 	for _, e := range studentEnrollments {
 		if e.WorkflowState != "active" {
+			continue
+		}
+		if !all && !visible[e.CourseID] {
 			continue
 		}
 		if seen[e.CourseID] {
@@ -506,12 +547,16 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 		return nil, errors.New("could not fetch student enrollments")
 	}
 	s.syncObserverEnrollments(ctx, parentID, childID, studentEnrollments)
+	visible, all := s.observedCourseScope(ctx, parentID, childID)
 
 	// Build the unique active course set for the child.
 	courseIDs := []uint{}
 	courseByID := map[uint]*models.Course{}
 	for _, e := range studentEnrollments {
 		if e.WorkflowState != "active" {
+			continue
+		}
+		if !all && !visible[e.CourseID] {
 			continue
 		}
 		if _, ok := courseByID[e.CourseID]; ok {
