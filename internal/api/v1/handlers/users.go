@@ -157,6 +157,7 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 				"avatar_url":    result.User.AvatarURL,
 				"locale":        result.User.Locale,
 				"role":          result.User.Role,
+				"account_id":    result.User.AccountID,
 			},
 		}
 		if result.MustEnroll {
@@ -185,6 +186,7 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 			"avatar_url":    user.AvatarURL,
 			"locale":        user.Locale,
 			"role":          user.Role,
+			"account_id":    user.AccountID,
 		},
 	})
 }
@@ -276,6 +278,7 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 			"email":         user.Email,
 			"locale":        user.Locale,
 			"role":          user.Role,
+			"account_id":    user.AccountID,
 		},
 	})
 }
@@ -370,6 +373,7 @@ func (h *UserHandler) SetPassword(c *fiber.Ctx) error {
 			"avatar_url":    user.AvatarURL,
 			"locale":        user.Locale,
 			"role":          user.Role,
+			"account_id":    user.AccountID,
 		},
 	})
 }
@@ -686,6 +690,7 @@ func (h *UserHandler) GetSelf(c *fiber.Ctx) error {
 		"locale":        user.Locale,
 		"time_zone":     user.TimeZone,
 		"role":          user.Role,
+		"account_id":    user.AccountID,
 	}
 
 	// If masquerading, include masquerade info so the frontend can show the banner

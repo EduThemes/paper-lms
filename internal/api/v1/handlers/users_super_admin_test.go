@@ -58,6 +58,26 @@ func TestAccountAdminCannotManageSuperAdmin(t *testing.T) {
 	repo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
 }
 
+// B070: /users/self carries the caller's account_id so admin pages can
+// target the right tenant instead of a hardcoded account 1.
+func TestGetSelfIncludesAccountID(t *testing.T) {
+	repo := new(mocks.MockUserRepository)
+	h := handlers.NewUserHandler(service.NewUserService(repo), "test-jwt-secret", "test", nil, nil, nil)
+	app := testutil.SetupTestApp()
+	app.Get("/users/self", func(c *fiber.Ctx) error {
+		c.Locals("user_id", uint(4))
+		c.Locals("account_id", uint(5))
+		return c.Next()
+	}, h.GetSelf)
+	repo.On("FindByID", mock.Anything, uint(4), uint(0)).
+		Return(&models.User{ID: 4, AccountID: 5, Name: "Ada Admin", Role: "admin"}, nil)
+
+	resp := testutil.MakeRequest(app, http.MethodGet, "/users/self", nil)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body, _ := testutil.ParseJSONMap(resp)
+	assert.EqualValues(t, 5, body["account_id"])
+}
+
 func TestSuperAdminCanManageSuperAdmin(t *testing.T) {
 	app, repo := superAdminTargetApp(true)
 	repo.On("Update", mock.Anything, mock.AnythingOfType("*models.User")).Return(nil)

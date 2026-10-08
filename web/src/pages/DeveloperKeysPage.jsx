@@ -2,10 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { KeyRound, Plus, Trash2, Copy, Check, AlertTriangle, X, ToggleLeft, ToggleRight, Eye, EyeOff } from 'lucide-react';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
+import useAccountId from '../hooks/useAccountId';
 
-const ACCOUNT_ID = 1;
+// The tenant comes from the signed-in user (useAccountId), never a constant.
 
 const DeveloperKeysPage = () => {
+  const ACCOUNT_ID = useAccountId();
   const [keys, setKeys] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -26,11 +28,11 @@ const DeveloperKeysPage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [ACCOUNT_ID]);
 
   useEffect(() => {
-    fetchKeys();
-  }, [fetchKeys]);
+    if (ACCOUNT_ID) fetchKeys();
+  }, [ACCOUNT_ID, fetchKeys]);
 
   const handleCreate = async (e) => {
     e.preventDefault();

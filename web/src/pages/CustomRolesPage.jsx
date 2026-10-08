@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Shield, Plus, Edit2, Trash2, Copy, Search, ChevronDown, ChevronRight, ToggleLeft, ToggleRight, Info, X } from 'lucide-react';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
+import useAccountId from '../hooks/useAccountId';
 import { getCSRFToken } from '../services/api';
 
 const PERMISSION_CATEGORIES = {
@@ -42,7 +43,7 @@ const CustomRolesPage = () => {
     permissions: {},
   });
 
-  const accountId = 1;
+  const accountId = useAccountId();
 
   const authHeaders = () => ({
     'Content-Type': 'application/json',
@@ -141,10 +142,12 @@ const CustomRolesPage = () => {
   ];
 
   useEffect(() => {
+    if (!accountId) return;
     fetchRoles();
     fetchPresets();
     fetchPermissionDefs();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]);
 
   const parsePermissions = (permJson) => {
     if (!permJson || permJson === '{}') return {};
