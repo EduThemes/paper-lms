@@ -115,6 +115,39 @@ func TestDeveloperKeys_CreateAcceptsArraysAndHashesSecret(t *testing.T) {
 	assert.False(t, service.VerifyClientSecret(stored, raw+"x"))
 }
 
+// LTI 1.3 developer keys carry LTI Advantage service scopes (Canvas
+// accepts them); scope validation must not reject them, while free-form
+// text is still refused.
+func TestDeveloperKeys_CreateAcceptsLTIAdvantageScopes(t *testing.T) {
+	repo := new(mocks.MockDeveloperKeyRepository)
+	var stored *models.DeveloperKey
+	repo.On("Create", mock.Anything, mock.AnythingOfType("*models.DeveloperKey")).
+		Run(func(args mock.Arguments) { stored = args.Get(1).(*models.DeveloperKey) }).
+		Return(nil)
+	app := devKeysApp(repo, 1)
+
+	ltiScopes := []string{
+		"https://purl.imsglobal.org/spec/lti-ags/scope/lineitem",
+		"https://purl.imsglobal.org/spec/lti-ags/scope/score",
+		"https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly",
+	}
+	resp := testutil.MakeRequest(app, http.MethodPost, "/accounts/self/developer_keys", testutil.JSONBody(map[string]interface{}{
+		"developer_key": map[string]interface{}{
+			"name":       "LTI Tool",
+			"is_lti_key": true,
+			"scopes":     ltiScopes,
+		},
+	}))
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	require.NotNil(t, stored)
+	assert.Equal(t, service.ScopesToJSON(ltiScopes), stored.Scopes)
+
+	resp = testutil.MakeRequest(app, http.MethodPost, "/accounts/self/developer_keys", testutil.JSONBody(map[string]interface{}{
+		"developer_key": map[string]interface{}{"name": "Bad", "scopes": []string{"read:courses"}},
+	}))
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
 // --- B076: OAuth2 authorization requires explicit consent -----------------
 
 func oauthFixture(keyAccount uint) (*mocks.MockDeveloperKeyRepository, *handlers.OAuth2Handler) {

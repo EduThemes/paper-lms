@@ -310,6 +310,24 @@ func IsValidScope(scope string) bool {
 	return ok && validScopeMethods[strings.ToUpper(method)] && strings.HasPrefix(path, "/api/")
 }
 
+// ltiScopePrefix prefixes the IMS LTI Advantage service scopes
+// (AGS lineitem/score/result, NRPS memberships, ...).
+const ltiScopePrefix = "https://purl.imsglobal.org/spec/lti-"
+
+// IsValidDeveloperKeyScope reports whether scope may be stored on a
+// developer key: a Canvas url: scope, or (as Canvas allows for LTI keys)
+// an IMS LTI Advantage scope URI such as
+// "https://purl.imsglobal.org/spec/lti-ags/scope/score". LTI scopes never
+// match a REST route, so under require_scopes they grant no API access.
+func IsValidDeveloperKeyScope(scope string) bool {
+	scope = strings.TrimSpace(scope)
+	if IsValidScope(scope) {
+		return true
+	}
+	rest, ok := strings.CutPrefix(scope, ltiScopePrefix)
+	return ok && rest != "" && !strings.ContainsAny(rest, " \t\n")
+}
+
 // scopeParamSegment matches a Canvas route-style placeholder segment.
 var scopeParamSegment = regexp.MustCompile(`^:[A-Za-z_][A-Za-z0-9_]*$`)
 

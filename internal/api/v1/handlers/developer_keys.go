@@ -124,11 +124,12 @@ func (f *flexStringList) scopesValue() string {
 	return service.ScopesToJSON(f.values())
 }
 
-// invalidScope returns the first scope that is not an enforceable Canvas
-// url: scope, or "" when all are valid (B085).
+// invalidScope returns the first scope that is neither an enforceable
+// Canvas url: scope nor an LTI Advantage scope URI, or "" when all are
+// valid (B085).
 func (f *flexStringList) invalidScope() string {
 	for _, s := range f.values() {
-		if !service.IsValidScope(s) {
+		if !service.IsValidDeveloperKeyScope(s) {
 			return s
 		}
 	}
