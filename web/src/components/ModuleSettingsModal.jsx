@@ -329,15 +329,14 @@ const ModuleSettingsModal = ({ courseId, module, modules, prerequisites, onClose
                               <input
                                 type="number"
                                 min="0"
-                                max="100"
-                                step="1"
+                                step="0.5"
                                 className="w-20 border border-border-strong rounded px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-1 focus:ring-brand-500"
                                 value={req.min_score}
                                 onChange={e => updateItemReq(item.id, 'min_score', e.target.value)}
                                 placeholder="Score"
-                                aria-label={`Minimum score percentage for ${item.title}`}
+                                aria-label={`Minimum score in points for ${item.title}`}
                               />
-                              <span className="text-sm text-text-tertiary">%</span>
+                              <span className="text-sm text-text-tertiary">pts</span>
                             </div>
                           )}
                         </div>

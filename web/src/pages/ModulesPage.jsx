@@ -5,7 +5,7 @@ import {
   FileText, PenTool, HelpCircle, ExternalLink, Minus, Book,
   GripVertical, MessageSquare, X, Pencil, Check, Lock, Settings2,
   MoreHorizontal, Indent as IndentIncrease, Outdent as IndentDecrease, ArrowRight,
-  ArrowUp, ArrowDown, Heading, Copy,
+  ArrowUp, ArrowDown, Heading, Copy, Paperclip, Megaphone,
 } from 'lucide-react';
 import {
   DndContext,
@@ -25,6 +25,14 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { api } from '../services/api';
+import {
+  NEW_CONTENT,
+  buildModuleItemPayload,
+  fetchContentOptions,
+  getModuleItemLink,
+  isExternalItemLink,
+  itemNeedsContent,
+} from '../utils/moduleItems';
 import { useAuth } from '../contexts/AuthContext';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
@@ -58,6 +66,8 @@ const ITEM_ICONS = {
   Discussion: MessageSquare,
   ExternalUrl: ExternalLink,
   SubHeader: Minus,
+  File: Paperclip,
+  Announcement: Megaphone,
 };
 
 const ITEM_TYPE_OPTIONS = [
@@ -167,7 +177,8 @@ const ModuleItemRow = memo(function ModuleItemRow({
 }) {
   const indent = item.indent || 0;
   const isHeader = item.type === 'SubHeader';
-  const isExternal = item.type === 'ExternalUrl';
+  const isExternal = isExternalItemLink(item);
+  const opensNewTab = item.type === 'File' || item.new_tab;
   const padLeft = `${1 + indent * INDENT_REM}rem`;
 
   if (isEditing) {
@@ -214,8 +225,8 @@ const ModuleItemRow = memo(function ModuleItemRow({
     isExternal ? (
       <a
         href={itemLink}
-        target={item.new_tab ? '_blank' : '_self'}
-        rel={item.new_tab ? 'noopener noreferrer' : undefined}
+        target={opensNewTab ? '_blank' : '_self'}
+        rel={opensNewTab ? 'noopener noreferrer' : undefined}
         className="flex items-center gap-3 flex-1 min-w-0 hover:text-brand-600"
       >
         {titleNode}
@@ -487,7 +498,9 @@ const ModulesPage = () => {
   const [newModuleName, setNewModuleName] = useState('');
   const [creating, setCreating] = useState(false);
   const [addingItemTo, setAddingItemTo] = useState(null);
-  const [newItem, setNewItem] = useState({ title: '', type: 'SubHeader', external_url: '', new_tab: false });
+  const [newItem, setNewItem] = useState({ title: '', type: 'SubHeader', external_url: '', new_tab: false, content_id: '' });
+  const [contentOptions, setContentOptions] = useState([]);
+  const [contentOptionsLoading, setContentOptionsLoading] = useState(false);
   const [editingModuleId, setEditingModuleId] = useState(null);
   const [editModuleName, setEditModuleName] = useState('');
   const [editingItemId, setEditingItemId] = useState(null);
@@ -615,26 +628,45 @@ const ModulesPage = () => {
 
   const openAddItem = useCallback((moduleId, type = 'Assignment') => {
     setAddingItemTo(moduleId);
-    setNewItem({ title: '', type, external_url: '', new_tab: false });
+    setNewItem({ title: '', type, external_url: '', new_tab: false, content_id: '' });
   }, []);
+
+  // B042: Assignment/Quiz/Discussion/Page items link to course content.
+  // Load the existing content of the selected type for the picker.
+  useEffect(() => {
+    if (addingItemTo === null || !itemNeedsContent(newItem.type)) {
+      setContentOptions([]);
+      return undefined;
+    }
+    let cancelled = false;
+    setContentOptionsLoading(true);
+    fetchContentOptions(api, courseId, newItem.type)
+      .then((opts) => { if (!cancelled) setContentOptions(opts); })
+      .catch(() => { if (!cancelled) setContentOptions([]); })
+      .finally(() => { if (!cancelled) setContentOptionsLoading(false); });
+    return () => { cancelled = true; };
+  }, [addingItemTo, newItem.type, courseId]);
+
+  const canSubmitNewItem = itemNeedsContent(newItem.type)
+    ? (newItem.content_id && newItem.content_id !== NEW_CONTENT) || !!newItem.title.trim()
+    : !!newItem.title.trim();
 
   const handleAddItem = async (e, moduleId) => {
     e.preventDefault();
-    if (!newItem.title.trim()) return;
+    if (!canSubmitNewItem) return;
     setCreating(true);
     try {
-      const itemPayload = {
-        title: newItem.title.trim(),
+      const itemPayload = await buildModuleItemPayload(api, courseId, {
+        title: newItem.title,
         type: newItem.type,
+        selection: newItem.content_id,
+        externalUrl: newItem.external_url,
+        newTab: newItem.new_tab,
         position: (modules.find(m => m.id === moduleId)?.items?.length || 0) + 1,
-      };
-      if (newItem.type === 'ExternalUrl') {
-        itemPayload.external_url = newItem.external_url;
-        itemPayload.new_tab = newItem.new_tab;
-      }
+      });
       await api.createModuleItem(courseId, moduleId, itemPayload);
       setAddingItemTo(null);
-      setNewItem({ title: '', type: 'SubHeader', external_url: '', new_tab: false });
+      setNewItem({ title: '', type: 'SubHeader', external_url: '', new_tab: false, content_id: '' });
       await fetchModules();
     } catch (err) {
       setError(err.message);
@@ -833,17 +865,7 @@ const ModulesPage = () => {
     }
   };
 
-  const getItemLink = useCallback((item) => {
-    if (item.type === 'Assignment' && item.content_id) return `/courses/${courseId}/assignments/${item.content_id}`;
-    if (item.type === 'Quiz' && item.content_id) return `/courses/${courseId}/quizzes/${item.content_id}/take`;
-    if (item.type === 'Page') {
-      if (item.page_url) return `/courses/${courseId}/pages/${item.page_url}`;
-      if (item.content_id) return `/courses/${courseId}/pages/${item.content_id}`;
-    }
-    if (item.type === 'Discussion' && item.content_id) return `/courses/${courseId}/discussions/${item.content_id}`;
-    if (item.type === 'ExternalUrl' && item.url) return item.url;
-    return null;
-  }, [courseId]);
+  const getItemLink = useCallback((item) => getModuleItemLink(item, courseId), [courseId]);
 
   const activeDragItem = useMemo(() => {
     if (!activeId) return null;
@@ -1059,7 +1081,8 @@ const ModulesPage = () => {
                                   <div className="flex items-center gap-3">
                                     <select
                                       value={newItem.type}
-                                      onChange={(e) => setNewItem({ ...newItem, type: e.target.value })}
+                                      onChange={(e) => setNewItem({ ...newItem, type: e.target.value, content_id: '' })}
+                                      aria-label="Item type"
                                       className="border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                                     >
                                       {ITEM_TYPE_OPTIONS.map(opt => (
@@ -1070,11 +1093,30 @@ const ModulesPage = () => {
                                       type="text"
                                       value={newItem.title}
                                       onChange={(e) => setNewItem({ ...newItem, title: e.target.value })}
-                                      placeholder="Item title..."
+                                      placeholder={itemNeedsContent(newItem.type) && newItem.content_id && newItem.content_id !== NEW_CONTENT
+                                        ? 'Item title (defaults to the selected item)'
+                                        : 'Item title...'}
+                                      aria-label="Item title"
                                       className="flex-1 border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                                       autoFocus
                                     />
                                   </div>
+                                  {itemNeedsContent(newItem.type) && (
+                                    <select
+                                      value={newItem.content_id}
+                                      onChange={(e) => setNewItem({ ...newItem, content_id: e.target.value })}
+                                      aria-label={`Choose ${newItem.type.toLowerCase()}`}
+                                      disabled={contentOptionsLoading}
+                                      className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                                    >
+                                      <option value="">
+                                        {contentOptionsLoading ? 'Loading...' : `[ New ${newItem.type.toLowerCase()} ]`}
+                                      </option>
+                                      {contentOptions.map(opt => (
+                                        <option key={opt.id} value={String(opt.id)}>{opt.label}</option>
+                                      ))}
+                                    </select>
+                                  )}
                                   {newItem.type === 'ExternalUrl' && (
                                     <div className="flex items-center gap-3">
                                       <input
@@ -1107,7 +1149,7 @@ const ModulesPage = () => {
                                     <Button
                                       type="submit"
                                       size="sm"
-                                      disabled={creating || !newItem.title.trim()}
+                                      disabled={creating || !canSubmitNewItem}
                                     >
                                       {creating ? 'Adding...' : 'Add Item'}
                                     </Button>
