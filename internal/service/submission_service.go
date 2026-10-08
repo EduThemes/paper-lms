@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -247,6 +248,15 @@ func (s *SubmissionService) Submit(ctx context.Context, submission *models.Submi
 		if submission.URL == nil || strings.TrimSpace(*submission.URL) == "" {
 			return errors.New("url is required for a website URL submission")
 		}
+		// The URL is rendered as a link in SpeedGrader, the student's
+		// page and the peer-review view; a javascript:/data: URL would run
+		// in the grader's session when clicked.
+		u, err := url.Parse(strings.TrimSpace(*submission.URL))
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return errors.New("url must be an http or https link")
+		}
+		clean := u.String()
+		submission.URL = &clean
 	case "online_upload":
 		if submission.Attachments == nil || *submission.Attachments == "" {
 			return errors.New("at least one file is required for a file upload submission")
@@ -483,22 +493,26 @@ func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, gra
 			return &models.Submission{AssignmentID: assignmentID, UserID: userID, WorkflowState: models.SubmissionUnsubmitted}, nil
 		}
 		oldGrade, oldScore := submission.Grade, submission.Score
-		submission.Score = nil
-		submission.Grade = nil
-		submission.EnteredScore = nil
-		submission.EnteredGrade = nil
-		submission.PointsDeducted = nil
-		submission.GradedAt = nil
-		submission.GraderID = &graderID
-		if submission.SubmittedAt != nil {
-			submission.WorkflowState = models.SubmissionSubmitted
-		} else {
-			submission.WorkflowState = models.SubmissionUnsubmitted
-		}
+		clearGrade(submission, graderID)
 		if err := s.submissionRepo.Update(ctx, submission); err != nil {
 			return nil, err
 		}
 		s.logGradeChange(ctx, assignment, submission, graderID, oldGrade, oldScore)
+		// A group grade was applied to every member, so clearing it
+		// clears it for every member too.
+		if assignment.GroupCategoryID != nil && *assignment.GroupCategoryID > 0 {
+			for _, memberID := range s.getGroupMemberIDs(ctx, userID, *assignment.GroupCategoryID) {
+				member, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, memberID, callerAccountID)
+				if err != nil || member == nil || (member.Score == nil && member.Grade == nil) {
+					continue
+				}
+				mOldGrade, mOldScore := member.Grade, member.Score
+				clearGrade(member, graderID)
+				if err := s.submissionRepo.Update(ctx, member); err == nil {
+					s.logGradeChange(ctx, assignment, member, graderID, mOldGrade, mOldScore)
+				}
+			}
+		}
 		return submission, nil
 	}
 
@@ -536,6 +550,25 @@ func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, gra
 	s.fireOnGraded(submission.ID)
 
 	return submission, nil
+}
+
+// clearGrade removes a submission's grade (B113): score, grade, entered
+// score and deduction are nulled and the state falls back to submitted
+// or unsubmitted.
+func clearGrade(sub *models.Submission, graderID uint) {
+	grader := graderID
+	sub.Score = nil
+	sub.Grade = nil
+	sub.EnteredScore = nil
+	sub.EnteredGrade = nil
+	sub.PointsDeducted = nil
+	sub.GradedAt = nil
+	sub.GraderID = &grader
+	if sub.SubmittedAt != nil {
+		sub.WorkflowState = models.SubmissionSubmitted
+	} else {
+		sub.WorkflowState = models.SubmissionUnsubmitted
+	}
 }
 
 // applyGrade writes an entered score onto sub: the late-policy deduction

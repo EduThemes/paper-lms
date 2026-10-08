@@ -6,8 +6,17 @@
 -- failed. Canvas's constraint is one ad-hoc override per student per
 -- assignment: UNIQUE (assignment_id, user_id). Existing rows cannot
 -- violate the new index (user_id alone was already unique).
+--
+-- Deleting an override only soft-deleted it and left its student rows
+-- behind, still holding the unique slot. Those orphans are removed here
+-- (the service now removes them on delete).
 
 BEGIN;
+
+DELETE FROM assignment_override_students s
+ USING assignment_overrides o
+ WHERE s.assignment_override_id = o.id
+   AND o.workflow_state = 'deleted';
 
 DROP INDEX IF EXISTS idx_override_user;
 

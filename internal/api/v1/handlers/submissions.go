@@ -103,6 +103,8 @@ func studentSubmissionToJSON(s *models.Submission) fiber.Map {
 		for _, k := range []string{"score", "grade", "entered_score", "entered_grade", "points_deducted", "graded_at", "grader_id"} {
 			m[k] = nil
 		}
+		// Excusing is part of the grade (Canvas hides it until posted too).
+		m["excused"] = false
 		if s.WorkflowState == models.SubmissionGraded {
 			if s.SubmittedAt != nil {
 				m["workflow_state"] = models.SubmissionSubmitted

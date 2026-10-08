@@ -278,6 +278,38 @@ func TestGradingParity_B110_ObserverSeesOnlyPostedGrades(t *testing.T) {
 	assert.Equal(t, uint(1), ov.RecentGrades[0].AssignmentID)
 }
 
+// B113 (group assignments): a group grade is applied to every member, so
+// clearing it clears every member's grade too.
+func TestGradingParity_B113_ClearingGroupGradeClearsMembers(t *testing.T) {
+	cat := uint(4)
+	a := &models.Assignment{ID: 10, CourseID: 1, PointsPossible: ptrFloat64(10), GroupCategoryID: &cat}
+	h := newGradeHarness(a)
+	groups := new(mocks.MockGroupMembershipRepository)
+	groups.On("FindUserGroupInCategory", mock.Anything, uint(20), uint(4)).Return(&models.Group{ID: 8}, nil)
+	groups.On("ListByGroupID", mock.Anything, uint(8), mock.Anything).Return(&repository.PaginatedResult[models.GroupMembership]{
+		Items: []models.GroupMembership{{UserID: 20, WorkflowState: "accepted"}, {UserID: 21, WorkflowState: "accepted"}},
+	}, nil)
+	courseRepo := new(mocks.MockCourseRepository)
+	courseRepo.On("FindByID", mock.Anything, mock.Anything, mock.Anything).Return(&models.Course{ID: 1, AccountID: 1}, nil).Maybe()
+	gpg := new(mocks.MockGradingPeriodGroupRepository)
+	gpg.On("ListByAccountID", mock.Anything, mock.Anything, mock.Anything).
+		Return(&repository.PaginatedResult[models.GradingPeriodGroup]{}, nil).Maybe()
+	svc := service.NewSubmissionService(h.submissionRepo, h.assignmentRepo, h.enrollmentRepo, h.latePolicyRepo,
+		courseRepo, gpg, new(mocks.MockGradingPeriodRepository), groups)
+
+	h.submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(10), uint(20), uint(1)).
+		Return(&models.Submission{ID: 1, AssignmentID: 10, UserID: 20, Score: ptrFloat64(8), Grade: ptrString("8"), WorkflowState: models.SubmissionGraded}, nil)
+	member := &models.Submission{ID: 2, AssignmentID: 10, UserID: 21, Score: ptrFloat64(8), Grade: ptrString("8"), EnteredScore: ptrFloat64(8), WorkflowState: models.SubmissionGraded}
+	h.submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(10), uint(21), uint(1)).Return(member, nil)
+	h.submissionRepo.On("Update", mock.Anything, mock.Anything).Return(nil)
+
+	_, err := svc.Grade(context.Background(), 10, 20, 99, 1, "")
+	require.NoError(t, err)
+	assert.Nil(t, member.Score, "member's group grade must be cleared")
+	assert.Nil(t, member.EnteredScore)
+	assert.Equal(t, models.SubmissionUnsubmitted, member.WorkflowState)
+}
+
 type emptyAnnouncements struct{}
 
 func (emptyAnnouncements) ListByCourseID(context.Context, uint, repository.PaginationParams) (*repository.PaginatedResult[models.Announcement], error) {

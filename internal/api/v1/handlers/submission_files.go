@@ -133,10 +133,12 @@ func (h *SubmissionHandler) DownloadSubmissionFile(c *fiber.Ctx) error {
 	if err != nil || submission == nil {
 		return responses.NotFound(c, "file")
 	}
-	if !h.callerCanViewSubmission(c, submission.UserID) && !h.callerIsAssignedPeerReviewer(c, uint(assignmentID), submission.UserID) {
+	if !submissionHasAttachment(submission, uint(fileID)) {
 		return responses.NotFound(c, "file")
 	}
-	if !submissionHasAttachment(submission, uint(fileID)) {
+	if !h.callerCanViewSubmission(c, submission.UserID) &&
+		!h.callerIsAssignedPeerReviewer(c, uint(assignmentID), submission.UserID) &&
+		!h.callerOwnSubmissionHasFile(c, uint(assignmentID), uint(fileID)) {
 		return responses.NotFound(c, "file")
 	}
 
@@ -179,6 +181,20 @@ func (h *SubmissionHandler) DownloadSubmissionFile(c *fiber.Ctx) error {
 
 	c.Set("Content-Type", attachment.ContentType)
 	return c.SendStream(reader)
+}
+
+// callerOwnSubmissionHasFile covers group assignments: a group
+// submission is copied onto every member's row with the submitter's
+// download URLs, so a member may download a file that is attached to
+// their OWN submission of this assignment even though the URL names the
+// classmate who uploaded it.
+func (h *SubmissionHandler) callerOwnSubmissionHasFile(c *fiber.Ctx, assignmentID, fileID uint) bool {
+	callerID, _ := c.Locals("user_id").(uint)
+	if callerID == 0 {
+		return false
+	}
+	own, err := h.submissionService.GetByAssignmentAndUser(c.Context(), assignmentID, callerID, callerAccountID(c))
+	return err == nil && submissionHasAttachment(own, fileID)
 }
 
 // submissionHasAttachment reports whether fileID is one of the files

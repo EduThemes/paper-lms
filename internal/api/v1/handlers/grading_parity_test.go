@@ -232,6 +232,23 @@ func TestGradingParity_B012_StudentGradeHiddenUntilPosted(t *testing.T) {
 			assert.Equal(t, "submitted", m["workflow_state"], "graded state must not leak")
 		}
 	}
+
+	// Excusing is part of the grade: hidden until posted as well.
+	for _, tc := range []struct {
+		name        string
+		postedAt    *time.Time
+		wantExcused bool
+	}{{"unposted excused", nil, false}, {"posted excused", &now, true}} {
+		f := newGradingFixture(t, 2, "StudentEnrollment", nil)
+		f.submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2), uint(1)).Return(&models.Submission{
+			ID: 11, AssignmentID: 1, UserID: 2, Excused: true, WorkflowState: models.SubmissionUnsubmitted, PostedAt: tc.postedAt,
+		}, nil)
+		resp := testutil.MakeRequest(f.app, http.MethodGet, "/api/v1/courses/1/assignments/1/submissions/2", nil)
+		require.Equal(t, http.StatusOK, resp.StatusCode, tc.name)
+		m, err := testutil.ParseJSONMap(resp)
+		require.NoError(t, err)
+		assert.Equal(t, tc.wantExcused, m["excused"], tc.name)
+	}
 }
 
 // B012: under a manual post policy grading neither posts the submission
@@ -324,6 +341,16 @@ func TestGradingParity_B111_SubmitGuards(t *testing.T) {
 	resp = testutil.MakeRequest(f.app, http.MethodPost, "/api/v1/courses/1/assignments/1/submissions", text())
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "type not accepted")
 	f.submissionRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+
+	// A website-URL submission must be an http(s) link: a javascript: URL
+	// would run in the grader's session when clicked in SpeedGrader.
+	for _, bad := range []string{"javascript:alert(document.cookie)", "data:text/html,<script>x</script>", "example.test/no-scheme"} {
+		f = newGradingFixture(t, 2, "StudentEnrollment", &models.Assignment{ID: 1, CourseID: 1, WorkflowState: models.AssignmentPublished, SubmissionTypes: "online_url"})
+		resp = testutil.MakeRequest(f.app, http.MethodPost, "/api/v1/courses/1/assignments/1/submissions", testutil.JSONBody(map[string]interface{}{
+			"submission": map[string]interface{}{"submission_type": "online_url", "url": bad}}))
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode, bad)
+		f.submissionRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+	}
 }
 
 // B013: a student may only attach files they uploaded themselves.
@@ -375,6 +402,8 @@ func TestGradingParity_B013_StudentUploadAndSubmissionScopedDownload(t *testing.
 	attJSON := `[{"id":77}]`
 	other.submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2), uint(1)).
 		Return(&models.Submission{ID: 11, AssignmentID: 1, UserID: 2, Attachments: &attJSON}, nil)
+	other.submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(8), uint(1)).
+		Return(&models.Submission{ID: 12, AssignmentID: 1, UserID: 8}, nil)
 	resp = testutil.MakeRequest(other.app, http.MethodGet, "/api/v1/courses/1/assignments/1/submissions/2/files/77/download", nil)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 
@@ -389,6 +418,17 @@ func TestGradingParity_B013_StudentUploadAndSubmissionScopedDownload(t *testing.
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	body, _ := io.ReadAll(resp.Body)
 	assert.Equal(t, "my essay text", string(body))
+
+	// A group member whose own (group) submission carries the same file
+	// can download it, although the URL names the uploader.
+	member := newGradingFixture(t, 9, "StudentEnrollment", nil)
+	member.handler.SetFileService(fileService)
+	member.submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2), uint(1)).
+		Return(&models.Submission{ID: 11, AssignmentID: 1, UserID: 2, Attachments: &attJSON}, nil)
+	member.submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(9), uint(1)).
+		Return(&models.Submission{ID: 13, AssignmentID: 1, UserID: 9, Attachments: &attJSON}, nil)
+	resp = testutil.MakeRequest(member.app, http.MethodGet, "/api/v1/courses/1/assignments/1/submissions/2/files/77/download", nil)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 // ---------------------------------------------------------------------------
@@ -686,6 +726,8 @@ func TestGradingParity_B112_OverrideStudentConflictReported(t *testing.T) {
 	studentRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.AssignmentOverrideStudent")).
 		Return(errors.New("duplicate key value violates unique constraint"))
 	overrideRepo.On("Delete", mock.Anything, uint(30)).Return(nil).Once()
+	studentRepo.On("ListByUserAndAssignment", mock.Anything, uint(2), uint(1)).Return([]models.AssignmentOverrideStudent{}, nil)
+	studentRepo.On("ListByOverrideID", mock.Anything, uint(30)).Return([]models.AssignmentOverrideStudent{}, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodPost, "/courses/1/assignments/1/overrides",
 		testutil.JSONBody(map[string]interface{}{"assignment_override": map[string]interface{}{"title": "x", "student_ids": []uint{2}}}))

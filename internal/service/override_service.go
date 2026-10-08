@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
+
+	"gorm.io/gorm"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -44,8 +47,22 @@ func (s *OverrideService) UpdateOverride(ctx context.Context, override *models.A
 	return s.overrideRepo.Update(ctx, override)
 }
 
+// DeleteOverride soft-deletes the override and removes its student rows.
+// Leaving them behind kept the (assignment_id, user_id) unique slot taken,
+// so the student could never get another override on that assignment
+// (B112).
 func (s *OverrideService) DeleteOverride(ctx context.Context, id uint) error {
-	return s.overrideRepo.Delete(ctx, id)
+	if err := s.overrideRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	if s.overrideStudentRepo != nil {
+		if students, err := s.overrideStudentRepo.ListByOverrideID(ctx, id); err == nil {
+			for _, st := range students {
+				_ = s.overrideStudentRepo.Delete(ctx, id, st.UserID)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *OverrideService) ListOverrides(ctx context.Context, assignmentID uint) ([]models.AssignmentOverride, error) {
@@ -63,6 +80,18 @@ func (s *OverrideService) IsCourseStudent(ctx context.Context, courseID, userID,
 }
 
 func (s *OverrideService) AddStudent(ctx context.Context, overrideID, userID, assignmentID uint) error {
+	// Drop stale rows left by overrides deleted before DeleteOverride
+	// cleaned up after itself; they would otherwise block this insert.
+	if rows, err := s.overrideStudentRepo.ListByUserAndAssignment(ctx, userID, assignmentID); err == nil {
+		for _, r := range rows {
+			if r.AssignmentOverrideID == overrideID {
+				continue
+			}
+			if _, err := s.overrideRepo.FindByID(ctx, r.AssignmentOverrideID); errors.Is(err, gorm.ErrRecordNotFound) {
+				_ = s.overrideStudentRepo.Delete(ctx, r.AssignmentOverrideID, userID)
+			}
+		}
+	}
 	student := &models.AssignmentOverrideStudent{
 		AssignmentOverrideID: overrideID,
 		UserID:               userID,
