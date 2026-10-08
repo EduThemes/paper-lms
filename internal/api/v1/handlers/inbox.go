@@ -62,6 +62,7 @@ type InboxStore interface {
 	ListVisibleMessages(ctx context.Context, convID, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.ConversationMessage], error)
 	VisibleMessages(ctx context.Context, convID, userID uint, messageIDs []uint) ([]models.ConversationMessage, error)
 	CanSeeAttachment(ctx context.Context, convID, userID, attachmentID uint) (bool, error)
+	ListSubmissionCommentThreads(ctx context.Context, userID, accountID uint, params repository.PaginationParams) ([]postgres.SubmissionCommentThread, int64, error)
 }
 
 // AddressBook scopes who a user may message (postgres.RecipientSearchRepository).

@@ -15,6 +15,7 @@ import {
 } from '../utils/notifyInbox';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
+import SubmissionCommentsMailbox from '../components/SubmissionCommentsMailbox';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export { pageFromLink };
@@ -28,6 +29,10 @@ const SCOPE_LABELS = {
   sent: 'Sent',
   archived: 'Archived',
 };
+
+// Canvas's "Submission Comments" mailbox: not a conversation scope, a
+// separate list of submission comment threads.
+const SUBMISSION_COMMENTS = 'submission_comments';
 
 // Messages are returned oldest-first, so the newest replies live on the
 // LAST page. Load that page (plus the one before it when it is short) so
@@ -664,7 +669,8 @@ const InboxPage = () => {
     return () => clearTimeout(id);
   }, [searchInput]);
 
-  const listQuery = useConversations({ scope, filter, search });
+  const submissionScope = scope === SUBMISSION_COMMENTS;
+  const listQuery = useConversations({ scope, filter, search }, { enabled: !submissionScope });
   const unreadQuery = useUnreadCount();
   const contextsQuery = useInboxContexts();
 
@@ -790,6 +796,15 @@ const InboxPage = () => {
               {s === 'unread' && unread > 0 ? ` (${unread})` : ''}
             </button>
           ))}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={submissionScope}
+            onClick={() => { setScope(SUBMISSION_COMMENTS); setSelectedId(null); }}
+            className={`px-3 py-1.5 rounded-md text-sm font-medium ${submissionScope ? 'bg-brand-600 text-white' : 'bg-surface-0 text-text-secondary hover:bg-surface-2'}`}
+          >
+            Submission comments
+          </button>
         </div>
         <div className="flex flex-1 gap-2">
           <select
@@ -803,7 +818,7 @@ const InboxPage = () => {
               <option key={c.context_code} value={c.context_code}>{c.name}</option>
             ))}
           </select>
-          <div className="relative flex-1">
+          <div className={`relative flex-1 ${submissionScope ? 'invisible' : ''}`}>
             <Search className="w-4 h-4 absolute left-2 top-2 text-text-tertiary" aria-hidden="true" />
             <input
               type="search"
@@ -841,6 +856,11 @@ const InboxPage = () => {
         </div>
       )}
 
+      {submissionScope ? (
+        <div className="bg-surface-0 rounded-lg shadow overflow-hidden">
+          <SubmissionCommentsMailbox filter={filter} />
+        </div>
+      ) : (
       <div className="flex flex-col md:flex-row bg-surface-0 rounded-lg shadow overflow-hidden" style={{ minHeight: '500px' }}>
         <div className={`w-full md:w-2/5 border-r border-border-default overflow-y-auto ${selected ? 'hidden md:block' : 'block'}`}>
           {visible.length === 0 ? (
@@ -924,6 +944,7 @@ const InboxPage = () => {
           )}
         </div>
       </div>
+      )}
     </Layout>
   );
 };

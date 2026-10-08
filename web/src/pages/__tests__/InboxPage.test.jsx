@@ -18,6 +18,7 @@ vi.mock('../../services/api_notify_inbox', () => ({
     batchUpdate: vi.fn(),
     forward: vi.fn(),
     uploadAttachment: vi.fn(),
+    submissionComments: vi.fn(),
   },
 }));
 
@@ -209,5 +210,35 @@ describe('InboxPage', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // G092: the "Submission comments" mailbox lists comment threads and
+  // links each to where it is answered.
+  test('submission comments tab lists threads with links', async () => {
+    inboxApi.listConversations.mockResolvedValue({ data: [], pagination: {} });
+    inboxApi.contexts.mockResolvedValue([
+      { context_code: 'course_7', context_type: 'Course', context_id: 7, name: 'Biology', permissions: {} },
+      { context_code: 'course_8', context_type: 'Course', context_id: 8, name: 'Chemistry', permissions: {} },
+    ]);
+    inboxApi.submissionComments.mockResolvedValue({
+      data: [
+        { submission_id: 1, course_id: 7, course_name: 'Biology', assignment_id: 3, assignment_name: 'Lab report', student_id: 50, comment_count: 2, last_comment: 'Good data', last_author_name: 'Pat Teacher', caller_is_student: true },
+        { submission_id: 2, course_id: 8, course_name: 'Chemistry', assignment_id: 4, assignment_name: 'Titration', student_id: 61, student_name: 'Sam Student', comment_count: 1, last_comment: 'Done?', last_author_name: 'Sam Student', caller_is_student: false },
+      ],
+      pagination: {},
+    });
+
+    renderPage();
+    await waitFor(() => expect(inboxApi.listConversations).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Submission comments' }));
+
+    const lab = await screen.findByRole('link', { name: /Lab report/ });
+    expect(lab).toHaveAttribute('href', '/courses/7/assignments/3');
+    expect(screen.getByRole('link', { name: /Titration/ })).toHaveAttribute('href', '/courses/8/assignments/4/speedgrader');
+    expect(inboxApi.listConversations).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByLabelText('Filter by course or group'), { target: { value: 'course_8' } });
+    await waitFor(() => expect(screen.queryByRole('link', { name: /Lab report/ })).not.toBeInTheDocument());
+    expect(screen.getByRole('link', { name: /Titration/ })).toBeInTheDocument();
   });
 });

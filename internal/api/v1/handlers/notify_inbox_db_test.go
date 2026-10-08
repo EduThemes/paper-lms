@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/assert"
@@ -112,6 +113,7 @@ func newNIFixture(t *testing.T) *niFixture {
 		// Same order as production: static paths before /:id.
 		app.Get("/conversations/unread_count", conv.UnreadCount)
 		app.Get("/conversations/contexts", conv.ListInboxContexts)
+		app.Get("/conversations/submission_comments", conv.ListSubmissionCommentThreads)
 		app.Put("/conversations", conv.BatchUpdateConversations)
 		app.Post("/conversations/attachments", conv.UploadAttachment)
 		app.Delete("/conversations/:id", conv.DeleteConversation)
@@ -456,4 +458,83 @@ func TestSubmissionCommentNotificationDB(t *testing.T) {
 	var d models.NotificationDelivery
 	require.NoError(t, f.g.Where("user_id = ?", niStudent1).Order("id DESC").First(&d).Error)
 	assert.Contains(t, d.Body, "Nice &lt;work&gt;", "the comment is escaped in the email body")
+}
+
+// G092: the inbox "Submission Comments" mailbox follows the submission
+// comment visibility rules.
+func TestInboxDB_SubmissionCommentThreads(t *testing.T) {
+	f := newNIFixture(t)
+	posted := time.Now().Add(-time.Hour)
+	auto := &models.Assignment{CourseID: f.courseID, Name: "Lab report", WorkflowState: models.AssignmentPublished, Published: true}
+	manual := &models.Assignment{CourseID: f.courseID, Name: "Essay", WorkflowState: models.AssignmentPublished, Published: true, PostPolicy: "manual"}
+	hidden := &models.Assignment{CourseID: f.courseID, Name: "Draft quiz", WorkflowState: models.AssignmentUnpublished}
+	for _, a := range []*models.Assignment{auto, manual, hidden} {
+		require.NoError(t, f.g.Create(a).Error)
+	}
+	subAuto := &models.Submission{AssignmentID: auto.ID, UserID: niStudent1, WorkflowState: models.SubmissionGraded, PostedAt: &posted}
+	subManual := &models.Submission{AssignmentID: manual.ID, UserID: niStudent1, WorkflowState: models.SubmissionGraded}
+	subHidden := &models.Submission{AssignmentID: hidden.ID, UserID: niStudent1, WorkflowState: models.SubmissionGraded, PostedAt: &posted}
+	for _, s := range []*models.Submission{subAuto, subManual, subHidden} {
+		require.NoError(t, f.g.Create(s).Error)
+	}
+	at := func(min int) time.Time { return time.Now().Add(time.Duration(min) * time.Minute) }
+	for _, sc := range []models.SubmissionComment{
+		{SubmissionID: subAuto.ID, AuthorID: niTeacher, Comment: "Good data", CreatedAt: at(-30)},
+		{SubmissionID: subAuto.ID, AuthorID: niTeacher, Comment: "unfinished draft", Draft: true, CreatedAt: at(-5)},
+		{SubmissionID: subManual.ID, AuthorID: niTeacher, Comment: "Hidden feedback", CreatedAt: at(-20)},
+		{SubmissionID: subHidden.ID, AuthorID: niTeacher, Comment: "On an unpublished assignment", CreatedAt: at(-10)},
+	} {
+		sc := sc
+		require.NoError(t, f.g.Create(&sc).Error)
+	}
+
+	list := func(caller uint) []map[string]any {
+		resp := testutil.MakeRequest(f.app(caller), http.MethodGet, "/conversations/submission_comments", nil)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		items, err := testutil.ParseJSONArray(resp)
+		require.NoError(t, err)
+		return items
+	}
+
+	// The student sees the posted thread only, and not the teacher's draft.
+	items := list(niStudent1)
+	require.Len(t, items, 1, "unposted feedback and unpublished assignments stay hidden")
+	assert.Equal(t, "Lab report", items[0]["assignment_name"])
+	assert.Equal(t, "Good data", items[0]["last_comment"])
+	assert.EqualValues(t, 1, items[0]["comment_count"])
+	assert.Equal(t, true, items[0]["caller_is_student"])
+
+	// The student's own comment on the unposted submission shows that
+	// thread, still without the hidden feedback.
+	require.NoError(t, f.g.Create(&models.SubmissionComment{SubmissionID: subManual.ID, AuthorID: niStudent1, Comment: "Question about the rubric", CreatedAt: at(-1)}).Error)
+	items = list(niStudent1)
+	require.Len(t, items, 2)
+	assert.Equal(t, "Essay", items[0]["assignment_name"])
+	assert.EqualValues(t, 1, items[0]["comment_count"])
+	assert.Equal(t, "Question about the rubric", items[0]["last_comment"])
+
+	// The teacher sees every thread in the course they teach, newest
+	// first, including their own draft.
+	items = list(niTeacher)
+	require.Len(t, items, 3)
+	assert.Equal(t, "Essay", items[0]["assignment_name"])
+	assert.Equal(t, "Ben Student", items[0]["student_name"])
+	assert.EqualValues(t, 2, items[0]["comment_count"])
+	assert.Equal(t, false, items[0]["caller_is_student"])
+	assert.Equal(t, "unfinished draft", items[1]["last_comment"])
+	assert.Equal(t, "Draft quiz", items[2]["assignment_name"])
+
+	// Another teacher's draft is not shown to a co-teacher.
+	require.NoError(t, f.g.Create(&models.Enrollment{UserID: niStudent2, CourseID: f.courseID, Type: "TaEnrollment", Role: "TaEnrollment", WorkflowState: "active"}).Error)
+	items = list(niStudent2)
+	require.Len(t, items, 3)
+	assert.Equal(t, "Lab report", items[2]["assignment_name"], "ordered by the newest comment the co-teacher can see")
+	assert.Equal(t, "Good data", items[2]["last_comment"])
+	assert.EqualValues(t, 1, items[2]["comment_count"])
+	require.NoError(t, f.g.Where("user_id = ? AND type = ?", niStudent2, "TaEnrollment").Delete(&models.Enrollment{}).Error)
+
+	// A classmate, a stranger and another tenant's user see nothing.
+	assert.Empty(t, list(niStudent2))
+	assert.Empty(t, list(niStranger))
+	assert.Empty(t, list(niForeign))
 }

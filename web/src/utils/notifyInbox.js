@@ -192,6 +192,20 @@ export const threadReplies = (replies) => {
   return roots;
 };
 
+// Where a submission comment thread is read and answered: the student's
+// own assignment page, or SpeedGrader for the course's teachers.
+export const submissionThreadLink = (thread) => {
+  const base = `/courses/${thread.course_id}/assignments/${thread.assignment_id}`;
+  return thread.caller_is_student ? base : `${base}/speedgrader`;
+};
+
+// The inbox course filter ("course_5") applied to submission comment
+// threads; group filters match none (submissions belong to courses).
+export const threadsInContext = (threads, filter) => {
+  if (!filter) return threads || [];
+  return (threads || []).filter((t) => `course_${t.course_id}` === filter);
+};
+
 // The cell of the notification grid for one channel and category.
 export const policyCell = (grid, channelId, category) =>
   (grid?.policies || []).find((p) => p.channel_id === channelId && p.category === category);

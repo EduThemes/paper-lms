@@ -12,6 +12,7 @@ export const notifyInboxKeys = {
   messages: (id) => ['inbox', 'messages', String(id)],
   unread: ['inbox', 'unread'],
   contexts: ['inbox', 'contexts'],
+  submissionComments: ['inbox', 'submissionComments'],
   recipients: (params) => ['inbox', 'recipients', params],
   replies: (announcementId) => ['announcementReplies', String(announcementId)],
   policies: ['notificationPolicies'],
@@ -20,13 +21,25 @@ export const notifyInboxKeys = {
 const CONVERSATIONS_PER_PAGE = 20;
 
 // Conversation list with "load more" pages.
-export function useConversations({ scope = 'inbox', filter = '', search = '' } = {}) {
+export function useConversations({ scope = 'inbox', filter = '', search = '' } = {}, options = {}) {
   return useInfiniteQuery({
     queryKey: notifyInboxKeys.conversations({ scope, filter, search }),
     queryFn: ({ pageParam = 1 }) =>
       inboxApi.listConversations({ scope, filter, search, page: pageParam, perPage: CONVERSATIONS_PER_PAGE }),
     initialPageParam: 1,
     getNextPageParam: (last) => pageFromLink(last?.pagination?.next) || undefined,
+    ...options,
+  });
+}
+
+// Submission comment threads ("Submission Comments" mailbox).
+export function useSubmissionCommentThreads(options = {}) {
+  return useInfiniteQuery({
+    queryKey: notifyInboxKeys.submissionComments,
+    queryFn: ({ pageParam = 1 }) => inboxApi.submissionComments({ page: pageParam, perPage: CONVERSATIONS_PER_PAGE }),
+    initialPageParam: 1,
+    getNextPageParam: (last) => pageFromLink(last?.pagination?.next) || undefined,
+    ...options,
   });
 }
 

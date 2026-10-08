@@ -18,6 +18,7 @@ func (r *Router) registerNotifyInboxRoutes(protected fiber.Router) {
 	// Inbox (any authenticated user; participant-gated in the handler).
 	protected.Get("/conversations/unread_count", r.ConversationHandler.UnreadCount)
 	protected.Get("/conversations/contexts", r.ConversationHandler.ListInboxContexts)
+	protected.Get("/conversations/submission_comments", r.ConversationHandler.ListSubmissionCommentThreads)
 	protected.Put("/conversations", r.ConversationHandler.BatchUpdateConversations)
 	protected.Post("/conversations/attachments", middleware.UploadRateLimit(), middleware.EnforceUploadSize(r.SettingsLookup), r.ConversationHandler.UploadAttachment)
 	protected.Delete("/conversations/:id", r.ConversationHandler.DeleteConversation)
