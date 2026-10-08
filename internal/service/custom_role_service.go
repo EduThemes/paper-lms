@@ -20,6 +20,16 @@ type CustomRoleService struct {
 	roleRepo       repository.CustomRoleRepository
 	overrideRepo   repository.RoleOverrideRepository
 	enrollmentRepo repository.EnrollmentRepository
+	// courseRepo ties course-context overrides to the role's tenant. Wired
+	// via WithCourseRepo; without it course-context overrides are refused.
+	courseRepo repository.CourseRepository
+}
+
+// WithCourseRepo wires the course repository used to validate
+// course-context role overrides. Returns the service for chaining.
+func (s *CustomRoleService) WithCourseRepo(courseRepo repository.CourseRepository) *CustomRoleService {
+	s.courseRepo = courseRepo
+	return s
 }
 
 // NewCustomRoleService creates a new CustomRoleService.
@@ -278,73 +288,146 @@ func baseRolePermissions(baseRoleType string) map[string]bool {
 	return perms
 }
 
-// CheckPermission resolves whether a user has a specific permission in a course context.
-// It merges the base role permissions with any custom role overrides.
-func (s *CustomRoleService) CheckPermission(ctx context.Context, userID, courseID uint, permission string) (bool, error) {
-	perms, err := s.GetEffectivePermissions(ctx, userID, courseID)
+// CheckPermission resolves whether a user has a specific permission in a
+// course context. accountID is the caller's tenant (0 = unscoped,
+// privileged internal callers only).
+func (s *CustomRoleService) CheckPermission(ctx context.Context, userID, courseID, accountID uint, permission string) (bool, error) {
+	perms, err := s.GetEffectivePermissions(ctx, userID, courseID, accountID)
 	if err != nil {
 		return false, err
 	}
 	return perms[permission], nil
 }
 
-// GetEffectivePermissions returns the full permission map for a user in a course context.
-// It starts with the base role defaults and then applies any custom role overrides.
-func (s *CustomRoleService) GetEffectivePermissions(ctx context.Context, userID, courseID uint) (map[string]bool, error) {
-	enrollment, err := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID, 0)
-	if err != nil {
-		return nil, errors.New("user is not enrolled in this course")
+// ErrNotEnrolled is returned when the user has no active enrollment in the
+// course (or the course is outside accountID).
+var ErrNotEnrolled = errors.New("user is not enrolled in this course")
+
+// GetEffectivePermissions returns the full permission map for a user in a
+// course. accountID scopes the enrollment (and so the course) to a tenant.
+func (s *CustomRoleService) GetEffectivePermissions(ctx context.Context, userID, courseID, accountID uint) (map[string]bool, error) {
+	enrollment, err := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID, accountID)
+	if err != nil || enrollment == nil {
+		return nil, ErrNotEnrolled
+	}
+	return s.EnrollmentPermissions(ctx, enrollment, accountID)
+}
+
+// EnrollmentPermissions resolves the permission map an enrollment carries
+// (G102). Canvas semantics, adapted to Paper's single-level tenants:
+//
+//   - No custom role: the base role's defaults.
+//   - A custom role: exactly the permissions enabled in the role's
+//     permission set (what the Custom Roles editor shows), then the role's
+//     account-level overrides, then the role's overrides for this course.
+//     A permission marked locked in the role (or by a locked account
+//     override) cannot be changed further down the chain.
+//
+// accountID is the course's tenant; the custom role must belong to it, so
+// a role id copied from another tenant never grants anything. A role that
+// is missing, deleted or from another tenant falls back to the base role.
+func (s *CustomRoleService) EnrollmentPermissions(ctx context.Context, enrollment *models.Enrollment, accountID uint) (map[string]bool, error) {
+	baseRole := enrollmentTypeToBaseRole(enrollment.Type)
+	if enrollment.RoleID == nil || *enrollment.RoleID == 0 {
+		return baseRolePermissions(baseRole), nil
+	}
+	role, err := s.roleRepo.FindByID(ctx, *enrollment.RoleID, accountID)
+	if err != nil || role == nil || role.WorkflowState != "active" {
+		return baseRolePermissions(baseRole), nil
 	}
 
-	// Map enrollment type to base role type
-	baseRole := enrollmentTypeToBaseRole(enrollment.Type)
-	perms := baseRolePermissions(baseRole)
-
-	// If the enrollment has a custom role reference, look up overrides
-	if enrollment.Role != "" && enrollment.Role != enrollment.Type {
-		// Try to find a custom role matching the enrollment role name
-		// Search across all active roles for the account
-		roles, err := s.roleRepo.ListActive(ctx, 1) // default account
-		if err == nil {
-			for _, role := range roles {
-				if role.Name == enrollment.Role || role.Label == enrollment.Role {
-					// Apply permissions from the custom role JSON
-					s.applyRolePermissions(perms, &role)
-
-					// Apply specific overrides
-					overrides, oErr := s.overrideRepo.ListByRoleID(ctx, role.ID)
-					if oErr == nil {
-						for _, o := range overrides {
-							if !o.Locked {
-								perms[o.Permission] = o.Enabled
-							}
-						}
-					}
-					break
-				}
-			}
+	perms := make(map[string]bool, len(models.AllPermissionNames()))
+	for _, p := range models.AllPermissionNames() {
+		perms[p] = false
+	}
+	locked := map[string]bool{}
+	for name, state := range parseRolePermissions(role.Permissions) {
+		if !models.IsValidPermission(name) {
+			continue
+		}
+		perms[name] = state.Enabled
+		if state.Locked {
+			locked[name] = true
 		}
 	}
 
+	overrides, err := s.overrideRepo.ListByRoleID(ctx, role.ID)
+	if err != nil {
+		return nil, err
+	}
+	// Account-level overrides first, then this course's.
+	for _, o := range overrides {
+		if o.ContextType != "Account" || !models.IsValidPermission(o.Permission) || locked[o.Permission] {
+			continue
+		}
+		perms[o.Permission] = o.Enabled
+		if o.Locked {
+			locked[o.Permission] = true
+		}
+	}
+	for _, o := range overrides {
+		if o.ContextType != "Course" || o.ContextID != enrollment.CourseID ||
+			!models.IsValidPermission(o.Permission) || locked[o.Permission] {
+			continue
+		}
+		perms[o.Permission] = o.Enabled
+	}
 	return perms, nil
 }
 
-// applyRolePermissions merges the permissions JSON blob from a CustomRole into the permission map.
-func (s *CustomRoleService) applyRolePermissions(perms map[string]bool, role *models.CustomRole) {
-	if role.Permissions == "" || role.Permissions == "{}" {
-		return
-	}
+// BaseRolePermissions exposes a base role's default permission set (used to
+// prefill the Custom Roles editor so a new role starts from its base).
+func (s *CustomRoleService) BaseRolePermissions(baseRoleType string) map[string]bool {
+	return baseRolePermissions(baseRoleType)
+}
 
-	var permMap map[string]permissionState
-	if err := json.Unmarshal([]byte(role.Permissions), &permMap); err != nil {
-		return
-	}
+// ErrRoleNotAssignable is returned when a custom role can't be given to an
+// enrollment: missing, inactive, another tenant's, or based on a different
+// role than the enrollment type.
+var ErrRoleNotAssignable = errors.New("custom role not found or not valid for this enrollment type")
 
-	for name, state := range permMap {
-		if models.IsValidPermission(name) {
-			perms[name] = state.Enabled
+// ResolveEnrollmentRole validates a custom role for an enrollment of
+// enrollmentType in a course of accountID and returns it. The role's base
+// role must match the enrollment type (a TA-based role can only be given
+// to a TaEnrollment), as in Canvas.
+func (s *CustomRoleService) ResolveEnrollmentRole(ctx context.Context, roleID, accountID uint, enrollmentType string) (*models.CustomRole, error) {
+	if roleID == 0 || accountID == 0 {
+		return nil, ErrRoleNotAssignable
+	}
+	role, err := s.roleRepo.FindByID(ctx, roleID, accountID)
+	if err != nil || role == nil || role.WorkflowState != "active" || role.AccountID != accountID {
+		return nil, ErrRoleNotAssignable
+	}
+	if role.BaseRoleType == "admin" || role.BaseRoleType != enrollmentTypeToBaseRole(enrollmentType) {
+		return nil, ErrRoleNotAssignable
+	}
+	return role, nil
+}
+
+// parseRolePermissions decodes a CustomRole.Permissions JSON blob. It
+// accepts both {"perm": {"enabled": true, "locked": false}} and the
+// shorthand {"perm": true}.
+func parseRolePermissions(raw string) map[string]permissionState {
+	out := map[string]permissionState{}
+	if raw == "" || raw == "{}" {
+		return out
+	}
+	var full map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &full); err != nil {
+		return out
+	}
+	for name, v := range full {
+		var st permissionState
+		if err := json.Unmarshal(v, &st); err == nil {
+			out[name] = st
+			continue
+		}
+		var b bool
+		if err := json.Unmarshal(v, &b); err == nil {
+			out[name] = permissionState{Enabled: b}
 		}
 	}
+	return out
 }
 
 // enrollmentTypeToBaseRole maps Canvas enrollment types to base role types.
@@ -365,30 +448,43 @@ func enrollmentTypeToBaseRole(enrollmentType string) string {
 	}
 }
 
-// SetRoleOverride creates or updates a single permission override for a role.
+// SetRoleOverride creates or updates a single permission override for a
+// role (keyed by role, permission and context).
 func (s *CustomRoleService) SetRoleOverride(ctx context.Context, override *models.RoleOverride) error {
 	if !models.IsValidPermission(override.Permission) {
 		return errors.New("invalid permission name")
 	}
-
-	// Check that the role exists
-	_, err := s.roleRepo.FindByID(ctx, override.RoleID, 0)
-	if err != nil {
+	role, err := s.roleRepo.FindByID(ctx, override.RoleID, override.AccountID)
+	if err != nil || role == nil {
 		return errors.New("role not found")
 	}
-
-	if override.ContextType == "" {
-		override.ContextType = "Account"
+	override.AccountID = role.AccountID
+	if err := s.validateOverrideContext(ctx, role, override); err != nil {
+		return err
 	}
+	return s.overrideRepo.BulkUpsert(ctx, []models.RoleOverride{*override})
+}
 
-	existing, err := s.overrideRepo.FindByRoleAndPermission(ctx, override.RoleID, override.Permission)
-	if err == nil && existing != nil {
-		existing.Enabled = override.Enabled
-		existing.Locked = override.Locked
-		return s.overrideRepo.Update(ctx, existing)
+// validateOverrideContext normalises and checks an override's context:
+// "Account" (context_id 0) or a "Course" of the role's own tenant.
+func (s *CustomRoleService) validateOverrideContext(ctx context.Context, role *models.CustomRole, o *models.RoleOverride) error {
+	switch o.ContextType {
+	case "", "Account":
+		o.ContextType = "Account"
+		o.ContextID = 0
+		return nil
+	case "Course":
+		if o.ContextID == 0 || s.courseRepo == nil {
+			return errors.New("invalid course context")
+		}
+		course, err := s.courseRepo.FindByID(ctx, o.ContextID, role.AccountID)
+		if err != nil || course == nil || course.AccountID != role.AccountID {
+			return errors.New("invalid course context")
+		}
+		return nil
+	default:
+		return errors.New("context_type must be Account or Course")
 	}
-
-	return s.overrideRepo.Create(ctx, override)
 }
 
 // RemoveRoleOverride deletes a specific override.
@@ -404,15 +500,15 @@ func (s *CustomRoleService) BulkSetOverrides(ctx context.Context, roleID, accoun
 		return errors.New("role not found")
 	}
 
-	// Validate all permissions
+	// Validate all permissions and contexts
 	for i := range overrides {
 		if !models.IsValidPermission(overrides[i].Permission) {
 			return errors.New("invalid permission name: " + overrides[i].Permission)
 		}
 		overrides[i].RoleID = roleID
 		overrides[i].AccountID = role.AccountID
-		if overrides[i].ContextType == "" {
-			overrides[i].ContextType = "Account"
+		if err := s.validateOverrideContext(ctx, role, &overrides[i]); err != nil {
+			return err
 		}
 	}
 

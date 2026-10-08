@@ -30,6 +30,7 @@ func enrollmentToJSON(e *models.Enrollment, includeContactInfo bool) fiber.Map {
 		"course_section_id": e.CourseSectionID,
 		"type":              e.Type,
 		"role":              e.Role,
+		"role_id":           e.RoleID,
 		"enrollment_state":  e.WorkflowState,
 		"created_at":        e.CreatedAt,
 		"updated_at":        e.UpdatedAt,
@@ -179,6 +180,7 @@ func (h *EnrollmentHandler) CreateEnrollment(c *fiber.Ctx) error {
 			UserID          uint   `json:"user_id"`
 			Type            string `json:"type"`
 			CourseSectionID *uint  `json:"course_section_id"`
+			RoleID          *uint  `json:"role_id"` // custom role (G102)
 		} `json:"enrollment"`
 	}
 
@@ -201,11 +203,14 @@ func (h *EnrollmentHandler) CreateEnrollment(c *fiber.Ctx) error {
 		CourseID:        uint(courseID),
 		CourseSectionID: input.Enrollment.CourseSectionID,
 		Type:            input.Enrollment.Type,
+		RoleID:          input.Enrollment.RoleID,
 		WorkflowState:   models.EnrollmentActive,
 	}
 
 	if err := h.enrollmentService.Create(c.Context(), enrollment, enrollmentCourseScope(c)); err != nil {
 		switch {
+		case errors.Is(err, service.ErrRoleNotAssignable):
+			return responses.BadRequest(c, err.Error())
 		case errors.Is(err, service.ErrEnrollmentUserNotFound):
 			// Same 404 whether the id is unused or belongs to another
 			// tenant — the endpoint must not be a cross-tenant oracle.

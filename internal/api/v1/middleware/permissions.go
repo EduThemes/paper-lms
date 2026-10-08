@@ -91,6 +91,9 @@ type PermissionMiddleware struct {
 	enrollmentRepo repository.EnrollmentRepository
 	userRepo       repository.UserRepository
 	courseRepo     repository.CourseRepository
+	// permResolver enforces custom-role permission sets (G102); see
+	// course_permissions.go. nil = enrollment-type gating only.
+	permResolver CoursePermissionResolver
 }
 
 // NewPermissionMiddleware creates a new permission middleware. courseRepo is
@@ -326,7 +329,13 @@ func (pm *PermissionMiddleware) courseGate(c *fiber.Ctx, roleSet map[string]bool
 		return forbidden(c, "enrollment is not active")
 	}
 
-	if roleSet != nil && !roleSet[enrollment.Type] {
+	if allowed, decided := pm.customRoleDecision(c, enrollment, course, roleSet); decided {
+		// The enrollment carries a custom role and the route maps onto a
+		// permission: the role's permission set decides (G102).
+		if !allowed {
+			return forbidden(c, "insufficient permissions for this action")
+		}
+	} else if roleSet != nil && !roleSet[enrollment.Type] {
 		return forbidden(c, "insufficient permissions for this action")
 	}
 

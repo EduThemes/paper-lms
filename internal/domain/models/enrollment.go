@@ -9,6 +9,11 @@ type Enrollment struct {
 	CourseSectionID  *uint              `json:"course_section_id" gorm:"index"`
 	Type             string             `json:"type" gorm:"not null"` // StudentEnrollment, TeacherEnrollment, TaEnrollment, ObserverEnrollment, DesignerEnrollment
 	Role             string             `json:"role" gorm:"not null"`
+	// RoleID names the custom role this enrollment was granted (migration
+	// 000148). Type stays the base role; the custom role's permission set
+	// is what the permission-gated course routes check (G102). nil = the
+	// base role's defaults.
+	RoleID           *uint              `json:"role_id" gorm:"index"`
 	WorkflowState    EnrollmentWorkflow `json:"workflow_state" gorm:"type:text;not null;default:'active';index"`
 	CreatedAt        time.Time          `json:"created_at"`
 	UpdatedAt        time.Time          `json:"updated_at"`

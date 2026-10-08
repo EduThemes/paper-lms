@@ -365,9 +365,19 @@ func (h *CustomRoleHandler) GetCoursePermissions(c *fiber.Ctx) error {
 		return err
 	}
 
-	perms, err := h.customRoleService.GetEffectivePermissions(c.Context(), userID, courseID)
-	if err != nil {
-		return responses.BadRequest(c, err.Error())
+	// Admins of the course's tenant act with every permission (the
+	// course gate already tied the course to the caller's tenant).
+	var perms map[string]bool
+	if isAdmin, _ := c.Locals("is_admin").(bool); isAdmin {
+		perms = map[string]bool{}
+		for _, p := range models.AllPermissionNames() {
+			perms[p] = true
+		}
+	} else {
+		perms, err = h.customRoleService.GetEffectivePermissions(c.Context(), userID, courseID, callerAccountID(c))
+		if err != nil {
+			return responses.NotFound(c, "enrollment")
+		}
 	}
 
 	// Build response with permission details
@@ -385,8 +395,9 @@ func (h *CustomRoleHandler) GetCoursePermissions(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"course_id":   courseID,
-		"user_id":     userID,
-		"permissions": permResults,
+		"course_id":      courseID,
+		"user_id":        userID,
+		"permissions":    permResults,
+		"permission_map": perms,
 	})
 }
