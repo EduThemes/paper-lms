@@ -22,6 +22,8 @@ type Router struct {
 	EnrollmentHandler      *handlers.EnrollmentHandler
 	ModuleHandler          *handlers.ModuleHandler
 	ModuleItemHandler      *handlers.ModuleItemHandler
+	// ModuleProgressionHandler: module progress + content gate (routes_modules.go).
+	ModuleProgressionHandler *handlers.ModuleProgressionHandler
 	PageHandler            *handlers.PageHandler
 	AssignmentHandler      *handlers.AssignmentHandler
 	AssignmentGroupHandler *handlers.AssignmentGroupHandler
@@ -198,6 +200,7 @@ func (r *Router) Register(app *fiber.App) {
 	// (~333 of them) without per-route plumbing. MUST sit before any
 	// route declarations on this group.
 	protected.Use(middleware.AuditWrites(r.AuditService, "http.write"))
+	r.mountModuleContentGate(protected)
 
 	// SECURITY (F-055): LTI 1.3 OIDC initiation and Launch endpoints
 	// must verify the caller IS the user being launched. The browser
@@ -853,4 +856,5 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerQuizExtensionRoutes(protected, enrolled, instructor)
 	r.registerGamificationRoutes(protected, admin, instructor, selfOrAdmin)
 	r.registerSuperAdminRoutes(protected)
+	r.registerModuleRoutes(protected, enrolled, instructor)
 }

@@ -137,6 +137,13 @@ func (s *MasteryPathService) CreateRule(ctx context.Context, courseID, triggerAs
 	if err := s.masteryRepo.ReplaceRule(ctx, rule); err != nil {
 		return nil, err
 	}
+	if existing != nil && s.submissionRepo != nil {
+		// The replace recreated every set; release already-graded
+		// students into the new ones.
+		if err := s.ReevaluateTrigger(ctx, triggerAssignmentID); err != nil {
+			return nil, err
+		}
+	}
 	return s.masteryRepo.FindRuleByID(ctx, rule.ID)
 }
 
@@ -246,22 +253,73 @@ func (s *MasteryPathService) EvaluateForStudent(ctx context.Context, submissionI
 	now := time.Now()
 	source := fmt.Sprintf("auto:submission:%d", submissionID)
 
-	var actions []models.ConditionalReleaseAssignmentSetAction
+	// The student's band decides which sets are released; a regrade
+	// into another band swaps them (Canvas unassigns the old band).
+	var chosen []uint
 	for _, sr := range rule.ScoringRanges {
 		if !sr.ContainsScore(pct) {
 			continue
 		}
 		for _, set := range sr.AssignmentSets {
-			actions = append(actions, models.ConditionalReleaseAssignmentSetAction{
-				SetID:      set.ID,
-				StudentID:  sub.UserID,
-				ActionType: "assigned",
-				ActedAt:    now,
-				Source:     source,
-			})
+			chosen = append(chosen, set.ID)
 		}
 	}
-	return s.masteryRepo.UpsertActions(ctx, actions)
+	return s.masteryRepo.ReplaceStudentAssignment(ctx, rule.ID, sub.UserID, chosen, now, source)
+}
+
+// ReevaluateTrigger re-runs release for every graded submission of the
+// trigger assignment. Replacing a rule recreates its sets, so students
+// already graded must be released into the new sets.
+func (s *MasteryPathService) ReevaluateTrigger(ctx context.Context, triggerAssignmentID uint) error {
+	for page := 1; ; page++ {
+		res, err := s.submissionRepo.ListByAssignmentID(ctx, triggerAssignmentID, repository.PaginationParams{Page: page, PerPage: 100})
+		if err != nil {
+			return err
+		}
+		if res == nil || len(res.Items) == 0 {
+			return nil
+		}
+		for _, sub := range res.Items {
+			if sub.Score == nil || sub.PostedAt == nil {
+				continue
+			}
+			if err := s.EvaluateForStudent(ctx, sub.ID); err != nil {
+				return err
+			}
+		}
+		if int64(page*100) >= res.TotalCount {
+			return nil
+		}
+	}
+}
+
+// HiddenAssignmentIDs returns the course's Mastery Paths assignments
+// that have not been released to the student. Canvas assigns path
+// assignments only to the students whose score lands them in that path,
+// so everyone else must not see them at all.
+func (s *MasteryPathService) HiddenAssignmentIDs(ctx context.Context, courseID, studentID uint) (map[uint]bool, error) {
+	gated, err := s.masteryRepo.ListGatedAssignmentIDs(ctx, courseID)
+	if err != nil {
+		return nil, err
+	}
+	hidden := make(map[uint]bool, len(gated))
+	if len(gated) == 0 {
+		return hidden, nil
+	}
+	released, err := s.GetEligibleAssignmentsForStudent(ctx, courseID, studentID)
+	if err != nil {
+		return nil, err
+	}
+	ok := make(map[uint]bool, len(released))
+	for _, id := range released {
+		ok[id] = true
+	}
+	for _, id := range gated {
+		if !ok[id] {
+			hidden[id] = true
+		}
+	}
+	return hidden, nil
 }
 
 // GetEligibleAssignmentsForStudent returns the union of assignment IDs the

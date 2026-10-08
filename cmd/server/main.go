@@ -1089,6 +1089,14 @@ func main() {
 		SettingsLookup: settingsLookup,
 	}
 
+	// Modules lane: progression engine + content gate (wire_modules.go).
+	router.ModuleProgressionHandler = wireModulesLane(database, modulesLaneDeps{
+		ModuleService: moduleService, ModuleHandler: moduleHandler, ModuleItemHandler: moduleItemHandler,
+		AssignmentService: assignmentService, MasteryPaths: masteryPathService, CoursePaces: coursePaceService,
+		QuizRepo: quizRepo, TopicRepo: discussionTopicRepo, AttachmentRepo: attachmentRepo,
+		ToolRepo: externalToolRepo, DevKeyRepo: devKeyRepo, CourseRepo: courseRepo,
+	})
+
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
 		// Per-tenant upload caps resolve through the Settings Engine

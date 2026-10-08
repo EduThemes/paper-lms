@@ -57,7 +57,8 @@ func (h *AssignmentHandler) ListAssignments(c *fiber.Ctx) error {
 
 	// B116: students and observers only ever see published assignments
 	// (Canvas hides unpublished drafts — title, description and all).
-	result, err := h.assignmentService.ListVisibleByCourse(c.Context(), uint(courseID), params, callerIsCourseStaff(c))
+	// G080: students also lose unreleased Mastery Paths assignments.
+	result, err := h.assignmentService.ListVisibleByCourseFor(c.Context(), uint(courseID), params, callerIsCourseStaff(c), callerUserID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch assignments")
 	}
