@@ -107,7 +107,7 @@ export function pastedHtmlHasContent(html) {
   tpl.innerHTML = html;
   tpl.content.querySelectorAll('style, script, meta, title, link').forEach((el) => el.remove());
   if (tpl.content.querySelector('table, ul, ol, h1, h2, h3, h4, h5, h6')) return true;
-  return (tpl.content.textContent || '').replace(/ /g, ' ').trim().length > 0;
+  return (tpl.content.textContent || '').trim().length > 0;
 }
 
 /**
