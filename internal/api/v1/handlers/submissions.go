@@ -561,6 +561,38 @@ func (h *SubmissionHandler) notifyGradePosted(ctx context.Context, assignment *m
 	_ = h.notificationDeliveryService.QueueNotification(ctx, sub.UserID, "submission_grade", subject, body, "Assignment", assignment.ID)
 }
 
+// recordOutcomeResults upserts the learning-outcome results of a graded,
+// POSTED submission for every outcome aligned to the assignment. An
+// unposted grade must not surface through the outcome/mastery views.
+func (h *SubmissionHandler) recordOutcomeResults(ctx context.Context, assignment *models.Assignment, sub *models.Submission, accountID uint) {
+	if h.outcomeAlignmentRepo == nil || h.outcomeService == nil || assignment == nil || sub == nil ||
+		sub.Score == nil || sub.PostedAt == nil {
+		return
+	}
+	alignments, err := h.outcomeAlignmentRepo.ListByAssignmentID(ctx, assignment.ID, accountID)
+	if err != nil {
+		return
+	}
+	for _, alignment := range alignments {
+		possible := 100.0
+		if assignment.PointsPossible != nil {
+			possible = *assignment.PointsPossible
+		}
+		result := &models.LearningOutcomeResult{
+			UserID:              sub.UserID,
+			LearningOutcomeID:   alignment.LearningOutcomeID,
+			ContextType:         "Course",
+			ContextID:           alignment.CourseID,
+			AssociatedAssetType: "Assignment",
+			AssociatedAssetID:   assignment.ID,
+			Score:               sub.Score,
+			Possible:            &possible,
+			Attempt:             sub.Attempt,
+		}
+		_ = h.outcomeService.CreateResult(ctx, result)
+	}
+}
+
 func (h *SubmissionHandler) UpdateSubmission(c *fiber.Ctx) error {
 	courseID, err := c.ParamsInt("course_id")
 	if err != nil {
@@ -655,29 +687,10 @@ func (h *SubmissionHandler) UpdateSubmission(c *fiber.Ctx) error {
 		// (automatic post policy, or an already-posted submission).
 		h.notifyGradePosted(c.Context(), assignment, submission)
 
-		// Auto-create outcome results for aligned outcomes
-		if h.outcomeAlignmentRepo != nil && h.outcomeService != nil && submission.Score != nil {
-			if alignments, aErr := h.outcomeAlignmentRepo.ListByAssignmentID(c.Context(), uint(assignmentID), acct); aErr == nil {
-				for _, alignment := range alignments {
-					possible := 100.0
-					if assignment.PointsPossible != nil {
-						possible = *assignment.PointsPossible
-					}
-					result := &models.LearningOutcomeResult{
-						UserID:              uint(userID),
-						LearningOutcomeID:   alignment.LearningOutcomeID,
-						ContextType:         "Course",
-						ContextID:           alignment.CourseID,
-						AssociatedAssetType: "Assignment",
-						AssociatedAssetID:   uint(assignmentID),
-						Score:               submission.Score,
-						Possible:            &possible,
-						Attempt:             submission.Attempt,
-					}
-					_ = h.outcomeService.CreateResult(c.Context(), result)
-				}
-			}
-		}
+		// Outcome results are student-visible (mastery views), so they
+		// are recorded only once the grade itself is visible; a manual
+		// post policy records them when grades are posted.
+		h.recordOutcomeResults(c.Context(), assignment, submission, acct)
 	}
 
 	if submission == nil {
@@ -949,6 +962,7 @@ func (h *SubmissionHandler) PostGrades(c *fiber.Ctx) error {
 	for i := range newlyPosted {
 		newlyPosted[i].PostedAt = &now
 		h.notifyGradePosted(c.Context(), assignment, &newlyPosted[i])
+		h.recordOutcomeResults(c.Context(), assignment, &newlyPosted[i], callerAccountID(c))
 	}
 
 	return c.JSON(fiber.Map{"posted": true, "posted_at": now})

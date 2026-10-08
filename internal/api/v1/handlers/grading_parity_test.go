@@ -276,6 +276,66 @@ func TestGradingParity_B012_GradePostsOnlyUnderAutomaticPolicy(t *testing.T) {
 	}
 }
 
+// recordingOutcomeResults counts outcome-result upserts.
+type recordingOutcomeResults struct {
+	*fakeLearningOutcomeResultRepo
+	upserts []models.LearningOutcomeResult
+}
+
+func (r *recordingOutcomeResults) Upsert(_ context.Context, res *models.LearningOutcomeResult) (*bool, error) {
+	r.upserts = append(r.upserts, *res)
+	return nil, nil
+}
+
+// B012: outcome results are student-visible, so a hidden (manual policy)
+// grade must not create them until grades are posted.
+func TestGradingParity_B012_OutcomeResultsWaitForPosting(t *testing.T) {
+	for _, policy := range []string{"automatic", "manual"} {
+		f := newGradingFixture(t, 7, "TeacherEnrollment", &models.Assignment{
+			ID: 1, CourseID: 1, WorkflowState: models.AssignmentPublished, PostPolicy: policy, PointsPossible: fptr(10),
+		})
+		alignRepo := new(mocks.MockOutcomeAlignmentRepository)
+		alignRepo.On("ListByAssignmentID", mock.Anything, uint(1), uint(1)).
+			Return([]models.OutcomeAlignment{{LearningOutcomeID: 5, CourseID: 1}}, nil)
+		results := &recordingOutcomeResults{fakeLearningOutcomeResultRepo: newFakeLearningOutcomeResultRepo()}
+		outcomeSvc := service.NewLearningOutcomeService(&fakeLearningOutcomeGroupRepo{}, &fakeLearningOutcomeRepo{}, results)
+		svc := service.NewSubmissionService(f.submissionRepo, f.assignmentRepo, f.enrollmentRepo,
+			new(mocks.MockLatePolicyRepository), new(mocks.MockCourseRepository),
+			new(mocks.MockGradingPeriodGroupRepository), new(mocks.MockGradingPeriodRepository), nil)
+		h := handlers.NewSubmissionHandler(svc, f.commentRepo, f.attachmentRepo, f.userRepo, f.assignmentRepo, nil, nil, alignRepo, outcomeSvc, nil)
+		app := testutil.SetupTestApp()
+		app.Use(func(c *fiber.Ctx) error {
+			c.Locals("user_id", uint(7))
+			c.Locals("account_id", uint(1))
+			c.Locals("enrollment_type", "TeacherEnrollment")
+			return c.Next()
+		})
+		app.Put("/api/v1/courses/:course_id/assignments/:assignment_id/submissions/:user_id", h.UpdateSubmission)
+		app.Post("/api/v1/courses/:course_id/assignments/:id/post_grades", h.PostGrades)
+
+		sub := &models.Submission{ID: 11, AssignmentID: 1, UserID: 2}
+		f.submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2), uint(1)).Return(sub, nil)
+		f.submissionRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.Submission")).Return(nil)
+
+		resp := testutil.MakeRequest(app, http.MethodPut, "/api/v1/courses/1/assignments/1/submissions/2",
+			testutil.JSONBody(map[string]interface{}{"submission": map[string]interface{}{"posted_grade": "7"}}))
+		require.Equal(t, http.StatusOK, resp.StatusCode, policy)
+		if policy == "automatic" {
+			assert.Len(t, results.upserts, 1, "visible grade records the outcome result")
+			continue
+		}
+		assert.Empty(t, results.upserts, "hidden grade must not surface through outcomes")
+
+		f.submissionRepo.On("ListByAssignmentID", mock.Anything, uint(1), mock.Anything).Return(&repository.PaginatedResult[models.Submission]{
+			Items: []models.Submission{{ID: 11, AssignmentID: 1, UserID: 2, Score: fptr(7)}},
+		}, nil)
+		f.submissionRepo.On("PostGradesByAssignment", mock.Anything, uint(1), mock.Anything).Return(nil)
+		resp = testutil.MakeRequest(app, http.MethodPost, "/api/v1/courses/1/assignments/1/post_grades", nil)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Len(t, results.upserts, 1, "posting records the outcome result")
+	}
+}
+
 // B113: an empty posted_grade clears the grade.
 func TestGradingParity_B113_EmptyPostedGradeClears(t *testing.T) {
 	f := newGradingFixture(t, 7, "TeacherEnrollment", nil)
