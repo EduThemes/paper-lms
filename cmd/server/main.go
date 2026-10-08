@@ -1129,6 +1129,7 @@ func main() {
 		weeklyJob, dailyJob := scheduler.NewDigestJobs(notificationDeliveryService)
 		sched.Register("weeklyDigest", scheduler.WeeklyAt(time.Monday, 7), weeklyJob)
 		sched.Register("dailyDigest", scheduler.DailyAt(7), dailyJob)
+		sched.Register("onerosterAutoSync", scheduler.EveryTick(), scheduler.NewOneRosterAutoSyncJob(onerosterService))
 
 		schedCtx, schedCancel := context.WithCancel(context.Background())
 		defer schedCancel()

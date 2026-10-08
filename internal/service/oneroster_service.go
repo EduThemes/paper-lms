@@ -196,6 +196,52 @@ func (s *OneRosterService) SyncIncremental(ctx context.Context, connectionID, ac
 	return syncLog, nil
 }
 
+// autoSyncDue reports whether an auto-sync connection is due at now: it
+// has never synced, or its last sync is at least AutoSyncInterval hours
+// old (default 24). A connection already syncing is never due.
+func autoSyncDue(conn *models.OneRosterConnection, now time.Time) bool {
+	if conn.SyncStatus == "syncing" {
+		return false
+	}
+	if conn.LastSyncAt == nil {
+		return true
+	}
+	interval := conn.AutoSyncInterval
+	if interval < 1 {
+		interval = 24
+	}
+	return now.Sub(*conn.LastSyncAt) >= time.Duration(interval)*time.Hour
+}
+
+// RunDueAutoSyncs runs a full sync for every auto_sync connection whose
+// interval has elapsed (B173: the auto-sync toggle previously did
+// nothing — no job ever read it). Full, not incremental, so the opt-in
+// deprovision passes see the whole roster. The scheduler calls this
+// hourly; one failing connection does not stop the others.
+func (s *OneRosterService) RunDueAutoSyncs(ctx context.Context, now time.Time) (int, error) {
+	conns, err := s.connRepo.ListAutoSync(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("listing auto-sync connections: %w", err)
+	}
+	ran := 0
+	var errs []string
+	for i := range conns {
+		conn := &conns[i]
+		if !autoSyncDue(conn, now) {
+			continue
+		}
+		if _, err := s.SyncFull(ctx, conn.ID, conn.AccountID); err != nil {
+			errs = append(errs, fmt.Sprintf("connection %d: %v", conn.ID, err))
+			continue
+		}
+		ran++
+	}
+	if len(errs) > 0 {
+		return ran, fmt.Errorf("auto-sync errors: %s", strings.Join(errs, "; "))
+	}
+	return ran, nil
+}
+
 func (s *OneRosterService) GetSyncLogs(ctx context.Context, connectionID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.OneRosterSyncLog], error) {
 	return s.syncLogRepo.ListByConnectionID(ctx, connectionID, params)
 }
