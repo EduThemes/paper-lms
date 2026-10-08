@@ -159,7 +159,10 @@ func TestQuizDB_BankGroupMaterializesEntries(t *testing.T) {
 		}
 	}
 
-	// Answering + completing grades the drawn questions at bank points.
+	// Answering + completing grades the drawn questions at the group's
+	// points per question — 1 when the group sets none (Canvas
+	// question_points default), never the bank entry's own 2 points — so a
+	// perfect attempt matches the quiz total the editor saves (pick 2 x 1).
 	for _, id := range ids {
 		if _, err := f.svc.AnswerQuestion(ctx, sub.ID, id, "a"); err != nil {
 			t.Fatalf("answer %d: %v", id, err)
@@ -169,8 +172,8 @@ func TestQuizDB_BankGroupMaterializesEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("complete: %v", err)
 	}
-	if done.Score == nil || *done.Score != 4 {
-		t.Errorf("score = %v, want 4", done.Score)
+	if done.Score == nil || *done.Score != 2 {
+		t.Errorf("score = %v, want 2", done.Score)
 	}
 
 	// A second attempt reuses the same materialized copies (no growth

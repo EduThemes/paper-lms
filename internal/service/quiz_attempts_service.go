@@ -234,7 +234,7 @@ func (s *QuizService) generateSelectedQuestions(ctx context.Context, quizID uint
 func (s *QuizService) materializeBankEntry(ctx context.Context, quizID uint, group models.QuizQuestionGroup, entry *models.QuestionBankEntry) (uint, error) {
 	groupID := group.ID
 	entryID := entry.ID
-	pts := entry.PointsPossible
+	pts := groupItemPoints(&group, entry.PointsPossible)
 	q := &models.QuizQuestion{
 		QuizID:              quizID,
 		QuizQuestionGroupID: &groupID,
@@ -681,10 +681,25 @@ func (s *QuizService) effectiveQuestionPoints(ctx context.Context, question *mod
 		cache[gid] = g
 		group = g
 	}
-	if group != nil && group.PointsPerItem != nil {
-		return *group.PointsPerItem
+	if group != nil {
+		return groupItemPoints(group, pts)
 	}
 	return pts
+}
+
+// groupItemPoints is what one question picked by a group is worth: the
+// group's points_per_item, or — for a bank-linked group without one —
+// 1 point (Canvas question_points default). Drawn bank entries must not
+// fall back to their own points, or the quiz total the editor saves
+// (pick_count x 1) disagrees with what an attempt can score.
+func groupItemPoints(group *models.QuizQuestionGroup, questionPoints float64) float64 {
+	if group.PointsPerItem != nil {
+		return *group.PointsPerItem
+	}
+	if group.QuestionBankID != nil && *group.QuestionBankID != 0 {
+		return 1
+	}
+	return questionPoints
 }
 
 func (s *QuizService) ListSubmissions(ctx context.Context, quizID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.QuizSubmission], error) {
