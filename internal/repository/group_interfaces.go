@@ -29,6 +29,9 @@ type GroupRepository interface {
 	ListByCategoryID(ctx context.Context, categoryID uint, params PaginationParams) (*PaginatedResult[models.Group], error)
 	ListByContextID(ctx context.Context, contextType string, contextID uint, params PaginationParams) (*PaginatedResult[models.Group], error)
 	ListByUserID(ctx context.Context, userID uint, params PaginationParams) (*PaginatedResult[models.Group], error)
+	// SetLeader writes only groups.leader_id (nil clears it), so a
+	// leadership change never clobbers a concurrent edit of the group.
+	SetLeader(ctx context.Context, groupID uint, leaderID *uint) error
 }
 
 type GroupMembershipRepository interface {
@@ -42,4 +45,9 @@ type GroupMembershipRepository interface {
 	// FindUserGroupInCategory finds the group a user belongs to within a given group category.
 	// Returns the group ID or an error if the user is not in any group in that category.
 	FindUserGroupInCategory(ctx context.Context, userID, groupCategoryID uint) (*models.Group, error)
+	// ListUserIDsInCategory returns the users with an accepted membership
+	// in any non-deleted group of the set (the "assigned" users).
+	ListUserIDsInCategory(ctx context.Context, groupCategoryID uint) ([]uint, error)
+	// CountByGroupIDs returns the membership count of each group.
+	CountByGroupIDs(ctx context.Context, groupIDs []uint) (map[uint]int64, error)
 }

@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"encoding/json"
+	"errors"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -107,6 +109,7 @@ func groupToJSON(g *models.Group) fiber.Map {
 		"context_type":      g.ContextType,
 		"context_id":        g.ContextID,
 		"workflow_state":    g.WorkflowState,
+		"leader_id":         g.LeaderID,
 		"created_at":        g.CreatedAt,
 		"updated_at":        g.UpdatedAt,
 	}
@@ -179,11 +182,21 @@ func (h *GroupHandler) CreateGroupCategory(c *fiber.Ctx) error {
 			GroupLimit *int   `json:"group_limit"`
 			AutoLeader string `json:"auto_leader"`
 			Role       string `json:"role"`
+			// G100 bulk options (Canvas create_group_count /
+			// create_group_member_count / assign_unassigned_members /
+			// group_by_section).
+			CreateGroupCount        int  `json:"create_group_count"`
+			CreateGroupMemberCount  int  `json:"create_group_member_count"`
+			AssignUnassignedMembers bool `json:"assign_unassigned_members"`
+			GroupBySection          bool `json:"group_by_section"`
 		} `json:"group_category"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
+	}
+	if input.GroupCategory.CreateGroupCount < 0 || input.GroupCategory.CreateGroupMemberCount < 0 {
+		return responses.BadRequest(c, "group counts must not be negative")
 	}
 
 	cid := uint(courseID)
@@ -200,7 +213,17 @@ func (h *GroupHandler) CreateGroupCategory(c *fiber.Ctx) error {
 		return responses.BadRequest(c, err.Error())
 	}
 
-	return c.Status(fiber.StatusCreated).JSON(groupCategoryToJSON(category))
+	out := groupCategoryToJSON(category)
+	if in := input.GroupCategory; in.CreateGroupCount > 0 || in.CreateGroupMemberCount > 0 {
+		groups, assigned, wrote, err := h.createAndFillGroups(c, category, in.CreateGroupCount, in.CreateGroupMemberCount, in.AssignUnassignedMembers, in.GroupBySection)
+		if wrote {
+			return err
+		}
+		out["groups_count"] = len(groups)
+		out["assigned"] = assigned
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(out)
 }
 
 func (h *GroupHandler) GetGroupCategory(c *fiber.Ctx) error {
@@ -446,23 +469,6 @@ func (h *GroupHandler) UpdateGroup(c *fiber.Ctx) error {
 		return responses.NotFound(c, "group")
 	}
 
-	// Authorization: instructor for course groups; admin or group
-	// moderator for non-course groups. A category lookup miss is a 404.
-	courseID, err := h.groupCourseID(c, group)
-	if err != nil {
-		return err
-	}
-	if courseID != 0 {
-		if err := h.authz.RequireCourseInstructor(c, courseID); err != nil {
-			return err
-		}
-	} else {
-		callerID, _ := c.Locals("user_id").(uint)
-		if !callerIsAdmin(c, h.authz) && !h.callerIsGroupModerator(c, group.ID, callerID) {
-			return authzForbidden("only group moderators or admins can modify this group")
-		}
-	}
-
 	var input struct {
 		Group struct {
 			Name          *string `json:"name"`
@@ -470,6 +476,10 @@ func (h *GroupHandler) UpdateGroup(c *fiber.Ctx) error {
 			MaxMembership *int    `json:"max_membership"`
 			IsPublic      *bool   `json:"is_public"`
 			JoinLevel     *string `json:"join_level"`
+			// G100: leader_id (number, or null to clear), or Canvas's
+			// leader: {"id": n} / leader: null.
+			LeaderID json.RawMessage `json:"leader_id"`
+			Leader   json.RawMessage `json:"leader"`
 		} `json:"group"`
 	}
 
@@ -477,7 +487,46 @@ func (h *GroupHandler) UpdateGroup(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 
+	// Authorization: instructor for course groups (the group's leader may
+	// rename it and edit its description, as in Canvas); admin or group
+	// moderator for non-course groups. A category lookup miss is a 404.
+	courseID, err := h.groupCourseID(c, group)
+	if err != nil {
+		return err
+	}
+	callerID, _ := c.Locals("user_id").(uint)
+	if courseID != 0 {
+		if err := h.authz.RequireCourseInstructor(c, courseID); err != nil {
+			in := input.Group
+			leaderEdit := group.LeaderID != nil && callerID != 0 && *group.LeaderID == callerID &&
+				in.MaxMembership == nil && in.IsPublic == nil && in.JoinLevel == nil &&
+				len(in.LeaderID) == 0 && len(in.Leader) == 0
+			if !leaderEdit {
+				return err
+			}
+			if aerr := h.authz.RequireCourseEnrolled(c, courseID); aerr != nil {
+				return aerr
+			}
+		}
+	} else if !callerIsAdmin(c, h.authz) && !h.callerIsGroupModerator(c, group.ID, callerID) {
+		return authzForbidden("only group moderators or admins can modify this group")
+	}
+
+	if leaderSet, leaderID, ok := parseLeaderInput(input.Group.LeaderID, input.Group.Leader); !ok {
+		return responses.BadRequest(c, "leader must be a user id or null")
+	} else if leaderSet {
+		if err := h.groupService.SetLeader(c.Context(), group, leaderID); err != nil {
+			if errors.Is(err, service.ErrLeaderNotMember) {
+				return responses.BadRequest(c, err.Error())
+			}
+			return responses.InternalError(c, "Could not set the group leader")
+		}
+	}
+
 	if input.Group.Name != nil {
+		if *input.Group.Name == "" {
+			return responses.BadRequest(c, "group name is required")
+		}
 		group.Name = *input.Group.Name
 	}
 	if input.Group.Description != nil {
@@ -803,8 +852,14 @@ func (h *GroupHandler) DeleteGroupMembership(c *fiber.Ctx) error {
 
 	callerID, _ := c.Locals("user_id").(uint)
 
-	// Self-removal is always allowed (leave-the-group UX).
-	if membership.UserID != callerID {
+	// Self-removal: always allowed in non-course groups; in a course group
+	// a student may leave only when the set has self sign-up (Canvas
+	// Group#can_leave?) — otherwise the instructor's assignment stands.
+	if membership.UserID == callerID {
+		if wrote, err := h.requireCanLeave(c, membership.GroupID); wrote {
+			return err
+		}
+	} else {
 		// Authorization: require instructor for course-scoped groups
 		courseID, err := h.getCourseIDFromGroup(c, membership.GroupID)
 		if err != nil {
@@ -824,6 +879,73 @@ func (h *GroupHandler) DeleteGroupMembership(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"delete": true})
+}
+
+// requireCanLeave checks a member's self-removal from a course group.
+// (wrote, err): on wrote=true the caller returns err.
+func (h *GroupHandler) requireCanLeave(c *fiber.Ctx, groupID uint) (bool, error) {
+	group, err := h.groupService.GetGroup(c.Context(), groupID, callerAccountID(c))
+	if err != nil {
+		return true, responses.NotFound(c, "group membership")
+	}
+	category, err := h.groupService.GetCategory(c.Context(), group.GroupCategoryID, callerAccountID(c))
+	if err != nil || category == nil {
+		return true, responses.NotFound(c, "group membership")
+	}
+	if category.CourseID == nil || *category.CourseID == 0 {
+		return false, nil
+	}
+	if callerIsCourseInstructor(c, h.authz, *category.CourseID) {
+		return false, nil
+	}
+	if category.SelfSignup == "enabled" || category.SelfSignup == "restricted" {
+		return false, nil
+	}
+	return true, responses.Forbidden(c, "you can only leave groups in a group set with self sign-up; ask your instructor to move you")
+}
+
+// parseLeaderInput reads the leader fields of a group update. set=false
+// when neither field was sent; leaderID=nil clears the leader; ok=false
+// on a malformed value.
+func parseLeaderInput(leaderIDRaw, leaderRaw json.RawMessage) (set bool, leaderID *uint, ok bool) {
+	parseID := func(raw json.RawMessage) (*uint, bool) {
+		if string(raw) == "null" {
+			return nil, true
+		}
+		var n uint
+		if err := json.Unmarshal(raw, &n); err == nil && n > 0 {
+			return &n, true
+		}
+		var str string
+		if err := json.Unmarshal(raw, &str); err == nil {
+			if str == "" {
+				return nil, true
+			}
+			if v, err := strconv.ParseUint(str, 10, 64); err == nil && v > 0 {
+				u := uint(v)
+				return &u, true
+			}
+		}
+		return nil, false
+	}
+	switch {
+	case len(leaderIDRaw) > 0:
+		id, ok := parseID(leaderIDRaw)
+		return true, id, ok
+	case len(leaderRaw) > 0:
+		if string(leaderRaw) == "null" {
+			return true, nil, true
+		}
+		var obj struct {
+			ID json.RawMessage `json:"id"`
+		}
+		if err := json.Unmarshal(leaderRaw, &obj); err != nil || len(obj.ID) == 0 {
+			return true, nil, false
+		}
+		id, ok := parseID(obj.ID)
+		return true, id, ok
+	}
+	return false, nil, true
 }
 
 // ---- User Groups ----
