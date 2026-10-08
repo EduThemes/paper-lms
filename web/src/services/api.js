@@ -655,6 +655,18 @@ export const api = {
     return data;
   },
 
+  // OAuth2 consent screen (B076): info for the screen, then the decision.
+  getOAuthAuthorizeInfo: async (params) => {
+    const { data } = await request(`/login/oauth2/auth/info?${new URLSearchParams(params).toString()}`);
+    return data;
+  },
+  submitOAuthConsent: async (consent) => {
+    const { data } = await request('/login/oauth2/auth', {
+      method: 'POST', body: JSON.stringify(consent),
+    });
+    return data;
+  },
+
   // Personal Access Tokens
   getAccessTokens: async (userId, page = 1, perPage = 10) => {
     return request(`/users/${userId}/tokens?page=${page}&per_page=${perPage}`);

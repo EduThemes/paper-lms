@@ -6,6 +6,20 @@ import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 
+// custom_fields comes back as an object (or, for legacy rows, the stored
+// JSON text). Pretty-print either without double-encoding a string.
+function formatCustomFields(value) {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(value), null, 2);
+    } catch {
+      return value;
+    }
+  }
+  return JSON.stringify(value, null, 2);
+}
+
 const ExternalToolsPage = () => {
   const { courseId } = useParams();
   const isTeacher = useIsTeacher(courseId);
@@ -59,11 +73,30 @@ const ExternalToolsPage = () => {
         setSaving(false);
         return;
       }
+    } else if (editingTool) {
+      // Emptying the box on edit clears the stored custom fields (an
+      // omitted key would leave them unchanged).
+      customFields = null;
+    }
+
+    // B084: the API wants a numeric developer_key_id (form inputs are
+    // strings) and custom_fields as a JSON object (stored as text).
+    const developerKeyRaw = String(formData.get('developer_key_id') || '').trim();
+    const developerKeyId = developerKeyRaw ? Number(developerKeyRaw) : undefined;
+    if (developerKeyRaw && (!Number.isInteger(developerKeyId) || developerKeyId <= 0)) {
+      setError('Developer Key ID must be a positive whole number.');
+      setSaving(false);
+      return;
+    }
+    if (!editingTool && developerKeyId === undefined) {
+      setError('Developer Key ID is required.');
+      setSaving(false);
+      return;
     }
 
     const externalTool = {
       name: formData.get('name'),
-      developer_key_id: formData.get('developer_key_id') || undefined,
+      developer_key_id: developerKeyId,
       url: formData.get('url') || undefined,
       description: formData.get('description') || undefined,
       custom_fields: customFields,
@@ -187,10 +220,12 @@ const ExternalToolsPage = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-text-secondary mb-1">
-                  Developer Key ID
+                  Developer Key ID <span className="text-accent-danger">*</span>
                 </label>
                 <input
                   name="developer_key_id"
+                  inputMode="numeric"
+                  required={!editingTool}
                   defaultValue={editingTool?.developer_key_id || ''}
                   className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                   placeholder="e.g., 10000000000001"
@@ -224,11 +259,7 @@ const ExternalToolsPage = () => {
               <textarea
                 name="custom_fields"
                 rows={4}
-                defaultValue={
-                  editingTool?.custom_fields
-                    ? JSON.stringify(editingTool.custom_fields, null, 2)
-                    : ''
-                }
+                defaultValue={formatCustomFields(editingTool?.custom_fields)}
                 className="w-full rounded-md border border-border-strong px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                 placeholder={'{\n  "custom_param": "value"\n}'}
               />

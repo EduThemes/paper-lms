@@ -166,6 +166,7 @@ func TestRequireAdmin_URLAccountMustBeCallersTenant(t *testing.T) {
 		want int
 	}{
 		{"own account, :account_id", "admin", "/api/v1/accounts/2/terms", http.StatusOK},
+		{"self alias", "admin", "/api/v1/accounts/self/terms", http.StatusOK},
 		{"other account, :account_id", "admin", "/api/v1/accounts/1/terms", http.StatusNotFound},
 		{"other account audit log", "admin", "/api/v1/accounts/1/audit_log", http.StatusNotFound},
 		{"other account roles", "admin", "/api/v1/accounts/1/roles", http.StatusNotFound},

@@ -27,11 +27,11 @@ func NewLTINRPSService(enrollmentRepo repository.EnrollmentRepository, userRepo 
 // GetMemberships returns all course memberships formatted according to the
 // LTI NRPS specification. Each enrollment is transformed into a member object
 // with LTI role URIs, user identity fields, and status.
-func (s *LTINRPSService) GetMemberships(ctx context.Context, courseID, accountID uint, params repository.PaginationParams) ([]map[string]interface{}, error) {
+func (s *LTINRPSService) GetMemberships(ctx context.Context, courseID, accountID uint, params repository.PaginationParams) ([]map[string]interface{}, int64, error) {
 	// Fetch enrollments for the course (tenant-scoped)
 	enrollments, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, accountID, params)
 	if err != nil {
-		return nil, errors.New("failed to fetch course enrollments")
+		return nil, 0, errors.New("failed to fetch course enrollments")
 	}
 
 	members := make([]map[string]interface{}, 0, len(enrollments.Items))
@@ -77,7 +77,7 @@ func (s *LTINRPSService) GetMemberships(ctx context.Context, courseID, accountID
 		members = append(members, member)
 	}
 
-	return members, nil
+	return members, enrollments.TotalCount, nil
 }
 
 // enrollmentTypeToNRPSRoles maps a Canvas enrollment type to one or more

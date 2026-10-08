@@ -215,6 +215,10 @@ func (r *Router) Register(app *fiber.App) {
 	ltiAuthenticated := api.Group("", r.AuthMiddleware.Protected())
 	ltiAuthenticated.Post("/lti/oidc/login", authLimit, r.LTIHandler.OIDCLogin)
 	ltiAuthenticated.Post("/lti/launch", authLimit, r.LTIHandler.LaunchDirect)
+	// OIDC authorization endpoint the tool redirects (GET) or posts back to
+	// after the login initiation (B083).
+	ltiAuthenticated.Get("/lti/authorize", authLimit, r.LTIHandler.LaunchDirect)
+	ltiAuthenticated.Post("/lti/authorize", authLimit, r.LTIHandler.LaunchDirect)
 
 	// Logout runs behind auth + CSRF (moved off the public group). It
 	// revokes the caller's own session token and clears the cookie, so
@@ -255,8 +259,10 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Put("/accounts/:account_id/developer_keys/:id", admin, r.DeveloperKeyHandler.UpdateDeveloperKey)
 	protected.Delete("/accounts/:account_id/developer_keys/:id", admin, r.DeveloperKeyHandler.DeleteDeveloperKey)
 
-	// OAuth2 Authorization (requires auth for consent)
-	protected.Get("/login/oauth2/auth", r.OAuth2Handler.Authorize)
+	// OAuth2 Authorization (requires auth for consent). The GET
+	// authorization endpoint itself is public (routes_public.go) and only
+	// redirects to the SPA consent screen; codes are minted on POST (B076).
+	protected.Get("/login/oauth2/auth/info", r.OAuth2Handler.AuthorizeInfo)
 	protected.Post("/login/oauth2/auth", r.OAuth2Handler.AuthorizePost)
 
 	// Courses (list: any user sees their own; create: admin; manage: instructor)

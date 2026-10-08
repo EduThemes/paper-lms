@@ -100,6 +100,8 @@ func allAutoMigrateModels() []interface{} {
 		&models.LTILineItem{},
 		&models.LTIResult{},
 		&models.Nonce{},
+		&models.OAuthAuthorizationCode{},
+		&models.LTIPlatformKey{},
 		// Discussions, Files, SIS
 		&models.DiscussionTopic{},
 		&models.DiscussionEntry{},

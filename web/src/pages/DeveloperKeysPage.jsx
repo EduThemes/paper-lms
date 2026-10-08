@@ -57,6 +57,7 @@ const DeveloperKeysPage = () => {
       redirect_uris: redirectUris,
       notes: formData.get('notes') || undefined,
       scopes: scopes,
+      require_scopes: formData.get('require_scopes') === 'on',
     };
 
     // Remove undefined fields
@@ -285,8 +286,12 @@ const DeveloperKeysPage = () => {
                 placeholder={"url:GET|/api/v1/courses\nurl:POST|/api/v1/courses/:id/assignments"}
               />
               <p className="text-xs text-text-tertiary mt-1">
-                One scope per line. Leave blank to allow all scopes.
+                One scope per line. Scopes only restrict tokens when enforced below.
               </p>
+              <label className="flex items-center gap-2 mt-2 text-sm text-text-secondary">
+                <input type="checkbox" name="require_scopes" />
+                Enforce scopes (tokens may only call the endpoints listed above)
+              </label>
             </div>
             <div className="flex gap-3">
               <button

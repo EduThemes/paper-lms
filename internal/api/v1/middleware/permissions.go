@@ -132,6 +132,13 @@ func urlAccountID(c *fiber.Ctx) (id uint, present bool, valid bool) {
 	if raw == "" {
 		return 0, false, false
 	}
+	// Canvas "self" alias: the caller's own account.
+	if raw == "self" {
+		if acct, ok := c.Locals("account_id").(uint); ok && acct > 0 {
+			return acct, true, true
+		}
+		return 0, true, false
+	}
 	n, err := strconv.ParseUint(raw, 10, 64)
 	if err != nil || n == 0 {
 		return 0, true, false

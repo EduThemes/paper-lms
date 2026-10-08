@@ -36,8 +36,8 @@ func (m *MockLTIResultRepository) Upsert(ctx context.Context, result *models.LTI
 	return args.Error(0)
 }
 
-func (m *MockLTIResultRepository) ListByLineItem(ctx context.Context, lineItemID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LTIResult], error) {
-	args := m.Called(ctx, lineItemID, params)
+func (m *MockLTIResultRepository) ListByLineItem(ctx context.Context, lineItemID, userID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.LTIResult], error) {
+	args := m.Called(ctx, lineItemID, userID, params)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
