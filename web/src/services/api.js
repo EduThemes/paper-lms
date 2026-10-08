@@ -65,6 +65,18 @@ export class ApiError extends Error {
  * `auth:session-expired` event dispatch, and `ApiError` extraction
  * from `{errors: [{code, message}]}` bodies.
  */
+// readJsonBody parses a successful response body. A 204 No Content (or any
+// empty body) is null rather than a SyntaxError — several DELETE handlers
+// answer 204, and a successful delete must not surface as a failure.
+async function readJsonBody(response) {
+  if (response.status === 204 || response.status === 205) return null;
+  if (response.headers?.get?.('Content-Length') === '0') return null;
+  if (typeof response.text !== 'function') return response.json();
+  const text = await response.text();
+  if (!text || !text.trim()) return null;
+  return JSON.parse(text);
+}
+
 async function fetchApi(path, { parse = 'json', ...options } = {}) {
   let fetchOptions;
   if (parse === 'multipart') {
@@ -98,11 +110,11 @@ async function fetchApi(path, { parse = 'json', ...options } = {}) {
     return response;
   }
   if (parse === 'multipart') {
-    return response.json();
+    return readJsonBody(response);
   }
   // 'json' path: parse JSON + extract pagination from Link header so
   // callers don't have to.
-  const data = await response.json();
+  const data = await readJsonBody(response);
   const linkHeader = response.headers.get('Link');
   const pagination = parseLinkHeader(linkHeader);
   return { data, pagination };

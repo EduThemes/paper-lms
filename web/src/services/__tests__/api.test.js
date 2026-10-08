@@ -162,4 +162,16 @@ describe('fetchApi (via api.* helpers)', () => {
     expect(options.headers).toHaveProperty('X-CSRF-Token');
     expect(options.body).toBeInstanceOf(FormData);
   });
+
+  test('a 204 No Content success resolves with null data instead of throwing', async () => {
+    global.fetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const res = await api.deleteAppointmentGroup(5);
+    expect(res.data).toBeNull();
+  });
+
+  test('an empty 200 body resolves with null data', async () => {
+    global.fetch.mockResolvedValueOnce(new Response('', { status: 200 }));
+    const res = await api.deleteAppointmentGroup(6);
+    expect(res.data).toBeNull();
+  });
 });

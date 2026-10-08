@@ -775,12 +775,8 @@ const DiscussionTopicPageV2 = () => {
     list: (tId) => api.getDiscussionCheckpoints(courseId, tId).then(unwrapList),
     replace: (tId, payload) => api.createDiscussionCheckpoints(courseId, tId, payload).then(unwrapList),
     update: (tId, id, body) => api.updateDiscussionCheckpoint(courseId, tId, id, body).then((r) => r?.data ?? r),
-    // DELETE answers 204 with no body, which the JSON helper can't parse;
-    // the delete itself succeeded, so don't report that as a failure.
-    remove: (tId, id) => api.deleteDiscussionCheckpoint(courseId, tId, id).catch((err) => {
-      if (err instanceof SyntaxError) return null;
-      throw err;
-    }),
+    // DELETE answers 204 with no body; the request helper returns null.
+    remove: (tId, id) => api.deleteDiscussionCheckpoint(courseId, tId, id),
     progress: (tId, uId) => api.getDiscussionCheckpointProgress(courseId, tId, uId).then(unwrapList),
   }), [courseId]);
 
