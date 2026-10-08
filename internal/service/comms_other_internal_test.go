@@ -370,6 +370,8 @@ func TestConferenceJoin_BigBlueButtonSignedURL(t *testing.T) {
 	svc := NewConferenceService(nil, partRepo)
 	settings := map[string]string{"conferences.bbb.url": "https://bbb.example.com/bigbluebutton/", "conferences.bbb.secret": "example-secret"}
 	svc.SetSettingsLookup(func(_ context.Context, key string) (string, error) { return settings[key], nil })
+	// G098: join now checks the meeting on the server; answer from a fake.
+	useFakeBBB(t, svc, "example-secret").open = true
 
 	started := time.Now()
 	conf := &models.Conference{ID: 9, ConferenceType: "BigBlueButton", Title: "Office hours", StartedAt: &started}

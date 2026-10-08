@@ -233,6 +233,36 @@ var Catalog = []Definition{
 		Scopes:      []ScopeType{ScopeInstance, ScopeAccount},
 		EnvFallback: "BBB_SECRET",
 	},
+	// Zoom (Server-to-Server OAuth app). All four must be set for Paper
+	// to create Zoom meetings; otherwise Zoom conferences need a link.
+	{
+		Key: "conferences.zoom.account_id", Group: "Conferencing", Label: "Zoom account ID",
+		Description: "Account ID of the Zoom Server-to-Server OAuth app (scopes: meeting:write, meeting:read, recording:read, recording:write). Leave empty to disable native Zoom meetings.",
+		ValueType:   TypeString,
+		Scopes:      []ScopeType{ScopeInstance, ScopeAccount},
+		EnvFallback: "ZOOM_ACCOUNT_ID",
+	},
+	{
+		Key: "conferences.zoom.client_id", Group: "Conferencing", Label: "Zoom client ID",
+		Description: "Client ID of the Zoom Server-to-Server OAuth app.",
+		ValueType:   TypeString,
+		Scopes:      []ScopeType{ScopeInstance, ScopeAccount},
+		EnvFallback: "ZOOM_CLIENT_ID",
+	},
+	{
+		Key: "conferences.zoom.client_secret", Group: "Conferencing", Label: "Zoom client secret",
+		Description: "Client secret of the Zoom Server-to-Server OAuth app. Stored encrypted.",
+		ValueType:   TypeSecret,
+		Scopes:      []ScopeType{ScopeInstance, ScopeAccount},
+		EnvFallback: "ZOOM_CLIENT_SECRET",
+	},
+	{
+		Key: "conferences.zoom.host_user", Group: "Conferencing", Label: "Zoom host user",
+		Description: "Email (or user ID) of the licensed Zoom user that hosts Paper's meetings.",
+		ValueType:   TypeString,
+		Scopes:      []ScopeType{ScopeInstance, ScopeAccount},
+		EnvFallback: "ZOOM_HOST_USER",
+	},
 
 	// ── Federated auth (SAML defaults) ──────────────────────────────
 	{

@@ -2,14 +2,9 @@ package service
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha1" //nolint:gosec // the BigBlueButton API checksum is specified as SHA-1
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/xml"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -24,16 +19,23 @@ import (
 type ConferenceService struct {
 	confRepo        repository.ConferenceRepository
 	participantRepo repository.ConferenceParticipantRepository
-	// lookup resolves the conferences.bbb.* settings per tenant. Nil
-	// means BigBlueButton is not configured.
+	// lookup resolves the conferences.* settings per tenant. Nil means no
+	// provider is configured.
 	lookup SettingsLookupFunc
-	// httpClient overrides the BBB API client (tests). Nil uses an
+	// httpClient overrides the provider API client (tests). Nil uses an
 	// SSRF-safe client.
 	httpClient *http.Client
+	// validateURL overrides the SSRF guard (tests point providers at a
+	// loopback httptest server). Nil uses security.ValidateExternalURL.
+	validateURL func(ctx context.Context, rawURL string) error
+	// Zoom endpoints; overridable in tests.
+	zoomAPIBase   string
+	zoomOAuthBase string
+	zoomTokens    *zoomTokenCache
 }
 
 // SetSettingsLookup wires the settings resolution chain used to find the
-// BigBlueButton server for a tenant.
+// conferencing providers for a tenant.
 func (s *ConferenceService) SetSettingsLookup(lookup SettingsLookupFunc) {
 	s.lookup = lookup
 }
@@ -42,8 +44,17 @@ func NewConferenceService(confRepo repository.ConferenceRepository, participantR
 	return &ConferenceService{
 		confRepo:        confRepo,
 		participantRepo: participantRepo,
+		zoomAPIBase:     zoomDefaultAPIBase,
+		zoomOAuthBase:   zoomDefaultOAuthBase,
+		zoomTokens:      newZoomTokenCache(),
 	}
 }
+
+// Conference types.
+const (
+	ConferenceTypeBigBlueButton = "BigBlueButton"
+	ConferenceTypeZoom          = "Zoom"
+)
 
 // CRUD
 
@@ -54,11 +65,14 @@ func (s *ConferenceService) Create(ctx context.Context, conference *models.Confe
 	if conference.ConferenceType == "" {
 		return errors.New("conference_type is required")
 	}
-	if conference.ConferenceType != "BigBlueButton" && conference.ConferenceType != "Zoom" {
+	if conference.ConferenceType != ConferenceTypeBigBlueButton && conference.ConferenceType != ConferenceTypeZoom {
 		return errors.New("conference_type must be 'BigBlueButton' or 'Zoom'")
 	}
 	if conference.ContextType == "" || conference.ContextID == 0 {
 		return errors.New("context_type and context_id are required")
+	}
+	if conference.Duration < 0 {
+		return errors.New("duration must not be negative")
 	}
 	if err := ValidateMeetingURL(conference.JoinURL); err != nil {
 		return err
@@ -99,75 +113,103 @@ func (s *ConferenceService) Delete(ctx context.Context, id uint) error {
 	return s.confRepo.Delete(ctx, id)
 }
 
-func (s *ConferenceService) ListByContext(ctx context.Context, contextType string, contextID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Conference], error) {
-	return s.confRepo.ListByContext(ctx, contextType, contextID, 0, params)
+// ListByContext lists a context's conferences, tenant-scoped by accountID
+// (0 = internal caller, no scope).
+func (s *ConferenceService) ListByContext(ctx context.Context, contextType string, contextID, accountID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Conference], error) {
+	return s.confRepo.ListByContext(ctx, contextType, contextID, accountID, params)
 }
 
 // Conference lifecycle
 //
-// Paper supports two ways to actually hold a conference:
+// Paper holds a conference one of three ways:
 //
 //   - BigBlueButton: when conferences.bbb.url + conferences.bbb.secret are
 //     configured (Settings → Conferencing, or BBB_URL / BBB_SECRET), Start
 //     creates the meeting through the BBB API and Join returns a signed
 //     BBB join URL (moderator for instructors, viewer for everyone else).
+//   - Zoom: when the conferences.zoom.* Server-to-Server OAuth app is
+//     configured, Start creates a Zoom meeting; instructors join through a
+//     fresh host start link, everyone else through the attendee link.
 //   - External meeting link: any conference may carry a teacher-supplied
-//     meeting URL (e.g. a Zoom link) in join_url; Join returns it.
+//     meeting URL (e.g. a personal Zoom room) in join_url; Join returns it.
 //
-// With neither, Start refuses with ErrConferenceNotConfigured instead of
-// handing out a URL that goes nowhere.
+// With none of these, Start refuses with ErrConferenceNotConfigured instead
+// of handing out a URL that goes nowhere.
 
 // ErrConferenceNotConfigured is returned when a conference has no way to
-// be held: no BigBlueButton server and no external meeting link.
-var ErrConferenceNotConfigured = errors.New("no conferencing provider is configured: ask an administrator to configure BigBlueButton, or edit the conference and add a meeting link")
+// be held: no provider and no external meeting link.
+var ErrConferenceNotConfigured = errors.New("no conferencing provider is configured: ask an administrator to configure BigBlueButton or Zoom, or edit the conference and add a meeting link")
 
 // ErrConferenceNotStarted is returned when a non-moderator tries to join a
 // conference the instructor has not started yet.
 var ErrConferenceNotStarted = errors.New("conference has not been started")
 
+// ErrConferenceNotRunning is returned when a non-moderator tries to join a
+// started conference whose meeting is no longer open on the provider
+// (everyone left and the provider closed it). The instructor restarts it
+// by joining.
+var ErrConferenceNotRunning = errors.New("the conference is not running right now: wait for the instructor to rejoin it")
+
 // ErrConferenceEnded is returned when joining or starting an ended
 // conference.
 var ErrConferenceEnded = errors.New("conference has already ended")
 
-// bbbConfig is the resolved BigBlueButton server configuration.
-type bbbConfig struct {
-	BaseURL string // normalized, ends in "/api/"
-	Secret  string
+// ErrRecordingNotFound is returned when a recording id does not belong to
+// the conference.
+var ErrRecordingNotFound = errors.New("recording not found")
+
+// ErrRecordingsUnsupported is returned when a conference is not held on a
+// provider that keeps recordings (an external meeting link).
+var ErrRecordingsUnsupported = errors.New("recordings are only available for conferences held on BigBlueButton or Zoom")
+
+// ConferenceProviderInfo describes one conference type for the UI.
+type ConferenceProviderInfo struct {
+	Type              string `json:"type"`
+	Name              string `json:"name"`
+	Configured        bool   `json:"configured"`
+	SupportsRecording bool   `json:"supports_recording"`
 }
 
-// resolveBBB returns the BigBlueButton config for the caller's tenant, or
-// ok=false when BBB is not configured.
-func (s *ConferenceService) resolveBBB(ctx context.Context, accountID uint) (bbbConfig, bool) {
+// Providers reports which conference types the tenant can hold natively.
+// An unconfigured type still works with an external meeting link.
+func (s *ConferenceService) Providers(ctx context.Context, accountID uint) []ConferenceProviderInfo {
+	_, bbb := s.resolveBBB(ctx, accountID)
+	_, zoom := s.resolveZoom(ctx, accountID)
+	return []ConferenceProviderInfo{
+		{Type: ConferenceTypeBigBlueButton, Name: "BigBlueButton", Configured: bbb, SupportsRecording: bbb},
+		{Type: ConferenceTypeZoom, Name: "Zoom", Configured: zoom, SupportsRecording: zoom},
+	}
+}
+
+// ConferenceRecording is a provider recording in a provider-neutral shape.
+type ConferenceRecording struct {
+	ID              string                      `json:"id"`
+	Title           string                      `json:"title"`
+	StartedAt       *time.Time                  `json:"started_at"`
+	EndedAt         *time.Time                  `json:"ended_at"`
+	DurationMinutes int                         `json:"duration_minutes"`
+	PlaybackURL     string                      `json:"playback_url"`
+	Published       bool                        `json:"published"`
+	Formats         []ConferenceRecordingFormat `json:"formats"`
+}
+
+// ConferenceRecordingFormat is one playable rendition of a recording.
+type ConferenceRecordingFormat struct {
+	Type          string `json:"type"`
+	URL           string `json:"url"`
+	LengthMinutes int    `json:"length_minutes"`
+}
+
+// resolveSetting reads a trimmed setting for the tenant ("" on error).
+func (s *ConferenceService) resolveSetting(ctx context.Context, accountID uint, key string) string {
 	if s.lookup == nil {
-		return bbbConfig{}, false
+		return ""
 	}
-	ctx = settingsctx.WithAccountID(ctx, accountID)
-	rawURL, err := s.lookup(ctx, "conferences.bbb.url")
+	v, err := s.lookup(settingsctx.WithAccountID(ctx, accountID), key)
 	if err != nil {
-		return bbbConfig{}, false
+		return ""
 	}
-	secret, err := s.lookup(ctx, "conferences.bbb.secret")
-	if err != nil {
-		return bbbConfig{}, false
-	}
-	rawURL, secret = strings.TrimSpace(rawURL), strings.TrimSpace(secret)
-	if rawURL == "" || secret == "" {
-		return bbbConfig{}, false
-	}
-	base := strings.TrimRight(rawURL, "/")
-	if !strings.HasSuffix(base, "/api") {
-		base += "/api"
-	}
-	return bbbConfig{BaseURL: base + "/", Secret: secret}, true
-}
-
-// usesBBB reports whether this conference is held on the configured BBB
-// server (a BigBlueButton conference without an external link).
-func (s *ConferenceService) usesBBB(ctx context.Context, conference *models.Conference, accountID uint) (bbbConfig, bool) {
-	if conference.ConferenceType != "BigBlueButton" || isExternalJoinURL(conference.JoinURL) {
-		return bbbConfig{}, false
-	}
-	return s.resolveBBB(ctx, accountID)
+	return strings.TrimSpace(v)
 }
 
 // isExternalJoinURL reports whether the stored join URL is a real,
@@ -190,68 +232,34 @@ func ValidateMeetingURL(raw string) error {
 	return nil
 }
 
-// bbbMeetingID is the BBB meeting identifier for a Paper conference.
-func bbbMeetingID(conferenceID uint) string {
-	return fmt.Sprintf("paper-conference-%d", conferenceID)
+// checkOutboundURL runs the SSRF guard on a provider URL before any
+// request is built.
+func (s *ConferenceService) checkOutboundURL(ctx context.Context, rawURL string) error {
+	if s.validateURL != nil {
+		return s.validateURL(ctx, rawURL)
+	}
+	return security.ValidateExternalURL(ctx, rawURL)
 }
 
-// bbbPassword derives a stable per-meeting password from the shared
-// secret, so nothing extra has to be stored.
-func bbbPassword(cfg bbbConfig, meetingID, role string) string {
-	mac := hmac.New(sha256.New, []byte(cfg.Secret))
-	mac.Write([]byte(meetingID + ":" + role))
-	return hex.EncodeToString(mac.Sum(nil))[:24]
+func (s *ConferenceService) client() *http.Client {
+	if s.httpClient != nil {
+		return s.httpClient
+	}
+	return &http.Client{Timeout: 10 * time.Second, Transport: security.SafeTransport()}
 }
 
-// bbbURL builds a signed BBB API URL: checksum = sha1(call + query +
-// secret), per the BigBlueButton API spec.
-func bbbURL(cfg bbbConfig, call string, params url.Values) string {
-	query := params.Encode()
-	sum := sha1.Sum([]byte(call + query + cfg.Secret))
-	if query != "" {
-		query += "&"
+// logoutURL is where the provider sends people when they leave: the
+// course's conference page, when the frontend URL is configured.
+func (s *ConferenceService) logoutURL(ctx context.Context, conference *models.Conference, accountID uint) string {
+	base := strings.TrimRight(s.resolveSetting(ctx, accountID, "branding.frontend_url"), "/")
+	if base == "" || conference.ContextType != "Course" || !isExternalJoinURL(base) {
+		return ""
 	}
-	return cfg.BaseURL + call + "?" + query + "checksum=" + hex.EncodeToString(sum[:])
-}
-
-type bbbResponse struct {
-	ReturnCode string `xml:"returncode"`
-	MessageKey string `xml:"messageKey"`
-	Message    string `xml:"message"`
-}
-
-// bbbCall performs a server-side BBB API call. The server URL is
-// operator-configured but still passes the SSRF guard before the request
-// is built.
-func (s *ConferenceService) bbbCall(ctx context.Context, apiURL string) error {
-	if err := security.ValidateExternalURL(ctx, apiURL); err != nil {
-		return fmt.Errorf("BigBlueButton URL rejected: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
-	if err != nil {
-		return err
-	}
-	client := s.httpClient
-	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second, Transport: security.SafeTransport()}
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("BigBlueButton request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	var out bbbResponse
-	if err := xml.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
-		return fmt.Errorf("BigBlueButton returned an unreadable response (HTTP %d)", resp.StatusCode)
-	}
-	if out.ReturnCode != "SUCCESS" {
-		return fmt.Errorf("BigBlueButton refused the request: %s %s", out.MessageKey, out.Message)
-	}
-	return nil
+	return fmt.Sprintf("%s/courses/%d/conferences", base, conference.ContextID)
 }
 
 // StartConference starts a conference so participants can join. On a
-// configured BBB server it creates the meeting; a conference with an
+// configured provider it creates the meeting; a conference with an
 // external meeting link needs nothing created. accountID scopes the
 // settings lookup to the caller's tenant.
 func (s *ConferenceService) StartConference(ctx context.Context, conference *models.Conference, accountID uint) (*models.Conference, error) {
@@ -260,16 +268,11 @@ func (s *ConferenceService) StartConference(ctx context.Context, conference *mod
 	}
 
 	if cfg, ok := s.usesBBB(ctx, conference, accountID); ok {
-		meetingID := bbbMeetingID(conference.ID)
-		params := url.Values{}
-		params.Set("name", conference.Title)
-		params.Set("meetingID", meetingID)
-		params.Set("attendeePW", bbbPassword(cfg, meetingID, "attendee"))
-		params.Set("moderatorPW", bbbPassword(cfg, meetingID, "moderator"))
-		if conference.Duration > 0 {
-			params.Set("duration", fmt.Sprintf("%d", conference.Duration))
+		if err := s.bbbCreateMeeting(ctx, cfg, conference, accountID); err != nil {
+			return nil, err
 		}
-		if err := s.bbbCall(ctx, bbbURL(cfg, "create", params)); err != nil {
+	} else if cfg, ok := s.usesZoom(ctx, conference, accountID); ok {
+		if err := s.zoomEnsureMeeting(ctx, cfg, conference); err != nil {
 			return nil, err
 		}
 	} else if !isExternalJoinURL(conference.JoinURL) {
@@ -288,7 +291,7 @@ func (s *ConferenceService) StartConference(ctx context.Context, conference *mod
 	return conference, nil
 }
 
-// EndConference ends a running conference (and the BBB meeting, best
+// EndConference ends a running conference (and the provider meeting, best
 // effort).
 func (s *ConferenceService) EndConference(ctx context.Context, conference *models.Conference, accountID uint) (*models.Conference, error) {
 	if conference.StartedAt == nil {
@@ -300,11 +303,9 @@ func (s *ConferenceService) EndConference(ctx context.Context, conference *model
 	}
 
 	if cfg, ok := s.usesBBB(ctx, conference, accountID); ok {
-		meetingID := bbbMeetingID(conference.ID)
-		params := url.Values{}
-		params.Set("meetingID", meetingID)
-		params.Set("password", bbbPassword(cfg, meetingID, "moderator"))
-		_ = s.bbbCall(ctx, bbbURL(cfg, "end", params))
+		s.bbbEndMeeting(ctx, cfg, conference)
+	} else if cfg, ok := s.usesZoom(ctx, conference, accountID); ok && conference.ProviderMeetingID != "" {
+		s.zoomEndMeeting(ctx, cfg, conference.ProviderMeetingID)
 	}
 
 	now := time.Now()
@@ -320,7 +321,8 @@ func (s *ConferenceService) EndConference(ctx context.Context, conference *model
 
 // JoinConference returns the URL the user opens to join a running
 // conference and records them as a participant. Moderators (course
-// instructors) join BBB meetings as MODERATOR, everyone else as VIEWER.
+// instructors) join BBB meetings as MODERATOR and Zoom meetings as host;
+// everyone else as an attendee.
 func (s *ConferenceService) JoinConference(ctx context.Context, conference *models.Conference, userID uint, userName string, moderator bool, accountID uint) (string, error) {
 	if conference.EndedAt != nil {
 		return "", ErrConferenceEnded
@@ -331,22 +333,17 @@ func (s *ConferenceService) JoinConference(ctx context.Context, conference *mode
 
 	var joinURL string
 	if cfg, ok := s.usesBBB(ctx, conference, accountID); ok {
-		meetingID := bbbMeetingID(conference.ID)
-		role, pwRole := "VIEWER", "attendee"
-		if moderator {
-			role, pwRole = "MODERATOR", "moderator"
+		u, err := s.bbbJoinURL(ctx, cfg, conference, userID, userName, moderator, accountID)
+		if err != nil {
+			return "", err
 		}
-		if strings.TrimSpace(userName) == "" {
-			userName = fmt.Sprintf("User %d", userID)
+		joinURL = u
+	} else if cfg, ok := s.usesZoom(ctx, conference, accountID); ok {
+		u, err := s.zoomJoinURL(ctx, cfg, conference, moderator)
+		if err != nil {
+			return "", err
 		}
-		params := url.Values{}
-		params.Set("fullName", userName)
-		params.Set("meetingID", meetingID)
-		params.Set("password", bbbPassword(cfg, meetingID, pwRole))
-		params.Set("role", role)
-		params.Set("userID", fmt.Sprintf("%d", userID))
-		params.Set("redirect", "true")
-		joinURL = bbbURL(cfg, "join", params)
+		joinURL = u
 	} else if isExternalJoinURL(conference.JoinURL) {
 		joinURL = conference.JoinURL
 	} else {
@@ -357,24 +354,91 @@ func (s *ConferenceService) JoinConference(ctx context.Context, conference *mode
 	if moderator {
 		participationType = "initiator"
 	}
-	if existing, _ := s.participantRepo.FindByConferenceAndUser(ctx, conference.ID, userID, 0); existing == nil {
-		_ = s.participantRepo.Create(ctx, &models.ConferenceParticipant{
-			ConferenceID:      conference.ID,
-			UserID:            userID,
-			ParticipationType: participationType,
-		})
+	if s.participantRepo != nil {
+		if existing, _ := s.participantRepo.FindByConferenceAndUser(ctx, conference.ID, userID, 0); existing == nil {
+			_ = s.participantRepo.Create(ctx, &models.ConferenceParticipant{
+				ConferenceID:      conference.ID,
+				UserID:            userID,
+				ParticipationType: participationType,
+			})
+		}
 	}
 
 	return joinURL, nil
 }
 
-func (s *ConferenceService) GetRecordings(ctx context.Context, id uint) (string, error) {
-	conference, err := s.confRepo.FindByID(ctx, id, 0)
-	if err != nil {
-		return "", errors.New("conference not found")
+// GetRecordings returns the conference's recordings from its provider.
+// Conferences on an external link have none (an empty list); recordings
+// stored on the row by an earlier import are returned as-is.
+func (s *ConferenceService) GetRecordings(ctx context.Context, conference *models.Conference, accountID uint) ([]ConferenceRecording, error) {
+	if cfg, ok := s.usesBBB(ctx, conference, accountID); ok {
+		return s.bbbRecordings(ctx, cfg, conference)
 	}
+	if cfg, ok := s.usesZoom(ctx, conference, accountID); ok {
+		if conference.ProviderMeetingID == "" {
+			return []ConferenceRecording{}, nil
+		}
+		return s.zoomRecordings(ctx, cfg, conference.ProviderMeetingID)
+	}
+	return storedRecordings(conference.Recordings), nil
+}
 
-	return conference.Recordings, nil
+// DeleteRecording deletes one of the conference's recordings on the
+// provider. The id must belong to this conference's meeting: provider
+// recording ids are global, so an unchecked id could delete another
+// course's (or another tenant's, on a shared server) recording.
+func (s *ConferenceService) DeleteRecording(ctx context.Context, conference *models.Conference, recordingID string, accountID uint) error {
+	recordingID = strings.TrimSpace(recordingID)
+	if recordingID == "" {
+		return ErrRecordingNotFound
+	}
+	var (
+		recs []ConferenceRecording
+		err  error
+	)
+	bbbCfg, isBBB := s.usesBBB(ctx, conference, accountID)
+	zoomCfg, isZoom := s.usesZoom(ctx, conference, accountID)
+	switch {
+	case isBBB:
+		recs, err = s.bbbRecordings(ctx, bbbCfg, conference)
+	case isZoom && conference.ProviderMeetingID != "":
+		recs, err = s.zoomRecordings(ctx, zoomCfg, conference.ProviderMeetingID)
+	case isZoom:
+		return ErrRecordingNotFound
+	default:
+		return ErrRecordingsUnsupported
+	}
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, r := range recs {
+		if r.ID == recordingID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ErrRecordingNotFound
+	}
+	if isBBB {
+		return s.bbbDeleteRecording(ctx, bbbCfg, recordingID)
+	}
+	return s.zoomDeleteRecordings(ctx, zoomCfg, recordingID)
+}
+
+// storedRecordings parses the legacy recordings JSON column. Anything
+// unreadable is treated as "no recordings".
+func storedRecordings(raw string) []ConferenceRecording {
+	out := []ConferenceRecording{}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return out
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return []ConferenceRecording{}
+	}
+	return out
 }
 
 // Participant management
