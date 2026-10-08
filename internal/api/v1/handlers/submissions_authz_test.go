@@ -140,15 +140,10 @@ func TestListSubmissions_TeacherSeesAll(t *testing.T) {
 // their own rows (previously this returned every student's submissions).
 func TestListCourseSubmissions_StudentDefaultsToOwn(t *testing.T) {
 	app, submissionRepo := setupSubmissionAuthz(1, "StudentEnrollment")
-	submissionRepo.On("BulkListByCourse", mock.Anything, uint(10), mock.Anything).
-		Return(&repository.PaginatedResult[models.Submission]{
-			Items: []models.Submission{
-				{ID: 1, UserID: 1},
-				{ID: 2, UserID: 2},
-				{ID: 3, UserID: 3},
-			},
-			TotalCount: 3, Page: 1, PerPage: 10,
-		}, nil)
+	// The student's own rows are filtered in SQL (ListByUserAndCourse),
+	// never the class-wide listing.
+	submissionRepo.On("ListByUserAndCourse", mock.Anything, uint(1), uint(10)).
+		Return([]models.Submission{{ID: 1, UserID: 1}}, nil)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/courses/10/submissions", nil)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -157,4 +152,47 @@ func TestListCourseSubmissions_StudentDefaultsToOwn(t *testing.T) {
 	if len(items) == 1 {
 		assert.EqualValues(t, 1, items[0]["user_id"])
 	}
+	submissionRepo.AssertNotCalled(t, "BulkListByCourse", mock.Anything, mock.Anything, mock.Anything)
+}
+
+// B014: a student's grades must not depend on where their rows fall in the
+// class-wide listing. With 150 of the student's own submissions and the
+// 100-row page cap, page 1 returns 100 of THEIR rows and rel="next" leads to
+// the remaining 50 (previously the class was paginated first and filtered
+// after, dropping most of the student's grades).
+func TestListCourseSubmissions_UserFilterPaginatesOwnRows(t *testing.T) {
+	app, submissionRepo := setupSubmissionAuthz(7, "StudentEnrollment")
+	own := make([]models.Submission, 150)
+	for i := range own {
+		own[i] = models.Submission{ID: uint(1000 + i), AssignmentID: uint(i + 1), UserID: 7}
+	}
+	submissionRepo.On("ListByUserAndCourse", mock.Anything, uint(7), uint(10)).Return(own, nil)
+
+	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/courses/10/submissions?user_id=self&per_page=100", nil)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, resp.Header.Get("Link"), `rel="next"`)
+	assert.Contains(t, resp.Header.Get("Link"), "user_id=self")
+	assert.Len(t, decodeJSONArray(t, resp), 100)
+
+	resp2 := testutil.MakeRequest(app, http.MethodGet, "/api/v1/courses/10/submissions?user_id=self&per_page=100&page=2", nil)
+	assert.Equal(t, http.StatusOK, resp2.StatusCode)
+	page2 := decodeJSONArray(t, resp2)
+	assert.Len(t, page2, 50)
+	for _, s := range page2 {
+		assert.EqualValues(t, 7, s["user_id"])
+	}
+}
+
+// Staff still get the class-wide, paginated listing.
+func TestListCourseSubmissions_TeacherSeesClass(t *testing.T) {
+	app, submissionRepo := setupSubmissionAuthz(9, "TeacherEnrollment")
+	submissionRepo.On("BulkListByCourse", mock.Anything, uint(10), mock.Anything).
+		Return(&repository.PaginatedResult[models.Submission]{
+			Items:      []models.Submission{{ID: 1, UserID: 1}, {ID: 2, UserID: 2}},
+			TotalCount: 2, Page: 1, PerPage: 10,
+		}, nil)
+
+	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/courses/10/submissions", nil)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Len(t, decodeJSONArray(t, resp), 2)
 }

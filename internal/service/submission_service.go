@@ -194,6 +194,14 @@ func (s *SubmissionService) BulkListByCourse(ctx context.Context, courseID uint,
 	return s.submissionRepo.BulkListByCourse(ctx, courseID, params)
 }
 
+// ListByUserAndCourse returns one student's submissions across the course
+// (bounded by the number of assignments). Used by the course submissions
+// endpoint when the caller asks for a single student, so the filter runs in
+// SQL rather than after paginating the whole class.
+func (s *SubmissionService) ListByUserAndCourse(ctx context.Context, userID, courseID uint) ([]models.Submission, error) {
+	return s.submissionRepo.ListByUserAndCourse(ctx, userID, courseID)
+}
+
 func (s *SubmissionService) PostGradesByAssignment(ctx context.Context, assignmentID uint, postedAt *time.Time) error {
 	return s.submissionRepo.PostGradesByAssignment(ctx, assignmentID, postedAt)
 }

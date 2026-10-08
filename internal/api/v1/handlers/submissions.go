@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
@@ -102,14 +103,6 @@ func (h *SubmissionHandler) ListCourseSubmissions(c *fiber.Ctx) error {
 	}
 
 	params := middleware.GetPagination(c)
-	if params.PerPage > 10000 {
-		params.PerPage = 10000
-	}
-
-	result, err := h.submissionService.BulkListByCourse(c.Context(), uint(courseID), params)
-	if err != nil {
-		return responses.InternalError(c, "Could not fetch submissions")
-	}
 
 	// Filter to requesting user's submissions if user_id query param is present
 	// This allows students (enrolled but not instructor) to fetch their own submissions
@@ -142,13 +135,42 @@ func (h *SubmissionHandler) ListCourseSubmissions(c *fiber.Ctx) error {
 		filterUserID = requestingUserID
 	}
 
+	// One student's submissions: filter in SQL, then paginate. This used
+	// to paginate the whole class first and filter afterwards, so with
+	// the 100-row page cap a student saw only whichever of their rows
+	// happened to fall in the first 100 of the course (B014).
+	if filterUserID > 0 {
+		all, err := h.submissionService.ListByUserAndCourse(c.Context(), filterUserID, uint(courseID))
+		if err != nil {
+			return responses.InternalError(c, "Could not fetch submissions")
+		}
+		sort.Slice(all, func(i, j int) bool { return all[i].ID < all[j].ID })
+		total := len(all)
+		start := (params.Page - 1) * params.PerPage
+		if start > total {
+			start = total
+		}
+		end := start + params.PerPage
+		if end > total {
+			end = total
+		}
+		responses.SetPaginationHeaders(c, int64(total), params.Page, params.PerPage)
+		submissions := make([]fiber.Map, 0, end-start)
+		for i := start; i < end; i++ {
+			submissions = append(submissions, submissionToJSON(&all[i]))
+		}
+		return c.JSON(submissions)
+	}
+
+	result, err := h.submissionService.BulkListByCourse(c.Context(), uint(courseID), params)
+	if err != nil {
+		return responses.InternalError(c, "Could not fetch submissions")
+	}
+
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
 
 	submissions := make([]fiber.Map, 0, len(result.Items))
 	for _, s := range result.Items {
-		if filterUserID > 0 && s.UserID != filterUserID {
-			continue
-		}
 		submissions = append(submissions, submissionToJSON(&s))
 	}
 
