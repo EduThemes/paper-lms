@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -12,6 +14,7 @@ import (
 type OutcomeProficiencyHandler struct {
 	proficiency *service.OutcomeProficiencyService
 	mastery     *service.MasteryGradebookService
+	audit       *service.AuditService
 }
 
 func NewOutcomeProficiencyHandler(proficiency *service.OutcomeProficiencyService, mastery *service.MasteryGradebookService) *OutcomeProficiencyHandler {
@@ -200,5 +203,100 @@ func (h *OutcomeProficiencyHandler) LearningMasteryGradebook(c *fiber.Ctx) error
 		"students":    students,
 		"outcomes":    outcomes,
 		"cells":       cells,
+	})
+}
+
+// SetAuditService wires FERPA read auditing for the student mastery view.
+func (h *OutcomeProficiencyHandler) SetAuditService(a *service.AuditService) {
+	h.audit = a
+}
+
+// StudentMastery handles GET /courses/:course_id/outcome_mastery/users/:user_id
+// (G152): one student's Learning Mastery view. user_id may be "self". A
+// student sees only themselves, an observer their linked students, course
+// staff any student of the course; anything else (another student, a user
+// who is not a student here, another tenant) is a 404.
+func (h *OutcomeProficiencyHandler) StudentMastery(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil || courseID <= 0 {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
+	callerID, err := getUserID(c)
+	if err != nil {
+		return err
+	}
+	targetID := callerID
+	if raw := c.Params("user_id"); raw != "self" {
+		v, err := c.ParamsInt("user_id")
+		if err != nil || v <= 0 {
+			return responses.BadRequest(c, "Invalid user ID")
+		}
+		targetID = uint(v)
+	}
+	accountID := callerAccountID(c)
+	if targetID != callerID && !callerIsCourseStaff(c) &&
+		!h.mastery.ObservesStudent(c.Context(), callerID, targetID, uint(courseID), accountID) {
+		return responses.NotFound(c, "student")
+	}
+
+	view, err := h.mastery.GetStudentMastery(c.Context(), uint(courseID), targetID, accountID)
+	if errors.Is(err, service.ErrMasteryStudentNotFound) {
+		return responses.NotFound(c, "student")
+	}
+	if err != nil {
+		return responses.InternalError(c, "Could not build learning mastery")
+	}
+	if targetID != callerID && h.audit != nil {
+		_ = h.audit.LogPIIAccess(c.Context(), callerID, targetID, "read", "learning_mastery", "courses", uint(courseID), c.IP(), c.Get("User-Agent"))
+	}
+
+	outcomes := make([]fiber.Map, len(view.Outcomes))
+	for i, o := range view.Outcomes {
+		results := make([]fiber.Map, len(o.Results))
+		for j, r := range o.Results {
+			m := fiber.Map{
+				"id":                    r.ID,
+				"title":                 r.Title,
+				"associated_asset_type": r.AssetType,
+				"associated_asset_id":   r.AssetID,
+				"score":                 r.Score,
+				"possible":              r.Possible,
+				"raw_score":             r.RawScore,
+				"raw_possible":          r.RawPossible,
+				"submitted_at":          r.SubmittedAt,
+				"assessed_at":           r.AssessedAt,
+			}
+			if r.Rating != nil {
+				m["rating"] = proficiencyRatingToJSON(r.Rating)
+			}
+			results[j] = m
+		}
+		m := fiber.Map{
+			"id":                 o.ID,
+			"title":              o.Title,
+			"display_name":       o.DisplayName,
+			"description":        o.Description,
+			"outcome_group_id":   o.GroupID,
+			"group_title":        o.GroupTitle,
+			"calculation_method": o.CalculationMethod,
+			"calculation_int":    o.CalculationInt,
+			"score":              o.Score,
+			"possible":           o.Possible,
+			"mastered":           o.Mastered,
+			"results":            results,
+		}
+		if o.Rating != nil {
+			m["rating"] = proficiencyRatingToJSON(o.Rating)
+		}
+		outcomes[i] = m
+	}
+	return c.JSON(fiber.Map{
+		"course_id":      view.CourseID,
+		"user_id":        view.UserID,
+		"user_name":      view.UserName,
+		"proficiency":    proficiencyToJSON(view.Proficiency),
+		"outcomes":       outcomes,
+		"mastered_count": view.Mastered,
+		"assessed_count": view.Assessed,
 	})
 }

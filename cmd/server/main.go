@@ -621,6 +621,7 @@ func main() {
 	appointmentGroupService := service.NewAppointmentGroupService(appointmentGroupRepo, appointmentSlotRepo, appointmentReservationRepo, database)
 	outcomeProficiencyService := service.NewOutcomeProficiencyService(outcomeProficiencyRepo)
 	masteryGradebookService := service.NewMasteryGradebookService(enrollmentRepo, outcomeRepo, outcomeResultRepo, userRepo, outcomeProficiencyService)
+	masteryGradebookService.SetOutcomeGroupRepo(outcomeGroupRepo) // student mastery view group titles (G152)
 
 	// Outcome results for every visible grade, whichever path wrote it
 	// (bulk grading, curve, CSV import, LTI AGS included).
@@ -929,6 +930,7 @@ func main() {
 	masteryPathHandler := handlers.NewMasteryPathHandler(masteryPathService)
 	appointmentGroupHandler := handlers.NewAppointmentGroupHandler(appointmentGroupService, authz, auditService)
 	outcomeProficiencyHandler := handlers.NewOutcomeProficiencyHandler(outcomeProficiencyService, masteryGradebookService)
+	outcomeProficiencyHandler.SetAuditService(auditService) // FERPA audit of the student mastery view (G152)
 	pairingCodeHandler := handlers.NewPairingCodeHandler(pairingCodeService)
 	// Wave 1 handlers
 	discussionCheckpointHandler := handlers.NewDiscussionCheckpointHandler(discussionCheckpointService)
