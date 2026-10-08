@@ -81,8 +81,11 @@ func (s *LTIService) PrepareLaunch(ctx context.Context, req LTILaunchRequest) (*
 	}
 
 	deepLinking := req.DeepLink != nil
-	if deepLinking && !req.IsStaff {
+	if deepLinking && !req.IsStaff && req.DeepLink.Kind != DeepLinkTargetSubmission {
 		return nil, ErrLTILaunchNotFound
+	}
+	if deepLinking && req.DeepLink.Kind == DeepLinkTargetSubmission && req.DeepLink.AssignmentID == 0 {
+		return nil, ltiInvalid("assignment_id is required to submit from a tool")
 	}
 
 	var link *models.LTIResourceLink
