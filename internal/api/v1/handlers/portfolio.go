@@ -389,16 +389,23 @@ func (h *PortfolioHandler) GetPortfolio(c *fiber.Ctx) error {
 	// A non-owner reading a public portfolio gets the public view: hidden
 	// sections (and their artifacts) stay private, exactly as on
 	// /portfolios/public/:slug.
-	return c.JSON(h.portfolioDetailJSON(c, portfolio, viewsAsPublic(c, portfolio)))
+	return c.JSON(h.portfolioDetailJSON(c, portfolio, h.viewsAsPublic(c, portfolio)))
 }
 
 // viewsAsPublic reports whether the caller was let in only because the
-// portfolio is published and public (they are not its owner), so they get
-// the public view of it. Owners always see everything; an admin reading
-// someone else's private portfolio passed RequireOwnerOrAdmin and sees it all.
-func viewsAsPublic(c *fiber.Ctx, p *models.Portfolio) bool {
+// portfolio is published and public (they are neither its owner nor an
+// admin of the owner's tenant), so they get the public view of it. Owners
+// and admins always see everything — an admin sees a public portfolio the
+// same way as a private one.
+func (h *PortfolioHandler) viewsAsPublic(c *fiber.Ctx, p *models.Portfolio) bool {
 	callerID, _ := c.Locals("user_id").(uint)
-	return callerID != p.UserID && isPubliclyVisible(p)
+	if callerID == p.UserID || !isPubliclyVisible(p) {
+		return false
+	}
+	if h.authz != nil && h.authz.RequireOwnerOrAdmin(c, p.UserID) == nil {
+		return false
+	}
+	return true
 }
 
 func (h *PortfolioHandler) UpdatePortfolio(c *fiber.Ctx) error {
@@ -881,7 +888,7 @@ func (h *PortfolioHandler) DownloadArtifactFile(c *fiber.Ctx) error {
 	if wrote {
 		return err
 	}
-	return h.streamPortfolioFile(c, portfolio, callerAccountID(c), viewsAsPublic(c, portfolio))
+	return h.streamPortfolioFile(c, portfolio, callerAccountID(c), h.viewsAsPublic(c, portfolio))
 }
 
 // DownloadPublicArtifactFile handles GET /portfolios/public/:slug/files/:file_id

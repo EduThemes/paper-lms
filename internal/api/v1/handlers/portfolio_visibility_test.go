@@ -66,6 +66,18 @@ func TestPortfolio_GetPortfolio_NonOwnerGetsPublicView(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, m["sections"], 2)
 	assert.Len(t, m["artifacts"], 2)
+
+	// So does an admin of the owner's tenant, exactly as for a private
+	// portfolio (learner-lane leftover: admins got the public view).
+	admin := setup(9)
+	admin.userRepo.On("FindByID", mock.Anything, uint(9), uint(0)).Return(&models.User{ID: 9, AccountID: 1, Role: "admin"}, nil)
+	admin.userRepo.On("FindByID", mock.Anything, uint(5), uint(1)).Return(&models.User{ID: 5, AccountID: 1}, nil)
+	resp = testutil.MakeRequest(admin.app, http.MethodGet, "/portfolios/12", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	m, err = testutil.ParseJSONMap(resp)
+	require.NoError(t, err)
+	assert.Len(t, m["sections"], 2)
+	assert.Len(t, m["artifacts"], 2)
 }
 
 // Public viewers must not be able to download a file that only backs an
