@@ -4,7 +4,7 @@
 // Built on the shared request helper (`api.request`) so CSRF, 401 handling
 // and ApiError extraction match the rest of the client.
 
-import { api, getCSRFToken, ApiError } from './api';
+import { api, getCSRFToken, ApiError, requestPaged } from './api';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -43,9 +43,9 @@ export const pagesFilesApi = {
 
   // ---- Files and folders (G070 / G071) ----
   // The folder tree: every live folder of the course (flat; build the
-  // tree client-side with buildFolderTree).
-  listCourseFolderTree: (courseId) =>
-    data(api.request(`/courses/${courseId}/folders?all=true&per_page=100`)),
+  // tree client-side with buildFolderTree). requestPaged walks past the
+  // 100-per-page cap.
+  listCourseFolderTree: (courseId) => data(requestPaged(`/courses/${courseId}/folders`, 1, 5000)),
   // Files directly inside a folder (null = the course root).
   listFolderFiles: (courseId, folderId, page = 1, perPage = 50) =>
     api.request(`/courses/${courseId}/files?folder_id=${folderId ?? 'root'}&page=${page}&per_page=${perPage}`),
