@@ -146,15 +146,26 @@ func (s *AccessTokenService) ValidateToken(ctx context.Context, rawToken string)
 		}
 	}
 
-	// Update LastUsedAt
+	// Update LastUsedAt. Prefer the single-column write: a full-row Save
+	// of the copy read above would race a concurrent refresh (B193 updates
+	// the access-token hash in place) or revoke, writing the stale hash /
+	// workflow_state back over it. Non-fatal either way: the token is
+	// still valid even if usage can't be recorded.
 	now := time.Now()
 	token.LastUsedAt = &now
-	if err := s.tokenRepo.Update(ctx, token); err != nil {
-		// Non-fatal: token is still valid even if we can't record usage
-		_ = err
+	if rec, ok := s.tokenRepo.(accessTokenUsageRecorder); ok {
+		_ = rec.TouchLastUsed(ctx, token.ID, now)
+	} else {
+		_ = s.tokenRepo.Update(ctx, token)
 	}
 
 	return token, nil
+}
+
+// accessTokenUsageRecorder is implemented by token repositories that can
+// record a use without rewriting the rest of the row (the Postgres repo).
+type accessTokenUsageRecorder interface {
+	TouchLastUsed(ctx context.Context, id uint, at time.Time) error
 }
 
 // RefreshOAuthToken uses a raw refresh token to mint a new access token.

@@ -55,6 +55,15 @@ func (r *accessTokenRepo) Update(ctx context.Context, token *models.AccessToken)
 	return r.db.WithContext(ctx).Omit(clause.Associations).Save(token).Error
 }
 
+// TouchLastUsed records a token use by writing ONLY last_used_at. The auth
+// middleware calls this on every request; a full-row Save there would
+// write back the token hash / expiry / workflow_state it read at the start
+// of the request, undoing a concurrent refresh (new access token hash) or
+// revocation (workflow_state='deleted').
+func (r *accessTokenRepo) TouchLastUsed(ctx context.Context, id uint, at time.Time) error {
+	return r.db.WithContext(ctx).Model(&models.AccessToken{}).Where("id = ?", id).UpdateColumn("last_used_at", at).Error
+}
+
 func (r *accessTokenRepo) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Model(&models.AccessToken{}).Where("id = ?", id).Update("workflow_state", "deleted").Error
 }
