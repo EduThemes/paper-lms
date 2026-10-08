@@ -49,7 +49,7 @@ func (h *CalendarHandler) ListItems(c *fiber.Ctx) error {
 	}
 	items, err := h.agg.ListItems(c.Context(), q)
 	if err != nil {
-		return responses.BadRequest(c, err.Error())
+		return calendarListError(c, err)
 	}
 	return c.JSON(items)
 }
@@ -138,5 +138,5 @@ func (h *CalendarHandler) PublicFeed(c *fiber.Ctx) error {
 	c.Set("Content-Type", "text/calendar; charset=utf-8")
 	c.Set("Cache-Control", "private, max-age=900")
 	c.Set("Content-Disposition", "inline; filename=\"calendar.ics\"")
-	return c.Send(service.RenderICS(items, user.Name+" (Paper LMS)", c.BaseURL(), now))
+	return c.Send(service.RenderICSIn(items, user.Name+" (Paper LMS)", c.BaseURL(), now, service.LoadCalendarLocation(user.TimeZone)))
 }

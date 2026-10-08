@@ -751,6 +751,17 @@ func (s *CalendarService) ExportAsICalendar(ctx context.Context, contextType str
 // RenderICS renders calendar items as an RFC 5545 VCALENDAR. baseURL,
 // when set, turns each item's HTMLURL into an absolute URL property.
 func RenderICS(items []CalendarItem, calName, baseURL string, now time.Time) []byte {
+	return RenderICSIn(items, calName, baseURL, now, time.UTC)
+}
+
+// RenderICSIn is RenderICS with all-day events dated in loc (the
+// calendar owner's zone). An all-day event is stored as the instant of
+// its local midnight, so reading its date in UTC puts it on the previous
+// day for anyone east of UTC.
+func RenderICSIn(items []CalendarItem, calName, baseURL string, now time.Time, loc *time.Location) []byte {
+	if loc == nil {
+		loc = time.UTC
+	}
 	sorted := make([]CalendarItem, len(items))
 	copy(sorted, items)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].StartAt.Before(sorted[j].StartAt) })
@@ -779,12 +790,9 @@ func RenderICS(items []CalendarItem, calName, baseURL string, now time.Time) []b
 			line("DESCRIPTION:" + escapeICalText(it.Description))
 		}
 		if it.AllDay {
-			line("DTSTART;VALUE=DATE:" + it.StartAt.UTC().Format("20060102"))
-			end := it.StartAt.AddDate(0, 0, 1)
-			if it.EndAt != nil && it.EndAt.After(it.StartAt) {
-				end = *it.EndAt
-			}
-			line("DTEND;VALUE=DATE:" + end.UTC().Format("20060102"))
+			startDay, endDay := allDayRange(it.StartAt, it.EndAt, loc)
+			line("DTSTART;VALUE=DATE:" + startDay.Format("20060102"))
+			line("DTEND;VALUE=DATE:" + endDay.Format("20060102"))
 		} else {
 			line("DTSTART:" + it.StartAt.UTC().Format("20060102T150405Z"))
 			if it.EndAt != nil {
@@ -808,6 +816,30 @@ func RenderICS(items []CalendarItem, calName, baseURL string, now time.Time) []b
 	}
 	line("END:VCALENDAR")
 	return buf.Bytes()
+}
+
+// allDayRange returns an all-day item's first day and its exclusive end
+// day (RFC 5545: a DATE event's DTEND is the day after its last day),
+// read in loc. An end at exactly local midnight is itself exclusive; any
+// other end time still covers its own day. The range is always at least
+// one day long.
+func allDayRange(start time.Time, end *time.Time, loc *time.Location) (time.Time, time.Time) {
+	day := func(t time.Time) time.Time {
+		l := t.In(loc)
+		return time.Date(l.Year(), l.Month(), l.Day(), 0, 0, 0, 0, time.UTC)
+	}
+	startDay := day(start)
+	endDay := startDay.AddDate(0, 0, 1)
+	if end != nil && end.After(start) {
+		last := day(*end)
+		if e := end.In(loc); e.Hour() == 0 && e.Minute() == 0 && e.Second() == 0 && e.Nanosecond() == 0 {
+			last = last.AddDate(0, 0, -1)
+		}
+		if cand := last.AddDate(0, 0, 1); cand.After(endDay) {
+			endDay = cand
+		}
+	}
+	return startDay, endDay
 }
 
 // writeICSLine writes one content line folded at 75 octets (RFC 5545

@@ -263,10 +263,10 @@ func selectContexts(all []CalendarContext, codes []string) []CalendarContext {
 // ListItems returns the aggregated calendar for the query's date range.
 func (s *CalendarAggregateService) ListItems(ctx context.Context, q CalendarQuery) ([]CalendarItem, error) {
 	if q.End.Before(q.Start) {
-		return nil, fmt.Errorf("end_date must not be before start_date")
+		return nil, calValidation("end_date must not be before start_date")
 	}
 	if q.End.Sub(q.Start) > MaxCalendarRange {
-		return nil, fmt.Errorf("the date range is limited to 400 days")
+		return nil, calValidation("the date range is limited to 400 days")
 	}
 	all, err := s.ListContexts(ctx, q.UserID, q.AccountID, q.IsAdmin)
 	if err != nil {
@@ -666,7 +666,8 @@ func (s *CalendarAggregateService) quizItems(ctx context.Context, q CalendarQuer
 	}
 	for _, qz := range quizzes {
 		c := byID[qz.CourseID]
-		if !c.IsInstructor && !qz.Published {
+		// Same published test as the quiz pages (quiz_access.go).
+		if !c.IsInstructor && !qz.Published && qz.WorkflowState != "published" {
 			continue
 		}
 		id := qz.ID

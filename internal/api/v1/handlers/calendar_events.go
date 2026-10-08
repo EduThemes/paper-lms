@@ -134,9 +134,19 @@ func (h *CalendarEventHandler) listAggregated(c *fiber.Ctx, userID uint) error {
 	}
 	items, err := h.agg.ListItems(c.Context(), q)
 	if err != nil {
-		return responses.BadRequest(c, err.Error())
+		return calendarListError(c, err)
 	}
 	return c.JSON(items)
+}
+
+// calendarListError answers an aggregated-calendar failure: a bad date
+// range is a 400 with its message; anything else is a 500 that does not
+// echo database text.
+func calendarListError(c *fiber.Ctx, err error) error {
+	if errors.Is(err, service.ErrCalendarValidation) {
+		return responses.BadRequest(c, err.Error())
+	}
+	return responses.InternalError(c, "Could not load the calendar")
 }
 
 // parseCalendarQuery reads start_date/end_date (YYYY-MM-DD or RFC 3339;
@@ -754,9 +764,9 @@ func (h *CalendarEventHandler) ExportAsICal(c *fiber.Ctx) error {
 			End:       endDate,
 		})
 		if err != nil {
-			return responses.BadRequest(c, err.Error())
+			return calendarListError(c, err)
 		}
-		data = service.RenderICS(items, "Paper LMS calendar", c.BaseURL(), now)
+		data = service.RenderICSIn(items, "Paper LMS calendar", c.BaseURL(), now, h.agg.UserTimeZone(c.Context(), userID))
 	} else {
 		var err error
 		data, err = h.calendarService.ExportAsICalendar(c.Context(), "User", userID, startDate, endDate)

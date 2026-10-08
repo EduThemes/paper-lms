@@ -9,13 +9,14 @@ import (
 // It must run before the protected group is created: a calendar client
 // (Google, Outlook, Apple) has no session, and the unguessable token in
 // the URL is the only credential. The token grants this read and
-// nothing else — it never creates a session. authLimit caps token
-// guessing per IP.
-func (r *Router) registerCalendarPublicRoutes(api fiber.Router, authLimit fiber.Handler) {
+// nothing else — it never creates a session. It has its own per-IP
+// limiter: calendar clients poll from shared IPs, so it must not share
+// the login limiter's bucket.
+func (r *Router) registerCalendarPublicRoutes(api fiber.Router) {
 	if r.CalendarHandler == nil {
 		return
 	}
-	api.Get("/feeds/calendars/:token", authLimit, r.CalendarHandler.PublicFeed)
+	api.Get("/feeds/calendars/:token", middleware.CalendarFeedRateLimit(), r.CalendarHandler.PublicFeed)
 }
 
 // registerCalendarRoutes mounts the aggregated calendar (G094/G146), the

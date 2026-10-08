@@ -579,3 +579,89 @@ func TestCalendarLane_Scheduler(t *testing.T) {
 	resp = testutil.MakeRequest(f.app(calOutsider, 2), http.MethodGet, fmt.Sprintf("/appointment_groups/%d", ggID), nil)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
+
+// Review fixes (G097): only students sign up (an observer who can read
+// the group can't take a slot), a group can't be created in an unknown
+// state, and a group-set appointment group can't also gain section
+// limits.
+func TestCalendarLane_SchedulerSignupRules(t *testing.T) {
+	f := newCalFixture(t)
+	const observer uint = 906
+	require.NoError(t, postgres.NewUserRepository(f.g).Create(t.Context(), &models.User{
+		ID: observer, AccountID: 1, Name: "Oz Observer", LoginID: "oz.cal@example.test", Email: "oz.cal@example.test", PasswordHash: "x", Role: "user",
+	}))
+	require.NoError(t, f.g.Create(&models.Enrollment{UserID: observer, CourseID: calCourse, Type: "ObserverEnrollment", Role: "ObserverEnrollment", WorkflowState: models.EnrollmentActive}).Error)
+
+	teacher := f.app(calTeacher, 1)
+	slotAt := time.Now().UTC().Add(96 * time.Hour).Truncate(time.Hour)
+	resp := testutil.MakeRequest(teacher, http.MethodPost, fmt.Sprintf("/courses/%d/appointment_groups", calCourse), testutil.JSONBody(map[string]interface{}{
+		"appointment_group": map[string]interface{}{
+			"title": "Office hours", "workflow_state": "active",
+			"new_appointments": []map[string]interface{}{{"start_at": slotAt, "end_at": slotAt.Add(15 * time.Minute)}},
+		},
+	}))
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var og map[string]interface{}
+	calJSON(t, resp, &og)
+	ogID := uint(og["id"].(float64))
+	slotID := uint(og["appointments"].([]interface{})[0].(map[string]interface{})["id"].(float64))
+
+	resp = testutil.MakeRequest(f.app(observer, 1), http.MethodPost, fmt.Sprintf("/appointment_groups/%d/appointments/%d/reservations", ogID, slotID), nil)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode, "an observer can't book a student's slot")
+	resp = testutil.MakeRequest(f.app(calStudent, 1), http.MethodPost, fmt.Sprintf("/appointment_groups/%d/appointments/%d/reservations", ogID, slotID), nil)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	resp = testutil.MakeRequest(teacher, http.MethodPost, fmt.Sprintf("/courses/%d/appointment_groups", calCourse), testutil.JSONBody(map[string]interface{}{
+		"appointment_group": map[string]interface{}{"title": "Ghost", "workflow_state": "deleted"},
+	}))
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	resp = testutil.MakeRequest(teacher, http.MethodPost, fmt.Sprintf("/courses/%d/appointment_groups", calCourse), testutil.JSONBody(map[string]interface{}{
+		"appointment_group": map[string]interface{}{
+			"title": "Project check-in", "workflow_state": "active",
+			"sub_context_codes": []string{fmt.Sprintf("group_category_%d", calGroupCat)},
+		},
+	}))
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var gg map[string]interface{}
+	calJSON(t, resp, &gg)
+	resp = testutil.MakeRequest(teacher, http.MethodPut, fmt.Sprintf("/appointment_groups/%d", uint(gg["id"].(float64))), testutil.JSONBody(map[string]interface{}{
+		"appointment_group": map[string]interface{}{"sub_context_codes": []string{fmt.Sprintf("course_section_%d", calSectionA)}},
+	}))
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// Review fix (G094): a quiz published through its workflow_state (the
+// quiz pages' test) shows on the student calendar; an unpublished one
+// doesn't.
+func TestCalendarLane_QuizPublishedByWorkflowState(t *testing.T) {
+	f := newCalFixture(t)
+	due := time.Now().UTC().Add(50 * time.Hour).Truncate(time.Hour)
+	require.NoError(t, f.g.Create(&models.Quiz{CourseID: calCourse, Title: "Nebula quiz", DueAt: &due, WorkflowState: "published"}).Error)
+	require.NoError(t, f.g.Create(&models.Quiz{CourseID: calCourse, Title: "Hidden quiz", DueAt: &due, WorkflowState: "unpublished"}).Error)
+	got := titles(calItems(t, f.app(calStudent, 1), calRange(due.Add(-time.Hour), due.Add(time.Hour))))
+	assert.Equal(t, []string{"Nebula quiz"}, got)
+}
+
+// Review fix (G096): the feed dates all-day events in the owner's zone.
+func TestCalendarLane_FeedAllDayInOwnerZone(t *testing.T) {
+	f := newCalFixture(t)
+	require.NoError(t, f.g.Model(&models.User{}).Where("id = ?", calStudent).Update("time_zone", "Asia/Tokyo").Error)
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	require.NoError(t, err)
+	day := time.Now().In(tokyo).AddDate(0, 0, 3)
+	midnight := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, tokyo)
+	require.NoError(t, f.g.Create(&models.CalendarEvent{ContextType: "User", ContextID: calStudent, Title: "Sports day", StartAt: midnight, AllDay: true, CreatedByUserID: calStudent, WorkflowState: "active"}).Error)
+
+	app := f.app(calStudent, 1)
+	resp := testutil.MakeRequest(app, http.MethodPost, "/calendar/feed", nil)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var st map[string]interface{}
+	calJSON(t, resp, &st)
+	resp = testutil.MakeRequest(app, http.MethodGet, strings.TrimPrefix(st["feed_path"].(string), "/api/v1"), nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body, _ := io.ReadAll(resp.Body)
+	ics := string(body)
+	assert.Contains(t, ics, "DTSTART;VALUE=DATE:"+midnight.Format("20060102"), "Tokyo midnight is the previous UTC day")
+	assert.Contains(t, ics, "DTEND;VALUE=DATE:"+midnight.AddDate(0, 0, 1).Format("20060102"))
+}

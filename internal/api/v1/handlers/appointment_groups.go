@@ -339,6 +339,13 @@ func (h *AppointmentGroupHandler) Create(c *fiber.Ctx) error {
 		body.AppointmentGroup = flat
 	}
 	in := body.AppointmentGroup
+	switch in.WorkflowState {
+	case "", "active", "pending":
+	default:
+		// Same rule as Update: a group can't be created already deleted
+		// (or in a state participants' visibility checks don't know).
+		return responses.BadRequest(c, "workflow_state must be 'active' or 'pending'")
+	}
 	parsed, err := parseAppointmentCodes(in.ContextCodes, in.SubContextCodes)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
@@ -493,6 +500,9 @@ func (h *AppointmentGroupHandler) Update(c *fiber.Ctx) error {
 		}
 		if parsed.groupCategoryID != nil && (g.GroupCategoryID == nil || *g.GroupCategoryID != *parsed.groupCategoryID) {
 			return responses.BadRequest(c, "the group set of an appointment group cannot be changed")
+		}
+		if g.GroupCategoryID != nil && len(parsed.sections) > 0 {
+			return responses.BadRequest(c, "an appointment group is limited either to sections or to a group set, not both")
 		}
 		if err := h.requireInstructorOfAll(c, parsed.courses); err != nil {
 			return err
@@ -706,12 +716,19 @@ func (h *AppointmentGroupHandler) Reserve(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.NotFound(c, "appointment group")
 	}
-	if _, _, err := h.groupAccess(c, g); err != nil {
+	manager, ctxs, err := h.groupAccess(c, g)
+	if err != nil {
 		return err
 	}
 	userID, _ := c.Locals("user_id").(uint)
 	if userID == 0 {
 		return responses.Unauthorized(c)
+	}
+	// Signing up is for students (Canvas participant_for): an observer or
+	// designer who can read the group must not take a student's slot.
+	if !manager && g.ParticipantType != models.AppointmentParticipantGroup &&
+		h.svc.HasDB() && !h.svc.CanParticipate(c.Context(), g, ctxs, userID) {
+		return responses.Forbidden(c, "only students can sign up for this appointment group")
 	}
 	var body struct {
 		Comments string `json:"comments"`
