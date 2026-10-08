@@ -4,7 +4,7 @@ import { CheckCircle, XCircle, MinusCircle, HelpCircle } from 'lucide-react';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
-import { sanitizeHTML } from '../components/RichContentViewer';
+import SafeHTML from '../components/SafeHTML';
 
 const QuizReviewPage = () => {
   const { courseId, quizId, submissionId } = useParams();
@@ -144,9 +144,9 @@ const QuizReviewPage = () => {
                   </span>
                 </div>
 
-                <div
+                <SafeHTML
                   className="text-text-primary mb-4 prose max-w-none"
-                  dangerouslySetInnerHTML={{ __html: sanitizeHTML(question.question_text) }}
+                  html={question.question_text}
                 />
 
                 {/* Show answer options for MC/TF with highlighting */}

@@ -4,6 +4,7 @@ import { BarChart3, Users, TrendingUp, Award, ArrowLeft } from 'lucide-react';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import SafeHTML from '../components/SafeHTML';
 
 const QuizStatisticsPage = () => {
   const { courseId, quizId } = useParams();
@@ -212,7 +213,7 @@ const QuestionCard = ({ question, index, formatPercent, getDifficultyColor, getD
               </span>
               <span className="text-xs text-text-disabled">{q.points_possible} pt{q.points_possible !== 1 ? 's' : ''}</span>
             </div>
-            <p className="text-sm text-text-primary" dangerouslySetInnerHTML={{ __html: q.question_text }} />
+            <SafeHTML className="text-sm text-text-primary" html={q.question_text} />
           </div>
           <div className="flex-shrink-0 text-right">
             <span className={`inline-block text-xs font-semibold px-2 py-1 rounded ${getDifficultyColor(q.difficulty_index)}`}>

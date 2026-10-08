@@ -1,16 +1,28 @@
 import React, { useMemo, useEffect, useRef, useState, useCallback, useContext } from 'react';
 import DOMPurify from 'dompurify';
 import katex from 'katex';
+// KaTeX layout CSS: without it .katex-mathml is not visually hidden and every
+// equation renders twice (MathML + flattened text) for anyone who never
+// opened the equation dialog (B100).
+import 'katex/dist/katex.min.css';
 import { Volume2, Square } from 'lucide-react';
 import { ReadingPrefsContext } from '../contexts/ReadingPrefsContext';
+import { htmlToText } from '../utils/html';
 
 /* --- DOMPurify Configuration ---------------------------------------------- */
 
 // Course content imported from Canvas / IMSCC commonly uses tags that a tight
 // allowlist would silently drop (collapsible <details>/<summary>, semantic
 // landmarks, embedded media, definition lists, Canvas equation images with
-// data-equation-content, etc.). Our philosophy is to keep all the rich HTML
-// authors put in — only block what's actively dangerous.
+// data-equation-content, etc.). Our philosophy is to keep the rich HTML
+// authors put in and block what's dangerous.
+//
+// This sanitizer also renders student-authored HTML (submission bodies,
+// discussion replies) in teacher views, so it must not allow anything that
+// can restyle or overlay the app or post data elsewhere (B002): no <style>
+// elements, no <form> / form* attributes, no plugin <object>/<embed>, iframes
+// only from the trusted media hosts the server allows, no fixed/sticky
+// positioning, and data: URIs only for images.
 //
 // FORBID_TAGS removes proven XSS vectors. Inline event handlers (on*) are
 // stripped by DOMPurify automatically.
@@ -29,15 +41,13 @@ const purifyConfig = {
     'ul', 'ol', 'li', 'dl', 'dt', 'dd',
     // Tables
     'table', 'caption', 'colgroup', 'col', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
-    // Media / embeds
-    'img', 'picture', 'source', 'video', 'audio', 'track', 'iframe', 'embed', 'object', 'param',
-    // Forms (instructor-authored quizzes, callouts etc. occasionally use these)
-    'form', 'fieldset', 'legend', 'label', 'input', 'button', 'select', 'option',
+    // Media / embeds (iframes are further restricted to TRUSTED_IFRAME_SRC)
+    'img', 'picture', 'source', 'video', 'audio', 'track', 'iframe',
+    // Form controls without <form> (task-list checkboxes, read-only widgets).
+    // With no <form> element and no form* attributes they cannot submit
+    // anything anywhere.
+    'fieldset', 'legend', 'label', 'input', 'button', 'select', 'option',
     'optgroup', 'textarea', 'output', 'progress', 'meter', 'datalist',
-    // Inline styling — Canvas exports include scoped <style> blocks for
-    // collapsible/tabbed designs. Trust level for course content imported by
-    // an instructor is higher than for general comment input.
-    'style',
     // SVG (used heavily in math content)
     'svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon',
     'text', 'tspan', 'defs', 'use', 'symbol', 'pattern', 'mask', 'clipPath',
@@ -65,11 +75,11 @@ const purifyConfig = {
     'srcset', 'sizes', 'loading', 'decoding', 'crossorigin', 'usemap',
     'controls', 'autoplay', 'loop', 'muted', 'playsinline', 'preload', 'poster',
     'allowfullscreen', 'allow', 'frameborder', 'sandbox', 'longdesc',
-    // Form elements (kept permissive but on* handlers are still blocked)
+    // Form-control attributes (no form/formaction/formmethod/formtarget:
+    // controls must never be able to submit to another origin)
     'value', 'placeholder', 'min', 'max', 'step', 'pattern', 'required',
     'readonly', 'disabled', 'checked', 'selected', 'multiple', 'accept',
-    'autocomplete', 'autofocus', 'form', 'formaction', 'formmethod',
-    'formnovalidate', 'formtarget', 'list', 'maxlength', 'minlength', 'size',
+    'list', 'maxlength', 'minlength', 'size',
     'for', 'open',
     // Media tracks
     'kind', 'srclang', 'default',
@@ -83,11 +93,57 @@ const purifyConfig = {
   ],
   ALLOW_DATA_ATTR: true,
   // Hard block: known XSS vectors and tags that don't belong in user content.
-  FORBID_TAGS: ['script', 'base', 'meta', 'link'],
-  FORBID_ATTR: ['xmlns:xlink'],
-  // Allow known-safe URI schemes + relative URLs.
-  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|ftp|sftp|data|blob):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+  FORBID_TAGS: ['script', 'base', 'meta', 'link', 'style', 'form', 'object', 'embed', 'param'],
+  FORBID_ATTR: ['xmlns:xlink', 'form', 'formaction', 'formmethod', 'formenctype', 'formtarget', 'formnovalidate', 'srcdoc'],
+  // Allow known-safe URI schemes + relative URLs. data: is limited to raster
+  // and SVG images (an SVG loaded through <img> cannot run script).
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|ftp|sftp|blob):|data:image\/(?:png|gif|jpe?g|webp|bmp|svg\+xml)[;,]|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
 };
+
+// Mirrors the server allowlist (internal/security/htmlsanitize
+// TrustedIframeSrc). The server strips other iframes on write; this covers
+// content stored before that policy existed.
+export const TRUSTED_IFRAME_SRC = new RegExp(
+  '^https://(' +
+    '(www\\.)?youtube(-nocookie)?\\.com/embed/|' +
+    'youtu\\.be/|' +
+    'player\\.vimeo\\.com/video/|' +
+    '(www\\.)?vimeo\\.com/|' +
+    '(www\\.)?khanacademy\\.org/embed/|' +
+    '(www\\.)?edpuzzle\\.com/embed/|' +
+    'h5p\\.org/h5p/embed/|' +
+    '(www\\.)?loom\\.com/embed/' +
+  ')',
+  'i',
+);
+
+// A private DOMPurify instance so these hooks never affect other callers.
+let purifier = null;
+function getPurifier() {
+  if (purifier) return purifier;
+  purifier = DOMPurify(typeof window !== 'undefined' ? window : undefined);
+  purifier.addHook('uponSanitizeElement', (node, data) => {
+    if (data.tagName === 'iframe') {
+      const src = node.getAttribute && node.getAttribute('src');
+      if (!src || !TRUSTED_IFRAME_SRC.test(src.trim())) {
+        node.parentNode?.removeChild(node);
+      }
+    }
+  });
+  purifier.addHook('afterSanitizeAttributes', (node) => {
+    // Inline styles may not pin content over the application chrome.
+    if (node.style && /^(fixed|sticky)$/i.test(node.style.position || '')) {
+      node.style.removeProperty('position');
+      if (!node.getAttribute('style')) node.removeAttribute('style');
+    }
+    // Form controls in content are display-only (task-list checkboxes etc.),
+    // so content can't present a working credential prompt.
+    if (/^(INPUT|BUTTON|SELECT|TEXTAREA)$/.test(node.nodeName)) {
+      node.setAttribute('disabled', '');
+    }
+  });
+  return purifier;
+}
 
 /**
  * Sanitize an HTML string using DOMPurify.
@@ -96,7 +152,7 @@ const purifyConfig = {
  */
 export function sanitizeHTML(dirty) {
   if (!dirty) return '';
-  return DOMPurify.sanitize(dirty, purifyConfig);
+  return getPurifier().sanitize(String(dirty), purifyConfig);
 }
 
 /* --- Rich Content Viewer ------------------------------------------------ */
@@ -109,10 +165,15 @@ export function sanitizeHTML(dirty) {
 function renderMathInElement(container) {
   if (!container) return;
 
-  // Render explicit math-tex spans (from our RCE)
+  // Render explicit math-tex spans (from our RCE). The text content carries
+  // \( \) delimiters, which KaTeX itself does not accept.
   const mathSpans = container.querySelectorAll('.math-tex');
   mathSpans.forEach((span) => {
-    const latex = span.getAttribute('data-latex') || span.textContent;
+    if (span.querySelector('.katex')) return; // already rendered
+    const latex = (span.getAttribute('data-latex') || span.textContent || '')
+      .trim()
+      .replace(/^\\\(([\s\S]*)\\\)$/, '$1')
+      .replace(/^\\\[([\s\S]*)\\\]$/, '$1');
     if (!latex) return;
     try {
       katex.render(latex, span, { throwOnError: false, displayMode: false });
@@ -126,6 +187,8 @@ function renderMathInElement(container) {
   const textNodes = [];
   let node;
   while ((node = walker.nextNode())) {
+    // Leave rendered math and code samples alone.
+    if (node.parentElement?.closest('.katex, code, pre, textarea')) continue;
     if (/\\\(.*?\\\)|\\\[.*?\\\]|\$\$.*?\$\$/s.test(node.textContent)) {
       textNodes.push(node);
     }
@@ -215,13 +278,9 @@ function ReadAloudButton({ text }) {
   );
 }
 
-/** Strip HTML to plain text for TTS. */
+/** Strip HTML to plain text for TTS (inert parse — see utils/html.js). */
 function htmlToPlainText(html) {
-  if (!html) return '';
-  if (typeof document === 'undefined') return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-  const tmp = document.createElement('div');
-  tmp.innerHTML = html;
-  return (tmp.textContent || tmp.innerText || '').replace(/\s+/g, ' ').trim();
+  return htmlToText(html);
 }
 
 export default function RichContentViewer({ content, className }) {

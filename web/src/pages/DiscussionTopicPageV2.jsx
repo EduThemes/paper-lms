@@ -31,6 +31,7 @@ import { useAuth } from '../contexts/AuthContext';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import RichContentViewer, { sanitizeHTML } from '../components/RichContentViewer';
+import { highlightMentions } from '../utils/html';
 import DiscussionCheckpointsPanel from '../components/DiscussionCheckpointsPanel';
 
 // ---------------------------------------------------------------------------
@@ -121,19 +122,6 @@ function avatarColor(name) {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
-/**
- * Highlight @mentions in an HTML string.
- * This is deliberately simple: it wraps @word tokens in a styled span.
- * Since the content comes from the server pre-sanitized, we do light post-processing.
- */
-function highlightMentions(html) {
-  if (!html) return '';
-  return html.replace(
-    /(@\w+)/g,
-    '<span class="bg-brand-100 text-brand-700 rounded px-0.5 font-medium">$1</span>'
-  );
-}
-
 // ---------------------------------------------------------------------------
 // UserAvatar component
 // ---------------------------------------------------------------------------
@@ -176,7 +164,9 @@ const ComposeArea = ({ initialValue = '', onSubmit, onCancel, submitLabel = 'Pos
 
   useEffect(() => {
     if (editorRef.current && initialValue) {
-      editorRef.current.innerHTML = initialValue;
+      // Live contenteditable: sanitize before assigning or <img onerror>
+      // in the stored message runs as soon as Edit is clicked (B001).
+      editorRef.current.innerHTML = sanitizeHTML(initialValue);
       setIsEmpty(false);
     }
   }, [initialValue]);

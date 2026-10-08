@@ -8,6 +8,7 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import QuizzesSubNav from '../components/quiz/QuizzesSubNav';
 import { TYPE_LABELS } from '../components/quiz/itemTypes/types';
+import { htmlPreview } from '../utils/html';
 
 /**
  * Item Bank Manager — list, create, rename, delete banks; view their items;
@@ -340,8 +341,9 @@ const ItemBankManagerPage = () => {
                       <div className="text-xs text-text-tertiary uppercase tracking-wide">
                         {TYPE_LABELS[item.question_type] || item.question_type}
                       </div>
-                      <div className="text-sm text-text-primary mt-1 line-clamp-2"
-                           dangerouslySetInnerHTML={{ __html: String(item.question_text || '').slice(0, 240) }} />
+                      <div className="text-sm text-text-primary mt-1 line-clamp-2">
+                        {htmlPreview(item.question_text, 240)}
+                      </div>
                     </div>
                     <span className="text-xs text-text-tertiary whitespace-nowrap">{t('itemBankManager.pts', { count: item.points_possible ?? 1 })}</span>
                   </div>
@@ -403,8 +405,7 @@ const ItemBankManagerPage = () => {
                         />
                         <span className="truncate flex-1">
                           [{TYPE_LABELS[it.question_type] || it.question_type}]{' '}
-                          <span className="text-text-primary"
-                                dangerouslySetInnerHTML={{ __html: String(it.question_text || '').slice(0, 120) }} />
+                          <span className="text-text-primary">{htmlPreview(it.question_text, 120)}</span>
                         </span>
                       </label>
                     ))}

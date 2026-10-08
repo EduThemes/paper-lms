@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
-import { sanitizeHTML } from './RichContentViewer';
+import { SubmissionBody } from './SafeHTML';
 
 const ANNOTATION_TYPES = {
   highlight: { label: 'Highlight', icon: Highlighter, color: '#FFFF00' },
@@ -392,9 +392,9 @@ const DocumentViewer = ({
     // We'll render the raw HTML and let CSS handle the visual styling
     // since inserting markers into HTML is complex
     return (
-      <div
+      <SubmissionBody
         className="prose max-w-none text-text-secondary leading-relaxed"
-        dangerouslySetInnerHTML={{ __html: sanitizeHTML(content) }}
+        body={content}
       />
     );
   };

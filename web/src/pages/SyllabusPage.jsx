@@ -5,7 +5,7 @@ import { api } from '../services/api';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import { useAuth } from '../contexts/AuthContext';
-import { sanitizeHTML } from '../components/RichContentViewer';
+import SafeHTML from '../components/SafeHTML';
 
 const GROUP_COLORS = {
   '#3b82f6': { bg: 'bg-brand-100', text: 'text-brand-800', border: 'border-brand-300', dot: 'bg-brand-500' },
@@ -339,9 +339,9 @@ const SyllabusPage = () => {
           {/* Custom syllabus content */}
           {course.syllabus_body && (
             <div className="px-6 py-6 sm:px-8 border-t border-border-subtle">
-              <div
+              <SafeHTML
                 className="prose prose-sm max-w-none text-text-secondary prose-headings:text-text-primary prose-a:text-brand-600"
-                dangerouslySetInnerHTML={{ __html: sanitizeHTML(course.syllabus_body) }}
+                html={course.syllabus_body}
               />
             </div>
           )}
