@@ -12,6 +12,16 @@ import (
 
 type DiscussionEntryHandler struct {
 	discussionService *service.DiscussionService
+	// v2 records edit history (UpdateEntryWithHistory); without it V1
+	// edits overwrite the message with no version kept.
+	v2 *service.DiscussionV2Service
+}
+
+// SetVersionHistory routes V1 entry edits through the versioned update the
+// /v2 edit route uses, so API edits keep the same history as UI edits.
+func (h *DiscussionEntryHandler) SetVersionHistory(v2 *service.DiscussionV2Service) *DiscussionEntryHandler {
+	h.v2 = v2
+	return h
 }
 
 func NewDiscussionEntryHandler(discussionService *service.DiscussionService) *DiscussionEntryHandler {
@@ -113,7 +123,15 @@ func (h *DiscussionEntryHandler) UpdateEntry(c *fiber.Ctx) error {
 	}
 
 	if input.Message != "" {
-		entry.Message = service.SanitizeHTML(input.Message)
+		msg := service.SanitizeHTML(input.Message)
+		if h.v2 != nil {
+			editorID, _ := c.Locals("user_id").(uint)
+			if err := h.v2.UpdateEntryWithHistory(c.Context(), entry, editorID, msg); err != nil {
+				return responses.InternalError(c, "Could not update discussion entry")
+			}
+			return c.JSON(entryToJSON(entry))
+		}
+		entry.Message = msg
 	}
 
 	if err := h.discussionService.UpdateEntry(c.Context(), entry); err != nil {

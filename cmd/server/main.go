@@ -836,7 +836,7 @@ func main() {
 	ltiHandler := handlers.NewLTIHandler(ltiService, agsService, nrpsService, externalToolRepo, ltiConfigRepo, userRepo, accountRepo, parentalConsentRepo)
 	// handlers
 	discussionHandler := handlers.NewDiscussionHandler(discussionService)
-	discussionEntryHandler := handlers.NewDiscussionEntryHandler(discussionService)
+	discussionEntryHandler := handlers.NewDiscussionEntryHandler(discussionService).SetVersionHistory(discussionV2Service)
 	fileHandler := handlers.NewFileHandler(fileService, enrollmentRepo, groupMembershipRepo, auditService)
 	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo, courseRepo)
 	fileHandler.SetAuthorizer(authz)

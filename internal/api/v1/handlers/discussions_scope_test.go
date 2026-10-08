@@ -420,7 +420,7 @@ func newDiscEnv(t *testing.T, callerID uint, enrollmentType string) *discEnv {
 	cps := service.NewDiscussionCheckpointService(fakeCheckpointRepo{s}, fakeCheckpointSubRepo{}, topicRepo, entryRepo, new(mocks.MockAssignmentRepository))
 
 	th := handlers.NewDiscussionHandler(v1)
-	eh := handlers.NewDiscussionEntryHandler(v1)
+	eh := handlers.NewDiscussionEntryHandler(v1).SetVersionHistory(v2)
 	vh := handlers.NewDiscussionV2Handler(v2)
 	ch := handlers.NewDiscussionCheckpointHandler(cps)
 
@@ -739,6 +739,11 @@ func TestDiscussionEntryUpdateDelete_RouteParamAndOwnership(t *testing.T) {
 		}
 		if env.store.entries[dEntryRoot].Message != "<p>changed</p>" {
 			t.Fatalf("message = %q", env.store.entries[dEntryRoot].Message)
+		}
+		// V1 edits keep the same history as /v2 edits: the original and
+		// the edited text.
+		if got := len(env.store.versions[dEntryRoot]); got != 2 {
+			t.Fatalf("versions = %d, want 2 (original + edit)", got)
 		}
 	})
 }
