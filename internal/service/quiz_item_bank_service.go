@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	mathrand "math/rand"
+	"sync"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -18,6 +19,10 @@ type QuizItemBankService struct {
 	quizRepo     repository.QuizRepository
 	now          func() time.Time
 	rand         *mathrand.Rand
+	// randMu serializes s.rand: a *rand.Rand is not safe for concurrent
+	// use, and random_draw requests from different teachers run in
+	// parallel.
+	randMu sync.Mutex
 }
 
 func NewQuizItemBankService(
@@ -274,9 +279,11 @@ func (s *QuizItemBankService) RandomDrawFromBank(ctx context.Context, bankID uin
 	// Shuffle a copy so we never mutate the caller's slice.
 	shuffled := make([]models.QuizItemBankItem, len(pool))
 	copy(shuffled, pool)
+	s.randMu.Lock()
 	s.rand.Shuffle(len(shuffled), func(i, j int) {
 		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 	})
+	s.randMu.Unlock()
 
 	if count > len(shuffled) {
 		count = len(shuffled)
