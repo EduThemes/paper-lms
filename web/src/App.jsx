@@ -26,6 +26,9 @@ const QuizReviewPage = React.lazy(() => import('./pages/QuizReviewPage'));
 const QuizEditorPage = React.lazy(() => import('./pages/QuizEditorPage'));
 const QuizSubmissionsPage = React.lazy(() => import('./pages/QuizSubmissionsPage'));
 const QuizStatisticsPage = React.lazy(() => import('./pages/QuizStatisticsPage'));
+const QuizGradePage = React.lazy(() => import('./pages/QuizGradePage'));
+const QuizModeratePage = React.lazy(() => import('./pages/QuizModeratePage'));
+const QuizRegradePage = React.lazy(() => import('./pages/QuizRegradePage'));
 const RubricsPage = React.lazy(() => import('./pages/RubricsPage'));
 const GradingPeriodsPage = React.lazy(() => import('./pages/GradingPeriodsPage'));
 const AssignmentOverridesPage = React.lazy(() => import('./pages/AssignmentOverridesPage'));
@@ -208,6 +211,9 @@ const App = () => {
           <Route path="quizzes/:quizId/submissions/:submissionId/review" element={<QuizReviewPage />} />
           <Route path="quizzes/:quizId/submissions" element={<QuizSubmissionsPage />} />
           <Route path="quizzes/:quizId/statistics" element={<QuizStatisticsPage />} />
+          <Route path="quizzes/:quizId/submissions/:submissionId/grade" element={<QuizGradePage />} />
+          <Route path="quizzes/:quizId/moderate" element={<QuizModeratePage />} />
+          <Route path="quizzes/:quizId/regrade" element={<QuizRegradePage />} />
           <Route path="quizzes/:quizId/item-analysis" element={<ItemAnalysisPage />} />
           <Route path="item-banks" element={<ItemBankManagerPage />} />
           <Route path="stimuli" element={<StimulusEditorPage />} />

@@ -91,7 +91,11 @@ const StudentGradesPage = () => {
         setAssignments(assignmentList);
         setGroups(groupResult.data || []);
 
-        const publishedQuizzes = (quizResult.data || []).filter(q => q.published !== false);
+        // G041: a graded quiz is backed by an online_quiz assignment, so its
+        // score is already in the assignment list (and the course total).
+        // Only quizzes outside the gradebook (practice quizzes, ungraded
+        // surveys) are listed separately.
+        const publishedQuizzes = (quizResult.data || []).filter(q => q.published !== false && !q.assignment_id);
         setQuizzes(publishedQuizzes);
 
         // Fetch all submissions for the target user in one bulk call
@@ -175,9 +179,9 @@ const StudentGradesPage = () => {
     const useWeights = course?.apply_assignment_group_weights && groups.length > 0 &&
       groups.some(g => g.group_weight > 0);
 
-    // B205: quizzes are not assignments in Paper, so neither the teacher
-    // gradebook nor the server's course grade counts them; the student
-    // total must not either (it used to, so the two disagreed).
+    // B205 / G041: a graded quiz counts through its online_quiz assignment
+    // (already in `assignments`); quizzes listed separately (practice,
+    // ungraded survey) never count toward the total.
     // B115: excused / unpublished / not_graded work never counts and a
     // 0-point assignment is extra credit (assignmentGradeWeight).
 

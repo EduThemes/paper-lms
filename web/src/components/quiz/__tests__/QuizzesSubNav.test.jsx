@@ -28,6 +28,14 @@ describe('QuizzesSubNav', () => {
     expect(screen.getByText('Item Analysis')).toBeInTheDocument();
   });
 
+  it('adds the quiz lifecycle tools for a quiz and highlights the open one', () => {
+    renderAt('/courses/1/quizzes/9/moderate', { quizId: 9 });
+    expect(screen.getByText('Attempts').closest('a').getAttribute('href')).toBe('/courses/1/quizzes/9/submissions');
+    expect(screen.getByText('Regrade')).toBeInTheDocument();
+    expect(screen.getByText('Moderate').closest('a').className).toMatch(/border-brand-600/);
+    expect(screen.getByText('Quizzes').closest('a').className).not.toMatch(/border-brand-600/);
+  });
+
   it('highlights the active tab based on the current pathname', () => {
     renderAt('/courses/1/item-banks');
     const link = screen.getByText('Item Banks').closest('a');

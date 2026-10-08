@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import QuizzesSubNav from '../components/quiz/QuizzesSubNav';
 
 const QuizSubmissionsPage = () => {
   const { t } = useTranslation();
@@ -81,6 +82,7 @@ const QuizSubmissionsPage = () => {
   return (
     <Layout>
       <CourseNav />
+      <QuizzesSubNav quizId={quizId} />
       <div className="mb-6">
         <Link to={`/courses/${courseId}`} className="text-brand-600 hover:underline text-sm">← {t('course.backToCourse')}</Link>
         <h2 className="text-2xl font-bold mt-2">{quiz?.title} - Submissions</h2>
@@ -101,12 +103,13 @@ const QuizSubmissionsPage = () => {
               <th className="px-4 py-3">Started</th>
               <th className="px-4 py-3">Finished</th>
               <th className="px-4 py-3">Time Spent</th>
+              <th className="px-4 py-3"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {submissions.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-text-tertiary">{t('quizSubmissionsPage.noSubmissions')}</td>
+                <td colSpan={8} className="px-4 py-8 text-center text-text-tertiary">{t('quizSubmissionsPage.noSubmissions')}</td>
               </tr>
             ) : (
               submissions.map(sub => (
@@ -126,6 +129,16 @@ const QuizSubmissionsPage = () => {
                   <td className="px-4 py-3 text-sm text-text-tertiary">{formatDate(sub.started_at)}</td>
                   <td className="px-4 py-3 text-sm text-text-tertiary">{formatDate(sub.finished_at)}</td>
                   <td className="px-4 py-3 text-sm text-text-tertiary">{formatDuration(sub.time_spent)}</td>
+                  <td className="px-4 py-3 text-sm text-right whitespace-nowrap">
+                    {sub.workflow_state !== 'untaken' && (
+                      <Link
+                        to={`/courses/${courseId}/quizzes/${quizId}/submissions/${sub.id}/grade`}
+                        className={sub.workflow_state === 'pending_review' ? 'font-medium text-accent-warning hover:underline' : 'text-brand-600 hover:underline'}
+                      >
+                        {sub.workflow_state === 'pending_review' ? 'Grade' : 'Review & log'}
+                      </Link>
+                    )}
+                  </td>
                 </tr>
               ))
             )}
