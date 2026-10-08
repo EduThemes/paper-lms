@@ -2,6 +2,9 @@ package handlers
 
 import (
 	"errors"
+	"time"
+
+	"github.com/EduThemes/paper-lms/internal/repository"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
@@ -12,6 +15,10 @@ import (
 
 type EnrollmentHandler struct {
 	enrollmentService *service.EnrollmentService
+	// lifecycle (SetLifecycle) backs the edit / conclude / deactivate /
+	// delete / reactivate / invitation endpoints and the filtered roster
+	// (enrollment_lifecycle.go).
+	lifecycle *service.EnrollmentLifecycleService
 }
 
 func NewEnrollmentHandler(enrollmentService *service.EnrollmentService) *EnrollmentHandler {
@@ -34,6 +41,11 @@ func enrollmentToJSON(e *models.Enrollment, includeContactInfo bool) fiber.Map {
 		"created_at":        e.CreatedAt,
 		"updated_at":        e.UpdatedAt,
 		"last_activity_at":  e.LastActivityAt,
+		"start_at":          e.StartAt,
+		"end_at":            e.EndAt,
+		"completed_at":      e.CompletedAt,
+		"associated_user_id": e.AssociatedUserID,
+		"limit_privileges_to_course_section": e.LimitPrivilegesToCourseSection,
 	}
 
 	if e.User != nil {
@@ -89,7 +101,13 @@ func (h *EnrollmentHandler) ListEnrollments(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.enrollmentService.ListByCourse(c.Context(), uint(courseID), callerAccountID(c), params)
+	var result *repository.PaginatedResult[models.Enrollment]
+	if h.lifecycle != nil {
+		// State filter (Canvas state[]), section-limited rosters (G107).
+		result, err = h.lifecycle.ListRoster(c.Context(), uint(courseID), callerAccountID(c), rosterFilter(c), params)
+	} else {
+		result, err = h.enrollmentService.ListByCourse(c.Context(), uint(courseID), callerAccountID(c), params)
+	}
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch enrollments")
 	}
@@ -179,6 +197,12 @@ func (h *EnrollmentHandler) CreateEnrollment(c *fiber.Ctx) error {
 			UserID          uint   `json:"user_id"`
 			Type            string `json:"type"`
 			CourseSectionID *uint  `json:"course_section_id"`
+			// G122: "invited" makes the user accept first; "inactive"
+			// adds them without access. Default active.
+			EnrollmentState string     `json:"enrollment_state"`
+			StartAt         *time.Time `json:"start_at"`
+			EndAt           *time.Time `json:"end_at"`
+			LimitPrivileges bool       `json:"limit_privileges_to_course_section"`
 		} `json:"enrollment"`
 	}
 
@@ -195,13 +219,33 @@ func (h *EnrollmentHandler) CreateEnrollment(c *fiber.Ctx) error {
 	if !canAddEnrollmentType(c, input.Enrollment.Type) {
 		return responses.Forbidden(c, "You are not allowed to add this enrollment type")
 	}
+	// Now that a user may hold several enrollments in a course (G110),
+	// a non-admin can't add one for themselves: a section-limited TA
+	// adding an unlimited student role would otherwise widen their own
+	// section access (and nobody but an admin edits their own roles).
+	if callerID, _ := c.Locals("user_id").(uint); callerID != 0 && input.Enrollment.UserID == callerID {
+		if isAdmin, _ := c.Locals("is_admin").(bool); !isAdmin {
+			return responses.Forbidden(c, "You can't add yourself to a course")
+		}
+	}
+	// A section-limited caller adds people only to their own sections.
+	if !callerMaySection(c, input.Enrollment.CourseSectionID) {
+		return responses.NotFound(c, "course section")
+	}
 
+	state := models.EnrollmentActive
+	if input.Enrollment.EnrollmentState != "" {
+		state = models.EnrollmentWorkflow(input.Enrollment.EnrollmentState)
+	}
 	enrollment := &models.Enrollment{
-		UserID:          input.Enrollment.UserID,
-		CourseID:        uint(courseID),
-		CourseSectionID: input.Enrollment.CourseSectionID,
-		Type:            input.Enrollment.Type,
-		WorkflowState:   models.EnrollmentActive,
+		UserID:                         input.Enrollment.UserID,
+		CourseID:                       uint(courseID),
+		CourseSectionID:                input.Enrollment.CourseSectionID,
+		Type:                           input.Enrollment.Type,
+		WorkflowState:                  state,
+		StartAt:                        input.Enrollment.StartAt,
+		EndAt:                          input.Enrollment.EndAt,
+		LimitPrivilegesToCourseSection: input.Enrollment.LimitPrivileges,
 	}
 
 	if err := h.enrollmentService.Create(c.Context(), enrollment, enrollmentCourseScope(c)); err != nil {
@@ -212,6 +256,8 @@ func (h *EnrollmentHandler) CreateEnrollment(c *fiber.Ctx) error {
 			return responses.NotFound(c, "user")
 		case errors.Is(err, service.ErrEnrollmentSectionNotFound):
 			return responses.NotFound(c, "course section")
+		case errors.Is(err, service.ErrEnrollmentDuplicate):
+			return responses.Error(c, fiber.StatusConflict, err.Error())
 		}
 		return responses.BadRequest(c, err.Error())
 	}

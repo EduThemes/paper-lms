@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { buildRecentGrades } from '../utils/dashboard';
 import Layout from '../components/Layout';
+import CourseInvitationsBanner from '../components/enrollments/CourseInvitationsBanner';
 import { useAuth } from '../contexts/AuthContext';
 import useDocumentTitle from '../hooks/useDocumentTitle';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -677,6 +678,7 @@ const DashboardPage = () => {
   if (!courses || courses.length === 0) {
     return (
       <Layout>
+        <CourseInvitationsBanner onAccepted={fetchData} />
         <EmptyDashboard />
       </Layout>
     );
@@ -686,6 +688,7 @@ const DashboardPage = () => {
     <Layout>
       <div className="space-y-6">
         <HeroGreeting firstName={firstName} />
+        <CourseInvitationsBanner onAccepted={fetchData} />
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-6">

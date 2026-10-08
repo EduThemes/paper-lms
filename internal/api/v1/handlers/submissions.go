@@ -331,6 +331,7 @@ func (h *SubmissionHandler) ListCourseSubmissions(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not fetch submissions")
 	}
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
+	result.Items = filterSubmissionsForSections(c, result.Items) // G107
 
 	submissions := make([]fiber.Map, 0, len(result.Items))
 	for i := range result.Items {
@@ -377,6 +378,7 @@ func (h *SubmissionHandler) ListSubmissions(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not fetch submissions")
 	}
 
+	result.Items = filterSubmissionsForSections(c, result.Items) // G107
 	submissions := make([]fiber.Map, 0, len(result.Items))
 	for i := range result.Items {
 		submissions = append(submissions, submissionToJSON(&result.Items[i]))
@@ -870,6 +872,10 @@ func (h *SubmissionHandler) BulkGrade(c *fiber.Ctx) error {
 		// course (and tenant) and the user a student of this course.
 		if tErr := h.gradeTargetError(c.Context(), entry.AssignmentID, entry.UserID, uint(courseID), callerAcct, assignmentCache); tErr != nil {
 			results = append(results, gradeResult{AssignmentID: entry.AssignmentID, UserID: entry.UserID, Error: tErr.Error()})
+			continue
+		}
+		if !sectionVisibleUser(c, entry.UserID) { // G107: outside the grader's sections
+			results = append(results, gradeResult{AssignmentID: entry.AssignmentID, UserID: entry.UserID, Error: "user not found"})
 			continue
 		}
 		sub, err := h.submissionService.Grade(c.Context(), entry.AssignmentID, entry.UserID, graderID, callerAcct, entry.PostedGrade)
