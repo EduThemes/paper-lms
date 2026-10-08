@@ -182,7 +182,11 @@ func TestRecipientSearch_ScopedToSharedCourses(t *testing.T) {
 
 	// A non-admin cannot search by email address: results never carry
 	// emails, so matching on them would let a student confirm who owns
-	// an address. Admins still can.
+	// an address. Admins still can. (The wallet fixture puts the email in
+	// the display name, so give the classmate a plain name first.)
+	if err := g.Exec("UPDATE users SET name = ?, sortable_name = ? WHERE id = ?", "John Classmate", "Classmate, John", 102).Error; err != nil {
+		t.Fatalf("rename: %v", err)
+	}
 	byEmail, err := rs.SearchRecipients(ctx, 101, 1, "john.classmate@", false, 10)
 	if err != nil {
 		t.Fatalf("email search: %v", err)
