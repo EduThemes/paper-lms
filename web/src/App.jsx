@@ -9,6 +9,7 @@ const GradebookPage = React.lazy(() => import('./pages/GradebookPage'));
 const StudentGradesPage = React.lazy(() => import('./pages/StudentGradesPage'));
 const ContentImportPage = React.lazy(() => import('./pages/ContentImportPage'));
 const ModulesPage = React.lazy(() => import('./pages/ModulesPage'));
+const ModuleProgressPage = React.lazy(() => import('./pages/ModuleProgressPage'));
 const PeoplePage = React.lazy(() => import('./pages/PeoplePage'));
 const AccessTokensPage = React.lazy(() => import('./pages/AccessTokensPage'));
 const DeveloperKeysPage = React.lazy(() => import('./pages/DeveloperKeysPage'));
@@ -198,6 +199,7 @@ const App = () => {
           <Route path="gradebook" element={<GradebookPage />} />
           <Route path="grades" element={<StudentGradesPage />} />
           <Route path="modules" element={<ModulesPage />} />
+          <Route path="modules/progressions" element={<ModuleProgressPage />} />
           <Route path="people" element={<PeoplePage />} />
           <Route path="pages" element={<PagesPage />} />
           <Route path="pages/:slug" element={<PageDetailPage />} />

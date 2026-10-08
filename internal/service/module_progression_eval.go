@@ -41,6 +41,7 @@ type ModuleEvalInput struct {
 // ItemProgress is a student's state on one module item.
 type ItemProgress struct {
 	ItemID          uint     `json:"item_id"`
+	Title           string   `json:"title"`
 	RequirementType string   `json:"requirement_type,omitempty"`
 	MinScore        *float64 `json:"min_score,omitempty"`
 	// Completed: the item's requirement is met (false when it has none).
@@ -214,7 +215,7 @@ func EvaluateModuleProgress(in ModuleEvalInput) []ModuleProgress {
 		reqTotal, reqMet := 0, 0
 		mp.Items = make([]ItemProgress, 0, len(items))
 		for _, it := range items {
-			ip := ItemProgress{ItemID: it.ID}
+			ip := ItemProgress{ItemID: it.ID, Title: it.Title}
 			if it.CompletionType != "" && it.ContentType != "ContextModuleSubHeader" {
 				reqTotal++
 				ip.RequirementType = it.CompletionType
