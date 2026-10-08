@@ -3,7 +3,13 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"html"
 	"html/template"
 	"net/http"
 	"net/smtp"
@@ -179,9 +185,85 @@ func (s *NotificationDeliveryService) resolveSMTPConfig(ctx context.Context) (SM
 	}, nil
 }
 
-// QueueNotification looks up the user's notification preference for the given type,
-// determines frequency and channel, and creates a NotificationDelivery record with the
-// appropriate scheduledFor time.
+// DefaultNotificationPreference is the preference set a user has before
+// they ever save the notification-preferences page. It is the single
+// source of truth for both NotificationService.GetOrCreatePreferences and
+// QueueNotification, so a user without a stored row is treated exactly as
+// if the defaults had been saved.
+func DefaultNotificationPreference(userID uint) *models.NotificationPreference {
+	return &models.NotificationPreference{
+		UserID:                userID,
+		Policy:                "daily",
+		NotifyNewMessage:      true,
+		NotifyEventStart:      false,
+		NotifySubmissionGrade: true,
+		NotifyNewAnnouncement: true,
+	}
+}
+
+// deliverableChannelTypes are the channel types the delivery engine can
+// actually send to. Anything else (e.g. "push", which has no transport)
+// is never queued.
+var deliverableChannelTypes = map[string]bool{"email": true, "webhook": true}
+
+// deliveryTarget is one address a notification is sent to.
+type deliveryTarget struct {
+	ChannelType string
+	Address     string
+}
+
+// deliveryTargets resolves where a user's notifications go: the user's
+// account email (the confirmed login identity) plus every additional
+// channel that is active, confirmed and of a deliverable type. An
+// unconfirmed address never receives mail — the owner must prove they
+// control it first (see ConfirmChannel).
+func (s *NotificationDeliveryService) deliveryTargets(ctx context.Context, userID uint) ([]deliveryTarget, error) {
+	var targets []deliveryTarget
+	seen := map[string]bool{}
+
+	// Background job: the notification was raised for this user by a
+	// tenant-checked request. accountID=0 is correct here.
+	user, userErr := s.userRepo.FindByID(ctx, userID, 0)
+	if userErr == nil && user != nil && strings.TrimSpace(user.Email) != "" {
+		targets = append(targets, deliveryTarget{ChannelType: "email", Address: user.Email})
+		seen["email:"+strings.ToLower(strings.TrimSpace(user.Email))] = true
+	}
+
+	if s.channelRepo != nil {
+		channels, err := s.channelRepo.ListByUserID(ctx, userID)
+		if err == nil {
+			for _, ch := range channels {
+				if !ch.Confirmed || ch.WorkflowState != "active" || !deliverableChannelTypes[ch.ChannelType] {
+					continue
+				}
+				key := ch.ChannelType + ":" + strings.ToLower(strings.TrimSpace(ch.Address))
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				targets = append(targets, deliveryTarget{ChannelType: ch.ChannelType, Address: ch.Address})
+			}
+		}
+	}
+
+	if len(targets) == 0 && userErr != nil {
+		return nil, fmt.Errorf("failed to find user %d: %w", userID, userErr)
+	}
+	return targets, nil
+}
+
+// QueueNotification records a notification for the user and queues its
+// deliveries.
+//
+//  1. An in-app notification row is always created (the /notifications
+//     feed), like Canvas's stream items — preferences govern delivery
+//     channels, not the in-app feed.
+//  2. The user's preference (or DefaultNotificationPreference when none
+//     is stored) decides whether the type is delivered and how often:
+//     "immediately" deliveries are sent by the per-minute job,
+//     daily/weekly ones are batched into digests.
+//  3. One delivery is created per deliverable target (account email plus
+//     confirmed channels).
 func (s *NotificationDeliveryService) QueueNotification(
 	ctx context.Context,
 	userID uint,
@@ -191,17 +273,29 @@ func (s *NotificationDeliveryService) QueueNotification(
 	contextType string,
 	contextID uint,
 ) error {
-	// Look up user preferences for digest frequency
-	prefs, err := s.prefRepo.FindByUserID(ctx, userID)
-	if err != nil {
-		// Default to daily if no preference is set
-		prefs = &models.NotificationPreference{
-			UserID: userID,
-			Policy: "daily",
+	var notificationID uint
+	if s.notifRepo != nil {
+		now := time.Now()
+		n := &models.Notification{
+			UserID:           userID,
+			NotificationType: notificationType,
+			Title:            subject,
+			Message:          notificationPreview(body),
+			ContextType:      contextType,
+			ContextID:        contextID,
+			SentAt:           &now,
+		}
+		if err := s.notifRepo.Create(ctx, n); err == nil {
+			notificationID = n.ID
 		}
 	}
 
-	// If user has opted out of notifications entirely, skip
+	prefs, err := s.prefRepo.FindByUserID(ctx, userID)
+	if err != nil || prefs == nil {
+		prefs = DefaultNotificationPreference(userID)
+	}
+
+	// If user has opted out of notification delivery entirely, skip
 	if prefs.Policy == "never" {
 		return nil
 	}
@@ -217,41 +311,17 @@ func (s *NotificationDeliveryService) QueueNotification(
 	// Calculate when this delivery should be sent
 	scheduledFor := s.calculateScheduledFor(digestType)
 
-	// Look up the user's communication channels
-	channels, err := s.channelRepo.ListByUserID(ctx, userID)
-	if err != nil || len(channels) == 0 {
-		// Fall back to user email if no explicit communication channels exist
-		// Notification fallback lookup: background job; tenant scope
-		// was already validated when the delivery was queued. Wave 2
-		// passes 0 to preserve pre-widening semantics; Sprint 2.3
-		// leftover threads tenant through notification flows.
-		user, userErr := s.userRepo.FindByID(ctx, userID, 0)
-		if userErr != nil {
-			return fmt.Errorf("failed to find user %d: %w", userID, userErr)
-		}
-
-		delivery := &models.NotificationDelivery{
-			NotificationID: 0, // Will be linked after notification creation
-			UserID:         userID,
-			ChannelType:    "email",
-			Address:        user.Email,
-			Subject:        subject,
-			Body:           body,
-			DeliveryStatus: "pending",
-			DigestType:     digestType,
-			MaxRetries:     3,
-			ScheduledFor:   &scheduledFor,
-		}
-		return s.deliveryRepo.Create(ctx, delivery)
+	targets, err := s.deliveryTargets(ctx, userID)
+	if err != nil {
+		return err
 	}
 
-	// Create a delivery record for each active communication channel
-	for _, ch := range channels {
+	for _, t := range targets {
 		delivery := &models.NotificationDelivery{
-			NotificationID: 0,
+			NotificationID: notificationID,
 			UserID:         userID,
-			ChannelType:    ch.ChannelType,
-			Address:        ch.Address,
+			ChannelType:    t.ChannelType,
+			Address:        t.Address,
 			Subject:        subject,
 			Body:           body,
 			DeliveryStatus: "pending",
@@ -260,18 +330,108 @@ func (s *NotificationDeliveryService) QueueNotification(
 			ScheduledFor:   &scheduledFor,
 		}
 		if err := s.deliveryRepo.Create(ctx, delivery); err != nil {
-			return fmt.Errorf("failed to create delivery for channel %d: %w", ch.ID, err)
+			return fmt.Errorf("failed to create %s delivery: %w", t.ChannelType, err)
 		}
 	}
 
 	return nil
 }
 
-// ProcessPendingDeliveries fetches all deliveries where scheduledFor <= now AND status = pending,
-// and sends them via the appropriate channel. Updates status accordingly.
+// notificationPreview turns an (HTML) notification body into the short
+// plain-text preview shown in the in-app feed, which renders text.
+func notificationPreview(body string) string {
+	text := html.UnescapeString(stripHTML(body))
+	const maxLen = 280
+	if r := []rune(text); len(r) > maxLen {
+		text = string(r[:maxLen-1]) + "…"
+	}
+	return text
+}
+
+// channelConfirmCodeHash is what is stored in communication_channels.
+// confirm_code: the SHA-256 of the code, never the code itself.
+func channelConfirmCodeHash(code string) string {
+	sum := sha256.Sum256([]byte(strings.ToUpper(strings.TrimSpace(code))))
+	return hex.EncodeToString(sum[:])
+}
+
+// newChannelConfirmCode returns a 10-character code from an unambiguous
+// alphabet (no 0/O, 1/I) that the user types back in.
+func newChannelConfirmCode() (string, error) {
+	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	buf := make([]byte, 10)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	out := make([]byte, len(buf))
+	for i, b := range buf {
+		out[i] = alphabet[int(b)%len(alphabet)]
+	}
+	return string(out), nil
+}
+
+// BeginChannelConfirmation prepares a newly added channel for delivery.
+// Email channels get a one-time code (stored hashed) that is mailed to
+// the address; the channel receives no notifications until the owner
+// enters the code (ConfirmChannel). Webhook channels are owner-supplied
+// URLs behind the SSRF guard and are confirmed immediately. The caller
+// persists the channel after this returns.
+func (s *NotificationDeliveryService) BeginChannelConfirmation(ch *models.CommunicationChannel) (code string, err error) {
+	if ch.ChannelType != "email" {
+		now := time.Now()
+		ch.Confirmed = true
+		ch.ConfirmedAt = &now
+		ch.ConfirmCode = ""
+		return "", nil
+	}
+	code, err = newChannelConfirmCode()
+	if err != nil {
+		return "", err
+	}
+	ch.Confirmed = false
+	ch.ConfirmedAt = nil
+	ch.ConfirmCode = channelConfirmCodeHash(code)
+	return code, nil
+}
+
+// SendChannelConfirmation mails the confirmation code to a new email
+// channel. Best-effort: a failure leaves the channel unconfirmed.
+func (s *NotificationDeliveryService) SendChannelConfirmation(ctx context.Context, ch *models.CommunicationChannel, code string) error {
+	if ch.ChannelType != "email" || code == "" {
+		return nil
+	}
+	body := fmt.Sprintf("<p>Enter this code in Paper LMS to start receiving notifications at this address:</p><p><strong>%s</strong></p><p>If you did not add this address, you can ignore this email.</p>", code)
+	return s.SendEmail(s.scopeCtxFor(ctx, ch.UserID), ch.Address, "Confirm your notification email", body)
+}
+
+// ErrInvalidConfirmationCode is returned by ConfirmChannel on a wrong code.
+var ErrInvalidConfirmationCode = errors.New("invalid confirmation code")
+
+// ConfirmChannel marks the channel confirmed when code matches the one
+// issued by BeginChannelConfirmation, and persists it.
+func (s *NotificationDeliveryService) ConfirmChannel(ctx context.Context, ch *models.CommunicationChannel, code string) error {
+	if ch.Confirmed {
+		return nil
+	}
+	if ch.ConfirmCode == "" || strings.TrimSpace(code) == "" ||
+		subtle.ConstantTimeCompare([]byte(ch.ConfirmCode), []byte(channelConfirmCodeHash(code))) != 1 {
+		return ErrInvalidConfirmationCode
+	}
+	now := time.Now()
+	ch.Confirmed = true
+	ch.ConfirmedAt = &now
+	ch.ConfirmCode = ""
+	return s.channelRepo.Update(ctx, ch)
+}
+
+// ProcessPendingDeliveries sends the "immediate" deliveries that are due
+// (scheduledFor <= now, status pending/queued) via the appropriate
+// channel and updates their status. Daily/weekly rows are left for
+// ProcessDigests so they are batched, not sent one by one. Run every
+// minute by the background scheduler.
 func (s *NotificationDeliveryService) ProcessPendingDeliveries(ctx context.Context) (int, error) {
 	now := time.Now()
-	deliveries, err := s.deliveryRepo.ListPending(ctx, now)
+	deliveries, err := s.deliveryRepo.ListPendingByDigestType(ctx, "immediate", now)
 	if err != nil {
 		return 0, fmt.Errorf("failed to list pending deliveries: %w", err)
 	}

@@ -1,6 +1,10 @@
 package handlers
 
 import (
+	"context"
+	"html"
+	"strings"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
@@ -19,6 +23,105 @@ type ConversationHandler struct {
 	accountRepo    repository.AccountRepository
 	enrollmentRepo repository.EnrollmentRepository
 	auditService   *service.AuditService
+	// notifier queues "new_message" notifications to the other
+	// participants. Nil disables (tests).
+	notifier service.Notifier
+	// recipientSearch backs GET /search/recipients. Nil → 503.
+	recipientSearch RecipientSearcher
+}
+
+// RecipientSearcher finds users the caller may message (see
+// postgres.RecipientSearchRepository).
+type RecipientSearcher interface {
+	SearchRecipients(ctx context.Context, callerID, accountID uint, term string, allInAccount bool, limit int) ([]models.User, error)
+}
+
+// SetRecipientSearch wires GET /search/recipients.
+func (h *ConversationHandler) SetRecipientSearch(s RecipientSearcher) {
+	h.recipientSearch = s
+}
+
+// SearchRecipients handles GET /search/recipients?search=<term>&per_page=N.
+//
+// The inbox recipient picker for every role. GET /users is admin-only, so
+// students and teachers need a scoped search: like Canvas, candidates are
+// the people who share an active course with the caller, within the
+// caller's tenant. Admins may address anyone in their account.
+func (h *ConversationHandler) SearchRecipients(c *fiber.Ctx) error {
+	userID, err := getUserID(c)
+	if err != nil {
+		return err
+	}
+	if h.recipientSearch == nil {
+		return responses.Error(c, fiber.StatusServiceUnavailable, "Recipient search is not available")
+	}
+	term := strings.TrimSpace(c.Query("search"))
+	if term == "" {
+		term = strings.TrimSpace(c.Query("search_term"))
+	}
+	if len([]rune(term)) < 2 {
+		return c.JSON([]fiber.Map{})
+	}
+	limit := c.QueryInt("per_page", 10)
+	if limit < 1 || limit > 50 {
+		limit = 10
+	}
+
+	// DB-backed role check (the JWT is_admin hint can be stale).
+	isAdmin := false
+	if h.userService != nil {
+		if me, err := h.userService.GetByID(c.Context(), userID, callerAccountID(c)); err == nil && me != nil {
+			isAdmin = me.Role == "admin" || me.Role == "super_admin"
+		}
+	}
+	users, err := h.recipientSearch.SearchRecipients(c.Context(), userID, callerAccountID(c), term, isAdmin, limit)
+	if err != nil {
+		return responses.InternalError(c, "Could not search recipients")
+	}
+
+	out := make([]fiber.Map, len(users))
+	for i, u := range users {
+		out[i] = fiber.Map{
+			"id":            u.ID,
+			"name":          u.Name,
+			"sortable_name": u.SortableName,
+			"avatar_url":    u.AvatarURL,
+		}
+	}
+	return c.JSON(out)
+}
+
+// SetNotifier wires new-message notifications.
+func (h *ConversationHandler) SetNotifier(n service.Notifier) {
+	h.notifier = n
+}
+
+// notifyNewMessage queues a "new_message" notification for every
+// participant except the sender. Best-effort: never fails the request.
+func (h *ConversationHandler) notifyNewMessage(c *fiber.Ctx, conversationID, senderID uint, subject, body string) {
+	if h.notifier == nil {
+		return
+	}
+	participants, err := h.conversationService.GetParticipants(c.Context(), conversationID)
+	if err != nil {
+		return
+	}
+	senderName := "Someone"
+	if h.userService != nil {
+		if u, err := h.userService.GetByID(c.Context(), senderID, callerAccountID(c)); err == nil && u != nil {
+			senderName = u.Name
+		}
+	}
+	title := "New message from " + senderName
+	if strings.TrimSpace(subject) != "" {
+		title += ": " + subject
+	}
+	for _, p := range participants {
+		if p.UserID == senderID {
+			continue
+		}
+		_ = h.notifier.QueueNotification(c.Context(), p.UserID, "new_message", title, html.EscapeString(body), "Conversation", conversationID)
+	}
 }
 
 func NewConversationHandler(conversationService *service.ConversationService, userService *service.UserService, accountRepo repository.AccountRepository, enrollmentRepo repository.EnrollmentRepository, auditService *service.AuditService) *ConversationHandler {
@@ -349,6 +452,14 @@ func (h *ConversationHandler) CreateMessage(c *fiber.Ctx) error {
 
 	if err := h.conversationService.CreateMessage(c.Context(), msg); err != nil {
 		return responses.BadRequest(c, err.Error())
+	}
+
+	if h.notifier != nil {
+		subject := ""
+		if conv, err := h.conversationService.GetConversation(c.Context(), uint(id), callerAccountID(c)); err == nil && conv != nil {
+			subject = conv.Subject
+		}
+		h.notifyNewMessage(c, uint(id), userID, subject, input.Message)
 	}
 
 	j := conversationMessageToJSON(msg)

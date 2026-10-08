@@ -504,6 +504,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Get("/conversations/:id/messages", r.ConversationHandler.ListMessages)
 	protected.Post("/conversations/:id/messages", r.ConversationHandler.CreateMessage)
 	protected.Put("/conversations/:id/mark_as_read", r.ConversationHandler.MarkAsRead)
+	protected.Get("/search/recipients", r.ConversationHandler.SearchRecipients) // inbox picker: users sharing a course with the caller
 
 	// Notifications (any authenticated user)
 	protected.Get("/notifications", r.NotificationHandler.ListNotifications)
@@ -693,6 +694,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Post("/admin/notification_deliveries/retry", admin, r.NotificationDeliveryHandler.RetryFailedDeliveries)
 	protected.Get("/users/self/communication_channels", r.NotificationDeliveryHandler.ListChannels)
 	protected.Post("/users/self/communication_channels", r.NotificationDeliveryHandler.CreateChannel)
+	protected.Post("/users/self/communication_channels/:id/confirm", r.NotificationDeliveryHandler.ConfirmChannel)
 	protected.Delete("/users/self/communication_channels/:id", r.NotificationDeliveryHandler.DeleteChannel)
 
 	// Audit Logs (course: instructor; account: admin)

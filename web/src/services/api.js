@@ -1100,6 +1100,11 @@ export const api = {
     });
     return data;
   },
+  // Inbox recipient picker: users who share a course with the caller
+  // (GET /users is admin-only).
+  searchRecipients: async (searchTerm, perPage = 10) => {
+    return request(`/search/recipients?search=${encodeURIComponent(searchTerm)}&per_page=${perPage}`);
+  },
   getConversationMessages: async (conversationId, page = 1, perPage = 50) => {
     return request(`/conversations/${conversationId}/messages?page=${page}&per_page=${perPage}`);
   },
@@ -1806,6 +1811,12 @@ export const api = {
   },
   deleteCommunicationChannel: async (id) => {
     const { data } = await request(`/users/self/communication_channels/${id}`, { method: 'DELETE' });
+    return data;
+  },
+  confirmCommunicationChannel: async (id, code) => {
+    const { data } = await request(`/users/self/communication_channels/${id}/confirm`, {
+      method: 'POST', body: JSON.stringify({ code }),
+    });
     return data;
   },
 
