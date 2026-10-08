@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { Plus, Trash2, Users, Calendar } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
+import { dateTimeLocalToISO, isoToDateTimeLocal } from '../utils/datetimeLocal';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 
@@ -47,9 +48,9 @@ const AssignmentOverridesPage = () => {
     e.preventDefault();
     try {
       const override = { title: newOverride.title };
-      if (newOverride.due_at) override.due_at = new Date(newOverride.due_at).toISOString();
-      if (newOverride.unlock_at) override.unlock_at = new Date(newOverride.unlock_at).toISOString();
-      if (newOverride.lock_at) override.lock_at = new Date(newOverride.lock_at).toISOString();
+      if (newOverride.due_at) override.due_at = dateTimeLocalToISO(newOverride.due_at);
+      if (newOverride.unlock_at) override.unlock_at = dateTimeLocalToISO(newOverride.unlock_at);
+      if (newOverride.lock_at) override.lock_at = dateTimeLocalToISO(newOverride.lock_at);
       if (newOverride.course_section_id) override.course_section_id = parseInt(newOverride.course_section_id);
       if (newOverride.student_ids) {
         override.student_ids = newOverride.student_ids.split(',').map(id => parseInt(id.trim())).filter(Boolean);

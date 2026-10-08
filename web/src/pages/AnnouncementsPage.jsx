@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { Megaphone, AlertTriangle, Clock, CheckCircle, Eye, Users, Plus, Edit2, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
+import { dateTimeLocalToISO, isoToDateTimeLocal } from '../utils/datetimeLocal';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import { useAuth } from '../contexts/AuthContext';
@@ -110,7 +111,7 @@ const AnnouncementsPage = () => {
       };
 
       if (formData.schedule && formData.delayed_post_at) {
-        payload.delayed_post_at = new Date(formData.delayed_post_at).toISOString();
+        payload.delayed_post_at = dateTimeLocalToISO(formData.delayed_post_at);
       }
 
       if (editingId) {

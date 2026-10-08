@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { Calendar, Award, Clock, User, CheckCircle, AlertCircle, MinusCircle, Zap, Eye, EyeOff, Users, Pencil, X, Save, MessageCircle, ArrowRight, Send, Star, Target } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
+import { dateTimeLocalToISO, isoToDateTimeLocal } from '../utils/datetimeLocal';
 import { useAuth } from '../contexts/AuthContext';
 import useIsTeacher from '../hooks/useIsTeacher';
 import useUnsavedChanges from '../hooks/useUnsavedChanges';
@@ -16,13 +17,9 @@ import RichContentEditor from '../components/RichContentEditor';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 
+// G157: the input shows (and saves) the wall clock in the profile zone.
 function toLocalDatetimeValue(date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  const h = String(date.getHours()).padStart(2, '0');
-  const min = String(date.getMinutes()).padStart(2, '0');
-  return `${y}-${m}-${d}T${h}:${min}`;
+  return isoToDateTimeLocal(date);
 }
 
 const STATUS_CONFIG = {
@@ -231,7 +228,7 @@ const AssignmentPage = () => {
         name: editForm.name,
         description: editForm.description,
         points_possible: Number(editForm.points_possible),
-        due_at: editForm.due_at ? new Date(editForm.due_at).toISOString() : null,
+        due_at: editForm.due_at ? dateTimeLocalToISO(editForm.due_at) : null,
         submission_types: editForm.submission_types,
         anonymous_grading: editForm.anonymous_grading,
         post_policy: editForm.post_policy,

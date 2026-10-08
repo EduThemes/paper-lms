@@ -14,8 +14,11 @@ import { ThemeProvider } from './contexts/ThemeContext'
 import { ReadingPrefsProvider } from './contexts/ReadingPrefsContext'
 import { registerServiceWorker } from './service-worker-register'
 import { queryClient } from './lib/queryClient'
+import { installTimeZoneDefaults } from './lib/userTimeZone'
 
 registerServiceWorker()
+// G157: dates render in the signed-in user's profile time zone.
+installTimeZoneDefaults()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
