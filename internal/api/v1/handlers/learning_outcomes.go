@@ -20,6 +20,9 @@ type LearningOutcomeHandler struct {
 	// enrollmentRepo resolves an observer's linked students in a course
 	// (B087). Optional: when nil, observers see no results.
 	enrollmentRepo repository.EnrollmentRepository
+	// assignmentRepo ties an alignment's assignment to the URL course.
+	// Optional: when nil, CreateAlignment refuses (fail closed).
+	assignmentRepo repository.AssignmentRepository
 }
 
 func NewLearningOutcomeHandler(outcomeService *service.LearningOutcomeService, alignmentRepo repository.OutcomeAlignmentRepository, auditService *service.AuditService) *LearningOutcomeHandler {
@@ -30,6 +33,32 @@ func NewLearningOutcomeHandler(outcomeService *service.LearningOutcomeService, a
 // their linked students' outcome results.
 func (h *LearningOutcomeHandler) SetEnrollmentRepo(repo repository.EnrollmentRepository) {
 	h.enrollmentRepo = repo
+}
+
+// SetAssignmentRepo wires the assignment lookup CreateAlignment uses to check
+// that the aligned assignment belongs to the URL course.
+func (h *LearningOutcomeHandler) SetAssignmentRepo(repo repository.AssignmentRepository) {
+	h.assignmentRepo = repo
+}
+
+// courseGroup loads an outcome group under the caller's tenant and ties it
+// to :course_id (F-013 parent tie). Any mismatch is reported as not found,
+// so the caller answers 404 and never touches another course's group.
+func (h *LearningOutcomeHandler) courseGroup(c *fiber.Ctx, courseID, groupID uint) (*models.LearningOutcomeGroup, bool) {
+	group, err := h.outcomeService.GetGroup(c.Context(), groupID, callerAccountID(c))
+	if err != nil || group == nil || group.ContextType != "Course" || group.ContextID != courseID {
+		return nil, false
+	}
+	return group, true
+}
+
+// courseOutcome is courseGroup for outcomes.
+func (h *LearningOutcomeHandler) courseOutcome(c *fiber.Ctx, courseID, outcomeID uint) (*models.LearningOutcome, bool) {
+	outcome, err := h.outcomeService.GetOutcome(c.Context(), outcomeID, callerAccountID(c))
+	if err != nil || outcome == nil || outcome.ContextType != "Course" || outcome.ContextID != courseID {
+		return nil, false
+	}
+	return outcome, true
 }
 
 // outcomeResultAudience reports which students' outcome results the caller
@@ -186,13 +215,17 @@ func (h *LearningOutcomeHandler) CreateGroup(c *fiber.Ctx) error {
 }
 
 func (h *LearningOutcomeHandler) GetGroup(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	groupID, err := c.ParamsInt("group_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid group ID")
 	}
 
-	group, err := h.outcomeService.GetGroup(c.Context(), uint(groupID), callerAccountID(c))
-	if err != nil {
+	group, ok := h.courseGroup(c, uint(courseID), uint(groupID))
+	if !ok {
 		return responses.NotFound(c, "outcome group")
 	}
 
@@ -200,13 +233,19 @@ func (h *LearningOutcomeHandler) GetGroup(c *fiber.Ctx) error {
 }
 
 func (h *LearningOutcomeHandler) UpdateGroup(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	groupID, err := c.ParamsInt("group_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid group ID")
 	}
 
-	group, err := h.outcomeService.GetGroup(c.Context(), uint(groupID), callerAccountID(c))
-	if err != nil {
+	// F-013 parent tie: a teacher of this course must not edit another
+	// course's outcome group by putting its id in the URL.
+	group, ok := h.courseGroup(c, uint(courseID), uint(groupID))
+	if !ok {
 		return responses.NotFound(c, "outcome group")
 	}
 
@@ -227,6 +266,11 @@ func (h *LearningOutcomeHandler) UpdateGroup(c *fiber.Ctx) error {
 		group.Description = service.SanitizeHTML(*input.Description)
 	}
 	if input.ParentGroupID != nil {
+		if *input.ParentGroupID != 0 {
+			if _, ok := h.courseGroup(c, uint(courseID), *input.ParentGroupID); !ok || *input.ParentGroupID == group.ID {
+				return responses.BadRequest(c, "parent_outcome_group_id must be another group in this course")
+			}
+		}
 		group.ParentGroupID = input.ParentGroupID
 	}
 
@@ -271,9 +315,16 @@ func (h *LearningOutcomeHandler) DeleteGroup(c *fiber.Ctx) error {
 // Outcome endpoints
 
 func (h *LearningOutcomeHandler) ListOutcomes(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	groupID, err := c.ParamsInt("group_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid group ID")
+	}
+	if _, ok := h.courseGroup(c, uint(courseID), uint(groupID)); !ok {
+		return responses.NotFound(c, "outcome group")
 	}
 
 	params := middleware.GetPagination(c)
@@ -302,6 +353,11 @@ func (h *LearningOutcomeHandler) CreateOutcome(c *fiber.Ctx) error {
 	groupID, err := c.ParamsInt("group_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid group ID")
+	}
+	// F-013 parent tie: the new outcome may only go into a group of this
+	// course, not into another course's group.
+	if _, ok := h.courseGroup(c, uint(courseID), uint(groupID)); !ok {
+		return responses.NotFound(c, "outcome group")
 	}
 
 	var input struct {
@@ -341,13 +397,17 @@ func (h *LearningOutcomeHandler) CreateOutcome(c *fiber.Ctx) error {
 }
 
 func (h *LearningOutcomeHandler) GetOutcome(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	outcomeID, err := c.ParamsInt("outcome_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid outcome ID")
 	}
 
-	outcome, err := h.outcomeService.GetOutcome(c.Context(), uint(outcomeID), callerAccountID(c))
-	if err != nil {
+	outcome, ok := h.courseOutcome(c, uint(courseID), uint(outcomeID))
+	if !ok {
 		return responses.NotFound(c, "outcome")
 	}
 
@@ -355,13 +415,19 @@ func (h *LearningOutcomeHandler) GetOutcome(c *fiber.Ctx) error {
 }
 
 func (h *LearningOutcomeHandler) UpdateOutcome(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	outcomeID, err := c.ParamsInt("outcome_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid outcome ID")
 	}
 
-	outcome, err := h.outcomeService.GetOutcome(c.Context(), uint(outcomeID), callerAccountID(c))
-	if err != nil {
+	// F-013 parent tie: a teacher of this course must not rewrite another
+	// course's outcome (its mastery threshold, scale or calculation).
+	outcome, ok := h.courseOutcome(c, uint(courseID), uint(outcomeID))
+	if !ok {
 		return responses.NotFound(c, "outcome")
 	}
 
@@ -403,6 +469,12 @@ func (h *LearningOutcomeHandler) UpdateOutcome(c *fiber.Ctx) error {
 	}
 	if input.Ratings != nil {
 		outcome.RatingsData = *input.Ratings
+		if input.PointsPossible == nil {
+			// Like Canvas, points_possible follows the highest rating:
+			// re-derive it from the new ratings (B090 scales results onto
+			// it, so a stale value would mis-scale every result).
+			outcome.PointsPossible = 0
+		}
 	}
 
 	if err := h.outcomeService.UpdateOutcome(c.Context(), outcome); err != nil {
@@ -549,6 +621,14 @@ func (h *LearningOutcomeHandler) CreateResult(c *fiber.Ctx) error {
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
+	// F-013 parent tie: results may only be recorded against an outcome of
+	// this course (otherwise a teacher could set mastery, and fire mastery
+	// events, on another course's outcome).
+	if input.LearningOutcomeID != 0 {
+		if _, ok := h.courseOutcome(c, uint(courseID), input.LearningOutcomeID); !ok {
+			return responses.NotFound(c, "outcome")
+		}
+	}
 
 	result := &models.LearningOutcomeResult{
 		UserID:              input.UserID,
@@ -668,6 +748,20 @@ func (h *LearningOutcomeHandler) CreateAlignment(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "learning_outcome_id and assignment_id are required")
 	}
 
+	// F-013 parent tie: both the outcome and the assignment must belong to
+	// this course. Grading an aligned assignment copies the grade into an
+	// outcome result in the alignment's course, so aligning another
+	// course's assignment would copy that course's students' grades here.
+	if _, ok := h.courseOutcome(c, uint(courseID), input.LearningOutcomeID); !ok {
+		return responses.NotFound(c, "outcome")
+	}
+	if h.assignmentRepo == nil {
+		return responses.InternalError(c, "Could not verify the assignment")
+	}
+	if a, err := h.assignmentRepo.FindByID(c.Context(), input.AssignmentID, callerAccountID(c)); err != nil || a == nil || a.CourseID != uint(courseID) {
+		return responses.NotFound(c, "assignment")
+	}
+
 	alignment := &models.OutcomeAlignment{
 		LearningOutcomeID: input.LearningOutcomeID,
 		AssignmentID:      input.AssignmentID,
@@ -687,9 +781,31 @@ func (h *LearningOutcomeHandler) CreateAlignment(c *fiber.Ctx) error {
 }
 
 func (h *LearningOutcomeHandler) DeleteAlignment(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	alignmentID, err := c.ParamsInt("alignment_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid alignment ID")
+	}
+
+	// F-013 parent tie: Delete(id) has no tenant or course scope, so only
+	// delete an alignment that is listed for this course in the caller's
+	// tenant; anything else is a 404.
+	alignments, err := h.alignmentRepo.ListByCourseID(c.Context(), uint(courseID), callerAccountID(c))
+	if err != nil {
+		return responses.InternalError(c, "Could not fetch alignments")
+	}
+	found := false
+	for _, a := range alignments {
+		if a.ID == uint(alignmentID) && a.CourseID == uint(courseID) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return responses.NotFound(c, "alignment")
 	}
 
 	if err := h.alignmentRepo.Delete(c.Context(), uint(alignmentID)); err != nil {

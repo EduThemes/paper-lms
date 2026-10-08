@@ -798,6 +798,7 @@ func main() {
 	contentMigrationHandler := handlers.NewContentMigrationHandler(contentMigrationService)
 	learningOutcomeHandler := handlers.NewLearningOutcomeHandler(learningOutcomeService, outcomeAlignmentRepo, auditService)
 	learningOutcomeHandler.SetEnrollmentRepo(enrollmentRepo)
+	learningOutcomeHandler.SetAssignmentRepo(assignmentRepo)
 	speedGraderHandler := handlers.NewSpeedGraderHandler(speedGraderService, auditService)
 	// handlers
 	groupHandler := handlers.NewGroupHandler(groupService, authz, auditService)
