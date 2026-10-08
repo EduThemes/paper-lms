@@ -169,13 +169,48 @@ func (s *ObserverAlertService) ListAlerts(ctx context.Context, observerID, accou
 		}
 	}
 	s.EvaluateObserver(ctx, observerID, 5*time.Minute)
-	return s.learner.ListAlerts(ctx, observerID, studentID, 200)
+	list, err := s.learner.ListAlerts(ctx, observerID, studentID, 200)
+	if err != nil {
+		return nil, err
+	}
+	return s.keepLinked(ctx, observerID, list), nil
 }
 
-// UnreadCount evaluates (throttled) and counts the caller's unread alerts.
+// keepLinked drops alerts about students the observer no longer observes:
+// once the pairing is removed the parent loses the alert history too, as
+// in Canvas (unlinking destroys the observer's alert thresholds).
+func (s *ObserverAlertService) keepLinked(ctx context.Context, observerID uint, list []models.ObserverAlert) []models.ObserverAlert {
+	linked := map[uint]bool{}
+	kept := list[:0]
+	for _, a := range list {
+		ok, seen := linked[a.StudentID]
+		if !seen {
+			isLinked, err := s.links.IsObserverOf(ctx, observerID, a.StudentID)
+			ok = err == nil && isLinked
+			linked[a.StudentID] = ok
+		}
+		if ok {
+			kept = append(kept, a)
+		}
+	}
+	return kept
+}
+
+// UnreadCount evaluates (throttled) and counts the caller's unread alerts
+// about students they still observe.
 func (s *ObserverAlertService) UnreadCount(ctx context.Context, observerID uint) (int64, error) {
 	s.EvaluateObserver(ctx, observerID, 5*time.Minute)
-	return s.learner.CountUnreadAlerts(ctx, observerID)
+	list, err := s.learner.ListAlerts(ctx, observerID, nil, 1000)
+	if err != nil {
+		return 0, err
+	}
+	var n int64
+	for _, a := range s.keepLinked(ctx, observerID, list) {
+		if a.WorkflowState == models.ObserverAlertUnread {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // SetAlertState marks the caller's alert read or dismissed.

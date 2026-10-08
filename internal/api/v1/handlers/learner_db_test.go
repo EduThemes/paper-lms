@@ -566,6 +566,13 @@ func TestLearnerObserverAlerts_ManualPostAlertsWhenPosted(t *testing.T) {
 	alerts := decodeList(t, data)
 	require.Len(t, alerts, 1, "posting the grade raises the alert")
 	assert.Equal(t, "assignment_grade_low", alerts[0]["alert_type"])
+
+	// Once the pairing is removed the parent no longer sees the child's alerts.
+	require.NoError(t, f.obs.UnlinkObserver(context.Background(), lnParent, lnStudent))
+	_, data = f.do("GET", "/users/self/observer_alerts", lnParent, 1, nil, "")
+	assert.Len(t, decodeList(t, data), 0, "unlinked: alert history hidden")
+	_, data = f.do("GET", "/users/self/observer_alerts/unread_count", lnParent, 1, nil, "")
+	assert.Equal(t, 0.0, decodeMap(t, data)["unread_count"])
 }
 
 // G144: an override only changes the flags it is given, and work turned in
