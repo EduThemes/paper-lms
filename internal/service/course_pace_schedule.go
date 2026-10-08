@@ -180,6 +180,7 @@ func (s *CoursePaceService) pacedAssignmentID(ctx context.Context, pace *models.
 		if s.topicRepo == nil {
 			return 0, true
 		}
+		// accountID 0: internal lookup; tied to the pace's course below.
 		topic, err := s.topicRepo.FindByID(ctx, id, 0)
 		if err != nil || topic == nil || topic.CourseID != pace.CourseID || topic.AssignmentID == nil {
 			return 0, true
@@ -191,6 +192,7 @@ func (s *CoursePaceService) pacedAssignmentID(ctx context.Context, pace *models.
 		if s.quizRepo == nil || pace.UserID != nil || pace.CourseSectionID != nil {
 			return 0, true
 		}
+		// accountID 0: internal lookup; tied to the pace's course below.
 		quiz, err := s.quizRepo.FindByID(ctx, id, 0)
 		if err != nil || quiz == nil || quiz.CourseID != pace.CourseID {
 			return 0, true

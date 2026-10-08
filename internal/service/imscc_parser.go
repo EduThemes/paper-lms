@@ -418,7 +418,7 @@ func (p *IMSCCParser) ParsePackage(ctx context.Context, courseID uint, userID ui
 	}
 	// G068: prerequisites and completion requirements reference other
 	// modules / items, so they are applied once every module exists.
-	p.applyModuleMetaLinks(ctx, result)
+	p.applyModuleMetaLinks(ctx, courseID, result)
 
 	// pass-1 (cont'd): import orphan resources (not referenced by any module).
 	referencedResources := collectReferencedResources(manifest)

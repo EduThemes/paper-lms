@@ -111,7 +111,7 @@ func (r *ImportResult) recordItemTag(identifier string, before int) {
 // applyModuleMetaLinks stores the imported prerequisites and completion
 // requirements once every module and item exists. Anything that cannot
 // be resolved or is not valid for the item is skipped with a warning.
-func (p *IMSCCParser) applyModuleMetaLinks(ctx context.Context, result *ImportResult) {
+func (p *IMSCCParser) applyModuleMetaLinks(ctx context.Context, courseID uint, result *ImportResult) {
 	for modRef, ms := range result.moduleMeta {
 		ent, ok := result.entityByMigID[modRef]
 		if !ok || ent.Type != "ContextModule" {
@@ -151,7 +151,7 @@ func (p *IMSCCParser) applyModuleMetaLinks(ctx context.Context, result *ImportRe
 			typ := req.Type
 			minScore := req.MinScore
 			if typ == "min_percentage" {
-				minScore = p.percentageToPoints(ctx, tag, req.MinPercentage)
+				minScore = p.percentageToPoints(ctx, courseID, tag, req.MinPercentage)
 				typ = models.ModuleCompletionMinScore
 				if minScore == nil {
 					result.Warnings = append(result.Warnings, fmt.Sprintf("min_percentage requirement on %q has no points to convert; skipped", tag.Title))
@@ -183,12 +183,14 @@ func (p *IMSCCParser) applyModuleMetaLinks(ctx context.Context, result *ImportRe
 
 // percentageToPoints converts a min_percentage requirement to points
 // using the linked assignment's points possible.
-func (p *IMSCCParser) percentageToPoints(ctx context.Context, tag *models.ContentTag, pct *float64) *float64 {
+func (p *IMSCCParser) percentageToPoints(ctx context.Context, courseID uint, tag *models.ContentTag, pct *float64) *float64 {
 	if pct == nil || tag.ContentID == nil || tag.ContentType != "Assignment" || p.assignmentRepo == nil {
 		return nil
 	}
+	// accountID 0: import-internal lookup with no caller tenant; the
+	// result is tied to the import's course below instead.
 	a, err := p.assignmentRepo.FindByID(ctx, *tag.ContentID, 0)
-	if err != nil || a == nil || a.PointsPossible == nil || *a.PointsPossible <= 0 {
+	if err != nil || a == nil || a.CourseID != courseID || a.PointsPossible == nil || *a.PointsPossible <= 0 {
 		return nil
 	}
 	v := math.Round(*pct/100**a.PointsPossible*100) / 100
