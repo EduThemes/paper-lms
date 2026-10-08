@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Plus, Calendar, MapPin, Users, Trash2, Pencil } from 'lucide-react';
+import { Plus, Calendar, MapPin, Users, Trash2, Pencil, CalendarCheck } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
+import { calendarApi } from '../services/api_calendar';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import SlotPicker from '../components/appointments/SlotPicker';
+import AppointmentParticipantsPanel from '../components/appointments/AppointmentParticipantsPanel';
 
 const Spinner = () => (
   <svg className="h-6 w-6 animate-spin text-brand-500" viewBox="0 0 24 24" fill="none">
@@ -15,8 +18,10 @@ const Spinner = () => (
 );
 
 const AppointmentGroupsPage = () => {
+  const { t } = useTranslation();
   const { courseId } = useParams();
   const isTeacher = useIsTeacher(courseId);
+  const [comments, setComments] = useState({});
   const [groups, setGroups] = useState([]);
   const [expandedId, setExpandedId] = useState(null);
   const [slotsByGroup, setSlotsByGroup] = useState({});
@@ -78,7 +83,9 @@ const AppointmentGroupsPage = () => {
   const reserve = async (groupId, slot) => {
     setBusy(true);
     try {
-      await api.reserveAppointmentSlot(groupId, slot.id);
+      // The optional note goes with the booking (G097).
+      await calendarApi.reserveSlot(groupId, slot.id, (comments[groupId] || '').trim());
+      setComments((c) => ({ ...c, [groupId]: '' }));
       await loadSlots(groupId);
       await fetchMyReservations();
     } catch (err) {
@@ -113,6 +120,19 @@ const AppointmentGroupsPage = () => {
     }
   };
 
+  const deleteSlot = async (groupId, slot) => {
+    if (!confirm(t('calendarLane.scheduler.deleteSlotConfirm'))) return;
+    setBusy(true);
+    try {
+      await calendarApi.deleteSlot(groupId, slot.id);
+      await loadSlots(groupId);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleDelete = async (group) => {
     if (!confirm(`Delete "${group.title}"? Existing reservations will be canceled.`)) return;
     try {
@@ -129,6 +149,13 @@ const AppointmentGroupsPage = () => {
       <div className="mx-auto max-w-5xl p-6">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-semibold text-text-primary">Appointment Groups</h1>
+          <div className="flex items-center gap-2">
+          <Link
+            to="/appointments"
+            className="inline-flex items-center gap-1 rounded-md border border-border-strong px-3 py-2 text-sm text-text-secondary hover:bg-surface-1"
+          >
+            <CalendarCheck className="h-4 w-4" /> {t('calendarLane.myAppointments')}
+          </Link>
           {isTeacher && (
             <Link
               to={`/courses/${courseId}/appointment_groups/new`}
@@ -137,6 +164,7 @@ const AppointmentGroupsPage = () => {
               <Plus className="h-4 w-4" /> New Group
             </Link>
           )}
+          </div>
         </div>
 
         {!isTeacher && (
@@ -201,6 +229,18 @@ const AppointmentGroupsPage = () => {
                     <span className="inline-flex items-center gap-1">
                       <Users className="h-3 w-3" /> {group.participants_per_appointment} per slot
                     </span>
+                    {group.participant_type === 'Group' && (
+                      <span className="rounded bg-surface-2 px-1.5 py-0.5">{t('calendarLane.scheduler.groupSignup')}</span>
+                    )}
+                    {(group.context_codes || []).length > 1 && (
+                      <span>{t('calendarLane.scheduler.sharedCourses', { count: group.context_codes.length })}</span>
+                    )}
+                    {(group.sub_context_codes || []).some((c) => c.startsWith('course_section_')) && (
+                      <span>{t('calendarLane.scheduler.sectionLimited')}</span>
+                    )}
+                    {isTeacher && group.workflow_state !== 'active' && (
+                      <span className="rounded bg-accent-warning/10 px-1.5 py-0.5">{t('common.unpublished')}</span>
+                    )}
                   </div>
                 </div>
                 {isTeacher && (
@@ -226,6 +266,23 @@ const AppointmentGroupsPage = () => {
 
               {expandedId === group.id && (
                 <div className="border-t border-border-subtle p-4">
+                  {!isTeacher && group.participant_type === 'Group' && (
+                    <p className="mb-3 text-sm text-text-secondary">{t('calendarLane.scheduler.groupSignupHelp')}</p>
+                  )}
+                  {!isTeacher && (
+                    <div className="mb-4">
+                      <label htmlFor={`ag-comment-${group.id}`} className="mb-1 block text-xs font-medium text-text-secondary">
+                        {t('calendarLane.scheduler.comment')}
+                      </label>
+                      <textarea
+                        id={`ag-comment-${group.id}`}
+                        rows={2}
+                        value={comments[group.id] || ''}
+                        onChange={(e) => setComments((c) => ({ ...c, [group.id]: e.target.value }))}
+                        className="w-full rounded-md border border-border-strong px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                  )}
                   <SlotPicker
                     slots={visibleSlots(group.id)}
                     reservedIds={reservedSlotIds}
@@ -233,7 +290,10 @@ const AppointmentGroupsPage = () => {
                     onCancel={(slot) => cancel(group.id, slot)}
                     locationName={group.location_name}
                     busy={busy}
+                    manager={isTeacher}
+                    onDeleteSlot={(slot) => deleteSlot(group.id, slot)}
                   />
+                  {isTeacher && <AppointmentParticipantsPanel group={group} />}
                 </div>
               )}
             </div>

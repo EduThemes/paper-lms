@@ -89,6 +89,7 @@ const FeatureFlagsPage = React.lazy(() => import('./pages/FeatureFlagsPage'));
 const MasteryPathsEditorPage = React.lazy(() => import('./pages/MasteryPathsEditorPage'));
 const AppointmentGroupsPage = React.lazy(() => import('./pages/AppointmentGroupsPage'));
 const AppointmentGroupEditorPage = React.lazy(() => import('./pages/AppointmentGroupEditorPage'));
+const MyAppointmentsPage = React.lazy(() => import('./pages/MyAppointmentsPage'));
 const OutcomeProficiencyPage = React.lazy(() => import('./pages/OutcomeProficiencyPage'));
 const MasteryGradebookPage = React.lazy(() => import('./pages/MasteryGradebookPage'));
 const ReadingPreferencesPage = React.lazy(() => import('./pages/ReadingPreferencesPage'));
@@ -291,6 +292,14 @@ const App = () => {
           element={
             <ProtectedRoute>
               <CalendarPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/appointments"
+          element={
+            <ProtectedRoute>
+              <MyAppointmentsPage />
             </ProtectedRoute>
           }
         />

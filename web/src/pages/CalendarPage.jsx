@@ -1,274 +1,204 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Calendar, Plus, Trash2, Edit2, Download, ChevronLeft, ChevronRight, X, Grid, List } from 'lucide-react';
+import {
+  Calendar, Plus, Trash2, Edit2, ChevronLeft, ChevronRight, X, Rss, CalendarCheck, ExternalLink,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
-import { useAuth } from '../contexts/AuthContext';
-import useIsTeacher from '../hooks/useIsTeacher';
+import { calendarApi } from '../services/api_calendar';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fetchAllPages } from '../utils/fetchAllPages';
+import {
+  VIEWS, viewRange, shiftDate, describeRRule, startOfDay,
+} from '../utils/calendarView';
+import {
+  MonthView, WeekView, AgendaView, CALENDAR_COLORS, ItemIcon, formatItemTime,
+} from '../components/calendar/CalendarViews';
+import CalendarEventForm from '../components/calendar/CalendarEventForm';
+import CalendarFeedPanel from '../components/calendar/CalendarFeedPanel';
 
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const VIEW_KEY = 'paper.calendar.view';
+const HIDDEN_KEY = 'paper.calendar.hidden';
 
-const CalendarGrid = ({ events, currentDate, onEventClick, onDayClick }) => {
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const today = new Date();
-  const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
-
-  // Build events-by-day lookup
-  const eventsByDay = {};
-  events.forEach((e) => {
-    const d = new Date(e.start_at);
-    if (d.getFullYear() === year && d.getMonth() === month) {
-      const day = d.getDate();
-      if (!eventsByDay[day]) eventsByDay[day] = [];
-      eventsByDay[day].push(e);
-    }
-  });
-
-  // Build grid cells: leading blanks + days
-  const cells = [];
-  for (let i = 0; i < firstDay; i++) {
-    cells.push({ type: 'blank', key: `b${i}` });
+function readStored(key, fallback) {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
   }
-  for (let day = 1; day <= daysInMonth; day++) {
-    cells.push({ type: 'day', day, key: `d${day}`, events: eventsByDay[day] || [] });
+}
+
+function writeStored(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* storage unavailable: the choice just isn't remembered */
   }
+}
 
-  return (
-    <div className="bg-surface-0 rounded-lg shadow overflow-hidden">
-      {/* Weekday headers */}
-      <div className="grid grid-cols-7 border-b bg-surface-1">
-        {WEEKDAYS.map((wd) => (
-          <div key={wd} className="px-2 py-2 text-xs font-medium text-text-tertiary text-center">
-            {wd}
-          </div>
-        ))}
-      </div>
-      {/* Day grid */}
-      <div className="grid grid-cols-7 auto-rows-fr">
-        {cells.map((cell) => {
-          if (cell.type === 'blank') {
-            return <div key={cell.key} className="border-b border-e border-border-subtle bg-surface-1 min-h-[5rem]" />;
-          }
-          const isToday = isCurrentMonth && today.getDate() === cell.day;
-          return (
-            <div
-              key={cell.key}
-              className="border-b border-e border-border-subtle min-h-[5rem] p-1 hover:bg-brand-50 cursor-pointer transition-colors"
-              onClick={() => onDayClick && onDayClick(cell.day)}
-            >
-              <div className="flex items-center justify-between mb-0.5">
-                <span
-                  className={`text-xs font-medium w-6 h-6 flex items-center justify-center rounded-full ${
-                    isToday ? 'bg-brand-600 text-white' : 'text-text-secondary'
-                  }`}
-                >
-                  {cell.day}
-                </span>
-                {cell.events.length > 0 && (
-                  <span className="text-xs text-text-disabled">{cell.events.length}</span>
-                )}
-              </div>
-              <div className="space-y-0.5 overflow-hidden">
-                {cell.events.slice(0, 3).map((event) => (
-                  <button
-                    key={event.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onEventClick(event);
-                    }}
-                    className="w-full text-start px-1 py-0.5 text-xs rounded bg-brand-100 text-brand-800 truncate hover:bg-blue-200 transition-colors"
-                    title={event.title}
-                  >
-                    {event.title}
-                  </button>
-                ))}
-                {cell.events.length > 3 && (
-                  <div className="text-xs text-text-disabled px-1">+{cell.events.length - 3} more</div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
+// Legacy course events (an admin looking at a course they aren't
+// enrolled in) shaped like aggregated items.
+const legacyItem = (e) => ({
+  ...e,
+  id: `event_${e.id}`,
+  type: 'event',
+  calendar_event_id: e.id,
+  can_edit: true,
+});
 
+// The aggregated calendar (G094/G146): personal, course, section, group
+// and account events, assignment and quiz due dates and scheduler
+// appointments across every calendar the user can see, in month, week
+// and agenda views (G095), with a subscribable feed (G096).
 const CalendarPage = () => {
   const { t } = useTranslation();
   const { courseId } = useParams();
-  const { user } = useAuth();
-  const [events, setEvents] = useState([]);
+  const courseCode = courseId ? `course_${courseId}` : null;
+
+  const [view, setView] = useState(() => {
+    const v = readStored(VIEW_KEY, 'month');
+    return VIEWS.includes(v) ? v : 'month';
+  });
+  const [anchor, setAnchor] = useState(() => new Date());
+  const [contexts, setContexts] = useState(null);
+  const [hidden, setHidden] = useState(() => readStored(HIDDEN_KEY, []));
+  const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [showForm, setShowForm] = useState(false);
-  const [editingEvent, setEditingEvent] = useState(null);
-  const [viewMode, setViewMode] = useState('grid');
-  const [selectedEvent, setSelectedEvent] = useState(null);
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    start_at: '',
-    end_at: '',
-    all_day: false,
-    location_name: '',
-    location_address: '',
-  });
-  const [submitting, setSubmitting] = useState(false);
-  const isTeacher = useIsTeacher(courseId);
+  const [selected, setSelected] = useState(null);
+  const [form, setForm] = useState(null); // {event?, initialStart?}
+  const [showFeed, setShowFeed] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const currentYear = currentDate.getFullYear();
-  const currentMonth = currentDate.getMonth();
-  const monthName = currentDate.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+  const range = useMemo(() => viewRange(view, anchor), [view, anchor]);
 
-  const fetchEvents = useCallback(async () => {
+  useEffect(() => {
+    let live = true;
+    calendarApi.listContexts()
+      .then((res) => { if (live) setContexts(res.data || []); })
+      .catch(() => { if (live) setContexts([]); });
+    return () => { live = false; };
+  }, []);
+
+  const colorIndex = useMemo(() => {
+    const idx = {};
+    (contexts || []).forEach((c, i) => { idx[c.asset_string] = i; });
+    return idx;
+  }, [contexts]);
+
+  // In a course the calendar shows that course; an admin who isn't
+  // enrolled (so it isn't one of their calendars) gets its events.
+  const courseIsMine = Boolean(courseCode && (contexts || []).some((c) => c.asset_string === courseCode));
+  const legacyCourse = Boolean(courseCode && contexts && !courseIsMine);
+
+  const contextCodes = useMemo(() => {
+    if (courseCode) return [courseCode];
+    if (!contexts || hidden.length === 0) return undefined;
+    return contexts.map((c) => c.asset_string).filter((code) => !hidden.includes(code));
+  }, [courseCode, contexts, hidden]);
+
+  const fetchItems = useCallback(async () => {
+    if (courseCode && contexts === null) return; // wait to know which source
+    setLoading(true);
     try {
-      setLoading(true);
-      // Load every page: a single 100-event page ordered by start_at made
-      // later months look empty in a busy course.
-      const all = await fetchAllPages((page) => (courseId
-        ? api.getCourseCalendarEvents(courseId, page, 100)
-        : api.getCalendarEvents(page, 100)));
-      setEvents(all);
+      if (legacyCourse) {
+        const all = await fetchAllPages((page) => api.getCourseCalendarEvents(courseId, page, 100));
+        setItems(all.map(legacyItem).filter((e) => {
+          const d = new Date(e.start_at);
+          return d >= range.start && d < range.end;
+        }));
+      } else if (contextCodes && contextCodes.length === 0) {
+        setItems([]);
+      } else {
+        const res = await calendarApi.listItems({
+          start: range.start,
+          end: new Date(range.end.getTime() - 1000),
+          contextCodes,
+        });
+        setItems(res.data || []);
+      }
+      setError(null);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [courseId]);
+  }, [courseCode, courseId, contexts, legacyCourse, contextCodes, range]);
 
-  useEffect(() => {
-    fetchEvents();
-  }, [fetchEvents]);
+  useEffect(() => { fetchItems(); }, [fetchItems]);
 
-  const eventsForMonth = events.filter((e) => {
-    const d = new Date(e.start_at);
-    return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
-  });
+  const changeView = (v) => {
+    setView(v);
+    writeStored(VIEW_KEY, v);
+  };
 
-  const eventsGroupedByDate = {};
-  eventsForMonth.forEach((e) => {
-    const dateKey = new Date(e.start_at).toLocaleDateString(undefined, {
-      weekday: 'long',
-      month: 'long',
-      day: 'numeric',
+  const toggleCalendar = (code) => {
+    setHidden((h) => {
+      const next = h.includes(code) ? h.filter((c) => c !== code) : [...h, code];
+      writeStored(HIDDEN_KEY, next);
+      return next;
     });
-    if (!eventsGroupedByDate[dateKey]) {
-      eventsGroupedByDate[dateKey] = [];
-    }
-    eventsGroupedByDate[dateKey].push(e);
-  });
-
-  const sortedDateKeys = Object.keys(eventsGroupedByDate).sort((a, b) => {
-    const aFirst = eventsGroupedByDate[a][0];
-    const bFirst = eventsGroupedByDate[b][0];
-    return new Date(aFirst.start_at) - new Date(bFirst.start_at);
-  });
-
-  const goToPrevMonth = () => {
-    setCurrentDate(new Date(currentYear, currentMonth - 1, 1));
   };
 
-  const goToNextMonth = () => {
-    setCurrentDate(new Date(currentYear, currentMonth + 1, 1));
+  const creatable = (contexts || []).filter((c) => c.can_create_calendar_events);
+  const canCreate = courseCode
+    ? creatable.some((c) => c.asset_string === courseCode) || legacyCourse
+    : creatable.length > 0;
+
+  const openNew = (day) => {
+    if (!canCreate) return;
+    setSelected(null);
+    setForm({ initialStart: day || startOfDay(new Date()) });
   };
 
-  const goToToday = () => {
-    setCurrentDate(new Date());
-  };
-
-  const resetForm = () => {
-    setFormData({
-      title: '',
-      description: '',
-      start_at: '',
-      end_at: '',
-      all_day: false,
-      location_name: '',
-      location_address: '',
-    });
-    setEditingEvent(null);
-    setShowForm(false);
-  };
-
-  const handleEdit = (event) => {
-    const formatDateTime = (dateStr) => {
-      if (!dateStr) return '';
-      const d = new Date(dateStr);
-      const pad = (n) => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    };
-    setFormData({
-      title: event.title || '',
-      description: event.description || '',
-      start_at: formatDateTime(event.start_at),
-      end_at: formatDateTime(event.end_at),
-      all_day: event.all_day || false,
-      location_name: event.location_name || '',
-      location_address: event.location_address || '',
-    });
-    setEditingEvent(event);
-    setSelectedEvent(null);
-    setShowForm(true);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSubmitting(true);
+  const openEdit = async (item) => {
     try {
-      const payload = {
-        title: formData.title,
-        description: formData.description,
-        start_at: formData.start_at ? new Date(formData.start_at).toISOString() : null,
-        end_at: formData.end_at ? new Date(formData.end_at).toISOString() : null,
-        all_day: formData.all_day,
-        location_name: formData.location_name,
-        location_address: formData.location_address,
-      };
+      // A section's event is edited through its course event.
+      const id = item.parent_calendar_event_id || item.calendar_event_id;
+      const res = await calendarApi.getEvent(id);
+      setSelected(null);
+      setForm({ event: res.data });
+    } catch (err) {
+      setError(err.message);
+    }
+  };
 
-      if (!editingEvent) {
-        payload.context_type = courseId ? 'Course' : 'User';
-        payload.context_id = courseId ? parseInt(courseId, 10) : user?.id;
-      }
-
-      if (editingEvent) {
-        await api.updateCalendarEvent(editingEvent.id, payload);
-      } else {
-        await api.createCalendarEvent(payload);
-      }
-      resetForm();
-      await fetchEvents();
+  const remove = async (item, which) => {
+    const id = item.parent_calendar_event_id || item.calendar_event_id;
+    if (!which && !window.confirm(t('calendarLane.deleteConfirm'))) return;
+    setBusy(true);
+    try {
+      await calendarApi.deleteEvent(id, which);
+      setSelected(null);
+      await fetchItems();
     } catch (err) {
       setError(err.message);
     } finally {
-      setSubmitting(false);
+      setBusy(false);
     }
   };
 
-  const handleDelete = async (eventId) => {
-    if (!window.confirm('Are you sure you want to delete this event?')) return;
+  const cancelReservation = async (item) => {
+    if (!window.confirm(t('calendarLane.cancelReservationConfirm'))) return;
+    setBusy(true);
     try {
-      await api.deleteCalendarEvent(eventId);
-      setSelectedEvent(null);
-      await fetchEvents();
+      await calendarApi.cancelReservation(item.appointment_group_id, item.appointment_slot_id, item.reservation_id);
+      setSelected(null);
+      await fetchItems();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setBusy(false);
     }
   };
 
-  const handleExport = async () => {
+  const handleDownload = async () => {
     try {
-      const url = api.getCalendarICalUrl();
-      const response = await fetch(url, { credentials: 'include' });
-      if (!response.ok) throw new Error('Export failed');
+      const response = await fetch(api.getCalendarICalUrl(), { credentials: 'include' });
+      if (!response.ok) throw new Error(t('calendarLane.exportFailed'));
       const blob = await response.blob();
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
@@ -280,57 +210,21 @@ const CalendarPage = () => {
     }
   };
 
-  const handleDayClick = (day) => {
-    const pad = (n) => String(n).padStart(2, '0');
-    const dateStr = `${currentYear}-${pad(currentMonth + 1)}-${pad(day)}T09:00`;
-    setFormData({
-      title: '',
-      description: '',
-      start_at: dateStr,
-      end_at: '',
-      all_day: false,
-      location_name: '',
-      location_address: '',
-    });
-    setEditingEvent(null);
-    setShowForm(true);
-  };
+  const heading = useMemo(() => {
+    if (view === 'month') return anchor.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+    const last = new Date(range.end.getTime() - 1);
+    const fmt = (d) => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    return `${fmt(range.start)} – ${fmt(last)}`;
+  }, [view, anchor, range]);
 
-  const formatTime = (dateStr, allDay) => {
-    if (!dateStr) return '';
-    if (allDay) return 'All day';
-    return new Date(dateStr).toLocaleTimeString(undefined, {
-      hour: 'numeric',
-      minute: '2-digit',
-    });
+  const viewProps = {
+    items,
+    range,
+    anchor,
+    colorIndex,
+    onSelect: (item) => { setForm(null); setSelected(item); },
+    onDayClick: canCreate ? openNew : undefined,
   };
-
-  const formatDate = (dateStr) => {
-    if (!dateStr) return '';
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      weekday: 'long',
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  };
-
-  if (loading) {
-    return (
-      <Layout>
-        {courseId && <CourseNav />}
-        <div className="p-6 space-y-3">
-          <Skeleton className="h-9 w-48" />
-          <Skeleton className="h-10 w-full" />
-          <div className="grid grid-cols-7 gap-2">
-            {Array.from({ length: 42 }).map((_, i) => (
-              <Skeleton key={i} className="h-16 rounded-md" />
-            ))}
-          </div>
-        </div>
-      </Layout>
-    );
-  }
 
   return (
     <Layout>
@@ -341,346 +235,236 @@ const CalendarPage = () => {
             &larr; {t('course.backToCourse')}
           </Link>
         )}
-        <div className="flex items-center justify-between mt-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
           <h2 className="text-2xl font-bold text-text-primary flex items-center gap-2">
             <Calendar className="w-6 h-6" />
             {t('calendarPage.title')}
           </h2>
-          <div className="flex items-center space-x-2">
-            {/* View toggle */}
-            <div className="flex rounded-md border border-border-strong overflow-hidden">
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`p-2 ${viewMode === 'grid' ? 'bg-brand-600 text-white' : 'bg-surface-0 text-text-secondary hover:bg-surface-1'}`}
-                title="Grid view"
-              >
-                <Grid className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setViewMode('list')}
-                className={`p-2 border-s border-border-strong ${viewMode === 'list' ? 'bg-brand-600 text-white' : 'bg-surface-0 text-text-secondary hover:bg-surface-1'}`}
-                title="List view"
-              >
-                <List className="w-4 h-4" />
-              </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-md border border-border-strong overflow-hidden" role="group" aria-label={t('calendarLane.viewLabel')}>
+              {VIEWS.map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={view === v}
+                  onClick={() => changeView(v)}
+                  className={`px-3 py-1.5 text-sm border-s first:border-s-0 border-border-strong ${view === v ? 'bg-brand-600 text-white' : 'bg-surface-0 text-text-secondary hover:bg-surface-1'}`}
+                >
+                  {t(`calendarLane.views.${v}`)}
+                </button>
+              ))}
             </div>
-            <button
-              onClick={handleExport}
-              className="inline-flex items-center space-x-2 border border-border-strong text-text-secondary px-4 py-2 rounded-md hover:bg-surface-1 text-sm font-medium"
+            <Link
+              to="/appointments"
+              className="inline-flex items-center gap-1 border border-border-strong text-text-secondary px-3 py-1.5 rounded-md hover:bg-surface-1 text-sm font-medium"
             >
-              <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Export iCal</span>
-            </button>
-            {(!courseId || isTeacher) && (
+              <CalendarCheck className="w-4 h-4" />
+              <span className="hidden sm:inline">{t('calendarLane.myAppointments')}</span>
+            </Link>
             <button
-              onClick={() => { if (showForm) { resetForm(); } else { setShowForm(true); } }}
-              className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+              type="button"
+              onClick={() => setShowFeed((s) => !s)}
+              aria-expanded={showFeed}
+              className="inline-flex items-center gap-1 border border-border-strong text-text-secondary px-3 py-1.5 rounded-md hover:bg-surface-1 text-sm font-medium"
             >
-              {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              <span>{showForm ? t('common.cancel') : t('calendarPage.newEvent')}</span>
+              <Rss className="w-4 h-4" />
+              <span className="hidden sm:inline">{t('calendarLane.feed.button')}</span>
             </button>
+            {canCreate && (
+              <button
+                type="button"
+                onClick={() => (form ? setForm(null) : openNew())}
+                className="inline-flex items-center gap-1 bg-brand-600 text-white px-3 py-1.5 rounded-md hover:bg-brand-700 text-sm font-medium"
+              >
+                {form ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                <span>{form ? t('common.cancel') : t('calendarPage.newEvent')}</span>
+              </button>
             )}
           </div>
         </div>
       </div>
 
       {error && (
-        <div className="bg-accent-danger/10 border border-accent-danger/30 text-accent-danger rounded-md p-3 mb-4 text-sm">
+        <div className="bg-accent-danger/10 border border-accent-danger/30 text-accent-danger rounded-md p-3 mb-4 text-sm" role="alert">
           {error}
-          <button onClick={() => setError(null)} className="ms-2 text-accent-danger hover:text-accent-danger font-bold">&times;</button>
+          <button type="button" onClick={() => setError(null)} className="ms-2 font-bold" aria-label={t('common.close')}>&times;</button>
         </div>
       )}
 
-      {showForm && (
-        <div className="bg-surface-0 rounded-lg shadow p-6 mb-6">
-          <h3 className="font-semibold mb-4">{editingEvent ? 'Edit Event' : 'Create Event'}</h3>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Title</label>
-              <input
-                type="text"
-                value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Description</label>
-              <textarea
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                rows={3}
-              />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-1">Start Date/Time</label>
-                <input
-                  type={formData.all_day ? 'date' : 'datetime-local'}
-                  value={formData.all_day && formData.start_at ? formData.start_at.substring(0, 10) : formData.start_at}
-                  onChange={(e) => setFormData({ ...formData, start_at: e.target.value })}
-                  className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-1">End Date/Time</label>
-                <input
-                  type={formData.all_day ? 'date' : 'datetime-local'}
-                  value={formData.all_day && formData.end_at ? formData.end_at.substring(0, 10) : formData.end_at}
-                  onChange={(e) => setFormData({ ...formData, end_at: e.target.value })}
-                  className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                />
-              </div>
-            </div>
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="all_day"
-                checked={formData.all_day}
-                onChange={(e) => setFormData({ ...formData, all_day: e.target.checked })}
-                className="rounded border-border-strong"
-              />
-              <label htmlFor="all_day" className="text-sm text-text-secondary">All day event</label>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-1">Location Name</label>
-                <input
-                  type="text"
-                  value={formData.location_name}
-                  onChange={(e) => setFormData({ ...formData, location_name: e.target.value })}
-                  className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  placeholder="e.g. Room 101"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-1">Location Address</label>
-                <input
-                  type="text"
-                  value={formData.location_address}
-                  onChange={(e) => setFormData({ ...formData, location_address: e.target.value })}
-                  className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  placeholder="e.g. 123 Main St"
-                />
-              </div>
-            </div>
-            <div className="flex justify-end space-x-2">
-              <button
-                type="button"
-                onClick={resetForm}
-                className="border border-border-strong text-text-secondary px-4 py-2 rounded-md hover:bg-surface-1 text-sm font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
-              >
-                {submitting ? 'Saving...' : editingEvent ? 'Update Event' : 'Create Event'}
-              </button>
-            </div>
-          </form>
-        </div>
+      {showFeed && <CalendarFeedPanel onClose={() => setShowFeed(false)} onDownload={handleDownload} />}
+
+      {form && (
+        <CalendarEventForm
+          key={form.event?.id || 'new'}
+          contexts={legacyCourse
+            ? [{ asset_string: courseCode, type: 'course', name: t('calendarLane.thisCourse'), can_create_calendar_events: true }]
+            : (contexts || []).filter((c) => !courseCode || c.asset_string === courseCode)}
+          defaultContextCode={courseCode || undefined}
+          event={form.event}
+          initialStart={form.initialStart}
+          onCancel={() => setForm(null)}
+          onSaved={() => { setForm(null); fetchItems(); }}
+        />
       )}
 
-      {/* Event detail popover */}
-      {selectedEvent && (
-        <div className="bg-surface-0 rounded-lg shadow-lg border border-border-default p-4 mb-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <h3 className="font-semibold text-text-primary">{selectedEvent.title}</h3>
-              <p className="text-sm text-text-tertiary mt-1">
-                {formatDate(selectedEvent.start_at)}
-                {!selectedEvent.all_day && (
-                  <span className="ms-1">
-                    at {formatTime(selectedEvent.start_at, false)}
-                    {selectedEvent.end_at && ` - ${formatTime(selectedEvent.end_at, false)}`}
-                  </span>
-                )}
-                {selectedEvent.all_day && ' (All day)'}
-              </p>
-              {selectedEvent.location_name && (
-                <p className="text-sm text-text-tertiary mt-1">{selectedEvent.location_name}</p>
-              )}
-              {selectedEvent.description && (
-                <p className="text-sm text-text-secondary mt-2">{selectedEvent.description}</p>
-              )}
+      {selected && (
+        <ItemDetail
+          item={selected}
+          busy={busy}
+          onClose={() => setSelected(null)}
+          onEdit={() => openEdit(selected)}
+          onDelete={(which) => remove(selected, which)}
+          onCancelReservation={() => cancelReservation(selected)}
+        />
+      )}
+
+      <div className="flex flex-col lg:flex-row gap-4">
+        {!courseId && contexts && contexts.length > 0 && (
+          <aside className="lg:w-56 flex-shrink-0" aria-label={t('calendarLane.calendars')}>
+            <h3 className="text-sm font-semibold text-text-secondary mb-2">{t('calendarLane.calendars')}</h3>
+            <ul className="space-y-1">
+              {contexts.map((c, i) => (
+                <li key={c.asset_string}>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!hidden.includes(c.asset_string)}
+                      onChange={() => toggleCalendar(c.asset_string)}
+                      className="rounded border-border-strong"
+                    />
+                    <span className={`w-2.5 h-2.5 rounded-full ${CALENDAR_COLORS[i % CALENDAR_COLORS.length].dot}`} />
+                    <span className="truncate">{c.type === 'user' ? t('calendarLane.personal') : c.name}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        )}
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setAnchor((a) => shiftDate(view, a, -1))} className="p-2 hover:bg-surface-2 rounded-md" aria-label={t('calendarLane.previous')}>
+                <ChevronLeft className="w-5 h-5 text-text-secondary" />
+              </button>
+              <h3 className="text-lg font-semibold text-text-primary md:min-w-[12rem] text-center">{heading}</h3>
+              <button type="button" onClick={() => setAnchor((a) => shiftDate(view, a, 1))} className="p-2 hover:bg-surface-2 rounded-md" aria-label={t('calendarLane.next')}>
+                <ChevronRight className="w-5 h-5 text-text-secondary" />
+              </button>
             </div>
-            <button
-              onClick={() => setSelectedEvent(null)}
-              className="p-1 text-text-disabled hover:text-text-secondary"
-            >
-              <X className="w-4 h-4" />
+            <button type="button" onClick={() => setAnchor(new Date())} className="text-sm text-brand-600 hover:text-brand-800 font-medium">
+              {t('calendarPage.today')}
             </button>
           </div>
-          {(!courseId || isTeacher) && (
-            <div className="flex items-center gap-2 mt-3 pt-3 border-t">
-              <button
-                onClick={() => handleEdit(selectedEvent)}
-                className="inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-800"
-              >
-                <Edit2 className="w-3.5 h-3.5" />
-                Edit
-              </button>
-              <button
-                onClick={() => handleDelete(selectedEvent.id)}
-                className="inline-flex items-center gap-1 text-sm text-accent-danger hover:text-accent-danger"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Delete
-              </button>
-            </div>
-          )}
-        </div>
-      )}
 
-      {/* Month navigation */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={goToPrevMonth}
-            className="p-2 hover:bg-surface-2 rounded-md"
-          >
-            <ChevronLeft className="w-5 h-5 text-text-secondary" />
-          </button>
-          <h3 className="text-lg font-semibold text-text-primary md:min-w-[12rem] text-center">{monthName}</h3>
-          <button
-            onClick={goToNextMonth}
-            className="p-2 hover:bg-surface-2 rounded-md"
-          >
-            <ChevronRight className="w-5 h-5 text-text-secondary" />
-          </button>
-        </div>
-        <button
-          onClick={goToToday}
-          className="text-sm text-brand-600 hover:text-brand-800 font-medium"
-        >
-          {t('calendarPage.today')}
-        </button>
-      </div>
-
-      {/* Grid view: month grid on md+, agenda list on mobile */}
-      {viewMode === 'grid' && (
-        <>
-          <div className="hidden md:block">
-            <CalendarGrid
-              events={events}
-              currentDate={currentDate}
-              onEventClick={(event) => setSelectedEvent(event)}
-              onDayClick={handleDayClick}
-            />
-          </div>
-          <div className="md:hidden bg-surface-0 rounded-lg shadow">
-            <div className="px-4 py-2 border-b bg-brand-50 text-xs text-brand-700 flex items-center justify-between">
-              <span>Agenda for {monthName}</span>
-              <span className="text-brand-500">{eventsForMonth.length} event{eventsForMonth.length === 1 ? '' : 's'}</span>
-            </div>
-            {sortedDateKeys.length === 0 ? (
-              <div className="p-6 text-center text-text-tertiary text-sm">No events this month.</div>
-            ) : (
-              <div className="divide-y">
-                {sortedDateKeys.map((dateKey) => (
-                  <div key={dateKey}>
-                    <div className="px-4 py-2 bg-surface-1">
-                      <span className="text-sm font-medium text-text-secondary">{dateKey}</span>
-                    </div>
-                    <div className="divide-y divide-gray-100">
-                      {eventsGroupedByDate[dateKey].map((event) => (
-                        <button
-                          key={event.id}
-                          onClick={() => setSelectedEvent(event)}
-                          className="w-full text-start flex items-start gap-3 px-4 py-3 hover:bg-surface-1"
-                        >
-                          <Calendar className="w-4 h-4 text-brand-500 flex-shrink-0 mt-0.5" />
-                          <div className="min-w-0 flex-1">
-                            <div className="font-medium text-text-primary text-sm truncate">{event.title}</div>
-                            <div className="text-xs text-text-tertiary">
-                              {formatTime(event.start_at, event.all_day)}
-                              {event.end_at && !event.all_day && (
-                                <span> - {formatTime(event.end_at, false)}</span>
-                              )}
-                            </div>
-                            {event.location_name && (
-                              <div className="text-xs text-text-disabled mt-0.5 truncate">{event.location_name}</div>
-                            )}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+          {loading && items.length === 0 ? (
+            <div className="space-y-3" aria-busy="true">
+              <div className="grid grid-cols-7 gap-2">
+                {Array.from({ length: 35 }).map((_, i) => <Skeleton key={i} className="h-16 rounded-md" />)}
               </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* List view */}
-      {viewMode === 'list' && (
-        <div className="bg-surface-0 rounded-lg shadow">
-          {sortedDateKeys.length === 0 ? (
-            <div className="p-6 text-center text-text-tertiary">No events this month.</div>
-          ) : (
-            <div className="divide-y">
-              {sortedDateKeys.map((dateKey) => (
-                <div key={dateKey}>
-                  <div className="px-4 py-2 bg-surface-1">
-                    <span className="text-sm font-medium text-text-secondary">{dateKey}</span>
-                  </div>
-                  <div className="divide-y divide-gray-100">
-                    {eventsGroupedByDate[dateKey].map((event) => (
-                      <div key={event.id} className="flex items-center justify-between px-4 py-3 hover:bg-surface-1">
-                        <div className="flex items-center space-x-3 min-w-0">
-                          <Calendar className="w-4 h-4 text-brand-500 flex-shrink-0" />
-                          <div className="min-w-0">
-                            <div className="font-medium text-text-primary truncate">{event.title}</div>
-                            <div className="text-xs text-text-tertiary">
-                              {formatTime(event.start_at, event.all_day)}
-                              {event.end_at && !event.all_day && (
-                                <span> - {formatTime(event.end_at, false)}</span>
-                              )}
-                              {event.location_name && (
-                                <span className="ms-2 text-text-disabled">| {event.location_name}</span>
-                              )}
-                            </div>
-                            {event.description && (
-                              <div className="text-xs text-text-disabled mt-0.5 truncate">{event.description}</div>
-                            )}
-                          </div>
-                        </div>
-                        {(!courseId || isTeacher) && (
-                          <div className="flex items-center space-x-1 flex-shrink-0 ms-4">
-                            <button
-                              onClick={() => handleEdit(event)}
-                              className="p-1.5 text-text-disabled hover:text-brand-600 hover:bg-brand-50 rounded"
-                              title="Edit event"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDelete(event.id)}
-                              className="p-1.5 text-text-disabled hover:text-accent-danger hover:bg-accent-danger/10 rounded"
-                              title="Delete event"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
             </div>
+          ) : (
+            <>
+              {view === 'month' && (
+                <>
+                  <div className="hidden md:block"><MonthView {...viewProps} /></div>
+                  <div className="md:hidden"><AgendaView {...viewProps} /></div>
+                </>
+              )}
+              {view === 'week' && <WeekView {...viewProps} />}
+              {view === 'agenda' && <AgendaView {...viewProps} />}
+            </>
           )}
         </div>
-      )}
+      </div>
     </Layout>
   );
 };
+
+const TYPE_LABEL_KEYS = {
+  event: 'calendarLane.types.event',
+  assignment: 'calendarLane.types.assignment',
+  quiz: 'calendarLane.types.quiz',
+  appointment: 'calendarLane.types.appointment',
+  appointment_slot: 'calendarLane.types.appointmentSlot',
+};
+
+function ItemDetail({ item, busy, onClose, onEdit, onDelete, onCancelReservation }) {
+  const { t } = useTranslation();
+  const [askScope, setAskScope] = useState(false);
+  const isEvent = item.type === 'event';
+  const date = new Date(item.start_at).toLocaleDateString(undefined, {
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+  });
+  return (
+    <section className="bg-surface-0 rounded-lg shadow-lg border border-border-default p-4 mb-4" aria-labelledby="calendar-item-title">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-xs uppercase tracking-wide text-text-tertiary flex items-center gap-1">
+            <ItemIcon type={item.type} /> {t(TYPE_LABEL_KEYS[item.type] || TYPE_LABEL_KEYS.event)}
+            {item.context_name && <span>· {item.context_name}</span>}
+            {item.section_name && <span>({item.section_name})</span>}
+          </div>
+          <h3 id="calendar-item-title" className="font-semibold text-text-primary mt-1">{item.title}</h3>
+          <p className="text-sm text-text-tertiary mt-1">{date} · {formatItemTime(item, t)}</p>
+          {item.rrule && <p className="text-sm text-text-tertiary mt-1">{describeRRule(item.rrule, t)}</p>}
+          {item.points_possible != null && (
+            <p className="text-sm text-text-tertiary mt-1">{t('calendarLane.points', { count: item.points_possible })}</p>
+          )}
+          {item.location_name && <p className="text-sm text-text-tertiary mt-1">{item.location_name}{item.location_address ? `, ${item.location_address}` : ''}</p>}
+          {item.type === 'appointment_slot' && (
+            <p className="text-sm text-text-tertiary mt-1">
+              {t('calendarLane.slotFill', { count: item.reservation_count || 0, limit: item.participants_limit || 1 })}
+              {item.reserved_by?.length > 0 && `: ${item.reserved_by.join(', ')}`}
+            </p>
+          )}
+          {item.description && <p className="text-sm text-text-secondary mt-2 whitespace-pre-line">{item.description}</p>}
+        </div>
+        <button type="button" onClick={onClose} className="p-1 text-text-disabled hover:text-text-secondary" aria-label={t('common.close')}>
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t">
+        {item.html_url && !isEvent && (
+          <Link to={item.html_url} className="inline-flex items-center gap-1 text-sm text-brand-600 hover:underline">
+            <ExternalLink className="w-3.5 h-3.5" /> {t('calendarLane.open')}
+          </Link>
+        )}
+        {item.type === 'appointment' && item.reservation_id && (
+          <button type="button" disabled={busy} onClick={onCancelReservation} className="text-sm text-accent-danger hover:underline disabled:opacity-50">
+            {t('calendarLane.cancelReservation')}
+          </button>
+        )}
+        {isEvent && item.can_edit && (
+          <>
+            <button type="button" onClick={onEdit} className="inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-800">
+              <Edit2 className="w-3.5 h-3.5" /> {t('common.edit')}
+            </button>
+            {item.series_uuid ? (
+              askScope ? (
+                <span className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="text-text-secondary">{t('calendarLane.scope.deleteWhich')}</span>
+                  {['one', 'following', 'all'].map((w) => (
+                    <button key={w} type="button" disabled={busy} onClick={() => onDelete(w)} className="px-2 py-1 rounded border border-accent-danger/40 text-accent-danger hover:bg-accent-danger/10 disabled:opacity-50">
+                      {t(`calendarLane.scope.${w}`)}
+                    </button>
+                  ))}
+                </span>
+              ) : (
+                <button type="button" onClick={() => setAskScope(true)} className="inline-flex items-center gap-1 text-sm text-accent-danger">
+                  <Trash2 className="w-3.5 h-3.5" /> {t('common.delete')}
+                </button>
+              )
+            ) : (
+              <button type="button" disabled={busy} onClick={() => onDelete()} className="inline-flex items-center gap-1 text-sm text-accent-danger disabled:opacity-50">
+                <Trash2 className="w-3.5 h-3.5" /> {t('common.delete')}
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
 
 export default CalendarPage;
