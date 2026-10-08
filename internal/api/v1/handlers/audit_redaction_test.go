@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -71,4 +72,24 @@ func TestTeacherOnlyGateRefusesTA(t *testing.T) {
 	assert.Equal(t, fiber.StatusForbidden, resp.StatusCode, "TA must not delete the course")
 	resp, _ = app.Test(httptest.NewRequest("DELETE", "/api/v1/courses/7", nil), -1)
 	assert.Equal(t, fiber.StatusOK, resp.StatusCode, "teacher may delete the course")
+}
+
+// The account audit log trusts no URL :account_id: an admin of account 1
+// asking for account 2's trail (users' IPs and user agents included)
+// gets a 404 before any lookup runs.
+func TestAccountAuditLogRefusesOtherTenant(t *testing.T) {
+	h := NewAuditHandler(nil) // never reached on the refused path
+	app := fiber.New()
+	app.Use(recover.New())
+	app.Use(func(c *fiber.Ctx) error {
+		c.Locals("user_id", uint(5))
+		c.Locals("account_id", uint(1))
+		c.Locals("is_admin", true)
+		return c.Next()
+	})
+	app.Get("/accounts/:account_id/audit_log", h.GetAccountAuditLog)
+
+	resp, err := app.Test(httptest.NewRequest("GET", "/accounts/2/audit_log", nil), -1)
+	assert.NoError(t, err)
+	assert.Equal(t, fiber.StatusNotFound, resp.StatusCode)
 }

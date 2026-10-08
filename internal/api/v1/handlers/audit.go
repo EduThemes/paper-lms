@@ -218,8 +218,13 @@ func (h *AuditHandler) GetCourseGradeChangeLog(c *fiber.Ctx) error {
 // GetAccountAuditLog handles GET /accounts/:account_id/audit_log
 func (h *AuditHandler) GetAccountAuditLog(c *fiber.Ctx) error {
 	accountID, err := c.ParamsInt("account_id")
-	if err != nil {
+	if err != nil || accountID <= 0 {
 		return responses.BadRequest(c, "Invalid account ID")
+	}
+	// The URL :account_id is caller-controlled: another tenant's audit
+	// trail (with its users' IP addresses) is a 404, super_admin excepted.
+	if assertSameTenant(c, uint(accountID)) {
+		return nil
 	}
 
 	params := middleware.GetPagination(c)
