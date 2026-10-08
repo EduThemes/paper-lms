@@ -4,10 +4,14 @@ package handlers_test
 // migrated scratch Postgres (skipped without one).
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -318,6 +322,40 @@ func TestBlueprintLockGuard_RefusesLockedEditsInChildCourses(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, http.StatusForbidden, testutil.MakeRequest(app, http.MethodDelete, aPath, nil).StatusCode)
 	assert.Equal(t, http.StatusOK, testutil.MakeRequest(app, http.MethodGet, aPath, nil).StatusCode)
+
+	// The router matches paths case-insensitively; so does the guard.
+	upper := fmt.Sprintf("/API/V1/Courses/%d/Assignments/%d", child.ID, copyA.ID)
+	resp = testutil.MakeRequest(app, http.MethodPut, upper, testutil.JSONBody(map[string]any{"assignment": map[string]any{"name": "Renamed"}}))
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode, "a mixed-case path must not slip past the lock")
+	assert.Equal(t, http.StatusForbidden, testutil.MakeRequest(app, http.MethodDelete, upper, nil).StatusCode)
+
+	// The write handlers bind form bodies too: they are checked the same way.
+	form := func(contentType, body string) int {
+		req := httptest.NewRequest(http.MethodPut, aPath, strings.NewReader(body))
+		req.Header.Set("Content-Type", contentType)
+		r, err := app.Test(req, -1)
+		require.NoError(t, err)
+		return r.StatusCode
+	}
+	assert.Equal(t, http.StatusForbidden, form("application/x-www-form-urlencoded", "assignment%5Bname%5D=Renamed"))
+	assert.Equal(t, http.StatusForbidden, form("application/x-www-form-urlencoded", "Assignment.Name=Renamed"))
+	assert.Equal(t, http.StatusOK, form("application/x-www-form-urlencoded", "assignment%5Bname%5D=Essay"))
+	var mp bytes.Buffer
+	mw := multipart.NewWriter(&mp)
+	require.NoError(t, mw.WriteField("assignment[name]", "Renamed"))
+	require.NoError(t, mw.Close())
+	assert.Equal(t, http.StatusForbidden, form(mw.FormDataContentType(), mp.String()))
+
+	// A full-form save re-sends submission_types as a list while the row
+	// stores a comma-separated string: unchanged, so it passes.
+	resp = testutil.MakeRequest(app, http.MethodPut, aPath, testutil.JSONBody(map[string]any{"assignment": map[string]any{
+		"name": "Essay", "submission_types": strings.Split(copyA.SubmissionTypes, ","),
+	}}))
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp = testutil.MakeRequest(app, http.MethodPut, aPath, testutil.JSONBody(map[string]any{"assignment": map[string]any{
+		"submission_types": []string{"external_tool"},
+	}}))
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 
 	// The unlocked page (addressed by slug) is editable; a locked quiz's
 	// questions are not.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -22,9 +23,10 @@ type BlueprintLockGuardDeps struct {
 
 // reBlueprintGuardedPath matches the content write routes the guard
 // checks: an assignment, quiz, page or discussion topic itself, and a
-// quiz's questions / question groups.
+// quiz's questions / question groups. Case-insensitive, as Fiber's
+// router is: /API/V1/Courses/1/Assignments/2 reaches the same handler.
 var reBlueprintGuardedPath = regexp.MustCompile(
-	`^/api/v1/courses/(\d+)/(assignments|quizzes|pages|discussion_topics)/([^/]+)(?:/(questions|groups)(?:/[^/]+)?)?/?$`)
+	`(?i)^/api/v1/courses/(\d+)/(assignments|quizzes|pages|discussion_topics)/([^/]+)(?:/(questions|groups)(?:/[^/]+)?)?/?$`)
 
 var blueprintGuardTypes = map[string]string{
 	"assignments":       "Assignment",
@@ -68,12 +70,12 @@ func NewBlueprintLockGuard(d BlueprintLockGuardDeps) fiber.Handler {
 		if m == nil {
 			return c.Next()
 		}
-		sub := m[4]
+		section, sub := strings.ToLower(m[2]), strings.ToLower(m[4])
 		// POST only creates sub-resources (a new quiz question).
 		if method == fiber.MethodPost && sub == "" {
 			return c.Next()
 		}
-		if sub != "" && m[2] != "quizzes" {
+		if sub != "" && section != "quizzes" {
 			return c.Next()
 		}
 		courseID64, err := strconv.ParseUint(m[1], 10, 64)
@@ -81,7 +83,7 @@ func NewBlueprintLockGuard(d BlueprintLockGuardDeps) fiber.Handler {
 			return c.Next()
 		}
 		courseID := uint(courseID64)
-		contentType := blueprintGuardTypes[m[2]]
+		contentType := blueprintGuardTypes[section]
 
 		childID, ok := resolveGuardedID(c, d, courseID, contentType, m[3])
 		if !ok {
@@ -95,7 +97,7 @@ func NewBlueprintLockGuard(d BlueprintLockGuardDeps) fiber.Handler {
 		case method == fiber.MethodDelete:
 			edit.Delete = true
 		default:
-			edit.Changes = guardBodyChanges(c.Body(), blueprintGuardEnvelopes[contentType])
+			edit.Changes = guardBodyChanges(c, contentType)
 		}
 
 		checkErr := d.Blueprints.CheckChildEdit(c.Context(), courseID, edit)
@@ -117,7 +119,7 @@ func NewBlueprintLockGuard(d BlueprintLockGuardDeps) fiber.Handler {
 
 // reBlueprintBulkDates matches the bulk assignment-date editor, which
 // writes due/availability dates of many assignments at once.
-var reBlueprintBulkDates = regexp.MustCompile(`^/api/v1/courses/(\d+)/assignments/bulk_update_dates/?$`)
+var reBlueprintBulkDates = regexp.MustCompile(`(?i)^/api/v1/courses/(\d+)/assignments/bulk_update_dates/?$`)
 
 // guardBulkDates applies the date locks to every assignment a bulk
 // date update touches.
@@ -173,11 +175,21 @@ func resolveGuardedID(c *fiber.Ctx, d BlueprintLockGuardDeps, courseID uint, con
 	return p.ID, true
 }
 
-// guardBodyChanges decodes a JSON write body into its attribute map,
-// unwrapping the handler's envelope ({"assignment": {...}}).
-func guardBodyChanges(body []byte, envelope string) map[string]json.RawMessage {
+// guardBodyChanges decodes a write body into its attribute map,
+// unwrapping the handler's envelope ({"assignment": {...}}). JSON is
+// the common case, but the write handlers' BodyParser binds
+// form-encoded and multipart bodies too (assignment[name]=...,
+// assignment.name=...), so those are decoded as well — otherwise a form
+// post would slip past the lock check.
+func guardBodyChanges(c *fiber.Ctx, contentType string) map[string]json.RawMessage {
+	body := c.Body()
 	if len(body) == 0 {
 		return nil
+	}
+	envelope := blueprintGuardEnvelopes[contentType]
+	ct := strings.ToLower(string(c.Request().Header.ContentType()))
+	if strings.HasPrefix(ct, fiber.MIMEApplicationForm) || strings.HasPrefix(ct, fiber.MIMEMultipartForm) {
+		return guardFormChanges(c, contentType, strings.HasPrefix(ct, fiber.MIMEMultipartForm))
 	}
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil {
@@ -190,6 +202,56 @@ func guardBodyChanges(body []byte, envelope string) map[string]json.RawMessage {
 		}
 	}
 	return top
+}
+
+// guardFormChanges maps form fields onto the lockable attribute names.
+// Fiber's form binder matches a field case-insensitively, through any
+// envelope prefix ("assignment[name]", "Assignment.PointsPossible",
+// "name"), so the leaf key is compared loosely: case and underscores
+// ignored.
+func guardFormChanges(c *fiber.Ctx, contentType string, multipart bool) map[string]json.RawMessage {
+	known := service.BlueprintLockedFields(contentType)
+	if len(known) == 0 {
+		return nil
+	}
+	byLoose := make(map[string]string, len(known))
+	for _, k := range known {
+		byLoose[looseFieldName(k)] = k
+	}
+	out := map[string]json.RawMessage{}
+	add := func(key, value string) {
+		leaf := strings.TrimRight(key, "]")
+		if i := strings.LastIndexAny(leaf, "[."); i >= 0 {
+			leaf = leaf[i+1:]
+		}
+		name, ok := byLoose[looseFieldName(leaf)]
+		if !ok {
+			return
+		}
+		if b, err := json.Marshal(value); err == nil {
+			out[name] = b
+		}
+	}
+	if multipart {
+		form, err := c.MultipartForm()
+		if err != nil || form == nil {
+			return nil
+		}
+		for k, vs := range form.Value {
+			if len(vs) > 0 {
+				add(k, vs[len(vs)-1])
+			}
+		}
+		return out
+	}
+	c.Request().PostArgs().VisitAll(func(k, v []byte) {
+		add(string(k), string(v))
+	})
+	return out
+}
+
+func looseFieldName(s string) string {
+	return strings.ReplaceAll(strings.ToLower(s), "_", "")
 }
 
 // guardCallerIsCourseStaff reports whether the caller is an admin of the

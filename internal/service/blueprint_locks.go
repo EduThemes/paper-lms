@@ -271,6 +271,18 @@ var lockedFieldCategories = map[string]map[string]string{
 	},
 }
 
+// BlueprintLockedFields lists the write-body attribute names that fall
+// under a lock category for a content type.
+func BlueprintLockedFields(contentType string) []string {
+	fields := lockedFieldCategories[normalizeModuleContentType(contentType)]
+	out := make([]string, 0, len(fields))
+	for k := range fields {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (r BlueprintRestrictions) has(category string) bool {
 	switch category {
 	case "content":
@@ -407,6 +419,14 @@ func jsonValueChanged(raw json.RawMessage, current interface{}) bool {
 	if empty(next) && empty(current) {
 		return false
 	}
+	// A list sent against a stored comma-separated string (an
+	// assignment's submission_types: ["online_upload"] vs
+	// "online_upload"): compare as sets.
+	if list, ok := next.([]interface{}); ok {
+		if cs, ok := current.(string); ok {
+			return !sameStringSet(list, strings.Split(cs, ","))
+		}
+	}
 	if ns, ok := next.(string); ok {
 		if cs, ok := current.(string); ok {
 			if nt, err1 := time.Parse(time.RFC3339Nano, ns); err1 == nil {
@@ -426,6 +446,28 @@ func jsonValueChanged(raw json.RawMessage, current interface{}) bool {
 		return true
 	}
 	return !reflect.DeepEqual(next, current)
+}
+
+// sameStringSet reports whether a decoded JSON list holds the same
+// non-empty strings as stored (order and blanks ignored).
+func sameStringSet(list []interface{}, stored []string) bool {
+	want := map[string]bool{}
+	for _, s := range stored {
+		if s = strings.TrimSpace(s); s != "" {
+			want[s] = true
+		}
+	}
+	got := map[string]bool{}
+	for _, v := range list {
+		s, ok := v.(string)
+		if !ok {
+			return false
+		}
+		if s = strings.TrimSpace(s); s != "" {
+			got[s] = true
+		}
+	}
+	return reflect.DeepEqual(want, got)
 }
 
 // BlueprintLockedChildItem is a locked blueprint copy in a child course.
