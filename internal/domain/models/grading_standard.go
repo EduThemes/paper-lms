@@ -23,7 +23,7 @@ type GradingStandard struct {
 }
 
 // BeforeCreate mirrors the SQL defaults GORM would otherwise overwrite
-// with zero values ('' / 0).
+// with zero values (an empty string, 0).
 func (g *GradingStandard) BeforeCreate(tx *gorm.DB) error {
 	if g.WorkflowState == "" {
 		g.WorkflowState = "active"

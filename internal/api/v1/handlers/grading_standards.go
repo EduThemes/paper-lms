@@ -28,6 +28,8 @@ func gradingStandardToJSON(gs *models.GradingStandard) fiber.Map {
 		"context_id":     gs.ContextID,
 		"data":           data,
 		"workflow_state": gs.WorkflowState,
+		"points_based":   gs.PointsBased,
+		"scaling_factor": gs.ScalingFactor,
 		"created_at":     gs.CreatedAt,
 		"updated_at":     gs.UpdatedAt,
 	}
@@ -58,32 +60,20 @@ func (h *GradingStandardHandler) CreateGradingStandard(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid course ID")
 	}
 
-	var input struct {
-		GradingStandard struct {
-			Title string          `json:"title"`
-			Data  json.RawMessage `json:"data"`
-		} `json:"grading_standard"`
-	}
-
+	var input gradingStandardInput
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
 
-	if input.GradingStandard.Title == "" {
-		return responses.BadRequest(c, "Grading standard title is required")
-	}
-
-	dataStr := string(input.GradingStandard.Data)
-	if dataStr == "" || dataStr == "null" {
-		return responses.BadRequest(c, "Grading standard data is required")
-	}
-
+	// G039: cutoffs are validated and stored sorted descending (the
+	// letter lookup walks them top-down).
 	standard := &models.GradingStandard{
 		ContextType:   "Course",
 		ContextID:     uint(courseID),
-		Title:         input.GradingStandard.Title,
-		Data:          dataStr,
 		WorkflowState: "active",
+	}
+	if msg := applyGradingStandardInput(standard, input, true); msg != "" {
+		return responses.BadRequest(c, msg)
 	}
 
 	if err := h.repo.Create(c.Context(), standard); err != nil {
@@ -118,22 +108,12 @@ func (h *GradingStandardHandler) UpdateGradingStandard(c *fiber.Ctx) error {
 		return responses.NotFound(c, "grading standard")
 	}
 
-	var input struct {
-		GradingStandard struct {
-			Title *string         `json:"title"`
-			Data  json.RawMessage `json:"data"`
-		} `json:"grading_standard"`
-	}
-
+	var input gradingStandardInput
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
-
-	if input.GradingStandard.Title != nil {
-		standard.Title = *input.GradingStandard.Title
-	}
-	if len(input.GradingStandard.Data) > 0 && string(input.GradingStandard.Data) != "null" {
-		standard.Data = string(input.GradingStandard.Data)
+	if msg := applyGradingStandardInput(standard, input, false); msg != "" {
+		return responses.BadRequest(c, msg)
 	}
 
 	if err := h.repo.Update(c.Context(), standard); err != nil {

@@ -189,6 +189,11 @@ func (r *gradingPolicyRepo) SetCoursePostManually(ctx context.Context, courseID 
 		Update("post_manually", postManually).Error
 }
 
+func (r *gradingPolicyRepo) SetCourseGradingScheme(ctx context.Context, courseID uint, standardID *uint, disabled bool) error {
+	return r.db.WithContext(ctx).Model(&models.Course{}).Where("id = ?", courseID).
+		Updates(map[string]interface{}{"grading_standard_id": standardID, "grading_standard_disabled": disabled}).Error
+}
+
 func (r *gradingPolicyRepo) SetSubmissionsPostedAt(ctx context.Context, assignmentID uint, submissionIDs []uint, postedAt *time.Time) error {
 	if len(submissionIDs) == 0 {
 		return nil
@@ -240,4 +245,13 @@ func (r *gradingPolicyRepo) FindLatePolicy(ctx context.Context, courseID uint) (
 
 func (r *gradingPolicyRepo) CreateSubmission(ctx context.Context, sub *models.Submission) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(sub).Error
+}
+
+func (r *gradingPolicyRepo) ListUserStudentCourseIDs(ctx context.Context, userID uint) ([]uint, error) {
+	var ids []uint
+	err := r.db.WithContext(ctx).Model(&models.Enrollment{}).
+		Where("user_id = ? AND type = ? AND workflow_state NOT IN ?", userID, "StudentEnrollment",
+			[]string{string(models.EnrollmentDeleted), string(models.EnrollmentRejected)}).
+		Distinct().Pluck("course_id", &ids).Error
+	return ids, err
 }

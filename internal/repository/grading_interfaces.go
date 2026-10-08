@@ -13,6 +13,8 @@ type GradingStandardRepository interface {
 	Delete(ctx context.Context, id uint) error
 	ListByCourse(ctx context.Context, courseID uint) ([]models.GradingStandard, error)
 	FindActiveByCourse(ctx context.Context, courseID uint) (*models.GradingStandard, error)
+	// ListByAccount returns the account-level (shared) schemes.
+	ListByAccount(ctx context.Context, accountID uint) ([]models.GradingStandard, error)
 }
 
 type GradingPeriodGroupRepository interface {

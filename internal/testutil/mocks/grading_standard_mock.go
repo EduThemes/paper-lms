@@ -43,6 +43,14 @@ func (m *MockGradingStandardRepository) ListByCourse(ctx context.Context, course
 	return args.Get(0).([]models.GradingStandard), args.Error(1)
 }
 
+func (m *MockGradingStandardRepository) ListByAccount(ctx context.Context, accountID uint) ([]models.GradingStandard, error) {
+	args := m.Called(ctx, accountID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.GradingStandard), args.Error(1)
+}
+
 func (m *MockGradingStandardRepository) FindActiveByCourse(ctx context.Context, courseID uint) (*models.GradingStandard, error) {
 	args := m.Called(ctx, courseID)
 	if args.Get(0) == nil {

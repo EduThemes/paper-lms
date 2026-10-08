@@ -45,6 +45,7 @@ type GradingPolicyRepository interface {
 	// non-anonymous assignment of the course.
 	SetAssignmentsPostPolicy(ctx context.Context, courseID uint, policy string) error
 	SetCoursePostManually(ctx context.Context, courseID uint, postManually bool) error
+	SetCourseGradingScheme(ctx context.Context, courseID uint, standardID *uint, disabled bool) error
 	// SetSubmissionsPostedAt sets posted_at on the assignment's
 	// submissions with the given ids.
 	SetSubmissionsPostedAt(ctx context.Context, assignmentID uint, submissionIDs []uint, postedAt *time.Time) error
@@ -58,4 +59,7 @@ type GradingPolicyRepository interface {
 	FindCourse(ctx context.Context, courseID uint) (*models.Course, error)
 	FindLatePolicy(ctx context.Context, courseID uint) (*models.LatePolicy, error)
 	CreateSubmission(ctx context.Context, sub *models.Submission) error
+	// ListUserStudentCourseIDs returns the courses the user is an active
+	// student of.
+	ListUserStudentCourseIDs(ctx context.Context, userID uint) ([]uint, error)
 }

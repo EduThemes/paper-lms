@@ -198,7 +198,7 @@ func (s *GradingScheme) GradeToPercent(grade string) (float64, bool) {
 	}
 	upper := s.Entries[idx-1].Value
 	if s.PointsBased && s.ScalingFactor > 0 {
-		return ((upper*s.ScalingFactor)-0.1)/s.ScalingFactor*100, true
+		return ((upper * s.ScalingFactor) - 0.1) / s.ScalingFactor * 100, true
 	}
 	step := 1.0
 	if math.Abs(s.Entries[idx].Value-upper) < 0.01 {

@@ -239,3 +239,12 @@ func laterDue(a, b *time.Time) bool {
 	}
 	return a.After(*b)
 }
+
+// SectionInCourse reports whether sectionID is a section of courseID.
+func (s *OverrideService) SectionInCourse(ctx context.Context, courseID, sectionID uint) bool {
+	if s.sectionRepo == nil || sectionID == 0 {
+		return false
+	}
+	sec, err := s.sectionRepo.FindByID(ctx, sectionID)
+	return err == nil && sec != nil && sec.CourseID == courseID
+}

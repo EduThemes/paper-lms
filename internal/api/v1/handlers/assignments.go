@@ -14,7 +14,13 @@ import (
 
 type AssignmentHandler struct {
 	assignmentService *service.AssignmentService
+	// gradingPolicy (optional): course post-policy default, grading
+	// scheme checks and late/missing refresh when dates change.
+	gradingPolicy *service.GradingPolicyService
 }
+
+// SetGradingPolicyService wires the grading-policy collaborator.
+func (h *AssignmentHandler) SetGradingPolicyService(p *service.GradingPolicyService) { h.gradingPolicy = p }
 
 func NewAssignmentHandler(assignmentService *service.AssignmentService) *AssignmentHandler {
 	return &AssignmentHandler{assignmentService: assignmentService}
@@ -42,6 +48,8 @@ func assignmentToJSON(a *models.Assignment) fiber.Map {
 		"peer_review_count":    a.PeerReviewCount,
 		"group_category_id":    a.GroupCategoryID,
 		"is_group_assignment":  a.GroupCategoryID != nil && *a.GroupCategoryID > 0,
+		"only_visible_to_overrides": a.OnlyVisibleToOverrides,
+		"grading_standard_id":       a.GradingStandardID,
 		"created_at":           a.CreatedAt,
 		"updated_at":           a.UpdatedAt,
 	}
@@ -120,6 +128,8 @@ func (h *AssignmentHandler) CreateAssignment(c *fiber.Ctx) error {
 			PeerReviewsEnabled bool       `json:"peer_reviews_enabled"`
 			PeerReviewCount    int        `json:"peer_review_count"`
 			GroupCategoryID    *uint      `json:"group_category_id"`
+			OnlyVisibleToOverrides bool  `json:"only_visible_to_overrides"`
+			GradingStandardID      *uint `json:"grading_standard_id"`
 		} `json:"assignment"`
 	}
 
@@ -140,7 +150,15 @@ func (h *AssignmentHandler) CreateAssignment(c *fiber.Ctx) error {
 
 	postPolicy := input.Assignment.PostPolicy
 	if postPolicy == "" {
+		// G018: new assignments follow the course post policy;
+		// anonymous grading always posts manually (Canvas).
 		postPolicy = "automatic"
+		if input.Assignment.AnonymousGrading || (h.gradingPolicy != nil && h.gradingPolicy.CoursePostManually(c.Context(), uint(courseID))) {
+			postPolicy = "manual"
+		}
+	}
+	if msg := h.validateGradingFields(c, uint(courseID), input.Assignment.GradingType, postPolicy, input.Assignment.GradingStandardID); msg != "" {
+		return responses.BadRequest(c, msg)
 	}
 
 	assignment := &models.Assignment{
@@ -162,6 +180,8 @@ func (h *AssignmentHandler) CreateAssignment(c *fiber.Ctx) error {
 		PeerReviewsEnabled: input.Assignment.PeerReviewsEnabled,
 		PeerReviewCount:    input.Assignment.PeerReviewCount,
 		GroupCategoryID:    input.Assignment.GroupCategoryID,
+		OnlyVisibleToOverrides: input.Assignment.OnlyVisibleToOverrides,
+		GradingStandardID:      nonZeroUint(input.Assignment.GradingStandardID),
 	}
 
 	if assignment.GradingType == "" {
@@ -226,12 +246,15 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 			PeerReviewsEnabled *bool      `json:"peer_reviews_enabled"`
 			PeerReviewCount    *int       `json:"peer_review_count"`
 			GroupCategoryID    *uint      `json:"group_category_id"`
+			OnlyVisibleToOverrides *bool `json:"only_visible_to_overrides"`
+			GradingStandardID      *uint `json:"grading_standard_id"`
 		} `json:"assignment"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
+	before := dueSnapshotOf(assignment)
 
 	// B114: a pointer field can't tell "absent" from an explicit JSON
 	// null, so clearing a date or turning off group assignment was
@@ -261,6 +284,9 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 	}
 	if explicitNull("group_category_id") {
 		assignment.GroupCategoryID = nil
+	}
+	if explicitNull("grading_standard_id") {
+		assignment.GradingStandardID = nil
 	}
 
 	if input.Assignment.Name != nil {
@@ -321,8 +347,29 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 		}
 	}
 
+	if input.Assignment.OnlyVisibleToOverrides != nil {
+		assignment.OnlyVisibleToOverrides = *input.Assignment.OnlyVisibleToOverrides
+	}
+	if input.Assignment.GradingStandardID != nil {
+		assignment.GradingStandardID = nonZeroUint(input.Assignment.GradingStandardID)
+	}
+	gradingTypeIn, postPolicyIn := "", ""
+	if input.Assignment.GradingType != nil {
+		gradingTypeIn = assignment.GradingType
+	}
+	if input.Assignment.PostPolicy != nil {
+		postPolicyIn = assignment.PostPolicy
+	}
+	if msg := h.validateGradingFields(c, assignment.CourseID, gradingTypeIn, postPolicyIn, input.Assignment.GradingStandardID); msg != "" {
+		return responses.BadRequest(c, msg)
+	}
+
 	if err := h.assignmentService.Update(c.Context(), assignment); err != nil {
 		return responses.InternalError(c, "Could not update assignment")
+	}
+	// G019 / G022: late and missing follow due-date and visibility edits.
+	if h.gradingPolicy != nil && before != dueSnapshotOf(assignment) {
+		_ = h.gradingPolicy.RefreshDueStatus(c.Context(), assignment.CourseID, []uint{assignment.ID})
 	}
 
 	return c.JSON(assignmentToJSON(assignment))
@@ -356,4 +403,47 @@ func (h *AssignmentHandler) DeleteAssignment(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"delete": true})
+}
+
+// validateGradingFields checks the grading type, post policy and
+// per-assignment grading scheme (empty / nil values are not checked).
+// Returns a client error message, or "".
+func (h *AssignmentHandler) validateGradingFields(c *fiber.Ctx, courseID uint, gradingType, postPolicy string, standardID *uint) string {
+	if gradingType != "" && !service.ValidGradingType(gradingType) {
+		return "grading_type must be points, percent, letter_grade, gpa_scale, pass_fail or not_graded"
+	}
+	if postPolicy != "" && postPolicy != "automatic" && postPolicy != "manual" {
+		return "post_policy must be automatic or manual"
+	}
+	if standardID != nil && *standardID != 0 {
+		if h.gradingPolicy == nil || !h.gradingPolicy.SchemeUsableByCourse(c.Context(), courseID, *standardID) {
+			return "grading_standard_id is not a grading scheme of this course or its account"
+		}
+	}
+	return ""
+}
+
+// nonZeroUint maps nil / 0 to nil.
+func nonZeroUint(v *uint) *uint {
+	if v == nil || *v == 0 {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+// dueSnapshot is what late / missing statuses depend on.
+type dueSnapshot struct {
+	due     string
+	visible bool
+	types   string
+	state   models.AssignmentWorkflow
+}
+
+func dueSnapshotOf(a *models.Assignment) dueSnapshot {
+	d := dueSnapshot{visible: a.OnlyVisibleToOverrides, types: a.SubmissionTypes, state: a.WorkflowState}
+	if a.DueAt != nil {
+		d.due = a.DueAt.UTC().Format(time.RFC3339Nano)
+	}
+	return d
 }
