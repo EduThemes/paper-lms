@@ -115,6 +115,7 @@ func (e *IMSCCExporter) writeModuleMetaXML(
 	w *zip.Writer,
 	courseID uint,
 	result *ExportResult,
+	filter *exportFilter,
 ) error {
 	if e.moduleRepo == nil {
 		return nil
@@ -128,6 +129,9 @@ func (e *IMSCCExporter) writeModuleMetaXML(
 		XMLNS: "http://canvas.instructure.com/xsd/cccv1p0",
 	}
 	for _, m := range mods.Items {
+		if !filter.want(CopyTypeModules, m.ID) {
+			continue
+		}
 		mm := exportModuleMetaMod{
 			Identifier:                fmt.Sprintf("module_%d", m.ID),
 			Title:                     m.Name,
@@ -138,6 +142,9 @@ func (e *IMSCCExporter) writeModuleMetaXML(
 		items, ierr := e.moduleItemRepo.ListByModuleID(ctx, m.ID, page)
 		if ierr == nil {
 			for _, it := range items.Items {
+				if !filter.wantItem(it) {
+					continue
+				}
 				mi := exportModuleMetaItem{
 					Identifier:    fmt.Sprintf("item_%d", it.ID),
 					ContentType:   exportModuleItemContentType(it.ContentType),
@@ -499,6 +506,7 @@ func (e *IMSCCExporter) writeAttachments(
 	w *zip.Writer,
 	courseID uint,
 	result *ExportResult,
+	filter *exportFilter,
 ) (map[uint]string, error) {
 	if e.attachmentRepo == nil || e.fileService == nil {
 		return nil, nil
@@ -529,6 +537,9 @@ func (e *IMSCCExporter) writeAttachments(
 	}
 
 	for _, a := range atts.Items {
+		if !filter.want(CopyTypeFiles, a.ID) {
+			continue
+		}
 		zipPath := path.Join("web_resources", sanitizeAttachmentName(a.DisplayName))
 		// Read file contents from the storage backend.
 		// FOLLOW-UP (Wave 10): stamp settingsctx.WithAccountID(ctx, accountID)

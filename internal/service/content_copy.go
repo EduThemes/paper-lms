@@ -20,6 +20,8 @@ func normalizeModuleContentType(contentType string) string {
 		return "WikiPage"
 	case "DiscussionTopic", "Discussion":
 		return "DiscussionTopic"
+	case "Attachment", "File":
+		return "Attachment"
 	default:
 		return contentType
 	}

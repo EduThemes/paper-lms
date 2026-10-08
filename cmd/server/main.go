@@ -899,6 +899,7 @@ func main() {
 	// handlers
 	discussionV2Handler := handlers.NewDiscussionV2Handler(discussionV2Service)
 	contentImportHandler := handlers.NewContentImportHandler(imsccParser, contentMigrationService, cfg.FileStoragePath)
+	contentLane := wireContentMigrationLane(database, fileService, cfg.FileStoragePath, imsccParser, blueprintService, commonsService, contentMigrationHandler, contentImportHandler)
 	batchHandler := handlers.NewBatchHandler(batchService, authz)
 	// handlers
 	coppaHandler := handlers.NewCOPPAHandler(coppaService).SetAuthorizer(authz)
@@ -1074,6 +1075,9 @@ func main() {
 
 		QTIImportHandler: qtiImportHandler,
 
+		ContentExportHandler: contentLane.exportHandler,
+		BlueprintLockGuard:   contentLane.lockGuard,
+
 		GamificationHandler: gamificationHandler,
 
 		AuthMiddleware: authMiddleware,
@@ -1223,6 +1227,8 @@ func main() {
 		publishJob, deliverJob := scheduler.NewMinuteJobs(announcementService, notificationDeliveryService)
 		minuteSched.Register("publishScheduledAnnouncements", scheduler.EveryTick(), publishJob)
 		minuteSched.Register("deliverImmediateNotifications", scheduler.EveryTick(), deliverJob)
+		minuteSched.Register("processContentMigrations", scheduler.EveryTick(), contentLane.migrationSweep)
+		minuteSched.Register("processContentExports", scheduler.EveryTick(), contentLane.exportSweep)
 		minuteSched.Start(schedCtx)
 	}
 

@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -49,6 +52,20 @@ type CommonsService struct {
 	// quiz snapshot has no questions and a module snapshot no items.
 	questionRepo repository.QuizQuestionRepository
 	itemRepo     repository.ModuleItemRepository
+
+	// Optional fidelity dependencies (SetFileDeps, G081): quiz question
+	// groups, and the files content links to.
+	groupRepo      repository.QuizQuestionGroupRepository
+	attachmentRepo repository.AttachmentRepository
+	files          *FileService
+}
+
+// SetFileDeps wires quiz question groups and file copying into
+// snapshots and imports (G081).
+func (s *CommonsService) SetFileDeps(groupRepo repository.QuizQuestionGroupRepository, attachmentRepo repository.AttachmentRepository, files *FileService) {
+	s.groupRepo = groupRepo
+	s.attachmentRepo = attachmentRepo
+	s.files = files
 }
 
 func NewCommonsService(
@@ -91,8 +108,22 @@ func validResourceType(t string) bool {
 // live questions. Older snapshots (no "questions" key) still decode.
 type commonsQuiz struct {
 	models.Quiz
-	Questions []models.QuizQuestion `json:"questions,omitempty"`
+	Questions []models.QuizQuestion      `json:"questions,omitempty"`
+	Groups    []models.QuizQuestionGroup `json:"groups,omitempty"`
 }
+
+// commonsFile is the snapshot shape of a file the shared content uses
+// (linked from a body or a module item). The bytes stay in the source
+// course's storage and are copied on import.
+type commonsFile struct {
+	ID          uint   `json:"id"`
+	DisplayName string `json:"display_name"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
+}
+
+var reCommonsFileLink = regexp.MustCompile(`/api/v1/files/(\d+)`)
 
 // Publish snapshots a resource (or a whole course) into the Commons
 // catalog so other teachers in the same district can import it.
@@ -240,7 +271,61 @@ func (s *CommonsService) buildSnapshot(ctx context.Context, course *models.Cours
 		}
 	}
 
-	return json.Marshal(bundle)
+	out, err := json.Marshal(bundle)
+	if err != nil {
+		return nil, err
+	}
+	if files := s.snapshotFiles(ctx, course, out); len(files) > 0 {
+		bundle["files"] = files
+		return json.Marshal(bundle)
+	}
+	return out, nil
+}
+
+// snapshotFiles lists the source-course files the snapshot uses: those
+// linked from its HTML (/api/v1/files/N) and those module items point at.
+func (s *CommonsService) snapshotFiles(ctx context.Context, course *models.Course, snapshot []byte) []commonsFile {
+	if s.attachmentRepo == nil || s.files == nil {
+		return nil
+	}
+	ids := map[uint]bool{}
+	for _, m := range reCommonsFileLink.FindAllSubmatch(snapshot, -1) {
+		if id, err := strconv.ParseUint(string(m[1]), 10, 64); err == nil {
+			ids[uint(id)] = true
+		}
+	}
+	// Module items that link a file.
+	var probe struct {
+		Module  *models.ContextModule  `json:"module"`
+		Modules []models.ContextModule `json:"modules"`
+	}
+	if json.Unmarshal(snapshot, &probe) == nil {
+		mods := probe.Modules
+		if probe.Module != nil {
+			mods = append(mods, *probe.Module)
+		}
+		for _, m := range mods {
+			for _, it := range m.Items {
+				if it.ContentID != nil && normalizeModuleContentType(it.ContentType) == "Attachment" {
+					ids[*it.ContentID] = true
+				}
+			}
+		}
+	}
+	sorted := make([]uint, 0, len(ids))
+	for id := range ids {
+		sorted = append(sorted, id)
+	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	var out []commonsFile
+	for _, id := range sorted {
+		a, err := s.attachmentRepo.FindByID(ctx, id, course.AccountID)
+		if err != nil || a == nil || a.ContextType != "Course" || a.ContextID != course.ID || a.WorkflowState == models.AttachmentDeleted {
+			continue
+		}
+		out = append(out, commonsFile{ID: a.ID, DisplayName: a.DisplayName, Filename: a.Filename, ContentType: a.ContentType, Size: a.Size})
+	}
+	return out
 }
 
 // snapshotQuiz pairs a quiz with its live questions.
@@ -250,6 +335,11 @@ func (s *CommonsService) snapshotQuiz(ctx context.Context, q *models.Quiz) commo
 		if qs, err := s.questionRepo.ListByQuizID(ctx, q.ID, repository.PaginationParams{Page: 1, PerPage: 10000}); err == nil {
 			// Bank-draw copies reference the source course's bank.
 			out.Questions = models.AuthoredQuizQuestions(qs.Items)
+		}
+	}
+	if s.groupRepo != nil {
+		if gs, err := s.groupRepo.ListByQuizID(ctx, q.ID); err == nil {
+			out.Groups = gs
 		}
 	}
 	return out
@@ -297,6 +387,8 @@ func (s *CommonsService) snapshotModuleContent(ctx context.Context, course *mode
 				if d, err := s.discussionRepo.FindByID(ctx, *it.ContentID, acct); err == nil && d != nil && d.CourseID == course.ID && d.WorkflowState != "deleted" {
 					discussions = append(discussions, *d)
 				}
+			case "Attachment":
+				// Picked up by snapshotFiles from the module items.
 			}
 		}
 	}
@@ -347,7 +439,13 @@ type commonsImporter struct {
 	userID   uint
 	result   *CommonsImportResult
 	idMap    map[string]uint
+	slugMap  map[string]string
+	created  []EntityRef
 	firstErr error
+
+	// Where the snapshot's files live (the source course and tenant).
+	sourceCourse  uint
+	sourceAccount uint
 }
 
 func (im *commonsImporter) note(err error) {
@@ -370,6 +468,7 @@ func (im *commonsImporter) assignment(ctx context.Context, raw json.RawMessage) 
 		return err
 	}
 	im.idMap[contentKey("Assignment", oldID)] = a.ID
+	im.created = append(im.created, EntityRef{Type: "Assignment", ID: a.ID})
 	im.result.CreatedIDs["assignments"] = append(im.result.CreatedIDs["assignments"], a.ID)
 	return nil
 }
@@ -380,6 +479,7 @@ func (im *commonsImporter) page(ctx context.Context, raw json.RawMessage) error 
 		return err
 	}
 	oldID := p.ID
+	oldURL := p.URL
 	p.ID = 0
 	p.CourseID = im.target
 	// The target course keeps its own front page.
@@ -388,6 +488,8 @@ func (im *commonsImporter) page(ctx context.Context, raw json.RawMessage) error 
 		return err
 	}
 	im.idMap[contentKey("WikiPage", oldID)] = p.ID
+	im.slugMap[oldURL] = p.URL
+	im.created = append(im.created, EntityRef{Type: "WikiPage", ID: p.ID})
 	im.result.CreatedIDs["pages"] = append(im.result.CreatedIDs["pages"], p.ID)
 	return nil
 }
@@ -401,22 +503,44 @@ func (im *commonsImporter) quiz(ctx context.Context, raw json.RawMessage) error 
 	oldID := q.ID
 	q.ID = 0
 	q.CourseID = im.target
-	if err := im.s.quizRepo.Create(ctx, &q); err != nil {
+	if err := createQuizPreservingDefaults(ctx, im.s.quizRepo, &q, cq.ShowCorrectAnswers); err != nil {
 		return err
+	}
+	im.created = append(im.created, EntityRef{Type: "Quiz", ID: q.ID})
+	groupMap := map[uint]uint{}
+	if im.s.groupRepo != nil {
+		for _, g := range cq.Groups {
+			ng := g
+			ng.ID = 0
+			ng.QuizID = q.ID
+			// A bank-backed group draws from the source course's bank.
+			ng.QuestionBankID = nil
+			if err := im.s.groupRepo.Create(ctx, &ng); err != nil {
+				return fmt.Errorf("copy question group: %w", err)
+			}
+			groupMap[g.ID] = ng.ID
+		}
 	}
 	if im.s.questionRepo != nil {
 		for _, src := range cq.Questions {
 			nq := src
 			nq.ID = 0
 			nq.QuizID = q.ID
-			// Group, bank-item and stimulus rows live with the source
-			// quiz/course; they are not part of the snapshot.
+			// Bank-item and stimulus rows live with the source course;
+			// they are not part of the snapshot.
 			nq.QuizQuestionGroupID = nil
+			if src.QuizQuestionGroupID != nil {
+				if gid, ok := groupMap[*src.QuizQuestionGroupID]; ok {
+					nq.QuizQuestionGroupID = &gid
+				}
+			}
 			nq.BankItemID = nil
 			nq.StimulusID = nil
+			nq.QuestionBankEntryID = nil
 			if err := im.s.questionRepo.Create(ctx, &nq); err != nil {
 				return fmt.Errorf("copy question: %w", err)
 			}
+			im.created = append(im.created, EntityRef{Type: "QuizQuestion", ID: nq.ID})
 		}
 	}
 	im.idMap[contentKey("Quiz", oldID)] = q.ID
@@ -441,6 +565,7 @@ func (im *commonsImporter) discussion(ctx context.Context, raw json.RawMessage) 
 		return err
 	}
 	im.idMap[contentKey("DiscussionTopic", oldID)] = d.ID
+	im.created = append(im.created, EntityRef{Type: "DiscussionTopic", ID: d.ID})
 	im.result.CreatedIDs["discussion_topics"] = append(im.result.CreatedIDs["discussion_topics"], d.ID)
 	return nil
 }
@@ -503,6 +628,114 @@ func (im *commonsImporter) module(ctx context.Context, raw json.RawMessage) erro
 	return nil
 }
 
+// file copies one snapshot file from the source course into the target
+// course's files. A file the source course no longer has is skipped.
+func (im *commonsImporter) file(ctx context.Context, raw json.RawMessage) error {
+	if im.s.attachmentRepo == nil || im.s.files == nil || im.s.files.StorageBackend() == nil {
+		return nil
+	}
+	var f commonsFile
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return err
+	}
+	src, err := im.s.attachmentRepo.FindByID(ctx, f.ID, im.sourceAccount)
+	if err != nil || src == nil || src.ContextType != "Course" || src.ContextID != im.sourceCourse || src.WorkflowState == models.AttachmentDeleted {
+		return nil
+	}
+	root, err := im.s.files.GetOrCreateRootFolder(ctx, "Course", im.target)
+	if err != nil {
+		return err
+	}
+	rc, err := im.s.files.StorageBackend().Get(ctx, src.StoragePath)
+	if err != nil {
+		return fmt.Errorf("read file %q: %w", src.DisplayName, err)
+	}
+	defer func() { _ = rc.Close() }()
+	att := &models.Attachment{
+		ContextType: "Course", ContextID: im.target, FolderID: &root.ID, UserID: im.userID,
+		DisplayName: src.DisplayName, Filename: src.Filename, ContentType: src.ContentType, Size: src.Size,
+	}
+	if att.UserID == 0 {
+		att.UserID = src.UserID
+	}
+	if err := im.s.files.UploadFileTrusted(ctx, att, rc); err != nil {
+		return fmt.Errorf("copy file %q: %w", src.DisplayName, err)
+	}
+	im.idMap[contentKey("Attachment", src.ID)] = att.ID
+	im.result.CreatedIDs["files"] = append(im.result.CreatedIDs["files"], att.ID)
+	return nil
+}
+
+// rewriteLinks points links inside the imported HTML at the imported
+// copies (pages, assignments, quizzes, discussions, modules, files of
+// the source course that came along).
+func (im *commonsImporter) rewriteLinks(ctx context.Context) error {
+	if im.sourceCourse == 0 || len(im.created) == 0 {
+		return nil
+	}
+	rw := &copier{
+		source:  &models.Course{ID: im.sourceCourse},
+		target:  &models.Course{ID: im.target},
+		idMap:   im.idMap,
+		slugMap: im.slugMap,
+	}
+	for _, ref := range im.created {
+		// accountID=0: auth-internal — rows this import just created in
+		// the (tenant-checked) target course.
+		switch ref.Type {
+		case "Assignment":
+			if a, err := im.s.assignmentRepo.FindByID(ctx, ref.ID, 0); err == nil && a != nil {
+				if body := rw.rewriteHTML(a.Description); body != a.Description {
+					a.Description = body
+					if err := im.s.assignmentRepo.Update(ctx, a); err != nil {
+						return err
+					}
+				}
+			}
+		case "WikiPage":
+			if p, err := im.s.pageRepo.FindByID(ctx, ref.ID, 0); err == nil && p != nil {
+				if body := rw.rewriteHTML(p.Body); body != p.Body {
+					p.Body = body
+					if err := im.s.pageRepo.Update(ctx, p); err != nil {
+						return err
+					}
+				}
+			}
+		case "Quiz":
+			if q, err := im.s.quizRepo.FindByID(ctx, ref.ID, 0); err == nil && q != nil {
+				if body := rw.rewriteHTML(q.Description); body != q.Description {
+					q.Description = body
+					if err := im.s.quizRepo.Update(ctx, q); err != nil {
+						return err
+					}
+				}
+			}
+		case "QuizQuestion":
+			if im.s.questionRepo == nil {
+				continue
+			}
+			if q, err := im.s.questionRepo.FindByID(ctx, ref.ID); err == nil && q != nil {
+				if body := rw.rewriteHTML(q.QuestionText); body != q.QuestionText {
+					q.QuestionText = body
+					if err := im.s.questionRepo.Update(ctx, q); err != nil {
+						return err
+					}
+				}
+			}
+		case "DiscussionTopic":
+			if d, err := im.s.discussionRepo.FindByID(ctx, ref.ID, 0); err == nil && d != nil {
+				if body := rw.rewriteHTML(d.Message); body != d.Message {
+					d.Message = body
+					if err := im.s.discussionRepo.Update(ctx, d); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // eachRaw decodes a JSON array and runs fn on each element, recording
 // (not aborting on) per-element failures.
 func (im *commonsImporter) eachRaw(ctx context.Context, raw json.RawMessage, fn func(context.Context, json.RawMessage) error) {
@@ -548,7 +781,15 @@ func (s *CommonsService) Import(ctx context.Context, userID, targetCourseID, sha
 		ResourceType:    item.ResourceType,
 		CreatedIDs:      map[string][]uint{},
 	}
-	im := &commonsImporter{s: s, target: targetCourseID, userID: userID, result: result, idMap: map[string]uint{}}
+	im := &commonsImporter{
+		s: s, target: targetCourseID, userID: userID, result: result,
+		idMap: map[string]uint{}, slugMap: map[string]string{},
+		sourceCourse: item.SourceCourseID, sourceAccount: item.AccountID,
+	}
+	// Files first: bodies and module items are remapped onto the copies.
+	if raw, ok := bundle["files"]; ok {
+		im.eachRaw(ctx, raw, im.file)
+	}
 
 	switch item.ResourceType {
 	case "assignment":
@@ -598,6 +839,10 @@ func (s *CommonsService) Import(ctx context.Context, userID, targetCourseID, sha
 		} else if raw, ok := bundle["modules"]; ok {
 			im.eachRaw(ctx, raw, im.module)
 		}
+	}
+
+	if err := im.rewriteLinks(ctx); err != nil {
+		return nil, err
 	}
 
 	if err := s.sharedRepo.IncrementDownloadCount(ctx, item.ID); err != nil {
