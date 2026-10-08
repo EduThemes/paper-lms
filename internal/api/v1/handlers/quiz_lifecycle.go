@@ -267,29 +267,35 @@ func (h *QuizLifecycleHandler) SetExtensions(c *fiber.Ctx) error {
 	if len(input.Extensions) > 500 {
 		return responses.BadRequest(c, "Too many extensions in one request")
 	}
-	// Validate every target first so a bad row writes nothing.
-	for _, e := range input.Extensions {
-		if e.UserID == 0 || !h.quizService.IsQuizCourseStudent(c.Context(), quiz.CourseID, e.UserID, callerAccountID(c)) {
-			return responses.NotFound(c, "student")
-		}
-	}
-	out := make([]fiber.Map, 0, len(input.Extensions))
-	for _, e := range input.Extensions {
-		ext, attempt, err := h.quizService.SetQuizExtension(c.Context(), quiz, service.QuizExtensionInput{
+	// Validate every row (target and values) first so a bad row writes
+	// nothing.
+	rows := make([]service.QuizExtensionInput, len(input.Extensions))
+	for i, e := range input.Extensions {
+		rows[i] = service.QuizExtensionInput{
 			UserID:           e.UserID,
 			ExtraAttempts:    e.ExtraAttempts,
 			ExtraTime:        e.ExtraTime,
 			ManuallyUnlocked: e.ManuallyUnlocked,
 			ExtendFromNow:    e.ExtendFromNow,
 			ExtendFromEndAt:  e.ExtendFromEndAt,
-		}, callerID(c))
+		}
+		if e.UserID == 0 || !h.quizService.IsQuizCourseStudent(c.Context(), quiz.CourseID, e.UserID, callerAccountID(c)) {
+			return responses.NotFound(c, "student")
+		}
+		if err := rows[i].Validate(); err != nil {
+			return responses.BadRequest(c, err.Error())
+		}
+	}
+	out := make([]fiber.Map, 0, len(rows))
+	for _, row := range rows {
+		ext, attempt, err := h.quizService.SetQuizExtension(c.Context(), quiz, row, callerID(c))
 		if errors.Is(err, service.ErrInvalidQuizExtension) {
 			return responses.BadRequest(c, err.Error())
 		}
 		if err != nil {
 			return responses.InternalError(c, "Could not save the quiz extension")
 		}
-		row := fiber.Map{
+		saved := fiber.Map{
 			"quiz_id":           ext.QuizID,
 			"user_id":           ext.UserID,
 			"extra_attempts":    ext.ExtraAttempts,
@@ -297,9 +303,9 @@ func (h *QuizLifecycleHandler) SetExtensions(c *fiber.Ctx) error {
 			"manually_unlocked": ext.ManuallyUnlocked,
 		}
 		if attempt != nil {
-			row["end_at"] = attempt.EndAt
+			saved["end_at"] = attempt.EndAt
 		}
-		out = append(out, row)
+		out = append(out, saved)
 	}
 	return c.JSON(fiber.Map{"quiz_extensions": out})
 }

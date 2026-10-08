@@ -34,9 +34,10 @@ type QuizOverdueSubmissionFinder interface {
 }
 
 // QuizUnlinkedGradedFinder lists live graded quizzes (quiz_type
-// assignment / graded_survey) that have no gradebook assignment yet:
-// quizzes created before the gradebook link existed, or copied / imported
-// without one.
+// assignment / graded_survey) with id > afterID that have no gradebook
+// assignment of their own yet: quizzes created before the gradebook link
+// existed, or copied / imported without one (or with a link into another
+// course).
 type QuizUnlinkedGradedFinder interface {
-	ListGradedWithoutAssignment(ctx context.Context, limit int) ([]models.Quiz, error)
+	ListGradedWithoutAssignment(ctx context.Context, afterID uint, limit int) ([]models.Quiz, error)
 }

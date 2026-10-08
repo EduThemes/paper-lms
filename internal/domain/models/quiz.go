@@ -67,3 +67,9 @@ func (q *Quiz) IsGraded() bool {
 	}
 	return false
 }
+
+// IsSurvey reports whether the quiz is a survey (graded or not): its
+// attempts are never held for manual review.
+func (q *Quiz) IsSurvey() bool {
+	return q != nil && (q.QuizType == QuizTypeSurvey || q.QuizType == QuizTypeGradedSurvey)
+}

@@ -110,5 +110,17 @@ func (s *QuizService) MarkResultsSeen(ctx context.Context, quiz *models.Quiz, su
 	}
 	t := now
 	sub.ResultsSeenAt = &t
+	// Write only results_seen_at: a full-row Save of the attempt loaded at
+	// the start of this request would undo a grader's concurrent manual
+	// score or a regrade.
+	if m, ok := s.submissionRepo.(quizResultsSeenMarker); ok {
+		_ = m.MarkResultsSeen(ctx, sub.ID, t)
+		return
+	}
 	_ = s.submissionRepo.Update(ctx, sub)
+}
+
+// quizResultsSeenMarker is implemented by the Postgres repository.
+type quizResultsSeenMarker interface {
+	MarkResultsSeen(ctx context.Context, id uint, at time.Time) error
 }

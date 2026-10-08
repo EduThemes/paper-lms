@@ -38,6 +38,18 @@ func boundedNonNegative(v *int, max int) bool {
 	return v == nil || (*v >= 0 && *v <= max)
 }
 
+// Validate checks the moderation values against the Canvas limits. A
+// batch validates every row before saving any.
+func (in QuizExtensionInput) Validate() error {
+	if !boundedNonNegative(in.ExtraAttempts, maxQuizExtraAttempts) ||
+		!boundedNonNegative(in.ExtraTime, maxQuizExtraMinutes) ||
+		(in.ExtendFromNow != nil && (*in.ExtendFromNow <= 0 || *in.ExtendFromNow > maxQuizExtraMinutes)) ||
+		(in.ExtendFromEndAt != nil && (*in.ExtendFromEndAt <= 0 || *in.ExtendFromEndAt > maxQuizExtraMinutes)) {
+		return ErrInvalidQuizExtension
+	}
+	return nil
+}
+
 // SetQuizExtension saves a student's moderation settings on the quiz and,
 // when asked, extends the attempt they have in progress. The caller has
 // verified the user is a student of the quiz's course.
@@ -45,11 +57,8 @@ func (s *QuizService) SetQuizExtension(ctx context.Context, quiz *models.Quiz, i
 	if s.lifecycle == nil || s.lifecycle.Extensions == nil {
 		return nil, nil, errors.New("quiz moderation is not available")
 	}
-	if !boundedNonNegative(in.ExtraAttempts, maxQuizExtraAttempts) ||
-		!boundedNonNegative(in.ExtraTime, maxQuizExtraMinutes) ||
-		(in.ExtendFromNow != nil && (*in.ExtendFromNow <= 0 || *in.ExtendFromNow > maxQuizExtraMinutes)) ||
-		(in.ExtendFromEndAt != nil && (*in.ExtendFromEndAt <= 0 || *in.ExtendFromEndAt > maxQuizExtraMinutes)) {
-		return nil, nil, ErrInvalidQuizExtension
+	if err := in.Validate(); err != nil {
+		return nil, nil, err
 	}
 
 	ext := s.quizExtensionFor(ctx, quiz.ID, in.UserID)
@@ -89,7 +98,20 @@ func (s *QuizService) SetQuizExtension(ctx context.Context, quiz *models.Quiz, i
 	}
 	old := latest.EndAt
 	latest.EndAt = &newEnd
-	if err := s.submissionRepo.Update(ctx, latest); err != nil {
+	// Only end_at is written, and only while the attempt is still in
+	// progress: the student (or the overdue job) may turn it in between
+	// the read above and this write, and saving the whole stale row would
+	// reopen the finished attempt and wipe its score.
+	if setter, ok := s.submissionRepo.(quizAttemptDeadlineSetter); ok {
+		won, err := setter.SetEndAtIfInProgress(ctx, latest.ID, newEnd)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !won {
+			// Turned in meanwhile: nothing in progress to extend.
+			return &ext, nil, nil
+		}
+	} else if err := s.submissionRepo.Update(ctx, latest); err != nil {
 		return nil, nil, err
 	}
 	s.recordQuizEvent(ctx, latest, models.QuizEventAttemptExtended, map[string]interface{}{
@@ -98,6 +120,12 @@ func (s *QuizService) SetQuizExtension(ctx context.Context, quiz *models.Quiz, i
 		"new_end_at": newEnd,
 	})
 	return &ext, latest, nil
+}
+
+// quizAttemptDeadlineSetter is implemented by the Postgres repository: it
+// writes only end_at, and only while the attempt is still in progress.
+type quizAttemptDeadlineSetter interface {
+	SetEndAtIfInProgress(ctx context.Context, id uint, endAt time.Time) (bool, error)
 }
 
 // IsQuizCourseStudent reports whether userID is an active student of the

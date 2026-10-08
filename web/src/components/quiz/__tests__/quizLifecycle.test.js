@@ -14,6 +14,7 @@ import {
   extensionPayload,
   effectiveAllowedAttempts,
   studentDateLines,
+  withoutQuizAssignments,
 } from '../quizLifecycle';
 import { createQuizEventQueue } from '../useQuizEventLog';
 import { isQuizAssignment } from '../AssignmentQuizBanner';
@@ -188,5 +189,18 @@ describe('quiz assignments (G041)', () => {
     expect(isQuizAssignment({ submission_types: ['online_quiz'] })).toBe(true);
     expect(isQuizAssignment({ submission_types: 'online_text_entry,online_upload' })).toBe(false);
     expect(isQuizAssignment(null)).toBe(false);
+  });
+});
+
+describe('withoutQuizAssignments (G041)', () => {
+  it('drops only the assignments that back a quiz', () => {
+    const assignments = [{ id: 1, name: 'Essay' }, { id: 2, name: 'Cells quiz' }, { id: 3, name: 'Lab' }];
+    const quizzes = [{ id: 9, assignment_id: 2 }, { id: 10, assignment_id: null }, { id: 11 }];
+    expect(withoutQuizAssignments(assignments, quizzes).map((a) => a.id)).toEqual([1, 3]);
+  });
+
+  it('copes with missing lists', () => {
+    expect(withoutQuizAssignments(undefined, undefined)).toEqual([]);
+    expect(withoutQuizAssignments([{ id: 1 }], null)).toEqual([{ id: 1 }]);
   });
 });

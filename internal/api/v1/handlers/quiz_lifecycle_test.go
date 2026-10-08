@@ -41,11 +41,26 @@ func (f *fakeEventRepo) ListBySubmissionID(_ context.Context, id uint) ([]models
 	return out, nil
 }
 
+// fakeExtensionRepo records moderation upserts in memory.
+type fakeExtensionRepo struct{ saved []models.QuizExtension }
+
+func (f *fakeExtensionRepo) Upsert(_ context.Context, ext *models.QuizExtension) error {
+	f.saved = append(f.saved, *ext)
+	return nil
+}
+func (f *fakeExtensionRepo) FindByQuizAndUser(_ context.Context, _, _ uint) (*models.QuizExtension, error) {
+	return nil, nil
+}
+func (f *fakeExtensionRepo) ListByQuizID(_ context.Context, _ uint) ([]models.QuizExtension, error) {
+	return f.saved, nil
+}
+
 type lifecycleDeps struct {
 	*quizDeps
 	groups      *mocks.MockAssignmentGroupRepository
 	enrollments *mocks.MockEnrollmentRepository
 	events      *fakeEventRepo
+	extensions  *fakeExtensionRepo
 }
 
 func lifecycleApp(role string, userID uint) (*fiber.App, *lifecycleDeps) {
@@ -60,6 +75,7 @@ func lifecycleApp(role string, userID uint) (*fiber.App, *lifecycleDeps) {
 		groups:      new(mocks.MockAssignmentGroupRepository),
 		enrollments: new(mocks.MockEnrollmentRepository),
 		events:      &fakeEventRepo{},
+		extensions:  &fakeExtensionRepo{},
 	}
 	svc := service.NewQuizService(d.quizRepo, d.qRepo, d.sRepo, d.aRepo,
 		service.WithStimulusRepo(d.stimRepo),
@@ -67,6 +83,7 @@ func lifecycleApp(role string, userID uint) (*fiber.App, *lifecycleDeps) {
 			AssignmentGroups: d.groups,
 			Enrollments:      d.enrollments,
 			Events:           d.events,
+			Extensions:       d.extensions,
 		}))
 	qh := handlers.NewQuizHandler(d.quizRepo).SetQuizService(svc)
 	qs := handlers.NewQuizSubmissionHandler(svc, nil, nil)
@@ -190,6 +207,23 @@ func TestQuizExtensions_TargetMustBeACourseStudent(t *testing.T) {
 	resp := testutil.MakeRequest(app, http.MethodPost, "/courses/7/quizzes/5/extensions",
 		strings.NewReader(`{"quiz_extensions":[{"user_id":99,"extra_attempts":1}]}`))
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+// A batch is validated as a whole: an out-of-range row is a 400 and no
+// row of the batch is saved (the valid first row included).
+func TestQuizExtensions_BadRowInBatchSavesNothing(t *testing.T) {
+	app, d := lifecycleApp("TeacherEnrollment", 2)
+	d.quizRepo.On("FindByID", mock.Anything, uint(5), uint(1)).Return(publishedQuiz(5, 7), nil)
+	d.enrollments.On("ListActiveStudentUserIDsByCourse", mock.Anything, uint(7), uint(1)).Return([]uint{10, 12}, nil)
+	resp := testutil.MakeRequest(app, http.MethodPost, "/courses/7/quizzes/5/extensions",
+		strings.NewReader(`{"quiz_extensions":[{"user_id":10,"extra_attempts":1},{"user_id":12,"extra_time":99999}]}`))
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Empty(t, d.extensions.saved, "no row of a rejected batch may be saved")
+
+	resp = testutil.MakeRequest(app, http.MethodPost, "/courses/7/quizzes/5/extensions",
+		strings.NewReader(`{"quiz_extensions":[{"user_id":10,"extra_attempts":1},{"user_id":12,"extra_time":30}]}`))
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Len(t, d.extensions.saved, 2)
 }
 
 func TestQuizRegrade_QuestionFromAnotherQuizIs404(t *testing.T) {

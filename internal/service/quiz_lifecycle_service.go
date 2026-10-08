@@ -261,6 +261,9 @@ func (s *QuizService) pushGradebookScore(ctx context.Context, quiz *models.Quiz,
 		PendingReview: latest.WorkflowState == models.QuizSubmissionPendingReview,
 		GraderID:      graderID,
 	})
+	if errors.Is(err, ErrQuizScoreNotStudent) {
+		return // staff preview: no gradebook row
+	}
 	if err != nil {
 		slog.Warn("quiz gradebook: record score", "quiz_id", quiz.ID, "user_id", latest.UserID, "err", err)
 		return
@@ -316,8 +319,15 @@ func (s *QuizService) SyncQuizAssignment(ctx context.Context, quiz *models.Quiz,
 
 	if !live {
 		if quiz.AssignmentID != nil {
-			if err := repo.Delete(ctx, *quiz.AssignmentID); err != nil {
-				return nil, err
+			// Only the quiz's own assignment (live, same course) is
+			// deleted. A link that points anywhere else — e.g. carried
+			// over from another course (or tenant) by an import — is just
+			// dropped: Delete is unscoped and must never touch a row the
+			// quiz does not own.
+			if own := s.linkedAssignment(ctx, quiz); own != nil {
+				if err := repo.Delete(ctx, own.ID); err != nil {
+					return nil, err
+				}
 			}
 			quiz.AssignmentID = nil
 			if err := s.quizRepo.Update(ctx, quiz); err != nil {
@@ -442,25 +452,27 @@ func (s *QuizService) LinkGradedQuizzes(ctx context.Context) (int, error) {
 	if s.lifecycle == nil || s.lifecycle.Unlinked == nil || s.lifecycle.Assignments == nil {
 		return 0, nil
 	}
+	const batchSize = 100
 	linked := 0
+	// Walk by id so a quiz that keeps failing to link is passed over
+	// (and retried next run) instead of blocking every quiz after it.
+	afterID := uint(0)
 	for batch := 0; batch < 50; batch++ {
-		quizzes, err := s.lifecycle.Unlinked.ListGradedWithoutAssignment(ctx, 100)
+		quizzes, err := s.lifecycle.Unlinked.ListGradedWithoutAssignment(ctx, afterID, batchSize)
 		if err != nil {
 			return linked, err
 		}
-		progressed := 0
 		for i := range quizzes {
 			q := quizzes[i]
+			afterID = q.ID
 			a, err := s.SyncQuizAssignment(ctx, &q, nil)
 			if err != nil || a == nil {
 				slog.Warn("quiz gradebook: link graded quiz", "quiz_id", q.ID, "err", err)
 				continue
 			}
 			linked++
-			progressed++
 		}
-		// Stop when nothing is left, or only quizzes that keep failing.
-		if progressed == 0 {
+		if len(quizzes) < batchSize {
 			return linked, nil
 		}
 	}
@@ -479,6 +491,20 @@ func (s *QuizService) defaultAssignmentGroup(ctx context.Context, courseID uint)
 	}
 	id := res.Items[0].ID
 	return &id
+}
+
+// QuizLinkedAssignmentIDs returns the ids of the gradebook assignments
+// that back the given quizzes. Views that list both quizzes and
+// assignments (planner, observer upcoming) skip these so a graded quiz
+// appears once, as the quiz.
+func QuizLinkedAssignmentIDs(quizzes []models.Quiz) map[uint]bool {
+	out := make(map[uint]bool, len(quizzes))
+	for i := range quizzes {
+		if quizzes[i].AssignmentID != nil && quizzes[i].WorkflowState != "deleted" {
+			out[*quizzes[i].AssignmentID] = true
+		}
+	}
+	return out
 }
 
 // LinkedAssignment exposes the quiz's live gradebook assignment (nil when

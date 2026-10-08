@@ -187,7 +187,7 @@ func (s *QuizService) rescoreAttempt(ctx context.Context, quiz *models.Quiz, sub
 		total = *quiz.PointsPossible
 	}
 	sub.Score = &total
-	if pending {
+	if pending && !quiz.IsSurvey() {
 		sub.WorkflowState = models.QuizSubmissionPendingReview
 	} else {
 		sub.WorkflowState = models.QuizSubmissionComplete

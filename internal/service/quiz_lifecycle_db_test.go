@@ -25,6 +25,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/repository/postgres"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
@@ -37,6 +38,7 @@ type lifecycleFixture struct {
 	groupID  uint
 	teacher  uint
 	students []uint
+	deps     service.QuizLifecycleDeps
 }
 
 func newLifecycleFixture(t *testing.T, nStudents int) *lifecycleFixture {
@@ -70,25 +72,32 @@ func newLifecycleFixture(t *testing.T, nStudents int) *lifecycleFixture {
 		postgres.NewAssignmentOverrideStudentRepository(g), enrollmentRepo, postgres.NewSectionRepository(g)))
 
 	submissionRepo := postgres.NewQuizSubmissionRepository(g)
-	f.svc = service.NewQuizService(
-		postgres.NewQuizRepository(g),
-		postgres.NewQuizQuestionRepository(g),
-		submissionRepo,
-		postgres.NewQuizSubmissionAnswerRepository(g),
-		service.WithQuestionGroupRepo(postgres.NewQuizQuestionGroupRepository(g)),
-		service.WithQuizLifecycle(service.QuizLifecycleDeps{
-			Assignments:      assignmentRepo,
-			AssignmentGroups: postgres.NewAssignmentGroupRepository(g),
-			Gradebook:        f.subs,
-			Extensions:       postgres.NewQuizExtensionRepository(g),
-			Events:           postgres.NewQuizSubmissionEventRepository(g),
-			Regrades:         postgres.NewQuizQuestionRegradeRepository(g),
-			Overdue:          submissionRepo,
-			Enrollments:      enrollmentRepo,
-			Unlinked:         postgres.NewQuizRepository(g),
-		}),
-	)
+	f.deps = service.QuizLifecycleDeps{
+		Assignments:      assignmentRepo,
+		AssignmentGroups: postgres.NewAssignmentGroupRepository(g),
+		Gradebook:        f.subs,
+		Extensions:       postgres.NewQuizExtensionRepository(g),
+		Events:           postgres.NewQuizSubmissionEventRepository(g),
+		Regrades:         postgres.NewQuizQuestionRegradeRepository(g),
+		Overdue:          submissionRepo,
+		Enrollments:      enrollmentRepo,
+		Unlinked:         postgres.NewQuizRepository(g),
+	}
+	f.svc = f.newService(f.deps)
 	return f
+}
+
+// newService builds a QuizService over the fixture's database with the
+// given lifecycle dependencies.
+func (f *lifecycleFixture) newService(deps service.QuizLifecycleDeps) *service.QuizService {
+	return service.NewQuizService(
+		postgres.NewQuizRepository(f.g),
+		postgres.NewQuizQuestionRepository(f.g),
+		postgres.NewQuizSubmissionRepository(f.g),
+		postgres.NewQuizSubmissionAnswerRepository(f.g),
+		service.WithQuestionGroupRepo(postgres.NewQuizQuestionGroupRepository(f.g)),
+		service.WithQuizLifecycle(deps),
+	)
 }
 
 const mcAnswers = `[{"id":"a","text":"Mitochondria","weight":100},{"id":"b","text":"Nucleus","weight":0}]`
@@ -658,4 +667,272 @@ func TestQuizLifecycle_LinkAdoptsCopiedQuizAssignment(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, a)
 	assert.NotEqual(t, orphan.ID, a.ID)
+}
+
+// G041 review: a quiz whose assignment_id points into another course (a
+// link carried over by an import) must never delete or edit that
+// assignment — AssignmentRepository.Delete is unscoped. Switching the
+// quiz to practice only drops the link; the link job gives a graded one
+// its own assignment; deleting it removes only its own.
+func TestQuizLifecycle_ForeignAssignmentLinkIsNeverTouched(t *testing.T) {
+	f := newLifecycleFixture(t, 1)
+	ctx := context.Background()
+	other := &models.Course{AccountID: 1, Name: "Chemistry", CourseCode: "CHEM-1", WorkflowState: "available"}
+	require.NoError(t, f.g.Create(other).Error)
+	foreign := &models.Assignment{CourseID: other.ID, Name: "Cells", SubmissionTypes: "online_quiz",
+		WorkflowState: models.AssignmentPublished, Published: true}
+	require.NoError(t, f.g.Create(foreign).Error)
+	fid := foreign.ID
+	assertForeignUntouched := func() {
+		t.Helper()
+		var a models.Assignment
+		require.NoError(t, f.g.First(&a, fid).Error)
+		assert.Equal(t, models.AssignmentPublished, a.WorkflowState, "the other course's assignment must stay live")
+		assert.Equal(t, other.ID, a.CourseID)
+		assert.Equal(t, "Cells", a.Name)
+	}
+
+	one := 1.0
+	mk := func(title, quizType string) *models.Quiz {
+		q := &models.Quiz{CourseID: f.courseID, Title: title, QuizType: quizType, AllowedAttempts: 1,
+			Published: true, WorkflowState: "published", PointsPossible: &one, AssignmentID: &fid}
+		require.NoError(t, f.g.Create(q).Error)
+		return q
+	}
+	practice := mk("Warm-up", "practice_quiz")
+	graded := mk("Cells", "assignment")
+
+	_, err := f.svc.SyncQuizAssignment(ctx, practice, nil)
+	require.NoError(t, err)
+	assertForeignUntouched()
+	var r models.Quiz
+	require.NoError(t, f.g.First(&r, practice.ID).Error)
+	assert.Nil(t, r.AssignmentID, "the carried-over link is dropped")
+
+	n, err := f.svc.LinkGradedQuizzes(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n, "a graded quiz linked outside its course still needs its own assignment")
+	var g2 models.Quiz
+	require.NoError(t, f.g.First(&g2, graded.ID).Error)
+	require.NotNil(t, g2.AssignmentID)
+	assert.NotEqual(t, fid, *g2.AssignmentID)
+	var own models.Assignment
+	require.NoError(t, f.g.First(&own, *g2.AssignmentID).Error)
+	assert.Equal(t, f.courseID, own.CourseID)
+	assertForeignUntouched()
+
+	g2.WorkflowState = "deleted"
+	_, err = f.svc.SyncQuizAssignment(ctx, &g2, nil)
+	require.NoError(t, err)
+	var ownAfter models.Assignment
+	require.NoError(t, f.g.First(&ownAfter, own.ID).Error)
+	assert.Equal(t, models.AssignmentDeleted, ownAfter.WorkflowState)
+	assertForeignUntouched()
+}
+
+// G041 review: a Commons import of a graded quiz must not carry the
+// source quiz's assignment_id into the target course.
+func TestQuizLifecycle_CommonsImportDropsSourceAssignmentLink(t *testing.T) {
+	f := newLifecycleFixture(t, 0)
+	ctx := context.Background()
+	quiz, _ := f.quiz(t, nil, 1)
+	var src models.Quiz
+	require.NoError(t, f.g.First(&src, quiz.ID).Error)
+	require.NotNil(t, src.AssignmentID)
+
+	dst := &models.Course{AccountID: 1, Name: "Biology 2", CourseCode: "BIO-2", WorkflowState: "available"}
+	require.NoError(t, f.g.Create(dst).Error)
+	commons := service.NewCommonsService(
+		postgres.NewSharedContentRepository(f.g), postgres.NewCourseRepository(f.g), postgres.NewAssignmentRepository(f.g),
+		postgres.NewPageRepository(f.g), postgres.NewQuizRepository(f.g), postgres.NewModuleRepository(f.g),
+		postgres.NewDiscussionTopicRepository(f.g),
+	)
+	commons.SetContentDeps(postgres.NewQuizQuestionRepository(f.g), postgres.NewModuleItemRepository(f.g))
+	shared, err := commons.Publish(ctx, f.teacher, f.courseID, 1, service.CommonsPublishOptions{ResourceType: "quiz", ResourceID: quiz.ID, Title: "Cells"})
+	require.NoError(t, err)
+	res, err := commons.Import(ctx, f.teacher, dst.ID, shared.ID, 1)
+	require.NoError(t, err)
+	require.Len(t, res.CreatedIDs["quizzes"], 1)
+
+	var imported models.Quiz
+	require.NoError(t, f.g.First(&imported, res.CreatedIDs["quizzes"][0]).Error)
+	assert.Nil(t, imported.AssignmentID, "the import must not link the source course's assignment")
+}
+
+// G047 / G043 review: the narrow writes used by moderation and one-time
+// results touch only their column, and the deadline only while the
+// attempt is in progress — a full-row Save of a stale copy would reopen a
+// finished attempt or undo a grader's score.
+func TestQuizLifecycle_NarrowAttemptWritesDoNotClobber(t *testing.T) {
+	f := newLifecycleFixture(t, 1)
+	ctx := context.Background()
+	quiz, _ := f.quiz(t, func(q *models.Quiz) { q.OneTimeResults = true }, 1)
+	repo := postgres.NewQuizSubmissionRepository(f.g)
+
+	// Extending an attempt that was turned in meanwhile: no write.
+	sub, err := f.svc.StartSubmission(ctx, quiz.ID, f.students[0], nil)
+	require.NoError(t, err)
+	_, err = f.svc.CompleteSubmission(ctx, sub.ID, f.students[0])
+	require.NoError(t, err)
+	won, err := repo.SetEndAtIfInProgress(ctx, sub.ID, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	assert.False(t, won)
+	var row models.QuizSubmission
+	require.NoError(t, f.g.First(&row, sub.ID).Error)
+	assert.Equal(t, models.QuizSubmissionComplete, row.WorkflowState)
+	assert.Nil(t, row.EndAt)
+
+	// Marking results seen from a stale copy keeps a grader's newer score.
+	stale := row
+	require.NoError(t, f.g.Model(&models.QuizSubmission{}).Where("id = ?", sub.ID).Update("score", 0.5).Error)
+	f.svc.MarkResultsSeen(ctx, quiz, &stale, time.Now())
+	require.NoError(t, f.g.First(&row, sub.ID).Error)
+	require.NotNil(t, row.Score)
+	assert.InDelta(t, 0.5, *row.Score, 1e-9, "the grader's score must survive")
+	require.NotNil(t, row.ResultsSeenAt)
+	first := *row.ResultsSeenAt
+
+	// Only the first view is stamped.
+	f.svc.MarkResultsSeen(ctx, quiz, &models.QuizSubmission{ID: sub.ID, QuizID: quiz.ID, WorkflowState: models.QuizSubmissionComplete}, time.Now().Add(time.Hour))
+	require.NoError(t, f.g.First(&row, sub.ID).Error)
+	assert.WithinDuration(t, first, *row.ResultsSeenAt, time.Second)
+}
+
+// unlinkedWithFailures puts quizzes that can never be linked (their
+// course does not exist, so creating the assignment fails) ahead of the
+// real unlinked quizzes.
+type unlinkedWithFailures struct {
+	real  repository.QuizUnlinkedGradedFinder
+	bogus []models.Quiz
+}
+
+func (u unlinkedWithFailures) ListGradedWithoutAssignment(ctx context.Context, afterID uint, limit int) ([]models.Quiz, error) {
+	var out []models.Quiz
+	for _, b := range u.bogus {
+		if b.ID > afterID && len(out) < limit {
+			out = append(out, b)
+		}
+	}
+	if len(out) == limit {
+		return out, nil
+	}
+	rest, err := u.real.ListGradedWithoutAssignment(ctx, afterID, limit-len(out))
+	return append(out, rest...), err
+}
+
+// G041 review: a full batch of quizzes that keep failing to link must not
+// stop the link job from reaching the quizzes after them.
+func TestQuizLifecycle_LinkJobSkipsPastQuizzesThatFail(t *testing.T) {
+	f := newLifecycleFixture(t, 0)
+	ctx := context.Background()
+	one := 1.0
+	real := &models.Quiz{ID: 5000, CourseID: f.courseID, Title: "Real", QuizType: "assignment", AllowedAttempts: 1,
+		Published: true, WorkflowState: "published", PointsPossible: &one}
+	require.NoError(t, f.g.Create(real).Error)
+
+	var bogus []models.Quiz
+	for i := 1; i <= 100; i++ {
+		bogus = append(bogus, models.Quiz{ID: uint(i), CourseID: 999999, Title: fmt.Sprintf("Ghost %d", i),
+			QuizType: "assignment", WorkflowState: "published"})
+	}
+	deps := f.deps
+	deps.Unlinked = unlinkedWithFailures{real: postgres.NewQuizRepository(f.g), bogus: bogus}
+	svc := f.newService(deps)
+
+	n, err := svc.LinkGradedQuizzes(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	var r models.Quiz
+	require.NoError(t, f.g.First(&r, real.ID).Error)
+	assert.NotNil(t, r.AssignmentID, "the quiz after a full batch of failures is still linked")
+}
+
+type noPlannerNotes struct {
+	repository.PlannerNoteRepository
+}
+
+func (noPlannerNotes) ListByUserID(context.Context, uint, repository.PaginationParams) (*repository.PaginatedResult[models.PlannerNote], error) {
+	return &repository.PaginatedResult[models.PlannerNote]{}, nil
+}
+
+type noPlannerOverrides struct {
+	repository.PlannerOverrideRepository
+}
+
+func (noPlannerOverrides) ListByUserID(context.Context, uint) ([]models.PlannerOverride, error) {
+	return nil, nil
+}
+
+// G041 review: a teacher who takes (previews) a graded quiz gets no row in
+// the gradebook; a student's attempt still does.
+func TestQuizLifecycle_StaffPreviewStaysOutOfGradebook(t *testing.T) {
+	f := newLifecycleFixture(t, 1)
+	require.NoError(t, f.g.Create(&models.Enrollment{UserID: f.teacher, CourseID: f.courseID, Type: "TeacherEnrollment",
+		Role: "TeacherEnrollment", WorkflowState: "active"}).Error)
+	quiz, qs := f.quiz(t, nil, 1)
+
+	f.take(t, quiz, f.teacher, map[uint]string{qs[0].ID: "a"})
+	assert.Nil(t, f.gradebook(t, quiz, f.teacher), "a staff preview must not create a gradebook submission")
+
+	f.take(t, quiz, f.students[0], map[uint]string{qs[0].ID: "a"})
+	sub := f.gradebook(t, quiz, f.students[0])
+	require.NotNil(t, sub)
+	assert.InDelta(t, 1.0, *sub.Score, 1e-9)
+}
+
+// G041 review: a graded survey with an essay question earns its full
+// points and is complete — never "needs grading" in the gradebook.
+func TestQuizLifecycle_GradedSurveyEssayIsNotPendingReview(t *testing.T) {
+	f := newLifecycleFixture(t, 1)
+	ctx := context.Background()
+	quiz, _ := f.quiz(t, func(q *models.Quiz) {
+		q.QuizType = models.QuizTypeGradedSurvey
+		five := 5.0
+		q.PointsPossible = &five
+	}, 0)
+	essay := models.QuizQuestion{QuizID: quiz.ID, Position: 1, QuestionType: "essay",
+		QuestionText: "How was the unit?", Answers: "[]", WorkflowState: "active"}
+	require.NoError(t, f.svc.CreateQuestion(ctx, &essay))
+
+	done := f.take(t, quiz, f.students[0], map[uint]string{essay.ID: "Good"})
+	assert.Equal(t, models.QuizSubmissionComplete, done.WorkflowState)
+	require.NotNil(t, done.Score)
+	assert.InDelta(t, 5.0, *done.Score, 1e-9)
+
+	sub := f.gradebook(t, quiz, f.students[0])
+	require.NotNil(t, sub)
+	assert.Equal(t, models.SubmissionGraded, sub.WorkflowState)
+	assert.InDelta(t, 5.0, *sub.Score, 1e-9)
+
+	// A grader comment on the survey keeps it complete.
+	comment := "Thanks"
+	updated, _, err := f.svc.UpdateQuizScores(ctx, quiz, done, service.QuizScoreUpdate{
+		Questions: map[uint]service.QuestionScoreUpdate{essay.ID: {Comment: &comment}}}, f.teacher)
+	require.NoError(t, err)
+	assert.Equal(t, models.QuizSubmissionComplete, updated.WorkflowState)
+}
+
+// G041 review: now that a graded quiz has an online_quiz assignment, the
+// planner must still list it once (as the quiz), not once per side.
+func TestQuizLifecycle_PlannerListsGradedQuizOnce(t *testing.T) {
+	f := newLifecycleFixture(t, 1)
+	ctx := context.Background()
+	due := time.Now().Add(48 * time.Hour)
+	quiz, _ := f.quiz(t, func(q *models.Quiz) { q.DueAt = &due }, 1)
+	var linked models.Quiz
+	require.NoError(t, f.g.First(&linked, quiz.ID).Error)
+	require.NotNil(t, linked.AssignmentID)
+
+	// Planner notes / overrides have no tables in the migration chain;
+	// they are empty here and beside the point.
+	planner := service.NewPlannerService(noPlannerNotes{}, noPlannerOverrides{},
+		postgres.NewEnrollmentRepository(f.g), postgres.NewAssignmentRepository(f.g), postgres.NewQuizRepository(f.g),
+		postgres.NewCalendarEventRepository(f.g))
+	items, err := planner.GetPlannerItems(ctx, f.students[0], time.Now(), time.Now().Add(7*24*time.Hour))
+	require.NoError(t, err)
+	var kinds []string
+	for _, it := range items {
+		kinds = append(kinds, fmt.Sprintf("%s:%d", it.PlannableType, it.PlannableID))
+	}
+	assert.Equal(t, []string{fmt.Sprintf("quiz:%d", quiz.ID)}, kinds)
 }

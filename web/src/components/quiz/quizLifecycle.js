@@ -72,6 +72,16 @@ export function validateQuizSettings(form = {}) {
   return errors;
 }
 
+// withoutQuizAssignments drops the online_quiz assignments that back the
+// given quizzes, for views that list quizzes and assignments side by side
+// (a graded quiz then appears once, as the quiz).
+export function withoutQuizAssignments(assignments = [], quizzes = []) {
+  const linked = new Set(
+    (quizzes || []).map((q) => q?.assignment_id).filter((id) => id != null).map(String),
+  );
+  return (assignments || []).filter((a) => !linked.has(String(a?.id)));
+}
+
 // isGradedQuizType: graded quizzes and graded surveys live in the gradebook.
 export function isGradedQuizType(type) {
   return !type || type === 'assignment' || type === 'graded_survey';

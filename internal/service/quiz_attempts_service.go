@@ -687,6 +687,12 @@ func (s *QuizService) finalizeAttempt(ctx context.Context, submission *models.Qu
 	if quiz != nil && quiz.QuizType == models.QuizTypeGradedSurvey && quiz.PointsPossible != nil {
 		totalScore = *quiz.PointsPossible
 	}
+	// Canvas never holds a survey attempt for review: its essay answers
+	// are responses, not work to grade (else a graded survey would sit in
+	// the gradebook as "needs grading" for good).
+	if quiz.IsSurvey() {
+		needsReview = false
+	}
 
 	submission.FinishedAt = &finishAt
 	submission.Score = &totalScore

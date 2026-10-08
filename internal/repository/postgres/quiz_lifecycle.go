@@ -118,18 +118,45 @@ func (r *quizSubmissionRepo) ListOverdueUntaken(ctx context.Context, cutoff time
 
 // ---- graded quizzes without a gradebook assignment (quizzes) ----
 
-// ListGradedWithoutAssignment returns live graded quizzes with no
-// assignment_id, oldest first.
-func (r *quizRepo) ListGradedWithoutAssignment(ctx context.Context, limit int) ([]models.Quiz, error) {
+// ListGradedWithoutAssignment returns live graded quizzes with id >
+// afterID that have no gradebook assignment of their own: assignment_id
+// is NULL, or it points at an assignment outside the quiz's course (a
+// link carried over by a copy or import). Oldest first.
+func (r *quizRepo) ListGradedWithoutAssignment(ctx context.Context, afterID uint, limit int) ([]models.Quiz, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	var out []models.Quiz
 	err := r.db.WithContext(ctx).
-		Where("assignment_id IS NULL AND workflow_state <> ?", "deleted").
+		Where("id > ? AND workflow_state <> ?", afterID, "deleted").
+		Where(`(assignment_id IS NULL OR NOT EXISTS (
+			SELECT 1 FROM assignments a WHERE a.id = quizzes.assignment_id AND a.course_id = quizzes.course_id))`).
 		Where("(quiz_type IN (?, ?) OR quiz_type = '' OR quiz_type IS NULL)", models.QuizTypeAssignment, models.QuizTypeGradedSurvey).
 		Order("id ASC").
 		Limit(limit).
 		Find(&out).Error
 	return out, err
+}
+
+// SetEndAtIfInProgress moves an attempt's deadline only while it is still
+// in progress, touching nothing else on the row. Returns false when the
+// attempt was turned in meanwhile (a full-row Save here would reopen it).
+func (r *quizSubmissionRepo) SetEndAtIfInProgress(ctx context.Context, id uint, endAt time.Time) (bool, error) {
+	res := r.db.WithContext(ctx).
+		Model(&models.QuizSubmission{}).
+		Where("id = ? AND workflow_state = ?", id, models.QuizSubmissionUntaken).
+		Updates(map[string]interface{}{"end_at": endAt, "updated_at": time.Now()})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// MarkResultsSeen stamps the first time the student viewed an attempt's
+// results (one_time_results). Only that column is written, and only once.
+func (r *quizSubmissionRepo) MarkResultsSeen(ctx context.Context, id uint, at time.Time) error {
+	return r.db.WithContext(ctx).
+		Model(&models.QuizSubmission{}).
+		Where("id = ? AND results_seen_at IS NULL", id).
+		UpdateColumn("results_seen_at", at).Error
 }

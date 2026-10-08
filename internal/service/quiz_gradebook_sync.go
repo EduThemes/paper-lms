@@ -9,6 +9,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -31,6 +32,10 @@ func (s *SubmissionService) QuizScorePosted(ctx context.Context, assignment *mod
 // quizSubmissionType is the submission_type of a quiz-backed submission.
 const quizSubmissionType = "online_quiz"
 
+// ErrQuizScoreNotStudent is returned when the quiz taker is course staff
+// (a preview), whose score never goes to the gradebook.
+var ErrQuizScoreNotStudent = errors.New("quiz taker is not a student of the course")
+
 // RecordQuizScore writes a quiz attempt's kept score onto the student's
 // submission for the quiz's assignment, creating the submission when it
 // does not exist. The submission is stamped with the attempt's finish
@@ -43,6 +48,15 @@ const quizSubmissionType = "online_quiz"
 func (s *SubmissionService) RecordQuizScore(ctx context.Context, assignment *models.Assignment, rec QuizScoreRecord) (*models.Submission, error) {
 	if assignment == nil {
 		return nil, ErrAssignmentUnavailable
+	}
+	// Staff who take (preview) a quiz get no gradebook row: their highest
+	// active enrollment in the course is not a student one. A student
+	// whose enrollment has since concluded still has their score kept.
+	// accountID=0: internal caller (course id comes from the quiz row).
+	if s.enrollmentRepo != nil {
+		if e, err := s.enrollmentRepo.FindByUserAndCourse(ctx, rec.UserID, assignment.CourseID, 0); err == nil && e != nil && e.Type != "StudentEnrollment" {
+			return nil, ErrQuizScoreNotStudent
+		}
 	}
 	if closed, periodTitle := s.isGradingPeriodClosed(ctx, assignment); closed {
 		return nil, fmt.Errorf("grading period %q is closed — grades cannot be modified", periodTitle)
