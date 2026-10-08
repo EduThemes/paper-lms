@@ -497,3 +497,69 @@ func TestMasteryPaths_GateAssignmentVisibility(t *testing.T) {
 	resp := testutil.MakeRequest(altApp, http.MethodGet, fmt.Sprintf("/courses/%d/assignments/%d", cid, low.ID), nil)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
+
+// G063: a module item that links draft or deleted content is hidden from
+// students (module lists and progress requirements) while staff still
+// see it; publishing the content brings the item back.
+func TestModuleItems_DraftContentHiddenFromStudents(t *testing.T) {
+	f := newMPFixture(t)
+	g := f.g
+	cid := f.course.ID
+
+	draftPage := &models.WikiPage{CourseID: cid, Title: "Draft notes", URL: "draft-notes", WorkflowState: "unpublished"}
+	require.NoError(t, g.Create(draftPage).Error)
+	draftAssignment := &models.Assignment{CourseID: cid, Name: "Draft essay", WorkflowState: models.AssignmentUnpublished}
+	require.NoError(t, g.Create(draftAssignment).Error)
+	mod := &models.ContextModule{CourseID: cid, Name: "Extras", Position: 5, WorkflowState: "active"}
+	require.NoError(t, g.Create(mod).Error)
+	pageItem := mpItem(t, g, mod.ID, 1, "WikiPage", draftPage.ID, models.ModuleCompletionMustView, "draft-notes")
+	assignmentItem := mpItem(t, g, mod.ID, 2, "Assignment", draftAssignment.ID, "", "")
+	urlItem := &models.ContentTag{ContextModuleID: mod.ID, Position: 3, ContentType: "ExternalUrl", Title: "Reference", URL: "https://example.org/ref", WorkflowState: models.ContentTagActive}
+	require.NoError(t, g.Create(urlItem).Error)
+
+	moduleHandler := handlers.NewModuleHandler(service.NewModuleService(postgres.NewModuleRepository(g), postgres.NewModuleItemRepository(g)))
+	moduleHandler.SetProgressionService(f.progression)
+	itemsOf := func(userID uint, enrollment string) map[uint]bool {
+		app := f.app(userID, 1, enrollment)
+		app.Get("/courses/:course_id/modules", moduleHandler.ListModules)
+		resp := testutil.MakeRequest(app, http.MethodGet, fmt.Sprintf("/courses/%d/modules?include[]=items&per_page=50", cid), nil)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		rows, err := testutil.ParseJSONArray(resp)
+		require.NoError(t, err)
+		out := map[uint]bool{}
+		for _, r := range rows {
+			items, _ := r["items"].([]interface{})
+			for _, it := range items {
+				out[uint(it.(map[string]interface{})["id"].(float64))] = true
+			}
+		}
+		return out
+	}
+
+	student := itemsOf(f.student, "StudentEnrollment")
+	assert.False(t, student[pageItem.ID], "draft page item hidden from students")
+	assert.False(t, student[assignmentItem.ID], "draft assignment item hidden from students")
+	assert.True(t, student[urlItem.ID], "items without publishable content stay visible")
+	teacher := itemsOf(f.teacher, "TeacherEnrollment")
+	assert.True(t, teacher[pageItem.ID])
+	assert.True(t, teacher[assignmentItem.ID])
+
+	// The hidden must_view requirement does not count toward the module.
+	p := f.progress(t, f.app(f.student, 1, "StudentEnrollment"), "")
+	_, locked := itemState(p, pageItem.ID)
+	assert.False(t, locked)
+	for _, m := range p.Modules {
+		if m.ModuleID != mod.ID {
+			continue
+		}
+		for _, it := range m.Items {
+			assert.NotEqual(t, pageItem.ID, it.ItemID, "a hidden item is not in the student's progress")
+		}
+	}
+
+	// Publishing the page brings its item back.
+	require.NoError(t, g.Model(draftPage).Update("workflow_state", "active").Error)
+	student = itemsOf(f.student, "StudentEnrollment")
+	assert.True(t, student[pageItem.ID])
+	assert.False(t, student[assignmentItem.ID])
+}

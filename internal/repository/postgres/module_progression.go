@@ -366,3 +366,36 @@ func (r *ModuleProgressionRepository) AttachmentCourseID(ctx context.Context, at
 	}
 	return att.ContextID, true, nil
 }
+
+// UnpublishedContent lists the course content a student may not open
+// because it is a draft or deleted, keyed by kind ("Assignment", "Quiz",
+// "DiscussionTopic", "WikiPage", "Attachment") then content id (G063).
+// A module item linking such content is hidden from students, as Canvas
+// keeps a module item's published state in step with its content.
+func (r *ModuleProgressionRepository) UnpublishedContent(ctx context.Context, courseID uint) (map[string]map[uint]bool, error) {
+	queries := []struct {
+		kind, table, where string
+	}{
+		// Mirrors Assignment.IsPublished: 'published', or a legacy blank
+		// state with the published flag set.
+		{"Assignment", "assignments", "course_id = ? AND NOT (workflow_state = 'published' OR (workflow_state = '' AND published))"},
+		// Mirrors quizVisibleToStudents.
+		{"Quiz", "quizzes", "course_id = ? AND (workflow_state = 'deleted' OR NOT (published OR workflow_state = 'published'))"},
+		{"DiscussionTopic", "discussion_topics", "course_id = ? AND workflow_state IN ('unpublished', 'deleted')"},
+		{"WikiPage", "wiki_pages", "course_id = ? AND workflow_state <> 'active'"},
+		{"Attachment", "attachments", "context_type = 'Course' AND context_id = ? AND workflow_state = 'deleted'"},
+	}
+	out := make(map[string]map[uint]bool, len(queries))
+	for _, q := range queries {
+		var ids []uint
+		if err := r.db.WithContext(ctx).Table(q.table).Where(q.where, courseID).Pluck("id", &ids).Error; err != nil {
+			return nil, err
+		}
+		set := make(map[uint]bool, len(ids))
+		for _, id := range ids {
+			set[id] = true
+		}
+		out[q.kind] = set
+	}
+	return out, nil
+}

@@ -30,6 +30,7 @@ type ModuleProgressionStore interface {
 	ListItemsForContent(ctx context.Context, courseID uint, contentTypes []string, contentID uint) ([]models.ContentTag, error)
 	ResolvePageID(ctx context.Context, courseID uint, key string) (uint, bool, error)
 	AttachmentCourseID(ctx context.Context, attachmentID uint) (uint, bool, error)
+	UnpublishedContent(ctx context.Context, courseID uint) (map[string]map[uint]bool, error)
 }
 
 // AssignmentVisibility hides assignments a student may not see yet —
@@ -157,15 +158,42 @@ func (s *ModuleProgressionService) hiddenAssignments(ctx context.Context, course
 	return s.visibility.HiddenAssignmentIDs(ctx, courseID, userID)
 }
 
+// contentKind maps a module item's content type to the kind keys of
+// ModuleProgressionStore.UnpublishedContent ("" for items with no
+// publishable content: URLs, tools, sub headers).
+func contentKind(contentType string) string {
+	switch contentType {
+	case "Assignment", "DiscussionTopic", "WikiPage", "Attachment":
+		return contentType
+	case "Quizzes::Quiz", "Quiz":
+		return "Quiz"
+	}
+	return ""
+}
+
 // VisibleItemFilter returns a predicate that drops module items the
-// student may not see (Mastery Paths assignments not released to them).
+// student may not see: Mastery Paths assignments not released to them
+// (G080) and items whose linked content is a draft or deleted (G063).
 func (s *ModuleProgressionService) VisibleItemFilter(ctx context.Context, courseID, userID uint) (func(models.ContentTag) bool, error) {
 	hidden, err := s.hiddenAssignments(ctx, courseID, userID)
 	if err != nil {
 		return nil, err
 	}
+	drafts, err := s.store.UnpublishedContent(ctx, courseID)
+	if err != nil {
+		return nil, err
+	}
 	return func(it models.ContentTag) bool {
-		return !(it.ContentType == "Assignment" && it.ContentID != nil && hidden[*it.ContentID])
+		if it.ContentID == nil {
+			return true
+		}
+		if it.ContentType == "Assignment" && hidden[*it.ContentID] {
+			return false
+		}
+		if kind := contentKind(it.ContentType); kind != "" && drafts[kind][*it.ContentID] {
+			return false
+		}
+		return true
 	}, nil
 }
 
