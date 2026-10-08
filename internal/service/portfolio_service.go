@@ -505,10 +505,26 @@ func (s *PortfolioService) ListArtifacts(ctx context.Context, portfolioID uint, 
 // portfolio owner, or to a different course than courseID (when given), are
 // skipped so a student cannot copy a classmate's work into their portfolio.
 func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uint, courseID uint, submissionIDs []uint, accountID uint) ([]models.PortfolioArtifact, error) {
+	return s.ImportSubmissions(ctx, portfolioID, courseID, submissionIDs, nil, accountID)
+}
+
+// ImportSubmissions is ImportFromCourse into an optional section (G155).
+// Like Canvas "add a submission to an ePortfolio" it carries the work over:
+// a course_work artifact with the submission's text or link, plus one file
+// artifact per uploaded file (linked through the portfolio's file route —
+// submission uploads are the student's own User files). A submission that
+// is already in the portfolio is not imported twice.
+func (s *PortfolioService) ImportSubmissions(ctx context.Context, portfolioID uint, courseID uint, submissionIDs []uint, sectionID *uint, accountID uint) ([]models.PortfolioArtifact, error) {
 	portfolio, err := s.portfolioRepo.FindByID(ctx, portfolioID, accountID)
 	if err != nil {
 		return nil, errors.New("portfolio not found")
 	}
+	if sectionID != nil {
+		if _, err := s.GetSection(ctx, portfolio.ID, *sectionID, accountID); err != nil {
+			return nil, ErrPortfolioChildNotFound
+		}
+	}
+	alreadyImported := s.importedSubmissionIDs(ctx, portfolio.ID)
 
 	var submissions []models.Submission
 	if len(submissionIDs) == 0 {
@@ -538,7 +554,7 @@ func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uin
 
 	for i := range submissions {
 		submission := &submissions[i]
-		if submission.UserID != portfolio.UserID {
+		if submission.UserID != portfolio.UserID || alreadyImported[submission.ID] {
 			continue
 		}
 		submissionID := submission.ID
@@ -560,6 +576,7 @@ func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uin
 		sourceID := submissionID
 		artifact := models.PortfolioArtifact{
 			PortfolioID:    portfolio.ID,
+			SectionID:      sectionID,
 			Title:          artifactTitle,
 			ArtifactType:   "course_work",
 			SourceType:     "course_submission",
@@ -567,8 +584,9 @@ func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uin
 			SourceID:       &sourceID,
 		}
 
-		// Copy submission URL / text body if available
-		if submission.URL != nil {
+		// Copy submission URL / text body if available. The link is shown
+		// as an href on the public page, so only web links are kept.
+		if submission.URL != nil && isWebURL(*submission.URL) {
 			artifact.ContentURL = *submission.URL
 		}
 		if submission.Body != nil {
@@ -582,9 +600,103 @@ func (s *PortfolioService) ImportFromCourse(ctx context.Context, portfolioID uin
 		}
 
 		imported = append(imported, artifact)
+
+		for _, f := range submissionFiles(submission) {
+			attachmentID := f.ID
+			fileArtifact := models.PortfolioArtifact{
+				PortfolioID:    portfolio.ID,
+				SectionID:      sectionID,
+				Title:          artifactTitle + " — " + f.name(),
+				ArtifactType:   artifactTypeForMIME(f.ContentType),
+				ContentURL:     PortfolioUploadURL(portfolio.ID, attachmentID),
+				SourceType:     "upload",
+				SourceCourseID: &sourceCourseID,
+				SourceID:       &attachmentID,
+				FileType:       fileExt(f.name()),
+				FileSizeBytes:  f.Size,
+			}
+			if err := s.artifactRepo.Create(ctx, &fileArtifact); err == nil {
+				imported = append(imported, fileArtifact)
+			}
+		}
 	}
 
 	return imported, nil
+}
+
+// importedSubmissionIDs lists submissions already imported into the
+// portfolio (course_submission artifacts).
+func (s *PortfolioService) importedSubmissionIDs(ctx context.Context, portfolioID uint) map[uint]bool {
+	out := map[uint]bool{}
+	res, err := s.artifactRepo.ListByPortfolioID(ctx, portfolioID, repository.PaginationParams{Page: 1, PerPage: 1000})
+	if err != nil || res == nil {
+		return out
+	}
+	for _, a := range res.Items {
+		if a.SourceType == "course_submission" && a.SourceID != nil {
+			out[*a.SourceID] = true
+		}
+	}
+	return out
+}
+
+// submissionFile is one entry of Submission.Attachments (JSON written by
+// the submission handler).
+type submissionFile struct {
+	ID          uint   `json:"id"`
+	DisplayName string `json:"display_name"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
+}
+
+func (f submissionFile) name() string {
+	if f.DisplayName != "" {
+		return f.DisplayName
+	}
+	if f.Filename != "" {
+		return f.Filename
+	}
+	return fmt.Sprintf("file %d", f.ID)
+}
+
+func submissionFiles(sub *models.Submission) []submissionFile {
+	if sub == nil || sub.Attachments == nil || strings.TrimSpace(*sub.Attachments) == "" {
+		return nil
+	}
+	var files []submissionFile
+	if err := json.Unmarshal([]byte(*sub.Attachments), &files); err != nil {
+		return nil
+	}
+	out := files[:0]
+	for _, f := range files {
+		if f.ID != 0 {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func artifactTypeForMIME(contentType string) string {
+	switch {
+	case strings.HasPrefix(contentType, "image/"):
+		return "image"
+	case strings.HasPrefix(contentType, "video/"):
+		return "video"
+	}
+	return "document"
+}
+
+func fileExt(name string) string {
+	if i := strings.LastIndexByte(name, '.'); i >= 0 && i < len(name)-1 {
+		return strings.ToLower(name[i+1:])
+	}
+	return ""
+}
+
+func isWebURL(raw string) bool {
+	lower := strings.ToLower(strings.TrimSpace(raw))
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 }
 
 // ---------------------------------------------------------------------------

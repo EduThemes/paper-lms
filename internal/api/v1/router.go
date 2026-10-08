@@ -188,6 +188,7 @@ func (r *Router) Register(app *fiber.App) {
 
 	authLimit := middleware.AuthRateLimit()
 	r.registerPublicRoutes(api, authLimit)
+	r.registerLearnerOutcomesPublicRoutes(api)
 
 	// Protected routes (authentication required)
 	protected := api.Group("", r.AuthMiddleware.Protected(), middleware.CSRFProtection())
