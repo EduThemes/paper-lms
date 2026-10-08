@@ -82,6 +82,42 @@ func TestSanitize_BlocksDangerousCSSAndMarkup(t *testing.T) {
 	}
 }
 
+// TestPlainText is the B005 regression: plain-text fields keep apostrophes and
+// ampersands literally (no entity encoding) while still carrying no markup.
+func TestPlainText(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"apostrophe and ampersand kept literally", "Don't forget A & B", "Don't forget A & B"},
+		{"quotes kept", `She said "hi"`, `She said "hi"`},
+		{"newlines kept", "line one\nline two\n\nline three", "line one\nline two\n\nline three"},
+		{"lone less-than kept", "x < y and 3 > 2", "x < y and 3 > 2"},
+		{"legacy entity-encoded value is repaired", "Don&#39;t forget A &amp; B", "Don't forget A & B"},
+		{"markup stripped", `<b>bold</b> <img src=x onerror="alert(1)">text`, "bold text"},
+		{"encoded markup decoded then stripped", "&lt;img src=x onerror=alert(1)&gt;safe", "safe"},
+		{"double-encoded markup stripped", "&amp;lt;script&amp;gt;alert(1)&amp;lt;/script&amp;gt;ok", "ok"},
+		{"empty", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := PlainText(tc.in)
+			if got != tc.want {
+				t.Errorf("PlainText(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			if again := PlainText(got); again != got {
+				t.Errorf("PlainText not idempotent: %q -> %q", got, again)
+			}
+			for _, bad := range []string{"<img", "<script", "onerror="} {
+				if strings.Contains(got, bad) {
+					t.Errorf("PlainText(%q) still contains markup %q: %q", tc.in, bad, got)
+				}
+			}
+		})
+	}
+}
+
 func TestSanitize_Idempotent(t *testing.T) {
 	in := `<h2 style="text-align: center">Don't &amp; <mark style="background-color: #ffc078">x</mark></h2><a href="https://example.com" target="_blank">l</a>`
 	first := Sanitize(in)

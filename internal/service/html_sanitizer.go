@@ -23,3 +23,12 @@ import "github.com/EduThemes/paper-lms/internal/security/htmlsanitize"
 func SanitizeHTML(input string) string {
 	return htmlsanitize.Sanitize(input)
 }
+
+// SanitizePlainText is the sanitizer for plain-text fields (descriptions and
+// messages typed into a textarea and rendered by the client as text). It
+// strips all markup but keeps the text literal — "Don't forget A & B" is
+// stored as typed instead of "Don&#39;t forget A &amp; B" (B005). See
+// htmlsanitize.PlainText.
+func SanitizePlainText(input string) string {
+	return htmlsanitize.PlainText(input)
+}

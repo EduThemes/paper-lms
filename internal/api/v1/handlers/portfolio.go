@@ -203,7 +203,7 @@ func (h *PortfolioHandler) CreatePortfolio(c *fiber.Ctx) error {
 	portfolio := &models.Portfolio{
 		UserID:         uint(userID),
 		Title:          input.Portfolio.Title,
-		Description:    service.SanitizeHTML(input.Portfolio.Description),
+		Description:    service.SanitizePlainText(input.Portfolio.Description),
 		ThemeID:        input.Portfolio.ThemeID,
 		CustomCSS:      input.Portfolio.CustomCSS,
 		HeaderImageURL: input.Portfolio.HeaderImageURL,
@@ -272,7 +272,7 @@ func (h *PortfolioHandler) UpdatePortfolio(c *fiber.Ctx) error {
 		portfolio.Title = *input.Portfolio.Title
 	}
 	if input.Portfolio.Description != nil {
-		portfolio.Description = service.SanitizeHTML(*input.Portfolio.Description)
+		portfolio.Description = service.SanitizePlainText(*input.Portfolio.Description)
 	}
 	if input.Portfolio.ThemeID != nil {
 		portfolio.ThemeID = *input.Portfolio.ThemeID
@@ -547,7 +547,7 @@ func (h *PortfolioHandler) AddArtifact(c *fiber.Ctx) error {
 		PortfolioID:   portfolio.ID,
 		SectionID:     input.Artifact.SectionID,
 		Title:         input.Artifact.Title,
-		Description:   service.SanitizeHTML(input.Artifact.Description),
+		Description:   service.SanitizePlainText(input.Artifact.Description),
 		ArtifactType:  input.Artifact.ArtifactType,
 		ContentURL:    input.Artifact.ContentURL,
 		ThumbnailURL:  input.Artifact.ThumbnailURL,
@@ -607,7 +607,7 @@ func (h *PortfolioHandler) UpdateArtifact(c *fiber.Ctx) error {
 		artifact.Title = *input.Artifact.Title
 	}
 	if input.Artifact.Description != nil {
-		artifact.Description = service.SanitizeHTML(*input.Artifact.Description)
+		artifact.Description = service.SanitizePlainText(*input.Artifact.Description)
 	}
 	if input.Artifact.ArtifactType != nil {
 		artifact.ArtifactType = *input.Artifact.ArtifactType

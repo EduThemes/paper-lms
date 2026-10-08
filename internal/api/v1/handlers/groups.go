@@ -340,7 +340,7 @@ func (h *GroupHandler) CreateGroup(c *fiber.Ctx) error {
 	group := &models.Group{
 		GroupCategoryID: uint(categoryID),
 		Name:            input.Group.Name,
-		Description:     service.SanitizeHTML(input.Group.Description),
+		Description:     service.SanitizePlainText(input.Group.Description),
 		MaxMembership:   input.Group.MaxMembership,
 		IsPublic:        input.Group.IsPublic,
 		JoinLevel:       input.Group.JoinLevel,
@@ -414,7 +414,7 @@ func (h *GroupHandler) UpdateGroup(c *fiber.Ctx) error {
 		group.Name = *input.Group.Name
 	}
 	if input.Group.Description != nil {
-		group.Description = service.SanitizeHTML(*input.Group.Description)
+		group.Description = service.SanitizePlainText(*input.Group.Description)
 	}
 	if input.Group.MaxMembership != nil {
 		group.MaxMembership = input.Group.MaxMembership

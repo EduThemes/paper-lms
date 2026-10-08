@@ -17,6 +17,7 @@
 package htmlsanitize
 
 import (
+	"html"
 	"regexp"
 	"sync"
 
@@ -122,7 +123,7 @@ func buildPolicy() *bluemonday.Policy {
 
 // Sanitize cleans untrusted HTML before it is persisted. It is idempotent and
 // returns "" for "". Note that it entity-encodes text (' becomes &#39;), so it
-// must only be applied to fields that are rendered as HTML — never to
+// must only be applied to fields that are rendered as HTML — use PlainText for
 // plain-text fields that the client renders as text.
 func Sanitize(input string) string {
 	if input == "" {
@@ -132,4 +133,42 @@ func Sanitize(input string) string {
 		policy = buildPolicy()
 	})
 	return policy.Sanitize(input)
+}
+
+var strictPolicy = bluemonday.StrictPolicy()
+
+// maxPlainTextPasses bounds the strip/decode loop in PlainText. Each pass can
+// only shorten the string or leave it unchanged, so in practice it converges
+// in one or two passes; the bound just guarantees termination.
+const maxPlainTextPasses = 8
+
+// PlainText sanitizes a plain-text field (a description or message typed into
+// a <textarea> and rendered by the client as text).
+//
+// Sanitize is wrong for these fields: bluemonday re-serializes text with HTML
+// entity escaping, so "Don't forget A & B" was stored as
+// "Don&#39;t forget A &amp; B" and shown literally by the client (B005).
+//
+// PlainText strips every tag (StrictPolicy) and decodes entities, repeating
+// until the value is stable. The result is literal text — apostrophes and
+// ampersands are kept as typed — and still contains no markup an HTML parser
+// would recognise, so it stays inert even if a consumer renders it as HTML
+// (an encoded payload such as "&lt;img onerror=...&gt;" is decoded and then
+// stripped on the next pass). Text that merely looks like a tag ("<b>") is
+// removed, which is acceptable for a field that must not contain HTML.
+func PlainText(input string) string {
+	out := input
+	for i := 0; i < maxPlainTextPasses; i++ {
+		if out == "" {
+			return out
+		}
+		next := html.UnescapeString(strictPolicy.Sanitize(out))
+		if next == out {
+			return out
+		}
+		out = next
+	}
+	// Did not converge (pathological nesting): fall back to the escaped,
+	// tag-free form, which is always inert.
+	return strictPolicy.Sanitize(out)
 }
