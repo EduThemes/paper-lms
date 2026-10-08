@@ -351,6 +351,26 @@ func TestQuizLifecycle_Extensions(t *testing.T) {
 	assert.Equal(t, second.ID, rows[0].InProgressID)
 }
 
+// G047: "extend the attempt" on an attempt with no deadline leaves it
+// without one (it must not start an auto-submit clock).
+func TestQuizLifecycle_ExtendUntimedAttemptKeepsNoDeadline(t *testing.T) {
+	f := newLifecycleFixture(t, 1)
+	ctx := context.Background()
+	quiz, _ := f.quiz(t, nil, 1)
+	student := f.students[0]
+	sub, err := f.svc.StartSubmission(ctx, quiz.ID, student, nil)
+	require.NoError(t, err)
+	require.Nil(t, sub.EndAt)
+
+	ten := 10
+	_, extended, err := f.svc.SetQuizExtension(ctx, quiz, service.QuizExtensionInput{UserID: student, ExtendFromNow: &ten}, f.teacher)
+	require.NoError(t, err)
+	assert.Nil(t, extended)
+	var reloaded models.QuizSubmission
+	require.NoError(t, f.g.First(&reloaded, sub.ID).Error)
+	assert.Nil(t, reloaded.EndAt)
+}
+
 func TestQuizLifecycle_ManualUnlockAndLockCap(t *testing.T) {
 	f := newLifecycleFixture(t, 2)
 	ctx := context.Background()

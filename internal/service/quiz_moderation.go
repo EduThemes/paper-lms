@@ -71,8 +71,10 @@ func (s *QuizService) SetQuizExtension(ctx context.Context, quiz *models.Quiz, i
 		return &ext, nil, nil
 	}
 	latest, err := s.submissionRepo.FindByQuizAndUser(ctx, quiz.ID, in.UserID)
-	if err != nil || latest == nil || latest.WorkflowState != models.QuizSubmissionUntaken {
-		return &ext, nil, nil // nothing in progress to extend
+	if err != nil || latest == nil || latest.WorkflowState != models.QuizSubmissionUntaken || latest.EndAt == nil {
+		// Nothing in progress to extend; an attempt with no deadline (no
+		// time limit, no lock date) must not be given one here.
+		return &ext, nil, nil
 	}
 	now := time.Now()
 	var newEnd time.Time

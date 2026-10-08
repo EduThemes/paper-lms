@@ -43,7 +43,8 @@ function ExtensionDialog({ student, name, timed, onClose, onSave, saving }) {
             <input type="checkbox" checked={form.manually_unlocked} onChange={set('manually_unlocked')} />
             Manually unlock the quiz for this student (ignore the availability dates)
           </label>
-          {student.in_progress_id ? (
+          {/* Only a timed (or lock-capped) attempt has a deadline to extend. */}
+          {student.in_progress_id && student.in_progress_end_at ? (
             <div>
               <label htmlFor="ext-now" className="block text-sm font-medium text-text-secondary mb-1">
                 Extend the attempt in progress (minutes from now)
