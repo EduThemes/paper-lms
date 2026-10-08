@@ -125,9 +125,11 @@ func lti11Roles(enrollmentType string, isAdmin bool) string {
 	return strings.Join(roles, ",")
 }
 
-// outcomeKeys derives the HMAC keys that sign LTI 1.1 sourcedids from
-// the platform keys (current first), so every replica shares them and
-// a sourcedid survives one key rotation.
+// outcomeKeys derives the HMAC keys of the LTI 1.1 sourcedid and opaque
+// user_id. The first key signs: the stored, never-rotated "lti11" key
+// when there is one (so sourcedids and user ids survive any number of
+// platform key rotations), else the operator-managed env key, which
+// never rotates either. Every replica derives the same keys.
 func (s *LTIService) outcomeKeys() [][]byte {
 	s.keyMu.RLock()
 	defer s.keyMu.RUnlock()
@@ -140,11 +142,10 @@ func (s *LTIService) outcomeKeys() [][]byte {
 		sum := sha256.Sum256(append([]byte("paper-lms:lti11-outcomes:"), der...))
 		out = append(out, sum[:])
 	}
-	if s.platformKey != nil {
+	if s.stableKey != nil {
+		add(s.stableKey)
+	} else if s.platformKey != nil {
 		add(s.platformKey)
-	}
-	for _, k := range s.extraKeys {
-		add(k.key)
 	}
 	return out
 }
@@ -199,7 +200,7 @@ func (s *LTIService) opaqueUserID(userID uint) string {
 	if len(keys) == 0 {
 		return strconv.FormatUint(uint64(userID), 10)
 	}
-	mac := hmac.New(sha256.New, keys[len(keys)-1])
+	mac := hmac.New(sha256.New, keys[0])
 	fmt.Fprintf(mac, "user:%d", userID)
 	return hex.EncodeToString(mac.Sum(nil))[:40]
 }

@@ -253,6 +253,9 @@ func (p *ltiParams) get(name string) string {
 // JWKS returns the platform's public keys in JSON Web Key Set format.
 // GET /api/v1/lti/jwks (PUBLIC - no auth)
 func (h *LTIHandler) JWKS(c *fiber.Ctx) error {
+	// G126: a rotation on another replica must reach this replica's key
+	// set too, or tools keep fetching a JWKS without the signing key.
+	h.ltiService.RefreshPlatformKeys(c.Context())
 	jwks, err := h.ltiService.GetJWKS()
 	if err != nil {
 		return responses.InternalError(c, "Could not retrieve platform keys")

@@ -252,6 +252,7 @@ func newLTILane(t *testing.T) *ltiLane {
 	app.Get("/courses/:course_id/external_tools/:id/launch", ltiCaller, h.LaunchCourseTool)
 	app.Get("/courses/:course_id/assignments/:assignment_id/external_tool", ltiCaller, h.GetAssignmentExternalTool)
 	app.Put("/courses/:course_id/assignments/:assignment_id/external_tool", ltiCaller, h.PutAssignmentExternalTool)
+	app.Delete("/courses/:course_id/assignments/:assignment_id/external_tool", ltiCaller, h.DeleteAssignmentExternalTool)
 	app.Post("/courses/:course_id/modules/:module_id/external_tool_items", ltiCaller, h.CreateModuleExternalToolItem)
 	l.app = app
 
@@ -820,6 +821,152 @@ func TestLTIAdvantage_EndToEnd(t *testing.T) {
 		resp, _ = l.do(ltiReq{method: "GET", path: fmt.Sprintf("/lti/courses/%d/line_items", l.course.ID), bearer: accessToken})
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
+
+	// --- review repairs ---------------------------------------------------------------------
+	t.Run("detaching a tool from an assignment revokes its line items", func(t *testing.T) {
+		_, fresh := l.serviceToken(clientID, strings.Join(service.LTIAdvantageScopes, " "), "jti-detach")
+		token := fresh["access_token"].(string)
+		a := &models.Assignment{CourseID: l.course.ID, Name: "Detached lab", WorkflowState: models.AssignmentPublished, Published: true}
+		require.NoError(t, postgres.NewAssignmentRepository(l.g).Create(ctx, a))
+		path := fmt.Sprintf("/courses/%d/assignments/%d/external_tool", l.course.ID, a.ID)
+		resp, body := l.do(ltiReq{method: "PUT", path: path, user: l.teacher.ID, account: 1, enrollment: "TeacherEnrollment",
+			body: jsonReader(map[string]interface{}{"tool_id": toolID})})
+		require.Equal(t, http.StatusOK, resp.StatusCode, body)
+		li, err := postgres.NewLTILineItemRepository(l.g).FindByAssignmentID(ctx, a.ID)
+		require.NoError(t, err)
+		require.NotNil(t, li.DeveloperKeyID)
+		scorePath := fmt.Sprintf("/lti/courses/%d/line_items/%d/scores", l.course.ID, li.ID)
+		score := func() int {
+			resp, _ := l.do(ltiReq{method: "POST", path: scorePath, bearer: token, contentType: "application/vnd.ims.lis.v1.score+json",
+				body: jsonReader(map[string]interface{}{"userId": strconv.Itoa(int(l.student.ID)), "scoreGiven": 3, "scoreMaximum": 100,
+					"activityProgress": "Completed", "gradingProgress": "FullyGraded"})})
+			return resp.StatusCode
+		}
+		require.Equal(t, http.StatusNoContent, score(), "the attached tool grades the assignment")
+
+		resp, body = l.do(ltiReq{method: "DELETE", path: path, user: l.teacher.ID, account: 1, enrollment: "TeacherEnrollment"})
+		require.Equal(t, http.StatusNoContent, resp.StatusCode, body)
+		li, err = postgres.NewLTILineItemRepository(l.g).FindByAssignmentID(ctx, a.ID)
+		require.NoError(t, err)
+		assert.Nil(t, li.DeveloperKeyID, "the detached tool no longer owns the line item")
+		assert.Equal(t, http.StatusNotFound, score(), "the detached tool can no longer post scores")
+		resp, body = l.do(ltiReq{method: "GET", path: fmt.Sprintf("/lti/courses/%d/line_items", l.course.ID), bearer: token})
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.NotContains(t, body, "Detached lab")
+	})
+
+	t.Run("module item launches follow module publication", func(t *testing.T) {
+		hidden := &models.ContextModule{CourseID: l.course.ID, Name: "Draft week", WorkflowState: "unpublished"}
+		require.NoError(t, postgres.NewModuleRepository(l.g).Create(ctx, hidden))
+		resp, body := l.do(ltiReq{method: "POST", path: fmt.Sprintf("/courses/%d/modules/%d/external_tool_items", l.course.ID, hidden.ID), user: l.teacher.ID, account: 1, enrollment: "TeacherEnrollment",
+			body: jsonReader(map[string]interface{}{"tool_id": toolID, "title": "Draft tool"})})
+		require.Equal(t, http.StatusCreated, resp.StatusCode, body)
+		var item map[string]interface{}
+		require.NoError(t, json.Unmarshal([]byte(body), &item))
+		tagID := uint(item["id"].(float64))
+		var link models.LTIResourceLink
+		require.NoError(t, l.g.Where("content_tag_id = ?", tagID).First(&link).Error)
+
+		launch := func(u *models.User, enrollment, query string) int {
+			resp, _ := l.do(ltiReq{method: "GET", path: fmt.Sprintf("/courses/%d/external_tools/%s/launch?%s", l.course.ID, toolID, query), user: u.ID, account: 1, enrollment: enrollment})
+			return resp.StatusCode
+		}
+		byItem := fmt.Sprintf("module_item_id=%d", tagID)
+		byLink := "resource_link_id=" + link.ResourceLinkID
+		assert.Equal(t, http.StatusNotFound, launch(l.student, "StudentEnrollment", byItem), "items of an unpublished module do not launch for students")
+		assert.Equal(t, http.StatusNotFound, launch(l.student, "StudentEnrollment", byLink), "nor through their resource link id")
+		assert.Equal(t, http.StatusFound, launch(l.teacher, "TeacherEnrollment", byItem), "staff preview unpublished modules")
+
+		require.NoError(t, l.g.Model(&models.ContextModule{}).Where("id = ?", hidden.ID).Update("workflow_state", "active").Error)
+		assert.Equal(t, http.StatusFound, launch(l.student, "StudentEnrollment", byItem))
+		assert.Equal(t, http.StatusFound, launch(l.student, "StudentEnrollment", byLink))
+	})
+
+	t.Run("deep linking drops a non-https resource link url", func(t *testing.T) {
+		claims := l.launch(l.teacher, "TeacherEnrollment", clientID, fmt.Sprintf("%s/launch?placement=link_selection&deep_link=module&module_id=%d", toolID, l.module.ID))
+		settings := claims["https://purl.imsglobal.org/spec/lti-dl/claim/deep_linking_settings"].(map[string]interface{})
+		respJWT := l.signTool(jwt.MapClaims{
+			"iss": clientID, "aud": ltiIssuer, "exp": time.Now().Add(5 * time.Minute).Unix(), "nonce": "dl-js-url",
+			"https://purl.imsglobal.org/spec/lti/claim/message_type":  "LtiDeepLinkingResponse",
+			"https://purl.imsglobal.org/spec/lti/claim/version":       "1.3.0",
+			"https://purl.imsglobal.org/spec/lti/claim/deployment_id": deploymentID,
+			"https://purl.imsglobal.org/spec/lti-dl/claim/data":       settings["data"],
+			"https://purl.imsglobal.org/spec/lti-dl/claim/content_items": []map[string]interface{}{
+				{"type": "ltiResourceLink", "title": "Scripted", "url": "javascript:alert(document.cookie)"},
+			},
+		})
+		resp, body := l.do(ltiReq{method: "POST", path: "/lti/deep_linking_response", contentType: "application/x-www-form-urlencoded",
+			body: strings.NewReader(url.Values{"JWT": {respJWT}}.Encode())})
+		require.Equal(t, http.StatusOK, resp.StatusCode, body)
+		var tag models.ContentTag
+		require.NoError(t, l.g.Where("context_module_id = ? AND title = ?", l.module.ID, "Scripted").First(&tag).Error)
+		assert.Empty(t, tag.URL)
+		var link models.LTIResourceLink
+		require.NoError(t, l.g.Where("content_tag_id = ?", tag.ID).First(&link).Error)
+		assert.Empty(t, link.URL)
+	})
+
+	t.Run("LTI 1.1 user ids and sourcedids survive key rotations", func(t *testing.T) {
+		lti11 := &models.ContextExternalTool{ContextType: "Course", ContextID: l.course.ID, Name: "Legacy 2", URL: "https://legacy2.example.com/lti",
+			ConsumerKey: "legacy2-key", SharedSecret: "legacy2-secret", WorkflowState: "active", PrivacyLevel: "anonymous"}
+		require.NoError(t, postgres.NewContextExternalToolRepository(l.g).Create(ctx, lti11))
+		a := &models.Assignment{CourseID: l.course.ID, Name: "Legacy 2 quiz", WorkflowState: models.AssignmentPublished, Published: true}
+		pts := 10.0
+		a.PointsPossible = &pts
+		require.NoError(t, postgres.NewAssignmentRepository(l.g).Create(ctx, a))
+		resp, body := l.do(ltiReq{method: "PUT", path: fmt.Sprintf("/courses/%d/assignments/%d/external_tool", l.course.ID, a.ID), user: l.teacher.ID, account: 1, enrollment: "TeacherEnrollment",
+			body: jsonReader(map[string]interface{}{"tool_id": lti11.ID})})
+		require.Equal(t, http.StatusOK, resp.StatusCode, body)
+		launchParams := func() map[string]string {
+			resp, body := l.do(ltiReq{method: "GET", path: fmt.Sprintf("/courses/%d/external_tools/%d/launch?assignment_id=%d", l.course.ID, lti11.ID, a.ID), user: l.student.ID, account: 1, enrollment: "StudentEnrollment"})
+			require.Equal(t, http.StatusOK, resp.StatusCode, body)
+			params := map[string]string{}
+			for _, m := range regexp.MustCompile(`name="([^"]+)" value="([^"]*)"`).FindAllStringSubmatch(body, -1) {
+				params[m[1]] = htmlUnescape(m[2])
+			}
+			return params
+		}
+		before := launchParams()
+		require.NotEmpty(t, before["user_id"])
+		require.NotEmpty(t, before["lis_result_sourcedid"])
+
+		for i := 0; i < 2; i++ {
+			_, err := l.svc.RotatePlatformKey(ctx)
+			require.NoError(t, err)
+		}
+		after := launchParams()
+		assert.Equal(t, before["user_id"], after["user_id"], "a key rotation must not re-identify LTI 1.1 users")
+		assert.Equal(t, before["lis_result_sourcedid"], after["lis_result_sourcedid"])
+
+		resp, body = lti11Outcome(l, lti11, before["lis_outcome_service_url"], "legacy2-secret", "rot-nonce-1", before["lis_result_sourcedid"], "0.5")
+		require.Equal(t, http.StatusOK, resp.StatusCode, body)
+		assert.Contains(t, body, "<imsx_codeMajor>success</imsx_codeMajor>", "a sourcedid issued before two rotations still grades")
+		assert.Equal(t, fmt.Sprintf("a=%d u=%d g=0 acct=1 grade=5", a.ID, l.student.ID), l.grader.last())
+	})
+}
+
+// lti11Outcome posts an OAuth1-signed Basic Outcomes replaceResult.
+func lti11Outcome(l *ltiLane, tool *models.ContextExternalTool, outcomesURL, secret, nonce, sourcedID, score string) (*http.Response, string) {
+	body := `<?xml version="1.0" encoding="UTF-8"?>
+<imsx_POXEnvelopeRequest xmlns="http://www.imsglobal.org/services/ltiv1p1/xsd/imsoms_v1p0">
+  <imsx_POXHeader><imsx_POXRequestHeaderInfo><imsx_version>V1.0</imsx_version><imsx_messageIdentifier>m-` + nonce + `</imsx_messageIdentifier></imsx_POXRequestHeaderInfo></imsx_POXHeader>
+  <imsx_POXBody><replaceResultRequest><resultRecord><sourcedGUID><sourcedId>` + sourcedID + `</sourcedId></sourcedGUID>
+  <result><resultScore><language>en</language><textString>` + score + `</textString></resultScore></result></resultRecord></replaceResultRequest></imsx_POXBody>
+</imsx_POXEnvelopeRequest>`
+	sum := sha1.Sum([]byte(body)) //nolint:gosec // oauth_body_hash is SHA-1 by spec
+	op := map[string]string{
+		"oauth_consumer_key": tool.ConsumerKey, "oauth_signature_method": "HMAC-SHA1", "oauth_timestamp": strconv.FormatInt(time.Now().Unix(), 10),
+		"oauth_nonce": nonce, "oauth_version": "1.0", "oauth_body_hash": base64.StdEncoding.EncodeToString(sum[:]),
+	}
+	sig, err := service.OAuth1Signature("POST", outcomesURL, op, secret)
+	require.NoError(l.t, err)
+	op["oauth_signature"] = sig
+	var parts []string
+	for k, v := range op {
+		parts = append(parts, fmt.Sprintf(`%s="%s"`, k, url.QueryEscape(v)))
+	}
+	return l.do(ltiReq{method: "POST", path: fmt.Sprintf("/lti/v1p1/tools/%d/outcomes", tool.ID), contentType: "application/xml",
+		body: strings.NewReader(body), headers: map[string]string{"Authorization": "OAuth " + strings.Join(parts, ", ")}})
 }
 
 func htmlUnescape(s string) string {

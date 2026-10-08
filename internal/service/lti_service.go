@@ -29,6 +29,12 @@ const ltiPlatformKeyName = "default"
 const (
 	ltiNextKeyName     = "next"
 	ltiPreviousKeyName = "previous"
+	// ltiStableKeyName names a stored key that is never rotated nor
+	// published: the HMAC root of the LTI 1.1 opaque user_id and the
+	// Basic Outcomes sourcedid, which must stay the same across platform
+	// key rotations (a rotation would otherwise re-identify every LTI 1.1
+	// user and invalidate every outstanding sourcedid).
+	ltiStableKeyName = "lti11"
 )
 
 // LTIPlatformKeyEnvVar optionally carries the platform RSA private key as
@@ -68,7 +74,9 @@ type LTIService struct {
 	// upcoming "next" key (published ahead of a rotation so tools have it
 	// cached) and the retired "previous" key (still verifiable while
 	// tokens signed with it are in flight).
-	extraKeys   []ltiSigningKey
+	extraKeys []ltiSigningKey
+	// stableKey is the never-rotated "lti11" key (nil with an env key).
+	stableKey   *rsa.PrivateKey
 	keyLoadedAt time.Time
 	keyRepo     repository.LTIPlatformKeyRepository
 	keySeal     func([]byte) ([]byte, error)
@@ -176,6 +184,9 @@ func (s *LTIService) LoadPersistentPlatformKey(
 	if err := s.ensureStoredKey(ctx, repo, ltiNextKeyName, seal); err != nil {
 		return err
 	}
+	if err := s.ensureStoredKey(ctx, repo, ltiStableKeyName, seal); err != nil {
+		return err
+	}
 
 	s.keyMu.Lock()
 	s.keyRepo = repo
@@ -263,10 +274,19 @@ func (s *LTIService) reloadPlatformKeys(ctx context.Context) error {
 		}
 		extras = append(extras, ltiSigningKey{key: k, kid: JWKThumbprint(&k.PublicKey)})
 	}
+	var stable *rsa.PrivateKey
+	if r, findErr := repo.FindByName(ctx, ltiStableKeyName); findErr == nil {
+		if k, openErr := unsealPlatformKey(r, open); openErr == nil {
+			stable = k
+		}
+	}
 	s.keyMu.Lock()
 	s.platformKey = current
 	s.keyID = JWKThumbprint(&current.PublicKey)
 	s.extraKeys = extras
+	if stable != nil {
+		s.stableKey = stable
+	}
 	s.keyLoadedAt = time.Now()
 	s.keyMu.Unlock()
 	return nil

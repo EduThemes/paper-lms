@@ -188,13 +188,30 @@ func (s *LTIService) resolveResourceLink(ctx context.Context, req LTILaunchReque
 		if err != nil || link == nil || link.ContextID != req.CourseID || link.ContextExternalToolID != tool.ID {
 			return nil, ErrLTILaunchNotFound
 		}
+		// A link attached to a module item or an assignment is visible to
+		// a student only when that item is (the UUID must not be a way
+		// around the module_item_id / assignment_id checks below).
+		if !req.IsStaff {
+			if link.ContentTagID != nil {
+				tag, tErr := store.FindContentTagInCourse(ctx, *link.ContentTagID, req.CourseID, req.AccountID)
+				if tErr != nil || tag == nil || !s.studentSeesModuleItem(ctx, tag, req) {
+					return nil, ErrLTILaunchNotFound
+				}
+			}
+			if link.AssignmentID != nil && s.adv.AssignmentRepo != nil {
+				a, aErr := s.adv.AssignmentRepo.FindByID(ctx, *link.AssignmentID, req.AccountID)
+				if aErr != nil || a == nil || a.CourseID != req.CourseID || !a.IsPublished() {
+					return nil, ErrLTILaunchNotFound
+				}
+			}
+		}
 		return link, nil
 	case req.ModuleItemID != 0:
 		tag, err := store.FindContentTagInCourse(ctx, req.ModuleItemID, req.CourseID, req.AccountID)
 		if err != nil || tag == nil || tag.ContentType != ContentTypeExternalTool || tag.ContentID == nil || *tag.ContentID != tool.ID {
 			return nil, ErrLTILaunchNotFound
 		}
-		if !req.IsStaff && tag.WorkflowState != models.ContentTagActive {
+		if !req.IsStaff && !s.studentSeesModuleItem(ctx, tag, req) {
 			return nil, ErrLTILaunchNotFound
 		}
 		if link, err := store.FindResourceLinkByContentTag(ctx, tag.ID, req.AccountID); err == nil && link != nil {
@@ -240,6 +257,19 @@ func (s *LTIService) resolveResourceLink(ctx context.Context, req LTILaunchReque
 		return nil, err
 	}
 	return link, nil
+}
+
+// studentSeesModuleItem reports whether a non-staff caller may open a
+// module item: the item and its module must both be published.
+func (s *LTIService) studentSeesModuleItem(ctx context.Context, tag *models.ContentTag, req LTILaunchRequest) bool {
+	if tag.WorkflowState != models.ContentTagActive {
+		return false
+	}
+	if s.adv.ModuleRepo == nil {
+		return true
+	}
+	module, err := s.adv.ModuleRepo.FindByID(ctx, tag.ContextModuleID, req.AccountID)
+	return err == nil && module != nil && module.CourseID == req.CourseID && module.WorkflowState == "active"
 }
 
 // ContentTypeExternalTool is the module item (content tag) content type

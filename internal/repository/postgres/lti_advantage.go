@@ -112,6 +112,12 @@ func (r *ltiAdvantageRepo) ListLineItems(ctx context.Context, courseID uint, fil
 	return &repository.PaginatedResult[models.LTILineItem]{Items: items, TotalCount: count, Page: page, PerPage: perPage}, nil
 }
 
+func (r *ltiAdvantageRepo) ReleaseAssignmentLineItems(ctx context.Context, assignmentID uint) error {
+	return r.db.WithContext(ctx).Model(&models.LTILineItem{}).
+		Where("assignment_id = ? AND developer_key_id IS NOT NULL", assignmentID).
+		Update("developer_key_id", nil).Error
+}
+
 // toolsForCourseQuery selects the active installs reachable from a course:
 // those installed in the course itself and those installed at the
 // course's tenant account. The course must belong to accountID when

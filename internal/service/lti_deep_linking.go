@@ -268,6 +268,11 @@ func decodeContentItems(raw interface{}) ([]DeepLinkContentItem, error) {
 		return nil, errors.New("too many content items")
 	}
 	for i := range items {
+		// An ltiResourceLink's url overrides the tool's launch URL; one
+		// that is not an https URL is dropped (the tool default is used).
+		if items[i].Type == "ltiResourceLink" && items[i].URL != "" && !validToolURL(items[i].URL) {
+			items[i].URL = ""
+		}
 		items[i].Custom = map[string]string{}
 		for k, v := range items[i].RawCustom {
 			switch tv := v.(type) {
@@ -534,6 +539,17 @@ func (s *LTIService) AttachToolToAssignment(ctx context.Context, in AssignmentTo
 	}
 
 	link, findErr := s.adv.Store.FindResourceLinkByAssignment(ctx, a.ID, in.AccountID)
+	if findErr == nil && link != nil && link.ContextExternalToolID != tool.ID {
+		// Switching to another tool: the previous tool loses the
+		// assignment's line items (unless it is the same tool, installed
+		// in another context).
+		prev, pErr := s.adv.Store.FindActiveToolForCourse(ctx, link.ContextExternalToolID, in.CourseID, in.AccountID)
+		if pErr != nil || prev == nil || prev.DeveloperKeyID != tool.DeveloperKeyID || tool.DeveloperKeyID == 0 {
+			if err := s.adv.Store.ReleaseAssignmentLineItems(ctx, a.ID); err != nil {
+				return nil, err
+			}
+		}
+	}
 	if findErr != nil || link == nil {
 		aid := a.ID
 		link = &models.LTIResourceLink{
@@ -628,6 +644,11 @@ func (s *LTIService) DetachToolFromAssignment(ctx context.Context, accountID, co
 		return ErrLTILaunchNotFound
 	}
 	if err := s.adv.Store.DeleteResourceLinksByAssignment(ctx, a.ID, accountID); err != nil {
+		return err
+	}
+	// The detached tool loses its line items: without this it could keep
+	// listing them and posting scores to the assignment over AGS.
+	if err := s.adv.Store.ReleaseAssignmentLineItems(ctx, a.ID); err != nil {
 		return err
 	}
 	if a.SubmissionTypes == "external_tool" {

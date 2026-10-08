@@ -37,6 +37,11 @@ type LTIAdvantageRepository interface {
 	FindPlacementResourceLink(ctx context.Context, toolID, courseID uint, placement string) (*models.LTIResourceLink, error)
 
 	ListLineItems(ctx context.Context, courseID uint, filter LTILineItemFilter, params PaginationParams) (*PaginatedResult[models.LTILineItem], error)
+	// ReleaseAssignmentLineItems drops tool ownership (developer_key_id)
+	// of every line item of an assignment, so a tool detached from the
+	// assignment can no longer read or post its scores. The caller has
+	// already tied the assignment to the course and tenant.
+	ReleaseAssignmentLineItems(ctx context.Context, assignmentID uint) error
 
 	// ListActiveToolsForCourse returns the active tools installed in the
 	// course plus those installed at the course's tenant account.
