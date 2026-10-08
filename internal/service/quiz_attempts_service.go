@@ -70,13 +70,21 @@ func (s *QuizService) generateSelectedQuestions(ctx context.Context, quizID uint
 		return nil, err
 	}
 
+	// Every authored question (per-attempt bank-draw copies are never
+	// served on their own — only through their group).
+	authoredIDs := func() []uint {
+		ids := make([]uint, 0, len(allQuestions.Items))
+		for _, q := range allQuestions.Items {
+			if q.QuestionBankEntryID == nil {
+				ids = append(ids, q.ID)
+			}
+		}
+		return ids
+	}
+
 	// If no group repo is configured, return all question IDs
 	if s.groupRepo == nil {
-		ids := make([]uint, len(allQuestions.Items))
-		for i, q := range allQuestions.Items {
-			ids[i] = q.ID
-		}
-		return ids, nil
+		return authoredIDs(), nil
 	}
 
 	// Get all question groups for this quiz
@@ -87,11 +95,7 @@ func (s *QuizService) generateSelectedQuestions(ctx context.Context, quizID uint
 
 	// If no groups exist, return all question IDs (no randomization needed)
 	if len(groups) == 0 {
-		ids := make([]uint, len(allQuestions.Items))
-		for i, q := range allQuestions.Items {
-			ids[i] = q.ID
-		}
-		return ids, nil
+		return authoredIDs(), nil
 	}
 
 	var selectedIDs []uint
@@ -122,9 +126,17 @@ func (s *QuizService) generateSelectedQuestions(ctx context.Context, quizID uint
 	for _, group := range groups {
 		var pool []poolEntry
 
-		groupQuestions, gqErr := s.questionRepo.ListByGroupID(ctx, group.ID)
+		listed, gqErr := s.questionRepo.ListByGroupID(ctx, group.ID)
 		if gqErr != nil {
-			groupQuestions = nil
+			listed = nil
+		}
+		// Only this quiz's questions (defends against stale cross-quiz
+		// group ids).
+		groupQuestions := make([]models.QuizQuestion, 0, len(listed))
+		for _, q := range listed {
+			if q.QuizID == quizID {
+				groupQuestions = append(groupQuestions, q)
+			}
 		}
 		// Already-materialized copies of bank entries, keyed by entry id.
 		materialized := make(map[uint]uint)
@@ -278,7 +290,13 @@ func (s *QuizService) GetSubmissionQuestions(ctx context.Context, submissionID u
 	if err != nil {
 		return nil, err
 	}
-	return result.Items, nil
+	authored := make([]models.QuizQuestion, 0, len(result.Items))
+	for _, q := range result.Items {
+		if q.QuestionBankEntryID == nil {
+			authored = append(authored, q)
+		}
+	}
+	return authored, nil
 }
 
 // ---------- Quiz Submission Methods ----------
