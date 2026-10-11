@@ -363,6 +363,10 @@ func TestGrade_InvalidGrade(t *testing.T) {
 
 	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(10), uint(20), uint(0)).
 		Return(existing, nil)
+	// The typed grade is read per the assignment's grading type, so the
+	// assignment is loaded first; a points assignment rejects a word.
+	assignmentRepo.On("FindByID", mock.Anything, uint(10), uint(0)).
+		Return(&models.Assignment{ID: 10, CourseID: 1, GradingType: "points"}, nil)
 
 	latePolicyRepo := new(mocks.MockLatePolicyRepository)
 	courseRepo := new(mocks.MockCourseRepository)

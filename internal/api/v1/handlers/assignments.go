@@ -14,10 +14,49 @@ import (
 
 type AssignmentHandler struct {
 	assignmentService *service.AssignmentService
+	// gradingPolicy (optional): course post-policy default, grading
+	// scheme checks and late/missing refresh when dates change.
+	gradingPolicy *service.GradingPolicyService
 }
+
+// SetGradingPolicyService wires the grading-policy collaborator.
+func (h *AssignmentHandler) SetGradingPolicyService(p *service.GradingPolicyService) { h.gradingPolicy = p }
 
 func NewAssignmentHandler(assignmentService *service.AssignmentService) *AssignmentHandler {
 	return &AssignmentHandler{assignmentService: assignmentService}
+}
+
+// studentDates returns the calling student's effective dates per
+// assignment of the course (G019): an assignment that is only visible to
+// overrides is absent unless an override applies to the student. ok is
+// false (no filtering) for staff, observers and other roles, or when the
+// grading-policy service is not wired.
+func (h *AssignmentHandler) studentDates(c *fiber.Ctx, courseID uint) (map[uint]service.EffectiveDueDate, bool) {
+	if h.gradingPolicy == nil || callerIsCourseStaff(c) {
+		return nil, false
+	}
+	if et, _ := c.Locals("enrollment_type").(string); et != "StudentEnrollment" {
+		return nil, false
+	}
+	callerID, _ := c.Locals("user_id").(uint)
+	course, err := h.gradingPolicy.Repo().FindCourse(c.Context(), courseID)
+	if err != nil || course == nil || course.AccountID != callerAccountID(c) {
+		return nil, false
+	}
+	dates, err := h.gradingPolicy.StudentAssignmentDates(c.Context(), course, callerID)
+	if err != nil {
+		return nil, false
+	}
+	return dates, true
+}
+
+// withStudentDates is the assignment JSON with the student's own
+// effective dates (override and accommodation applied), as Canvas returns
+// due_at / unlock_at / lock_at for the current user.
+func withStudentDates(a *models.Assignment, d service.EffectiveDueDate) fiber.Map {
+	m := assignmentToJSON(a)
+	m["due_at"], m["unlock_at"], m["lock_at"] = d.DueAt, d.UnlockAt, d.LockAt
+	return m
 }
 
 func assignmentToJSON(a *models.Assignment) fiber.Map {
@@ -42,6 +81,8 @@ func assignmentToJSON(a *models.Assignment) fiber.Map {
 		"peer_review_count":    a.PeerReviewCount,
 		"group_category_id":    a.GroupCategoryID,
 		"is_group_assignment":  a.GroupCategoryID != nil && *a.GroupCategoryID > 0,
+		"only_visible_to_overrides": a.OnlyVisibleToOverrides,
+		"grading_standard_id":       a.GradingStandardID,
 		"created_at":           a.CreatedAt,
 		"updated_at":           a.UpdatedAt,
 	}
@@ -65,9 +106,19 @@ func (h *AssignmentHandler) ListAssignments(c *fiber.Ctx) error {
 
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
 
-	assignments := make([]fiber.Map, len(result.Items))
-	for i, a := range result.Items {
-		assignments[i] = assignmentToJSON(&a)
+	// G019: a student does not see assignments that are not assigned to
+	// them, and sees their own dates on the ones that are.
+	dates, filtered := h.studentDates(c, uint(courseID))
+	assignments := make([]fiber.Map, 0, len(result.Items))
+	for i := range result.Items {
+		a := &result.Items[i]
+		if !filtered {
+			assignments = append(assignments, assignmentToJSON(a))
+			continue
+		}
+		if d, ok := dates[a.ID]; ok {
+			assignments = append(assignments, withStudentDates(a, d))
+		}
 	}
 
 	return c.JSON(assignments)
@@ -92,6 +143,14 @@ func (h *AssignmentHandler) GetAssignment(c *fiber.Ctx) error {
 	if assignment.CourseID != uint(courseID) || assignment.WorkflowState == models.AssignmentDeleted ||
 		(!callerIsCourseStaff(c) && !assignment.IsPublished()) {
 		return responses.NotFound(c, "assignment")
+	}
+	// G019: an assignment not assigned to the calling student is a 404.
+	if dates, filtered := h.studentDates(c, uint(courseID)); filtered {
+		d, ok := dates[assignment.ID]
+		if !ok {
+			return responses.NotFound(c, "assignment")
+		}
+		return c.JSON(withStudentDates(assignment, d))
 	}
 
 	return c.JSON(assignmentToJSON(assignment))
@@ -121,6 +180,8 @@ func (h *AssignmentHandler) CreateAssignment(c *fiber.Ctx) error {
 			PeerReviewsEnabled bool       `json:"peer_reviews_enabled"`
 			PeerReviewCount    int        `json:"peer_review_count"`
 			GroupCategoryID    *uint      `json:"group_category_id"`
+			OnlyVisibleToOverrides bool  `json:"only_visible_to_overrides"`
+			GradingStandardID      *uint `json:"grading_standard_id"`
 		} `json:"assignment"`
 	}
 
@@ -141,7 +202,20 @@ func (h *AssignmentHandler) CreateAssignment(c *fiber.Ctx) error {
 
 	postPolicy := input.Assignment.PostPolicy
 	if postPolicy == "" {
+		// G018: new assignments follow the course post policy;
+		// anonymous grading always posts manually (Canvas).
 		postPolicy = "automatic"
+		if input.Assignment.AnonymousGrading || (h.gradingPolicy != nil && h.gradingPolicy.CoursePostManually(c.Context(), uint(courseID))) {
+			postPolicy = "manual"
+		}
+	}
+	if msg := h.validateGradingFields(c, uint(courseID), input.Assignment.GradingType, postPolicy, input.Assignment.GradingStandardID); msg != "" {
+		return responses.BadRequest(c, msg)
+	}
+	if input.Assignment.AnonymousGrading {
+		// Canvas: anonymous assignments always post manually, whatever
+		// post_policy was sent, so no grade shows before the reveal.
+		postPolicy = "manual"
 	}
 
 	assignment := &models.Assignment{
@@ -163,6 +237,8 @@ func (h *AssignmentHandler) CreateAssignment(c *fiber.Ctx) error {
 		PeerReviewsEnabled: input.Assignment.PeerReviewsEnabled,
 		PeerReviewCount:    input.Assignment.PeerReviewCount,
 		GroupCategoryID:    input.Assignment.GroupCategoryID,
+		OnlyVisibleToOverrides: input.Assignment.OnlyVisibleToOverrides,
+		GradingStandardID:      nonZeroUint(input.Assignment.GradingStandardID),
 	}
 
 	if assignment.GradingType == "" {
@@ -227,12 +303,15 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 			PeerReviewsEnabled *bool      `json:"peer_reviews_enabled"`
 			PeerReviewCount    *int       `json:"peer_review_count"`
 			GroupCategoryID    *uint      `json:"group_category_id"`
+			OnlyVisibleToOverrides *bool `json:"only_visible_to_overrides"`
+			GradingStandardID      *uint `json:"grading_standard_id"`
 		} `json:"assignment"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
+	before := dueSnapshotOf(assignment)
 
 	// B114: a pointer field can't tell "absent" from an explicit JSON
 	// null, so clearing a date or turning off group assignment was
@@ -262,6 +341,9 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 	}
 	if explicitNull("group_category_id") {
 		assignment.GroupCategoryID = nil
+	}
+	if explicitNull("grading_standard_id") {
+		assignment.GradingStandardID = nil
 	}
 
 	if input.Assignment.Name != nil {
@@ -322,8 +404,33 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 		}
 	}
 
+	if input.Assignment.OnlyVisibleToOverrides != nil {
+		assignment.OnlyVisibleToOverrides = *input.Assignment.OnlyVisibleToOverrides
+	}
+	if input.Assignment.GradingStandardID != nil {
+		assignment.GradingStandardID = nonZeroUint(input.Assignment.GradingStandardID)
+	}
+	gradingTypeIn, postPolicyIn := "", ""
+	if input.Assignment.GradingType != nil {
+		gradingTypeIn = assignment.GradingType
+	}
+	if input.Assignment.PostPolicy != nil {
+		postPolicyIn = assignment.PostPolicy
+	}
+	if msg := h.validateGradingFields(c, assignment.CourseID, gradingTypeIn, postPolicyIn, input.Assignment.GradingStandardID); msg != "" {
+		return responses.BadRequest(c, msg)
+	}
+	if assignment.AnonymousGrading {
+		// G018: anonymous assignments always post manually (Canvas).
+		assignment.PostPolicy = "manual"
+	}
+
 	if err := h.assignmentService.Update(c.Context(), assignment); err != nil {
 		return responses.InternalError(c, "Could not update assignment")
+	}
+	// G019 / G022: late and missing follow due-date and visibility edits.
+	if h.gradingPolicy != nil && before != dueSnapshotOf(assignment) {
+		_ = h.gradingPolicy.RefreshDueStatus(c.Context(), assignment.CourseID, []uint{assignment.ID})
 	}
 
 	return c.JSON(assignmentToJSON(assignment))
@@ -357,4 +464,47 @@ func (h *AssignmentHandler) DeleteAssignment(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"delete": true})
+}
+
+// validateGradingFields checks the grading type, post policy and
+// per-assignment grading scheme (empty / nil values are not checked).
+// Returns a client error message, or "".
+func (h *AssignmentHandler) validateGradingFields(c *fiber.Ctx, courseID uint, gradingType, postPolicy string, standardID *uint) string {
+	if gradingType != "" && !service.ValidGradingType(gradingType) {
+		return "grading_type must be points, percent, letter_grade, gpa_scale, pass_fail or not_graded"
+	}
+	if postPolicy != "" && postPolicy != "automatic" && postPolicy != "manual" {
+		return "post_policy must be automatic or manual"
+	}
+	if standardID != nil && *standardID != 0 {
+		if h.gradingPolicy == nil || !h.gradingPolicy.SchemeUsableByCourse(c.Context(), courseID, *standardID) {
+			return "grading_standard_id is not a grading scheme of this course or its account"
+		}
+	}
+	return ""
+}
+
+// nonZeroUint maps nil / 0 to nil.
+func nonZeroUint(v *uint) *uint {
+	if v == nil || *v == 0 {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+// dueSnapshot is what late / missing statuses depend on.
+type dueSnapshot struct {
+	due     string
+	visible bool
+	types   string
+	state   models.AssignmentWorkflow
+}
+
+func dueSnapshotOf(a *models.Assignment) dueSnapshot {
+	d := dueSnapshot{visible: a.OnlyVisibleToOverrides, types: a.SubmissionTypes, state: a.WorkflowState}
+	if a.DueAt != nil {
+		d.due = a.DueAt.UTC().Format(time.RFC3339Nano)
+	}
+	return d
 }

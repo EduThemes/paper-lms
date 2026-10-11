@@ -154,8 +154,16 @@ func (s *OverrideService) GetEffectiveDates(ctx context.Context, assignmentID, u
 // overrides apply, the one with the latest due date wins, and "no due
 // date" counts as the latest of all.
 func (s *OverrideService) EffectiveDatesFor(ctx context.Context, assignment *models.Assignment, userID uint) (dueAt, unlockAt, lockAt *time.Time) {
+	dueAt, unlockAt, lockAt, _ = s.EffectiveDatesWithOverride(ctx, assignment, userID)
+	return
+}
+
+// EffectiveDatesWithOverride is EffectiveDatesFor that also reports
+// whether any override applies to the student (an assignment that is
+// only visible to overrides is not assigned to anyone without one).
+func (s *OverrideService) EffectiveDatesWithOverride(ctx context.Context, assignment *models.Assignment, userID uint) (dueAt, unlockAt, lockAt *time.Time, hasOverride bool) {
 	if assignment == nil {
-		return nil, nil, nil
+		return nil, nil, nil, false
 	}
 	dueAt, unlockAt, lockAt = assignment.DueAt, assignment.UnlockAt, assignment.LockAt
 	if s == nil {
@@ -217,7 +225,7 @@ func (s *OverrideService) EffectiveDatesFor(ctx context.Context, assignment *mod
 			best = o
 		}
 	}
-	return best.DueAt, best.UnlockAt, best.LockAt
+	return best.DueAt, best.UnlockAt, best.LockAt, true
 }
 
 // laterDue reports whether a is a strictly more lenient due date than b
@@ -230,4 +238,13 @@ func laterDue(a, b *time.Time) bool {
 		return true
 	}
 	return a.After(*b)
+}
+
+// SectionInCourse reports whether sectionID is a section of courseID.
+func (s *OverrideService) SectionInCourse(ctx context.Context, courseID, sectionID uint) bool {
+	if s.sectionRepo == nil || sectionID == 0 {
+		return false
+	}
+	sec, err := s.sectionRepo.FindByID(ctx, sectionID)
+	return err == nil && sec != nil && sec.CourseID == courseID
 }

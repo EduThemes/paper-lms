@@ -33,7 +33,12 @@ type SubmissionHandler struct {
 	// Optional, wired with setters (nil-safe).
 	fileService       *service.FileService
 	peerReviewService *service.PeerReviewService
+	gradingPolicy     *service.GradingPolicyService
 }
+
+// SetGradingPolicyService enables post / hide by section and graded-only
+// posting (G018).
+func (h *SubmissionHandler) SetGradingPolicyService(p *service.GradingPolicyService) { h.gradingPolicy = p }
 
 func NewSubmissionHandler(submissionService *service.SubmissionService, commentRepo repository.SubmissionCommentRepository, attachmentRepo repository.AttachmentRepository, userRepo repository.UserRepository, assignmentRepo repository.AssignmentRepository, notificationDeliveryService *service.NotificationDeliveryService, observerService *service.ObserverService, outcomeAlignmentRepo repository.OutcomeAlignmentRepository, outcomeService *service.LearningOutcomeService, auditService *service.AuditService) *SubmissionHandler {
 	return &SubmissionHandler{
@@ -84,6 +89,11 @@ func submissionToJSON(s *models.Submission) fiber.Map {
 		"excused":         s.Excused,
 		"workflow_state":  s.WorkflowState,
 		"preview_url":     nil,
+		// Grading policy (G022): manual status and the student's
+		// effective due date.
+		"late_policy_status":    s.LatePolicyStatus,
+		"seconds_late_override": s.SecondsLateOverride,
+		"cached_due_date":       s.CachedDueDate,
 	}
 	if s.Attachments != nil && *s.Attachments != "" {
 		var attachments []map[string]interface{}
@@ -926,6 +936,31 @@ func (h *SubmissionHandler) PostGrades(c *fiber.Ctx) error {
 		return nil
 	}
 
+	// G018: "Graded" (only graded / excused work) or "Everyone", and
+	// optionally only some sections, through the grading-policy service.
+	if h.gradingPolicy != nil {
+		opts, ok := parsePostOptions(c)
+		if !ok {
+			return responses.BadRequest(c, "Invalid input")
+		}
+		course, cErr := h.gradingPolicy.Repo().FindCourse(c.Context(), assignment.CourseID)
+		if cErr != nil {
+			return responses.NotFound(c, "course")
+		}
+		released, pErr := h.gradingPolicy.PostGrades(c.Context(), course, assignment, opts)
+		if pErr != nil {
+			return responses.InternalError(c, "Could not post grades")
+		}
+		postedIDs := make([]uint, 0, len(released))
+		for i := range released {
+			h.notifyGradePosted(c.Context(), assignment, &released[i])
+			h.recordOutcomeResults(c.Context(), assignment, &released[i], callerAccountID(c))
+			postedIDs = append(postedIDs, released[i].ID)
+		}
+		h.submissionService.FirePosted(postedIDs...)
+		return c.JSON(fiber.Map{"posted": true, "posted_at": time.Now(), "posted_count": len(released)})
+	}
+
 	// Collect the submissions this call newly posts so their students
 	// can be notified once the update lands.
 	var newlyPosted []models.Submission
@@ -974,9 +1009,44 @@ func (h *SubmissionHandler) HideGrades(c *fiber.Ctx) error {
 		return nil
 	}
 
+	if h.gradingPolicy != nil {
+		opts, ok := parsePostOptions(c)
+		if !ok {
+			return responses.BadRequest(c, "Invalid input")
+		}
+		course, cErr := h.gradingPolicy.Repo().FindCourse(c.Context(), assignment.CourseID)
+		if cErr != nil {
+			return responses.NotFound(c, "course")
+		}
+		if err := h.gradingPolicy.HideGrades(c.Context(), course, assignment, opts); err != nil {
+			return responses.InternalError(c, "Could not hide grades")
+		}
+		return c.JSON(fiber.Map{"hidden": true})
+	}
+
 	if err := h.submissionService.PostGradesByAssignment(c.Context(), assignment.ID, nil); err != nil {
 		return responses.InternalError(c, "Could not hide grades")
 	}
 
 	return c.JSON(fiber.Map{"hidden": true})
+}
+
+// parsePostOptions reads the optional post / hide body:
+// {"graded_only": true, "section_ids": [1, 2]}. An empty body is
+// "everyone in every section".
+func parsePostOptions(c *fiber.Ctx) (service.PostOptions, bool) {
+	var opts service.PostOptions
+	if len(c.Body()) == 0 {
+		return opts, true
+	}
+	var input struct {
+		GradedOnly bool   `json:"graded_only"`
+		SectionIDs []uint `json:"section_ids"`
+	}
+	if err := json.Unmarshal(c.Body(), &input); err != nil {
+		return opts, false
+	}
+	opts.GradedOnly = input.GradedOnly
+	opts.SectionIDs = dedupeUints(input.SectionIDs)
+	return opts, true
 }

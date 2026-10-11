@@ -44,6 +44,14 @@ func (r *gradingStandardRepo) ListByCourse(ctx context.Context, courseID uint) (
 	return standards, nil
 }
 
+func (r *gradingStandardRepo) ListByAccount(ctx context.Context, accountID uint) ([]models.GradingStandard, error) {
+	var standards []models.GradingStandard
+	if err := r.db.WithContext(ctx).Where("context_type = ? AND context_id = ? AND workflow_state = ?", "Account", accountID, "active").Order("id ASC").Find(&standards).Error; err != nil {
+		return nil, err
+	}
+	return standards, nil
+}
+
 func (r *gradingStandardRepo) FindActiveByCourse(ctx context.Context, courseID uint) (*models.GradingStandard, error) {
 	var standard models.GradingStandard
 	if err := r.db.WithContext(ctx).Where("context_type = ? AND context_id = ? AND workflow_state = ?", "Course", courseID, "active").Order("id DESC").First(&standard).Error; err != nil {

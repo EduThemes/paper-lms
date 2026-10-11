@@ -28,6 +28,17 @@ type Course struct {
 	// on the Grades page (Canvas course setting hide_final_grades).
 	// Migration 000166.
 	HideFinalGrades bool `json:"hide_final_grades" gorm:"not null;default:false"`
-	CreatedAt         time.Time      `json:"created_at"`
-	UpdatedAt         time.Time      `json:"updated_at"`
+	// PostManually is the course default post policy: new assignments
+	// start with a manual post policy when it is set (Canvas course
+	// post_policy.post_manually).
+	PostManually bool `json:"post_manually" gorm:"default:false"`
+	// GradingStandardID selects the course grading scheme (a course- or
+	// account-owned grading_standards row). Nil falls back to the newest
+	// course scheme, then the default scale.
+	GradingStandardID *uint `json:"grading_standard_id"`
+	// GradingStandardDisabled turns letter grades off for course totals
+	// (Canvas "Enable course grading scheme" unchecked).
+	GradingStandardDisabled bool      `json:"grading_standard_disabled" gorm:"default:false"`
+	CreatedAt               time.Time `json:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at"`
 }

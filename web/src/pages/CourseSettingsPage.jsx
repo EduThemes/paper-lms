@@ -9,6 +9,7 @@ import CourseNav from '../components/CourseNav';
 import { useLiveRegion } from '../components/LiveRegion';
 import ButtonEditor from '../components/settings/ButtonEditor';
 import OverrideEditor from '../components/settings/OverrideEditor';
+import CourseGradingPolicyPanel from '../components/grading/CourseGradingPolicyPanel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -758,6 +759,7 @@ const CourseSettingsPage = () => {
               aria-labelledby="settings-tab-grading"
               className="space-y-6"
             >
+              <CourseGradingPolicyPanel courseId={courseId} />
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">Grading Scale</CardTitle>

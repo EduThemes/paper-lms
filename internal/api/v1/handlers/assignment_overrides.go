@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -13,6 +15,21 @@ import (
 type AssignmentOverrideHandler struct {
 	overrideService   *service.OverrideService
 	assignmentService *service.AssignmentService
+	// gradingPolicy (optional) refreshes late / missing statuses when an
+	// override changes a student's dates (G019).
+	gradingPolicy *service.GradingPolicyService
+}
+
+// SetGradingPolicyService wires the late/missing refresh.
+func (h *AssignmentOverrideHandler) SetGradingPolicyService(p *service.GradingPolicyService) {
+	h.gradingPolicy = p
+}
+
+// refreshDueStatus recomputes the assignment's late / missing statuses.
+func (h *AssignmentOverrideHandler) refreshDueStatus(c *fiber.Ctx, courseID, assignmentID uint) {
+	if h.gradingPolicy != nil {
+		_ = h.gradingPolicy.RefreshDueStatus(c.Context(), courseID, []uint{assignmentID})
+	}
 }
 
 func NewAssignmentOverrideHandler(overrideService *service.OverrideService, assignmentService *service.AssignmentService) *AssignmentOverrideHandler {
@@ -152,6 +169,18 @@ func (h *AssignmentOverrideHandler) CreateOverride(c *fiber.Ctx) error {
 		CourseSectionID: input.AssignmentOverride.CourseSectionID,
 	}
 
+	// The section must be one of this course's (F-013 parent-tie).
+	if sid := input.AssignmentOverride.CourseSectionID; sid != nil && *sid != 0 {
+		if !h.overrideService.SectionInCourse(c.Context(), uint(courseID), *sid) {
+			return responses.NotFound(c, "section")
+		}
+	} else {
+		override.CourseSectionID = nil
+	}
+	if override.CourseSectionID == nil && len(input.AssignmentOverride.StudentIDs) == 0 {
+		return responses.BadRequest(c, "An override needs a section or at least one student")
+	}
+
 	// Every listed student must be a student of this course.
 	studentIDs := dedupeUints(input.AssignmentOverride.StudentIDs)
 	for _, studentID := range studentIDs {
@@ -175,6 +204,7 @@ func (h *AssignmentOverrideHandler) CreateOverride(c *fiber.Ctx) error {
 		}
 	}
 	input.AssignmentOverride.StudentIDs = studentIDs
+	h.refreshDueStatus(c, uint(courseID), uint(assignmentID))
 
 	// Build response with student IDs
 	overrideJSON := assignmentOverrideToJSON(override)
@@ -255,11 +285,25 @@ func (h *AssignmentOverrideHandler) UpdateOverride(c *fiber.Ctx) error {
 			AllDay          *bool      `json:"all_day"`
 			AllDayDate      *time.Time `json:"all_day_date"`
 			CourseSectionID *uint      `json:"course_section_id"`
+			StudentIDs      *[]uint    `json:"student_ids"`
 		} `json:"assignment_override"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
+	}
+	if sid := input.AssignmentOverride.CourseSectionID; sid != nil && *sid != 0 &&
+		!h.overrideService.SectionInCourse(c.Context(), uint(courseID), *sid) {
+		return responses.NotFound(c, "section")
+	}
+	var newStudents []uint
+	if input.AssignmentOverride.StudentIDs != nil {
+		newStudents = dedupeUints(*input.AssignmentOverride.StudentIDs)
+		for _, studentID := range newStudents {
+			if !h.overrideService.IsCourseStudent(c.Context(), uint(courseID), studentID, callerAccountID(c)) {
+				return responses.BadRequest(c, fmt.Sprintf("User %d is not a student in this course", studentID))
+			}
+		}
 	}
 
 	if input.AssignmentOverride.Title != nil {
@@ -281,12 +325,58 @@ func (h *AssignmentOverrideHandler) UpdateOverride(c *fiber.Ctx) error {
 		override.AllDayDate = input.AssignmentOverride.AllDayDate
 	}
 	if input.AssignmentOverride.CourseSectionID != nil {
-		override.CourseSectionID = input.AssignmentOverride.CourseSectionID
+		override.CourseSectionID = nonZeroUint(input.AssignmentOverride.CourseSectionID)
+	}
+	// An explicit null clears a date or the section (G019).
+	var raw struct {
+		AssignmentOverride map[string]json.RawMessage `json:"assignment_override"`
+	}
+	_ = json.Unmarshal(c.Body(), &raw)
+	isNull := func(k string) bool {
+		v, ok := raw.AssignmentOverride[k]
+		return ok && strings.TrimSpace(string(v)) == "null"
+	}
+	if isNull("due_at") {
+		override.DueAt = nil
+	}
+	if isNull("unlock_at") {
+		override.UnlockAt = nil
+	}
+	if isNull("lock_at") {
+		override.LockAt = nil
+	}
+	if isNull("course_section_id") {
+		override.CourseSectionID = nil
 	}
 
 	if err := h.overrideService.UpdateOverride(c.Context(), override); err != nil {
 		return responses.InternalError(c, "Could not update assignment override")
 	}
+
+	// G019: replace the ad-hoc student list when one was sent.
+	if input.AssignmentOverride.StudentIDs != nil {
+		current, _ := h.overrideService.ListStudents(c.Context(), override.ID)
+		keep := map[uint]bool{}
+		for _, id := range newStudents {
+			keep[id] = true
+		}
+		have := map[uint]bool{}
+		for _, st := range current {
+			have[st.UserID] = true
+			if !keep[st.UserID] {
+				_ = h.overrideService.RemoveStudent(c.Context(), override.ID, st.UserID)
+			}
+		}
+		for _, id := range newStudents {
+			if have[id] {
+				continue
+			}
+			if err := h.overrideService.AddStudent(c.Context(), override.ID, id, override.AssignmentID); err != nil {
+				return responses.Error(c, fiber.StatusConflict, fmt.Sprintf("User %d already has an override for this assignment", id))
+			}
+		}
+	}
+	h.refreshDueStatus(c, uint(courseID), uint(assignmentID))
 
 	// Fetch student IDs
 	students, _ := h.overrideService.ListStudents(c.Context(), override.ID)
@@ -329,6 +419,7 @@ func (h *AssignmentOverrideHandler) DeleteOverride(c *fiber.Ctx) error {
 	if err := h.overrideService.DeleteOverride(c.Context(), uint(overrideID)); err != nil {
 		return responses.InternalError(c, "Could not delete assignment override")
 	}
+	h.refreshDueStatus(c, uint(courseID), uint(assignmentID))
 
 	return c.JSON(fiber.Map{"delete": true})
 }

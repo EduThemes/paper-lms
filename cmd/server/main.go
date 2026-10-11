@@ -625,6 +625,15 @@ func main() {
 			slog.Warn("grade change audit failed", "submission_id", ch.SubmissionID, "err", err)
 		}
 	})
+	// Grading policy (grading-policy lane): letter / GPA grade schemes,
+	// attempt history, course grading periods, and the full course grade
+	// calculator (overrides, drop rules, final grade overrides).
+	gradingPolicyRepo := postgres.NewGradingPolicyRepository(database)
+	gradingPolicyService := service.NewGradingPolicyService(gradingPolicyRepo, gradingStandardRepo, submissionService)
+	submissionService.SetGradingStandardRepository(gradingStandardRepo)
+	submissionService.SetGradingPolicyRepository(gradingPolicyRepo)
+	submissionService.SetPeriodResolver(gradingPolicyService)
+	gradingService.SetPolicyService(gradingPolicyService)
 	questionBankService := service.NewQuestionBankService(questionBankRepo, questionBankEntryRepo, quizQuestionRepo, quizRepo)
 	// P3 Feature services
 	featureFlagService := service.NewFeatureFlagService(featureFlagRepo, courseRepo, accountRepo, userRepo)
@@ -959,6 +968,11 @@ func main() {
 	coppaHandler := handlers.NewCOPPAHandler(coppaService).SetAuthorizer(authz)
 	ferpaHandler := handlers.NewFERPAHandler(ferpaService).SetAuthorizer(authz)
 	accommodationHandler := handlers.NewAccommodationHandler(accommodationService, assignmentService, authz, auditService)
+	gradingPolicyHandler := handlers.NewGradingPolicyHandler(gradingPolicyService, courseRepo, assignmentRepo, submissionRepo, gradingStandardRepo, observerService)
+	submissionHandler.SetGradingPolicyService(gradingPolicyService)
+	assignmentHandler.SetGradingPolicyService(gradingPolicyService)
+	assignmentOverrideHandler.SetGradingPolicyService(gradingPolicyService)
+	accommodationHandler.SetGradingPolicyService(gradingPolicyService)
 	attendanceHandler := handlers.NewAttendanceHandler(attendanceService, auditService)
 	portfolioHandler := handlers.NewPortfolioHandler(portfolioService, authz)
 	portfolioHandler.SetFileService(fileService)
@@ -1052,6 +1066,7 @@ func main() {
 		SubmissionHandler:      submissionHandler,
 		GradebookHandler:       gradebookHandler,
 		GradingStandardHandler: gradingStandardHandler,
+		GradingPolicyHandler:   gradingPolicyHandler,
 
 		DeveloperKeyHandler: developerKeyHandler,
 		AccessTokenHandler:  accessTokenHandler,
@@ -1307,6 +1322,7 @@ func main() {
 		sched.Register("onerosterAutoSync", scheduler.EveryTick(), scheduler.NewOneRosterAutoSyncJob(onerosterService))
 		sched.Register("linkGradedQuizzes", scheduler.EveryTick(), scheduler.NewQuizAssignmentLinkJob(quizService))
 		sched.Register("observerAlerts", scheduler.EveryTick(), observerAlertService.EvaluateAll)
+		sched.Register("missingSubmissionPolicy", scheduler.EveryTick(), scheduler.NewMissingPolicyJob(gradingPolicyService))
 
 		schedCtx, schedCancel := context.WithCancel(context.Background())
 		defer schedCancel()

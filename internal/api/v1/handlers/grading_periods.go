@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"encoding/json"
+	"math"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -320,6 +323,20 @@ func (h *GradingPeriodHandler) UpdatePeriod(c *fiber.Ctx) error {
 	}
 	if input.GradingPeriod.IsClosed != nil {
 		period.IsClosed = *input.GradingPeriod.IsClosed
+	}
+	// An explicit null clears the close date or weight (G025).
+	var raw struct {
+		GradingPeriod map[string]json.RawMessage `json:"grading_period"`
+	}
+	_ = json.Unmarshal(c.Body(), &raw)
+	if v, ok := raw.GradingPeriod["close_date"]; ok && strings.TrimSpace(string(v)) == "null" {
+		period.CloseDate = nil
+	}
+	if v, ok := raw.GradingPeriod["weight"]; ok && strings.TrimSpace(string(v)) == "null" {
+		period.Weight = nil
+	}
+	if period.Weight != nil && (*period.Weight < 0 || math.IsNaN(*period.Weight)) {
+		return responses.BadRequest(c, "weight cannot be negative")
 	}
 
 	if err := h.gradingPeriodService.UpdatePeriod(c.Context(), period); err != nil {

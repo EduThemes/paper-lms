@@ -206,6 +206,20 @@ func SubmissionTardiness(a *models.Assignment, sub *models.Submission, now time.
 	if sub != nil && sub.Excused {
 		return TardinessExcused
 	}
+	// A status a grader set by hand wins (same rule as ComputeTardiness).
+	if sub != nil && sub.LatePolicyStatus != nil {
+		switch *sub.LatePolicyStatus {
+		case models.LatePolicyStatusLate:
+			return TardinessLate
+		case models.LatePolicyStatusMissing:
+			return TardinessMissing
+		case models.LatePolicyStatusExtended, models.LatePolicyStatusNone:
+			if sub.SubmittedAt != nil || sub.Score != nil {
+				return TardinessOnTime
+			}
+			return TardinessFloating
+		}
+	}
 	if sub != nil && sub.SubmittedAt != nil {
 		if sub.Late {
 			return TardinessLate

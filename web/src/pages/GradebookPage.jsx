@@ -20,6 +20,10 @@ import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import GradeInput from '../components/GradeInput';
+import SubmissionStatusMenu from '../components/grading/SubmissionStatusMenu';
+import PostGradesDialog from '../components/grading/PostGradesDialog';
+import FinalGradeOverrideInput from '../components/grading/FinalGradeOverrideInput';
+import { gradingPolicyApi } from '../services/api_grading_policy';
 import {
   getLetterGrade,
   gradeColor,
@@ -536,8 +540,12 @@ const GradebookCell = memo(function GradebookCell({
   onCommit,
   isFocused,
   onFocusCell,
+  courseId,
+  onStatusUpdated,
+  onStatusError,
 }) {
   const status = cellStatus(cell);
+  const textGrade = ['letter_grade', 'gpa_scale', 'pass_fail', 'percent'].includes(assignment.grading_type);
   const isExcused = status === 'excused';
   const isMissing = status === 'missing';
   const isLate = status === 'late';
@@ -569,12 +577,23 @@ const GradebookCell = memo(function GradebookCell({
           }
         >
           <GradeInput
-            value={enteredScore(cell)}
+            value={textGrade ? (cell?.entered_grade ?? cell?.grade ?? null) : enteredScore(cell)}
             pointsPossible={assignment.points_possible ?? 0}
             studentName={student.name}
+            gradingType={assignment.grading_type}
             onSave={(score) => onCommit(student.id, assignment.id, score)}
           />
         </div>
+      )}
+      {courseId && (
+        <SubmissionStatusMenu
+          courseId={courseId}
+          assignmentId={assignment.id}
+          student={student}
+          cell={cell}
+          onUpdated={onStatusUpdated}
+          onError={onStatusError}
+        />
       )}
       {isLate && (
         <span
@@ -592,7 +611,16 @@ const StudentRowHeader = memo(function StudentRowHeader({
   total,
   letterGrade,
   rowIndex,
+  courseId,
+  serverGrade,
+  showOverride,
+  overridePeriodId,
+  onOverrideSaved,
 }) {
+  const overrideScore = overridePeriodId
+    ? serverGrade?.period_overrides?.[overridePeriodId] ?? null
+    : serverGrade?.override_score ?? null;
+  const overrideGrade = overridePeriodId ? '' : serverGrade?.override_grade || '';
   return (
     <div
       role="row"
@@ -615,11 +643,28 @@ const StudentRowHeader = memo(function StudentRowHeader({
         className="flex items-center justify-center text-xs px-3 border-r border-border-default whitespace-nowrap"
         style={{ width: TOTAL_COL_WIDTH, minWidth: TOTAL_COL_WIDTH }}
       >
-        {total.percentage !== null ? (
+        {showOverride && courseId ? (
+          <span className="flex items-center gap-2">
+            <span className="text-text-tertiary">{total.percentage !== null ? `${total.percentage}%` : '—'}</span>
+            <FinalGradeOverrideInput
+              courseId={courseId}
+              student={student}
+              value={overrideScore}
+              grade={overrideGrade}
+              gradingPeriodId={overridePeriodId || 0}
+              onSaved={onOverrideSaved}
+            />
+          </span>
+        ) : total.percentage !== null ? (
           <span className="font-medium">
             {total.earned}/{total.possible}
             <span className="text-text-tertiary ml-1">({total.percentage}%)</span>
             <span className={`ml-2 font-semibold ${gradeColor(letterGrade)}`}>{letterGrade}</span>
+            {overrideScore !== null && (
+              <span className="ml-1 text-[10px] text-brand-600" title="Final grade override">
+                → {overrideGrade || `${overrideScore}%`}
+              </span>
+            )}
           </span>
         ) : (
           <span className="text-text-disabled">&mdash;</span>
@@ -756,6 +801,11 @@ const FrozenStudentColumn = memo(function FrozenStudentColumn({
   letterGrades,
   scrollRef,
   height,
+  courseId,
+  serverGrades,
+  showOverride,
+  overridePeriodId,
+  onOverrideSaved,
 }) {
   return (
     <div
@@ -775,6 +825,11 @@ const FrozenStudentColumn = memo(function FrozenStudentColumn({
             total={totals[s.id]}
             letterGrade={letterGrades[s.id]}
             rowIndex={i}
+            courseId={courseId}
+            serverGrade={serverGrades?.[s.id]}
+            showOverride={showOverride}
+            overridePeriodId={overridePeriodId}
+            onOverrideSaved={onOverrideSaved}
           />
         ))}
       </div>
@@ -807,6 +862,12 @@ const GradebookGrid = ({
   height,
   width,
   gridContainerRef,
+  serverGrades,
+  showOverride,
+  overridePeriodId,
+  onOverrideSaved,
+  onStatusUpdated,
+  onStatusError,
 }) => {
   const gridRef = useGridRef();
   const headerScrollRef = useRef(null);
@@ -824,12 +885,12 @@ const GradebookGrid = ({
   );
 
   const cellProps = useMemo(
-    () => ({ students, assignments, getCellData, onCommit, focusedCell, onFocusCell }),
-    [students, assignments, getCellData, onCommit, focusedCell, onFocusCell]
+    () => ({ students, assignments, getCellData, onCommit, focusedCell, onFocusCell, courseId, onStatusUpdated, onStatusError }),
+    [students, assignments, getCellData, onCommit, focusedCell, onFocusCell, courseId, onStatusUpdated, onStatusError]
   );
 
   const Cell = useCallback(
-    ({ rowIndex, columnIndex, style, ariaAttributes, students: s, assignments: a, getCellData: g, onCommit: c, focusedCell: fc, onFocusCell: ofc }) => {
+    ({ rowIndex, columnIndex, style, ariaAttributes, students: s, assignments: a, getCellData: g, onCommit: c, focusedCell: fc, onFocusCell: ofc, courseId: cid, onStatusUpdated: osu, onStatusError: ose }) => {
       const student = s[rowIndex];
       const assignment = a[columnIndex];
       if (!student || !assignment) return <div style={style} />;
@@ -847,6 +908,9 @@ const GradebookGrid = ({
           onCommit={c}
           isFocused={isFocused}
           onFocusCell={ofc}
+          courseId={cid}
+          onStatusUpdated={osu}
+          onStatusError={ose}
         />
       );
     },
@@ -926,6 +990,11 @@ const GradebookGrid = ({
           letterGrades={letterGrades}
           scrollRef={studentScrollRef}
           height={bodyHeight}
+          courseId={courseId}
+          serverGrades={serverGrades}
+          showOverride={showOverride}
+          overridePeriodId={overridePeriodId}
+          onOverrideSaved={onOverrideSaved}
         />
         <Grid
           gridRef={gridRef}
@@ -1000,7 +1069,7 @@ const GradebookPage = () => {
   const [error, setError] = useState(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
-  const [postingAssignment, setPostingAssignment] = useState(null);
+  const [postingAssignment] = useState(null);
   const [viewport, setViewport] = useState({ width: 1200, height: 600 });
   const containerRef = useRef(null);
   const gridContainerRef = useRef(null);
@@ -1017,6 +1086,43 @@ const GradebookPage = () => {
 
   // Keyboard cell focus
   const [focusedCell, setFocusedCell] = useState({ row: 0, col: 0 });
+
+  // Grading policy (server-computed totals, grading periods, overrides,
+  // post / hide tray).
+  const [serverGrades, setServerGrades] = useState(null); // user id -> student grade
+  const [gradingPeriods, setGradingPeriods] = useState([]);
+  const [periodFilter, setPeriodFilter] = useState('all');
+  const [assignmentPeriods, setAssignmentPeriods] = useState({}); // assignment id -> Set(period ids)
+  const [showOverride, setShowOverride] = useState(false);
+  const [postDialog, setPostDialog] = useState({ open: false, assignment: null, mode: 'post' });
+  const [policyError, setPolicyError] = useState(null);
+
+  const refreshServerGrades = useCallback(async () => {
+    try {
+      const res = await gradingPolicyApi.getCourseGrades(courseId);
+      const map = {};
+      for (const g of res?.students || []) map[g.user_id] = g;
+      setServerGrades(map);
+      setGradingPeriods(Array.isArray(res?.grading_periods) ? res.grading_periods : []);
+    } catch {
+      setServerGrades(null);
+    }
+  }, [courseId]);
+
+  useEffect(() => {
+    if (loading) return;
+    refreshServerGrades();
+    gradingPolicyApi
+      .getEffectiveDueDates(courseId)
+      .then((dd) => {
+        const out = {};
+        for (const [aid, perUser] of Object.entries(dd || {})) {
+          out[aid] = new Set(Object.values(perUser || {}).map((d) => d.grading_period_id).filter(Boolean));
+        }
+        setAssignmentPeriods(out);
+      })
+      .catch(() => setAssignmentPeriods({}));
+  }, [loading, courseId, refreshServerGrades]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -1126,6 +1232,30 @@ const GradebookPage = () => {
     });
   }, [assignments, assignmentGroups]);
 
+  // G025: with a grading period selected, only assignments due in it.
+  // G018: an assignment reads as "posted" once every graded or excused
+  // submission is visible to its student.
+  const visibleAssignments = useMemo(() => {
+    const pid = Number(periodFilter);
+    const list = periodFilter === 'all'
+      ? orderedAssignments
+      : orderedAssignments.filter((a) => assignmentPeriods[String(a.id)]?.has(pid));
+    const subs = gradebook ? gradebook.submissions || gradebook : null;
+    return list.map((a) => {
+      if (a.gradesPosted !== undefined || !subs) return a;
+      let graded = false;
+      let hidden = false;
+      for (const perStudent of Object.values(subs)) {
+        const c = perStudent?.[a.id] || perStudent?.[String(a.id)];
+        if (c && (c.score != null || c.excused)) {
+          graded = true;
+          if (!c.posted_at) hidden = true;
+        }
+      }
+      return { ...a, gradesPosted: graded && !hidden };
+    });
+  }, [orderedAssignments, periodFilter, assignmentPeriods, gradebook]);
+
   const getCellData = useCallback(
     (studentId, assignmentId) => {
       if (!gradebook) return null;
@@ -1232,11 +1362,65 @@ const GradebookPage = () => {
     return result;
   }, [students, assignments, assignmentGroups, course, getCellData]);
 
+  // Server totals (G020/G021/G024/G025/G029): drop rules, excused and
+  // unassigned work, grading periods and quiz-backed assignments are
+  // applied the same way students see them. The client totals above stay
+  // as the fallback when the grades endpoint is unavailable.
+  const effectiveTotals = useMemo(() => {
+    if (!serverGrades) return totals;
+    const out = {};
+    for (const s of students) {
+      const g = serverGrades[s.id];
+      let set = g;
+      if (g && periodFilter !== 'all') {
+        set = (g.grading_periods || []).find((p) => String(p.grading_period_id) === String(periodFilter)) || null;
+      }
+      if (!set || set.current_score === null || set.current_score === undefined) {
+        out[s.id] = totals[s.id] && periodFilter === 'all' && !g
+          ? totals[s.id]
+          : { earned: 0, possible: 0, percentage: null };
+        continue;
+      }
+      out[s.id] = {
+        earned: Math.round((set.current_points || 0) * 100) / 100,
+        possible: Math.round((set.current_possible || 0) * 100) / 100,
+        percentage: Number(set.current_score).toFixed(1),
+      };
+    }
+    return out;
+  }, [serverGrades, totals, students, periodFilter]);
+
   const letterGrades = useMemo(() => {
     const out = {};
-    for (const s of students) out[s.id] = getLetterGrade(totals[s.id]?.percentage, gradingScale);
+    for (const s of students) {
+      const g = serverGrades?.[s.id];
+      out[s.id] = periodFilter === 'all' && g?.current_grade
+        ? g.current_grade
+        : getLetterGrade(effectiveTotals[s.id]?.percentage, gradingScale);
+    }
     return out;
-  }, [students, totals, gradingScale]);
+  }, [students, effectiveTotals, gradingScale, serverGrades, periodFilter]);
+
+  const handleOverrideSaved = useCallback(() => {
+    refreshServerGrades();
+  }, [refreshServerGrades]);
+
+  const handleStatusUpdated = useCallback((studentId, assignmentId, saved) => {
+    if (saved && typeof saved === 'object') {
+      setGradebook((prev) => {
+        if (!prev) return prev;
+        const sid = String(studentId);
+        const aid = String(assignmentId);
+        const hasSubmissions = !!prev.submissions;
+        const oldSubs = hasSubmissions ? prev.submissions : prev;
+        const oldStudent = oldSubs[sid] || {};
+        const newStudent = { ...oldStudent, [aid]: { ...(oldStudent[aid] || {}), ...saved } };
+        const newSubs = { ...oldSubs, [sid]: newStudent };
+        return hasSubmissions ? { ...prev, submissions: newSubs } : newSubs;
+      });
+    }
+    refreshServerGrades();
+  }, [refreshServerGrades]);
 
   const handleCommit = useCallback(
     async (studentId, assignmentId, score) => {
@@ -1261,14 +1445,21 @@ const GradebookPage = () => {
               score: saved.score ?? null,
               grade: saved.grade ?? null,
               entered_score: saved.entered_score ?? null,
+              // Letter / percent / pass-fail cells show the entered grade
+              // (G023), and the post state follows posted_at (G018).
+              entered_grade: saved.entered_grade ?? null,
               points_deducted: saved.points_deducted ?? null,
               excused: saved.excused ?? old.excused,
+              posted_at: saved.posted_at !== undefined ? saved.posted_at : old.posted_at,
+              late: saved.late ?? old.late,
+              missing: saved.missing ?? old.missing,
               workflow_state: saved.workflow_state,
             }
           : {
               ...old,
               score: score == null ? null : parseFloat(score),
               grade: score == null ? null : String(score),
+              entered_grade: score == null ? null : String(score),
               entered_score: score == null ? null : parseFloat(score),
               points_deducted: null,
               workflow_state: score != null ? 'graded' : old.submitted_at ? 'submitted' : 'unsubmitted',
@@ -1277,43 +1468,33 @@ const GradebookPage = () => {
         const newSubs = { ...oldSubs, [sid]: newStudent };
         return hasSubmissions ? { ...prev, submissions: newSubs } : newSubs;
       });
+      refreshServerGrades();
     },
-    [courseId]
+    [courseId, refreshServerGrades]
   );
 
-  const handlePostGrades = useCallback(
-    async (assignmentId) => {
-      setPostingAssignment(assignmentId);
-      try {
-        await api.postGrades(courseId, assignmentId);
-        setAssignments((prev) =>
-          prev.map((a) => (a.id === assignmentId ? { ...a, gradesPosted: true } : a))
-        );
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setPostingAssignment(null);
-      }
+  // G018: Post / Hide open the tray (everyone vs graded, by section).
+  const openPostDialog = useCallback(
+    (assignmentId, mode) => {
+      const assignment = assignments.find((a) => a.id === assignmentId) || { id: assignmentId, name: '' };
+      setPostDialog({ open: true, assignment, mode });
     },
-    [courseId]
+    [assignments]
+  );
+  const handlePostDialogDone = useCallback(
+    (assignmentId, mode, sectionIds) => {
+      if (!sectionIds || sectionIds.length === 0) {
+        setAssignments((prev) =>
+          prev.map((a) => (a.id === assignmentId ? { ...a, gradesPosted: mode === 'post' } : a))
+        );
+      }
+      refreshServerGrades();
+    },
+    [refreshServerGrades]
   );
 
-  const handleHideGrades = useCallback(
-    async (assignmentId) => {
-      setPostingAssignment(assignmentId);
-      try {
-        await api.hideGrades(courseId, assignmentId);
-        setAssignments((prev) =>
-          prev.map((a) => (a.id === assignmentId ? { ...a, gradesPosted: false } : a))
-        );
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setPostingAssignment(null);
-      }
-    },
-    [courseId]
-  );
+  const handlePostGrades = useCallback((assignmentId) => openPostDialog(assignmentId, 'post'), [openPostDialog]);
+  const handleHideGrades = useCallback((assignmentId) => openPostDialog(assignmentId, 'hide'), [openPostDialog]);
 
   // ---------- Bulk grade application (Set Default / Curve) ----------
   const applyBulkGrades = useCallback(
@@ -1418,7 +1599,7 @@ const GradebookPage = () => {
 
   // ---------- Keyboard cell navigation ----------
   const numRows = studentRows.length;
-  const numCols = orderedAssignments.length;
+  const numCols = visibleAssignments.length;
 
   const moveFocus = useCallback(
     (dRow, dCol) => {
@@ -1727,7 +1908,7 @@ const GradebookPage = () => {
     );
   }
 
-  const focusedAssignment = orderedAssignments[focusedCell.col];
+  const focusedAssignment = visibleAssignments[focusedCell.col];
   const focusedStudent = studentRows[focusedCell.row];
 
   return (
@@ -1755,7 +1936,26 @@ const GradebookPage = () => {
               )}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {gradingPeriods.length > 0 && (
+              <select
+                value={periodFilter}
+                onChange={(e) => setPeriodFilter(e.target.value)}
+                aria-label="Grading period"
+                className="border border-border-strong rounded-md px-2 py-2 text-sm"
+              >
+                <option value="all">All grading periods</option>
+                {gradingPeriods.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.title}{p.is_closed ? ' (closed)' : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+            <label className="inline-flex items-center gap-1.5 text-sm text-text-secondary">
+              <input type="checkbox" checked={showOverride} onChange={(e) => setShowOverride(e.target.checked)} />
+              Final grade override
+            </label>
             <Legend />
             <button
               onClick={() => setShortcutsDialog(true)}
@@ -1837,20 +2037,37 @@ const GradebookPage = () => {
         </div>
       )}
 
+      {policyError && (
+        <div role="alert" className="mb-3 flex items-center justify-between rounded-md border border-accent-danger/30 bg-accent-danger/10 px-3 py-2 text-sm text-accent-danger">
+          <span>{policyError}</span>
+          <button type="button" onClick={() => setPolicyError(null)} className="text-xs underline">Dismiss</button>
+        </div>
+      )}
+
       <span className="sr-only" aria-live="polite">
         Gradebook: students by assignments grade matrix.
       </span>
 
       <div ref={containerRef} className="w-full">
-        {students.length === 0 || orderedAssignments.length === 0 ? (
+        {students.length === 0 || visibleAssignments.length === 0 ? (
           <div className="bg-surface-0 rounded-lg shadow p-8 text-center text-text-tertiary">
-            {students.length === 0 ? 'No students enrolled.' : 'No assignments yet.'}
+            {students.length === 0
+              ? 'No students enrolled.'
+              : orderedAssignments.length === 0
+              ? 'No assignments yet.'
+              : 'No assignments are due in this grading period.'}
           </div>
         ) : (
           <GradebookGrid
             students={studentRows}
-            assignments={orderedAssignments}
-            totals={totals}
+            assignments={visibleAssignments}
+            totals={effectiveTotals}
+            serverGrades={serverGrades}
+            showOverride={showOverride}
+            overridePeriodId={periodFilter === 'all' ? 0 : Number(periodFilter)}
+            onOverrideSaved={handleOverrideSaved}
+            onStatusUpdated={handleStatusUpdated}
+            onStatusError={setPolicyError}
             letterGrades={letterGrades}
             gradebook={gradebook}
             courseId={courseId}
@@ -1919,6 +2136,14 @@ const GradebookPage = () => {
         onSend={handleSendBulkMessage}
       />
       <KeyboardShortcutsDialog open={shortcutsDialog} onOpenChange={setShortcutsDialog} />
+      <PostGradesDialog
+        open={postDialog.open}
+        onOpenChange={(o) => setPostDialog((s) => ({ ...s, open: o }))}
+        courseId={courseId}
+        assignment={postDialog.assignment}
+        mode={postDialog.mode}
+        onDone={handlePostDialogDone}
+      />
     </Layout>
   );
 };

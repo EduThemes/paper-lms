@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -24,7 +23,12 @@ type GradingService struct {
 	enrollmentRepo      repository.EnrollmentRepository
 	courseRepo           repository.CourseRepository
 	gradingStandardRepo repository.GradingStandardRepository
+	policy              *GradingPolicyService
 }
+
+// SetPolicyService routes student grades through the full grading-policy
+// calculator (overrides, grading periods, final grade overrides).
+func (s *GradingService) SetPolicyService(p *GradingPolicyService) { s.policy = p }
 
 func NewGradingService(submissionRepo repository.SubmissionRepository, assignmentRepo repository.AssignmentRepository, groupRepo repository.AssignmentGroupRepository, enrollmentRepo repository.EnrollmentRepository, courseRepo repository.CourseRepository, gradingStandardRepo repository.GradingStandardRepository) *GradingService {
 	return &GradingService{
@@ -59,6 +63,10 @@ type StudentGrade struct {
 	CurrentScore float64 `json:"current_score"`
 	FinalGrade   string  `json:"final_grade"`
 	FinalScore   float64 `json:"final_score"`
+	// OverrideScore / OverrideGrade are the instructor's final grade
+	// override, when set (G029).
+	OverrideScore *float64 `json:"override_score,omitempty"`
+	OverrideGrade string   `json:"override_grade,omitempty"`
 }
 
 func (s *GradingService) GetGradebook(ctx context.Context, courseID uint) (*GradebookEntry, error) {
@@ -134,6 +142,32 @@ func (s *GradingService) GetStudentGrade(ctx context.Context, courseID, studentI
 		return nil, err
 	}
 
+	// The full calculator (overrides, grading periods, drop rules, final
+	// grade override) when the grading-policy service is wired.
+	if s.policy != nil {
+		grades, err := s.policy.CourseGrades(ctx, course, CourseGradesOptions{UserIDs: []uint{studentID}})
+		if err != nil {
+			return nil, err
+		}
+		out := &StudentGrade{}
+		if len(grades.Students) == 0 {
+			return out, nil
+		}
+		g := grades.Students[0]
+		if g.CurrentScore != nil {
+			out.CurrentScore = *g.CurrentScore
+		}
+		if g.FinalScore != nil {
+			out.FinalScore = *g.FinalScore
+		}
+		out.CurrentGrade, out.FinalGrade = g.CurrentGrade, g.FinalGrade
+		if g.OverrideScore != nil {
+			out.OverrideScore = g.OverrideScore
+			out.OverrideGrade = g.OverrideGrade
+		}
+		return out, nil
+	}
+
 	// Look up the course's custom grading scale (if any)
 	scale := s.getCourseGradingScale(ctx, courseID)
 
@@ -156,45 +190,24 @@ func (s *GradingService) GetStudentGrade(ctx context.Context, courseID, studentI
 		subByAssignment[sub.AssignmentID] = &submissions[i]
 	}
 
-	// Check if weighted grading is enabled and groups have weights
-	if course.ApplyGroupWeights {
-		groups, err := s.groupRepo.ListByCourseID(ctx, courseID, repository.PaginationParams{Page: 1, PerPage: 100})
-		if err == nil && len(groups.Items) > 0 {
-			currentScore, finalScore := s.calculateWeightedGrade(assignments.Items, groups.Items, subByAssignment)
-			return &StudentGrade{
-				CurrentGrade: scoreToLetterGradeWithScale(currentScore, scale),
-				CurrentScore: currentScore,
-				FinalGrade:   scoreToLetterGradeWithScale(finalScore, scale),
-				FinalScore:   finalScore,
-			}, nil
+	// Groups carry weights and drop rules (G020); they are always read
+	// when a policy service is wired, otherwise only for weighted courses.
+	var groups []models.AssignmentGroup
+	if course.ApplyGroupWeights || s.policy != nil {
+		if res, err := s.groupRepo.ListByCourseID(ctx, courseID, repository.PaginationParams{Page: 1, PerPage: 100}); err == nil {
+			groups = res.Items
 		}
 	}
-
-	// Unweighted: simple point totals
-	var currentEarned, currentPossible float64
-	var finalEarned, finalPossible float64
-
-	for _, a := range assignments.Items {
-		sub := subByAssignment[a.ID]
-		points, counts := assignmentCounts(&a, sub)
-		if !counts {
-			continue
-		}
-		finalPossible += points
-
-		if sub != nil && sub.Score != nil {
-			currentEarned += *sub.Score
-			currentPossible += points
-			finalEarned += *sub.Score
-		}
-	}
-
+	res := CalculateCourseGrade(CourseGradeInput{
+		Assignments: assignments.Items, Groups: groups, Submissions: subByAssignment,
+		ApplyGroupWeights: course.ApplyGroupWeights,
+	})
 	var currentScore, finalScore float64
-	if currentPossible > 0 {
-		currentScore = math.Round(currentEarned/currentPossible*10000) / 100
+	if res.CurrentScore != nil {
+		currentScore = *res.CurrentScore
 	}
-	if finalPossible > 0 {
-		finalScore = math.Round(finalEarned/finalPossible*10000) / 100
+	if res.FinalScore != nil {
+		finalScore = *res.FinalScore
 	}
 
 	return &StudentGrade{
@@ -205,135 +218,22 @@ func (s *GradingService) GetStudentGrade(ctx context.Context, courseID, studentI
 	}, nil
 }
 
-// assignmentCounts decides whether an assignment takes part in a
-// student's grade and with how many points possible (Canvas grade
-// calculator rules, B115/B206):
-//   - unpublished / deleted assignments and not_graded ones never count;
-//   - an excused submission is dropped from both earned and possible;
-//   - a 0-point (or point-less) assignment counts as extra credit: its
-//     score is added to earned with nothing added to possible.
-func assignmentCounts(a *models.Assignment, sub *models.Submission) (pointsPossible float64, counts bool) {
-	if a == nil || !a.IsPublished() || a.GradingType == "not_graded" {
-		return 0, false
-	}
-	if sub != nil && sub.Excused {
-		return 0, false
-	}
-	if a.PointsPossible != nil && *a.PointsPossible > 0 {
-		return *a.PointsPossible, true
-	}
-	// Extra credit: only meaningful when there is a score to add.
-	return 0, sub != nil && sub.Score != nil
-}
-
-// calculateWeightedGrade computes Canvas-compatible weighted grades.
-// Current score: only considers groups where the student has graded submissions.
-// Final score: treats unsubmitted assignments as 0.
-func (s *GradingService) calculateWeightedGrade(assignments []models.Assignment, groups []models.AssignmentGroup, subByAssignment map[uint]*models.Submission) (currentScore, finalScore float64) {
-	currentScore, finalScore, _ = weightedScores(assignments, groups, subByAssignment)
-	return
-}
-
 // CurrentCourseScore is the grade calculator's current score (0-100) for
 // one student, the same number the Grades page and gradebook show: group
-// weights when the course applies them, extra credit and excused work per
-// assignmentCounts, and only graded work counted. subByAssignment must
+// weights when the course applies them, drop rules, extra credit and
+// excused work, and only graded work counted. subByAssignment must
 // hold only the submissions the viewer may see (e.g. posted grades for a
 // student or observer). ok is false when nothing graded counts yet.
 func CurrentCourseScore(applyGroupWeights bool, assignments []models.Assignment, groups []models.AssignmentGroup, subByAssignment map[uint]*models.Submission) (score float64, ok bool) {
-	if applyGroupWeights && len(groups) > 0 {
-		current, _, hasCurrent := weightedScores(assignments, groups, subByAssignment)
-		return current, hasCurrent
-	}
-	var earned, possible float64
-	for i := range assignments {
-		a := &assignments[i]
-		sub := subByAssignment[a.ID]
-		points, counts := assignmentCounts(a, sub)
-		if !counts || sub == nil || sub.Score == nil {
-			continue
-		}
-		earned += *sub.Score
-		possible += points
-	}
-	if possible <= 0 {
+	// Same calculator as the gradebook: drop rules apply too (G020).
+	res := CalculateCourseGrade(CourseGradeInput{
+		Assignments: assignments, Groups: groups, Submissions: subByAssignment,
+		ApplyGroupWeights: applyGroupWeights,
+	})
+	if res.CurrentScore == nil {
 		return 0, false
 	}
-	return math.Round(earned/possible*10000) / 100, true
-}
-
-// weightedScores is calculateWeightedGrade's body; hasCurrent reports
-// whether any weighted group has graded work.
-func weightedScores(assignments []models.Assignment, groups []models.AssignmentGroup, subByAssignment map[uint]*models.Submission) (currentScore, finalScore float64, hasCurrent bool) {
-	// Build group lookup
-	groupMap := make(map[uint]*models.AssignmentGroup)
-	for i := range groups {
-		groupMap[groups[i].ID] = &groups[i]
-	}
-
-	// Per-group earned/possible totals
-	type groupTotals struct {
-		currentEarned, currentPossible float64
-		finalEarned, finalPossible     float64
-		weight                         float64
-	}
-	totals := make(map[uint]*groupTotals)
-
-	for _, a := range assignments {
-		points, counts := assignmentCounts(&a, subByAssignment[a.ID])
-		if !counts {
-			continue
-		}
-		groupID := uint(0)
-		if a.AssignmentGroupID != nil {
-			groupID = *a.AssignmentGroupID
-		}
-		g, ok := groupMap[groupID]
-		if !ok || g.GroupWeight <= 0 {
-			continue // Skip assignments in groups with no weight
-		}
-
-		gt, exists := totals[groupID]
-		if !exists {
-			gt = &groupTotals{weight: g.GroupWeight}
-			totals[groupID] = gt
-		}
-
-		gt.finalPossible += points
-
-		sub, hasSub := subByAssignment[a.ID]
-		if hasSub && sub.Score != nil {
-			gt.currentEarned += *sub.Score
-			gt.currentPossible += points
-			gt.finalEarned += *sub.Score
-		}
-	}
-
-	// Calculate weighted averages
-	var currentWeightedSum, currentWeightTotal float64
-	var finalWeightedSum, finalWeightTotal float64
-
-	for _, gt := range totals {
-		if gt.currentPossible > 0 {
-			groupPct := gt.currentEarned / gt.currentPossible * 100
-			currentWeightedSum += groupPct * gt.weight
-			currentWeightTotal += gt.weight
-		}
-		if gt.finalPossible > 0 {
-			groupPct := gt.finalEarned / gt.finalPossible * 100
-			finalWeightedSum += groupPct * gt.weight
-			finalWeightTotal += gt.weight
-		}
-	}
-
-	if currentWeightTotal > 0 {
-		currentScore = math.Round(currentWeightedSum/currentWeightTotal*100) / 100
-		hasCurrent = true
-	}
-	if finalWeightTotal > 0 {
-		finalScore = math.Round(finalWeightedSum/finalWeightTotal*100) / 100
-	}
-	return
+	return *res.CurrentScore, true
 }
 
 // defaultGradingScale is the standard US grading scale used when no custom
@@ -392,7 +292,10 @@ func (s *GradingService) getCourseGradingScale(ctx context.Context, courseID uin
 	if err != nil || standard == nil {
 		return nil
 	}
-	return parseGradingStandardData(standard.Data)
+	entries := parseGradingStandardData(standard.Data)
+	// The lookup walks the scale top-down, so it must be descending.
+	sortEntriesDesc(entries)
+	return entries
 }
 
 // parseGradingStandardData parses the JSONB data from a GradingStandard.

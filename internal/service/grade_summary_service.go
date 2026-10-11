@@ -537,7 +537,7 @@ func (s *GradeSummaryService) Summary(ctx context.Context, courseID, studentID, 
 		default:
 			row.Status = "unsubmitted"
 		}
-		_, counts := assignmentCounts(a, &models.Submission{Excused: row.Excused, Score: row.Score})
+		_, counts := countedItem(a, &models.Submission{Excused: row.Excused, Score: row.Score}, nil)
 		row.CountsTowardTotal = counts
 		gid := uint(0)
 		if a.AssignmentGroupID != nil {

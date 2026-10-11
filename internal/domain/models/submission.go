@@ -28,6 +28,16 @@ type Submission struct {
 	Attachments    *string            `json:"attachments" gorm:"type:text"`
 	WorkflowState  SubmissionWorkflow `json:"workflow_state" gorm:"type:text;not null;default:'unsubmitted';index"`
 	PostedAt       *time.Time         `json:"posted_at"`
+	// LatePolicyStatus is a manually applied status (none, missing, late,
+	// extended) that overrides the computed late/missing flags; nil means
+	// "computed" (Canvas submissions.late_policy_status).
+	LatePolicyStatus *string `json:"late_policy_status"`
+	// SecondsLateOverride replaces the computed lateness when the status
+	// is manually set to late.
+	SecondsLateOverride *int64 `json:"seconds_late_override"`
+	// CachedDueDate is the student's effective due date (overrides and
+	// accommodations applied), refreshed whenever dates change.
+	CachedDueDate *time.Time `json:"cached_due_date"`
 	CreatedAt      time.Time          `json:"created_at"`
 	UpdatedAt      time.Time          `json:"updated_at"`
 }

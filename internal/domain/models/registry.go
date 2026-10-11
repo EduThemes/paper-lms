@@ -67,6 +67,8 @@ func AllModels() []interface{} {
 		&AssignmentOverride{},
 		&AssignmentOverrideStudent{},
 		&LatePolicy{},
+		&SubmissionVersion{},
+		&CourseScoreOverride{},
 		&CalendarEvent{},
 		&Conversation{},
 		&ConversationParticipant{},

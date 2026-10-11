@@ -6,6 +6,7 @@ import { api } from '../services/api';
 import Layout from '../components/Layout';
 import useAccountId from '../hooks/useAccountId';
 import { clickableProps } from '../utils/a11y';
+import AccountGradingSchemesPanel from '../components/grading/AccountGradingSchemesPanel';
 
 const GradingPeriodsPage = () => {
   const { t } = useTranslation();
@@ -17,7 +18,7 @@ const GradingPeriodsPage = () => {
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [newGroupTitle, setNewGroupTitle] = useState('');
   const [showCreatePeriod, setShowCreatePeriod] = useState(null);
-  const [newPeriod, setNewPeriod] = useState({ title: '', start_date: '', end_date: '' });
+  const [newPeriod, setNewPeriod] = useState({ title: '', start_date: '', end_date: '', close_date: '', weight: '' });
 
   const accountId = useAccountId();
 
@@ -83,8 +84,10 @@ const GradingPeriodsPage = () => {
         title: newPeriod.title,
         start_date: new Date(newPeriod.start_date).toISOString(),
         end_date: new Date(newPeriod.end_date).toISOString(),
+        ...(newPeriod.close_date ? { close_date: new Date(newPeriod.close_date).toISOString() } : {}),
+        ...(newPeriod.weight !== '' ? { weight: Number(newPeriod.weight) } : {}),
       });
-      setNewPeriod({ title: '', start_date: '', end_date: '' });
+      setNewPeriod({ title: '', start_date: '', end_date: '', close_date: '', weight: '' });
       setShowCreatePeriod(null);
       fetchPeriods(groupId);
     } catch (err) {
@@ -96,6 +99,30 @@ const GradingPeriodsPage = () => {
     if (!window.confirm(t('gradingPeriods.deletePeriodConfirm'))) return;
     try {
       await api.deleteGradingPeriod(accountId, groupId, periodId);
+      fetchPeriods(groupId);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  // G025: weighted grading periods and per-period weights / close dates
+  // drive the course grade calculation.
+  const handleGroupFlag = async (group, field, value) => {
+    try {
+      await api.updateGradingPeriodGroup(accountId, group.id, { [field]: value });
+      setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, [field]: value } : g)));
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handlePeriodField = async (groupId, period, field, raw) => {
+    let value = raw;
+    if (field === 'weight') value = raw === '' ? null : Number(raw);
+    if (field === 'close_date') value = raw ? new Date(raw).toISOString() : null;
+    if (field === 'is_closed') value = !!raw;
+    try {
+      await api.updateGradingPeriod(accountId, groupId, period.id, { [field]: value });
       fetchPeriods(groupId);
     } catch (err) {
       setError(err.message);
@@ -171,6 +198,24 @@ const GradingPeriodsPage = () => {
 
               {expandedGroups[group.id] && (
                 <div className="border-t px-4 py-3">
+                  <div className="flex flex-wrap gap-4 mb-3 text-sm">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={!!group.weighted}
+                        onChange={(e) => handleGroupFlag(group, 'weighted', e.target.checked)}
+                      />
+                      Weight final grade by grading period
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={!!group.display_totals_for_all_grading_periods}
+                        onChange={(e) => handleGroupFlag(group, 'display_totals_for_all_grading_periods', e.target.checked)}
+                      />
+                      Show totals for &ldquo;All grading periods&rdquo;
+                    </label>
+                  </div>
                   {periods[group.id]?.length === 0 && (
                     <p className="text-sm text-text-tertiary mb-3">{t('gradingPeriods.noPeriodsInGroup')}</p>
                   )}
@@ -180,7 +225,47 @@ const GradingPeriodsPage = () => {
                         <p className="text-sm font-medium">{period.title}</p>
                         <p className="text-xs text-text-tertiary">
                           {formatDate(period.start_date)} - {formatDate(period.end_date)}
+                          {period.close_date ? ` · closes ${formatDate(period.close_date)}` : ''}
                         </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-3 text-xs">
+                          {group.weighted && (
+                            <label className="flex items-center gap-1">
+                              Weight %
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                defaultValue={period.weight ?? ''}
+                                aria-label={`Weight for ${period.title}`}
+                                onBlur={(e) => {
+                                  if (String(period.weight ?? '') !== e.target.value) handlePeriodField(group.id, period, 'weight', e.target.value);
+                                }}
+                                className="w-20 border border-border-strong rounded px-1 py-0.5"
+                              />
+                            </label>
+                          )}
+                          <label className="flex items-center gap-1">
+                            Close date
+                            <input
+                              type="date"
+                              defaultValue={period.close_date ? String(period.close_date).slice(0, 10) : ''}
+                              aria-label={`Close date for ${period.title}`}
+                              onBlur={(e) => {
+                                const was = period.close_date ? String(period.close_date).slice(0, 10) : '';
+                                if (was !== e.target.value) handlePeriodField(group.id, period, 'close_date', e.target.value);
+                              }}
+                              className="border border-border-strong rounded px-1 py-0.5"
+                            />
+                          </label>
+                          <label className="flex items-center gap-1">
+                            <input
+                              type="checkbox"
+                              checked={!!period.is_closed}
+                              onChange={(e) => handlePeriodField(group.id, period, 'is_closed', e.target.checked)}
+                            />
+                            Closed
+                          </label>
+                        </div>
                       </div>
                       <button
                         onClick={() => handleDeletePeriod(group.id, period.id)}
@@ -217,6 +302,30 @@ const GradingPeriodsPage = () => {
                           required
                         />
                       </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="text-xs text-text-tertiary">
+                          Close date (grades lock)
+                          <input
+                            type="date"
+                            value={newPeriod.close_date}
+                            onChange={e => setNewPeriod({ ...newPeriod, close_date: e.target.value })}
+                            className="mt-1 w-full border border-border-strong rounded px-3 py-2 text-sm"
+                          />
+                        </label>
+                        {group.weighted && (
+                          <label className="text-xs text-text-tertiary">
+                            Weight %
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={newPeriod.weight}
+                              onChange={e => setNewPeriod({ ...newPeriod, weight: e.target.value })}
+                              className="mt-1 w-full border border-border-strong rounded px-3 py-2 text-sm"
+                            />
+                          </label>
+                        )}
+                      </div>
                       <div className="flex space-x-2">
                         <button type="submit" className="bg-brand-600 text-white px-3 py-1 rounded text-sm hover:bg-brand-700">{t('common.add')}</button>
                         <button type="button" onClick={() => setShowCreatePeriod(null)} className="text-text-tertiary text-sm">{t('common.cancel')}</button>
@@ -236,6 +345,7 @@ const GradingPeriodsPage = () => {
           ))
         )}
       </div>
+      {accountId && <AccountGradingSchemesPanel accountId={accountId} />}
     </Layout>
   );
 };

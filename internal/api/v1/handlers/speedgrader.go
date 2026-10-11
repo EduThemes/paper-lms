@@ -46,6 +46,9 @@ func speedGraderSubmissionJSON(sub *models.Submission) fiber.Map {
 		"missing":         sub.Missing,
 		"excused":         sub.Excused,
 		"workflow_state":  sub.WorkflowState,
+		// G022: manual status for the SpeedGrader status picker.
+		"late_policy_status":    sub.LatePolicyStatus,
+		"seconds_late_override": sub.SecondsLateOverride,
 	}
 	if sub.Attachments != nil && *sub.Attachments != "" {
 		var attachments []map[string]interface{}

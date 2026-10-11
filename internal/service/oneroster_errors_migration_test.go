@@ -31,7 +31,9 @@ func TestMigration000073_IdempotentOnBigintColumn(t *testing.T) {
 		return v
 	}
 	latest := version()
-
+	// Step down one migration at a time: migration numbers are allocated
+	// in blocks, so the chain can have gaps and latest-72 is not a step
+	// count.
 	// Roll back to 72: the column is text again.
 	require.NoError(t, db.MigrateTo(g, 72))
 	require.Equal(t, uint(72), version())

@@ -30,6 +30,7 @@ type Router struct {
 	SubmissionHandler        *handlers.SubmissionHandler
 	GradebookHandler         *handlers.GradebookHandler
 	GradingStandardHandler   *handlers.GradingStandardHandler
+	GradingPolicyHandler     *handlers.GradingPolicyHandler
 
 	// Developer keys, tokens, OAuth, external tools, LTI
 	DeveloperKeyHandler *handlers.DeveloperKeyHandler
@@ -885,6 +886,7 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerQuizExtensionRoutes(protected, enrolled, instructor)
 	r.registerQuizEngineRoutes(protected, enrolled, instructor)
 	r.registerQuizItemsRoutes(protected, enrolled, instructor)
+	r.registerGradingPolicyRoutes(protected, admin, enrolled, instructor)
 	r.registerGamificationRoutes(protected, admin, instructor, selfOrAdmin)
 	r.registerSuperAdminRoutes(protected)
 	r.registerRCEMediaRoutes(protected)

@@ -64,5 +64,8 @@ func (h *GradebookHandler) GetStudentGrade(c *fiber.Ctx) error {
 		"current_score": grade.CurrentScore,
 		"final_grade":   grade.FinalGrade,
 		"final_score":   grade.FinalScore,
+		// G029: the instructor's final grade override, when set.
+		"override_score": grade.OverrideScore,
+		"override_grade": grade.OverrideGrade,
 	})
 }
