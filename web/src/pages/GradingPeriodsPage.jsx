@@ -7,6 +7,8 @@ import Layout from '../components/Layout';
 import useAccountId from '../hooks/useAccountId';
 import { clickableProps } from '../utils/a11y';
 import AccountGradingSchemesPanel from '../components/grading/AccountGradingSchemesPanel';
+import { dateInputToStartISO, dateInputToEndISO, isoToDateInput } from '../utils/datetimeLocal';
+import { getUserTimeZone } from '../lib/userTimeZone';
 
 const GradingPeriodsPage = () => {
   const { t } = useTranslation();
@@ -82,9 +84,11 @@ const GradingPeriodsPage = () => {
     try {
       await api.createGradingPeriod(accountId, groupId, {
         title: newPeriod.title,
-        start_date: new Date(newPeriod.start_date).toISOString(),
-        end_date: new Date(newPeriod.end_date).toISOString(),
-        ...(newPeriod.close_date ? { close_date: new Date(newPeriod.close_date).toISOString() } : {}),
+        // A period runs from the start of its first day to the end of its
+        // last day in the profile zone (G157), not UTC midnight.
+        start_date: dateInputToStartISO(newPeriod.start_date),
+        end_date: dateInputToEndISO(newPeriod.end_date),
+        ...(newPeriod.close_date ? { close_date: dateInputToEndISO(newPeriod.close_date) } : {}),
         ...(newPeriod.weight !== '' ? { weight: Number(newPeriod.weight) } : {}),
       });
       setNewPeriod({ title: '', start_date: '', end_date: '', close_date: '', weight: '' });
@@ -119,7 +123,7 @@ const GradingPeriodsPage = () => {
   const handlePeriodField = async (groupId, period, field, raw) => {
     let value = raw;
     if (field === 'weight') value = raw === '' ? null : Number(raw);
-    if (field === 'close_date') value = raw ? new Date(raw).toISOString() : null;
+    if (field === 'close_date') value = raw ? dateInputToEndISO(raw) : null;
     if (field === 'is_closed') value = !!raw;
     try {
       await api.updateGradingPeriod(accountId, groupId, period.id, { [field]: value });
@@ -131,7 +135,7 @@ const GradingPeriodsPage = () => {
 
   const formatDate = (dateStr) => {
     if (!dateStr) return '';
-    return new Date(dateStr).toLocaleDateString();
+    return new Date(dateStr).toLocaleDateString(undefined, { timeZone: getUserTimeZone() });
   };
 
   if (loading) {
@@ -248,10 +252,10 @@ const GradingPeriodsPage = () => {
                             Close date
                             <input
                               type="date"
-                              defaultValue={period.close_date ? String(period.close_date).slice(0, 10) : ''}
+                              defaultValue={isoToDateInput(period.close_date)}
                               aria-label={`Close date for ${period.title}`}
                               onBlur={(e) => {
-                                const was = period.close_date ? String(period.close_date).slice(0, 10) : '';
+                                const was = isoToDateInput(period.close_date);
                                 if (was !== e.target.value) handlePeriodField(group.id, period, 'close_date', e.target.value);
                               }}
                               className="border border-border-strong rounded px-1 py-0.5"

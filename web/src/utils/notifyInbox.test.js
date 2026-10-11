@@ -3,6 +3,7 @@ import {
   textToHtml, audienceLabel, validateAnnouncementForm, threadReplies, policyCell, participantNames,
   formatBytes, channelLabel,
 } from './notifyInbox';
+import { setUserTimeZone } from '../lib/userTimeZone';
 
 describe('notifyInbox helpers', () => {
   test('buildConversationPayload mixes user ids and context codes', () => {
@@ -61,6 +62,19 @@ describe('notifyInbox helpers', () => {
     expect(validateAnnouncementForm({ title: 'T', schedule: true, delayed_post_at: '' }, now)).toMatch(/when/);
     expect(validateAnnouncementForm({ title: 'T', schedule: true, delayed_post_at: '2026-10-07T12:00:00Z' }, now)).toMatch(/future/);
     expect(validateAnnouncementForm({ title: 'T', schedule: true, delayed_post_at: '2026-10-09T12:00:00Z', target_audience: 'all' }, now)).toBeNull();
+  });
+
+  test('validateAnnouncementForm reads the datetime-local value in the profile zone', () => {
+    // 10:00 in Tokyo is 01:00Z: an hour *before* now, though 10:00 in
+    // any zone west of UTC would be in the future.
+    setUserTimeZone('Asia/Tokyo');
+    try {
+      const now = new Date('2026-10-08T02:00:00Z');
+      expect(validateAnnouncementForm({ title: 'T', schedule: true, delayed_post_at: '2026-10-08T10:00' }, now)).toMatch(/future/);
+      expect(validateAnnouncementForm({ title: 'T', schedule: true, delayed_post_at: '2026-10-08T12:00' }, now)).toBeNull();
+    } finally {
+      setUserTimeZone(null);
+    }
   });
 
   test('threadReplies nests children under parents', () => {

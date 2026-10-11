@@ -2,7 +2,8 @@
 // settings <-> API payload, manual-grading payloads, answer-key release
 // summaries and event-log labels. Kept free of React so vitest covers them.
 
-import { isoToDateTimeLocal, dateTimeLocalToISO } from '../../utils/datetimeLocal';
+import { isoToDateTimeLocal, dateTimeLocalToISO, parseFormDate } from '../../utils/datetimeLocal';
+import { getUserTimeZone } from '../../lib/userTimeZone';
 
 export const SCORING_POLICIES = [
   { value: 'keep_highest', label: 'Keep highest score' },
@@ -99,8 +100,11 @@ export function answerKeyReleaseSummary(form = {}) {
   } else if (form.show_correct_answers_last_attempt) {
     parts.push('Correct answers are shown after the last attempt.');
   } else if (form.show_correct_answers_at || form.hide_correct_answers_at) {
-    const from = form.show_correct_answers_at ? `from ${new Date(form.show_correct_answers_at).toLocaleString()}` : '';
-    const until = form.hide_correct_answers_at ? `until ${new Date(form.hide_correct_answers_at).toLocaleString()}` : '';
+    // The form values are profile-zone wall clocks (G157): read them in
+    // that zone, then format in it too.
+    const fmt = (v) => parseFormDate(v).toLocaleString(undefined, { timeZone: getUserTimeZone() });
+    const from = form.show_correct_answers_at ? `from ${fmt(form.show_correct_answers_at)}` : '';
+    const until = form.hide_correct_answers_at ? `until ${fmt(form.hide_correct_answers_at)}` : '';
     parts.push(`Correct answers are shown ${[from, until].filter(Boolean).join(' ')}.`);
   } else {
     parts.push('Correct answers are shown as soon as an attempt is submitted.');

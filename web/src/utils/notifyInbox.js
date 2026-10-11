@@ -2,6 +2,8 @@
 // preference grid (notify-inbox lane). Kept free of React so they are unit
 // tested directly.
 
+import { parseFormDate } from './datetimeLocal';
+
 export const INBOX_SCOPES = ['inbox', 'unread', 'starred', 'sent', 'archived'];
 
 // Batch events accepted by PUT /conversations.
@@ -173,7 +175,8 @@ export const validateAnnouncementForm = (form, now = new Date()) => {
   }
   if (form.schedule) {
     if (!form.delayed_post_at) return 'Choose when to post the announcement';
-    const at = new Date(form.delayed_post_at);
+    // The datetime-local value is a profile-zone wall clock (G157).
+    const at = parseFormDate(form.delayed_post_at);
     if (Number.isNaN(at.getTime()) || at <= now) return 'The scheduled time must be in the future';
   }
   return null;

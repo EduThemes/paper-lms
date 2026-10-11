@@ -25,6 +25,7 @@ import {
 import { cn } from '@/lib/utils';
 import CourseStorageCard from '../components/files/CourseStorageCard';
 import CourseDateAccessCard from '../components/enrollments/CourseDateAccessCard';
+import { dateInputToStartISO, dateInputToEndISO, isoToDateInput } from '../utils/datetimeLocal';
 
 // All available CourseNav tabs in default order
 const DEFAULT_NAV_TABS = [
@@ -87,11 +88,11 @@ const DEFAULT_GRADING_SCALE = [
   ['D-', 0.60], ['F', 0.0],
 ];
 
-const fmtDate = (d) => {
-  if (!d) return '';
-  const dt = new Date(d);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-};
+// Course dates are calendar days in the profile time zone (G157): shown
+// as that zone's day and saved as the start (start_at) or the last second
+// (end_at) of that day there. new Date('YYYY-MM-DD') is UTC midnight, the
+// evening before in US zones, so every save used to move them back a day.
+const fmtDate = (d) => isoToDateInput(d);
 
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -360,8 +361,13 @@ const CourseSettingsPage = () => {
     setMessage('');
     try {
       const payload = { ...form };
-      payload.start_at = payload.start_at ? new Date(payload.start_at).toISOString() : null;
-      payload.end_at = payload.end_at ? new Date(payload.end_at).toISOString() : null;
+      // Only send a date the user changed, so re-saving the tab can't
+      // move a stored time (e.g. one set through the API).
+      const baseForm = baselineRef.current.form || {};
+      if (payload.start_at === baseForm.start_at) delete payload.start_at;
+      else payload.start_at = dateInputToStartISO(payload.start_at) || null;
+      if (payload.end_at === baseForm.end_at) delete payload.end_at;
+      else payload.end_at = dateInputToEndISO(payload.end_at) || null;
       if (navTabs) payload.navigation_tabs = navTabs.map((t, i) => ({ ...t, position: i }));
       const updated = await api.updateCourse(courseId, payload);
       setCourse(updated);

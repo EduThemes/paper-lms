@@ -6,6 +6,7 @@ import { api } from '../services/api';
 import { calendarApi } from '../services/api_calendar';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import { zonedWallClockToISO } from '../lib/userTimeZone';
 
 /**
  * Slot generator helper: given a date, start time, end time, and slot duration
@@ -13,8 +14,10 @@ import CourseNav from '../components/CourseNav';
  */
 const generateSlots = (date, startTime, endTime, durationMin) => {
   if (!date || !startTime || !endTime || !durationMin) return [];
-  const start = new Date(`${date}T${startTime}`);
-  const end = new Date(`${date}T${endTime}`);
+  // The date and times are a wall clock in the profile time zone (G157),
+  // not the browser's.
+  const start = new Date(zonedWallClockToISO(`${date}T${startTime}`) || NaN);
+  const end = new Date(zonedWallClockToISO(`${date}T${endTime}`) || NaN);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
   if (end <= start) return [];
   const out = [];
