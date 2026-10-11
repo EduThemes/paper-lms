@@ -33,7 +33,7 @@ func startFakeSMTP(t *testing.T) (int, <-chan string) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		r := bufio.NewReader(conn)
 		reply := func(s string) { _, _ = conn.Write([]byte(s + "\r\n")) }
 		reply("220 fake.example ESMTP")

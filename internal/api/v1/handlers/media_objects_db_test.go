@@ -81,7 +81,7 @@ func newMediaFixture(t *testing.T) *mediaFixture {
 	// The caller is chosen per request with the X-Test-User header.
 	app.Use(func(c *fiber.Ctx) error {
 		var uid uint
-		fmt.Sscan(c.Get("X-Test-User"), &uid)
+		_, _ = fmt.Sscan(c.Get("X-Test-User"), &uid)
 		acct := uint(1)
 		if uid == 14 {
 			acct = 2

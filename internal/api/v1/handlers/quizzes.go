@@ -187,7 +187,7 @@ func (h *QuizHandler) CreateQuiz(c *fiber.Ctx) error {
 		quiz.AllowedAttempts = 1
 	}
 	quiz.ShowCorrectAnswers = true // Canvas default
-	if msg := input.Quiz.quizLifecycleInput.apply(quiz); msg != "" {
+	if msg := input.Quiz.apply(quiz); msg != "" {
 		return responses.BadRequest(c, msg)
 	}
 	if applyQuizDeliveryInput(c, quiz) {
@@ -304,7 +304,7 @@ func (h *QuizHandler) UpdateQuiz(c *fiber.Ctx) error {
 	}
 
 	// Applied after the dates so the window checks see the new values.
-	if msg := input.Quiz.quizLifecycleInput.apply(quiz); msg != "" {
+	if msg := input.Quiz.apply(quiz); msg != "" {
 		return responses.BadRequest(c, msg)
 	}
 	if applyQuizDeliveryInput(c, quiz) {

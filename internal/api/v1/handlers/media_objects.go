@@ -137,7 +137,7 @@ func (h *MediaObjectHandler) Upload(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.InternalError(c, "Could not open uploaded file")
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	accountID := callerAccountID(c)
 	m, err := h.svc.Upload(settingsctx.WithAccountID(c.Context(), accountID), service.UploadMediaInput{

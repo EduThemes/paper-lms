@@ -91,7 +91,7 @@ func (h *QuizSubmissionHandler) UploadAnswerFile(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.InternalError(c, "Could not open uploaded file")
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Browsers send "" or application/octet-stream for types they don't
 	// know; derive from the extension so the MIME/extension check applies

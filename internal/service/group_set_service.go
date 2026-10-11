@@ -568,8 +568,8 @@ func (s *GroupService) ImportGroupsCSV(ctx context.Context, category *models.Gro
 		}
 	}
 	has := func(name string) bool { _, ok := col[name]; return ok }
-	if !(has("canvas_user_id") || has("user_id") || has("login_id") || has("email")) ||
-		!(has("canvas_group_id") || has("group_name")) {
+	if (!has("canvas_user_id") && !has("user_id") && !has("login_id") && !has("email")) ||
+		(!has("canvas_group_id") && !has("group_name")) {
 		return nil, ErrImportColumns
 	}
 	cell := func(rec []string, name string) string {

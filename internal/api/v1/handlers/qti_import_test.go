@@ -240,7 +240,7 @@ func TestQTIExport_SameCourse_SkipsBankDrawCopies(t *testing.T) {
 	for _, f := range zr.File {
 		rc, _ := f.Open()
 		_, _ = io.Copy(&all, rc)
-		rc.Close()
+		_ = rc.Close()
 	}
 	assert.Contains(t, all.String(), "Authored question")
 	assert.NotContains(t, all.String(), "Drawn bank copy")

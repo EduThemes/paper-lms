@@ -128,7 +128,7 @@ func readZip(t *testing.T, data []byte) map[string]string {
 	for _, f := range zr.File {
 		rc, _ := f.Open()
 		b, _ := io.ReadAll(rc)
-		rc.Close()
+		_ = rc.Close()
 		out[f.Name] = string(b)
 	}
 	return out

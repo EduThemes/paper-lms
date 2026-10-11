@@ -128,7 +128,7 @@ func (s *LTIService) fetchToolJWKS(ctx context.Context, jwksURL string) ([]toolJ
 	if err != nil {
 		return nil, fmt.Errorf("fetch tool JWKS: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("fetch tool JWKS: HTTP %d", resp.StatusCode)
 	}

@@ -304,10 +304,10 @@ func InterpretGrade(a *models.Assignment, scheme *GradingScheme, grade string) (
 		return 0, invalid
 	}
 	if gradingType == "pass_fail" {
-		switch {
-		case score == possible:
+		switch score {
+		case possible:
 			return possible, nil
-		case score == 0:
+		case 0:
 			return 0, nil
 		default:
 			return 0, fmt.Errorf("pass/fail assignments take complete or incomplete")

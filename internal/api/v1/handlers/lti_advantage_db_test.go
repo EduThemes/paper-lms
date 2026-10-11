@@ -766,7 +766,7 @@ func TestLTIAdvantage_EndToEnd(t *testing.T) {
 
 		resp, _ = post("wrong-secret", "nonce-2", sourcedID)
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
-		resp, body = post("legacy-secret", "nonce-3", strings.Replace(sourcedID, ":"+strconv.Itoa(int(l.student.ID))+":", ":"+strconv.Itoa(int(l.teacher.ID))+":", 1))
+		_, body = post("legacy-secret", "nonce-3", strings.Replace(sourcedID, ":"+strconv.Itoa(int(l.student.ID))+":", ":"+strconv.Itoa(int(l.teacher.ID))+":", 1))
 		assert.Contains(t, body, "<imsx_codeMajor>failure</imsx_codeMajor>", "a forged sourcedid is refused")
 		resp, _ = post("legacy-secret", "nonce-1", sourcedID)
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, "OAuth nonces are single use")

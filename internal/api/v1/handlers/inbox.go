@@ -618,7 +618,7 @@ func (h *ConversationHandler) UploadAttachment(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.InternalError(c, "Could not open uploaded file")
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Same rule as course uploads: never trust a claimed inline-safe image
 	// type whose bytes say otherwise.

@@ -13,7 +13,7 @@ type OneRosterTestSession struct {
 func (s *OneRosterService) SyncAcademicSessionsForTest(ctx context.Context, accountID uint, rows []OneRosterTestSession) []string {
 	sessions := make([]onerosterAcademicSession, len(rows))
 	for i, r := range rows {
-		sessions[i] = onerosterAcademicSession{SourcedID: r.SourcedID, Status: r.Status, Title: r.Title, Type: r.Type, StartDate: r.StartDate, EndDate: r.EndDate}
+		sessions[i] = onerosterAcademicSession(r)
 	}
 	_, _, errs := s.syncAcademicSessions(ctx, accountID, sessions)
 	return errs

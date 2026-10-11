@@ -932,7 +932,7 @@ func (h *LearnerHandler) UploadAvatar(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Could not read the upload")
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	u, err := h.profiles.SetAvatar(c.Context(), userID, callerAccountID(c), f)
 	if err != nil {
 		return profileError(c, err)

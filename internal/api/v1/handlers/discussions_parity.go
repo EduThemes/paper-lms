@@ -68,7 +68,7 @@ func (h *DiscussionParityHandler) UploadAttachment(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.InternalError(c, "Could not open uploaded file")
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Never trust a client claim of an inline-safe type the bytes
 	// contradict (same hardening as the course and submission uploads).

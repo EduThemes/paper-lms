@@ -65,7 +65,7 @@ func (h *SubmissionHandler) UploadSubmissionFile(c *fiber.Ctx) error {
 	// A media recording is checked by type below; any other file must
 	// have one of the assignment's allowed extensions.
 	claimedMedia := service.IsMediaContentType(fileHeader.Header.Get("Content-Type"))
-	if !(acceptsMedia && claimedMedia) {
+	if !acceptsMedia || !claimedMedia {
 		if !acceptsUpload {
 			return responses.BadRequest(c, "This assignment accepts audio or video recordings only")
 		}
@@ -90,7 +90,7 @@ func (h *SubmissionHandler) storeOwnFile(c *fiber.Ctx, fileHeader *multipart.Fil
 	if err != nil {
 		return responses.InternalError(c, "Could not open uploaded file")
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Same content-type hardening as the course upload path: never trust
 	// a client claim of an inline-safe type the bytes contradict.

@@ -259,7 +259,7 @@ func (r *canvasAPIRepo) TeachersForCourses(ctx context.Context, courseIDs []uint
 	}
 	seen := map[[2]uint]bool{}
 	for _, rw := range rows {
-		k := [2]uint{rw.CourseID, rw.User.ID}
+		k := [2]uint{rw.CourseID, rw.ID}
 		if seen[k] {
 			continue
 		}

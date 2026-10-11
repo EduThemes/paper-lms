@@ -51,7 +51,7 @@ func oauthBaseURL(raw string) (string, url.Values, error) {
 	scheme := strings.ToLower(u.Scheme)
 	host := strings.ToLower(u.Hostname())
 	port := u.Port()
-	if port != "" && !((scheme == "http" && port == "80") || (scheme == "https" && port == "443")) {
+	if port != "" && (scheme != "http" || port != "80") && (scheme != "https" || port != "443") {
 		host += ":" + port
 	}
 	path := u.EscapedPath()
@@ -201,7 +201,7 @@ func (s *LTIService) opaqueUserID(userID uint) string {
 		return strconv.FormatUint(uint64(userID), 10)
 	}
 	mac := hmac.New(sha256.New, keys[0])
-	fmt.Fprintf(mac, "user:%d", userID)
+	_, _ = fmt.Fprintf(mac, "user:%d", userID)
 	return hex.EncodeToString(mac.Sum(nil))[:40]
 }
 

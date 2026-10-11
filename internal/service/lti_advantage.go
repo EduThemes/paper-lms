@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -416,16 +415,6 @@ func (s *LTIService) parseHint(tok string) (*ltiLaunchHint, error) {
 // looksLikeJWT distinguishes the signed hint from the legacy
 // "course:link:key" hint.
 func looksLikeJWT(s string) bool { return strings.Count(s, ".") == 2 && !strings.Contains(s, ":") }
-
-// sortedKeys returns m's keys in order (stable claims for tests/logs).
-func sortedKeys(m map[string]string) []string {
-	ks := make([]string, 0, len(m))
-	for k := range m {
-		ks = append(ks, k)
-	}
-	sort.Strings(ks)
-	return ks
-}
 
 // courseURL builds an absolute SPA URL under the course.
 func (s *LTIService) courseURL(courseID uint, suffix string) string {

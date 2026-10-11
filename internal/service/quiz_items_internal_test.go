@@ -200,7 +200,8 @@ func TestShuffleQuizAnswers(t *testing.T) {
 		}
 		return strings.Join(ids, "")
 	}
-	if ShuffleQuizAnswers("multiple_choice", opts, 1) != ShuffleQuizAnswers("multiple_choice", opts, 1) {
+	first, second := ShuffleQuizAnswers("multiple_choice", opts, 1), ShuffleQuizAnswers("multiple_choice", opts, 1)
+	if first != second {
 		t.Fatal("shuffle must be stable for a seed")
 	}
 	seen := map[string]bool{}

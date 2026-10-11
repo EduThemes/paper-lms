@@ -174,7 +174,7 @@ func checkQuizAccessCode(q *models.Quiz, submitted string) bool {
 func quizClientIP(c *fiber.Ctx) string {
 	peer := c.IP()
 	ip := net.ParseIP(peer)
-	if ip == nil || !(ip.IsLoopback() || ip.IsPrivate()) {
+	if ip == nil || (!ip.IsLoopback() && !ip.IsPrivate()) {
 		return peer
 	}
 	xff := strings.TrimSpace(c.Get(fiber.HeaderXForwardedFor))
