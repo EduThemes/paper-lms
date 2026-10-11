@@ -32,7 +32,7 @@ type Assignment struct {
 	UpdatedAt          time.Time          `json:"updated_at"`
 
 	// Submission settings, group grading, moderated grading and peer
-	// review options (grading-ui lane, migration 000093). Canvas names.
+	// review options (grading-ui lane, migration 000082). Canvas names.
 	// Every bool defaults to false in the DB (GORM omits false on
 	// insert); handlers set the Canvas "default true" values explicitly.
 	AllowedAttempts                 *int       `json:"allowed_attempts"`                    // nil or <= 0: unlimited
@@ -50,7 +50,7 @@ type Assignment struct {
 	PeerReviewsDueAt                *time.Time `json:"peer_reviews_due_at"`
 
 	// OmitFromFinalGrade keeps a graded assignment out of the course
-	// total (Canvas omit_from_final_grade; migration 000097).
+	// total (Canvas omit_from_final_grade; migration 000085).
 	OmitFromFinalGrade bool `json:"omit_from_final_grade" gorm:"default:false"`
 }
 

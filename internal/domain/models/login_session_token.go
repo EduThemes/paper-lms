@@ -6,7 +6,7 @@ import "time"
 // GET /login/session_token for a caller holding an API access token. Its
 // session_url, opened in a browser, signs that user into a web session
 // (Canvas login/session_token). Only the SHA-256 of the token is stored;
-// it is consumed with DELETE ... RETURNING. Migration 000160.
+// it is consumed with DELETE ... RETURNING. Migration 000120.
 type LoginSessionToken struct {
 	ID        uint   `json:"id" gorm:"column:id;primaryKey"`
 	TokenHash string `json:"-" gorm:"column:token_hash;type:text;uniqueIndex;not null"`

@@ -21,7 +21,7 @@ type QuizSubmission struct {
 	UpdatedAt         time.Time  `json:"updated_at"`
 
 	// FudgePoints is the instructor's whole-attempt adjustment added to
-	// the question total (Canvas fudge_points, migration 000098).
+	// the question total (Canvas fudge_points, migration 000086).
 	FudgePoints *float64 `json:"fudge_points"`
 	// ScoreBeforeRegrade keeps the attempt's score from before the first
 	// regrade that changed it, so the change stays visible.
@@ -33,7 +33,7 @@ type QuizSubmission struct {
 
 	// ReadQuestions is a JSON array of question ids the student has moved
 	// past on a one-question-at-a-time + can't-go-back quiz (migration
-	// 000103). Answers to these questions are refused.
+	// 000090). Answers to these questions are refused.
 	ReadQuestions string `json:"-" gorm:"column:read_questions;type:text"`
 }
 

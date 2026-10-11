@@ -17,7 +17,7 @@ type WikiPage struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 
 	// TodoDate puts an ungraded page on learners' to-do lists for that
-	// date (Canvas wiki_pages.todo_date). Migration 000113.
+	// date (Canvas wiki_pages.todo_date). Migration 000094.
 	TodoDate *time.Time `json:"todo_date"`
 }
 

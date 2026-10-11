@@ -1,7 +1,7 @@
 package service_test
 
 // G060 — one question-bank system, on real Postgres:
-//   - migration 000104 copies quiz_item_banks/items into question_banks /
+//   - migration 000091 copies quiz_item_banks/items into question_banks /
 //     question_bank_entries and remaps quiz_questions.bank_item_id;
 //   - the /quiz_item_banks repositories read and write question_banks;
 //   - a bank shared with the account is usable (list, group draw, pull,
@@ -40,12 +40,12 @@ func TestQuestionBankConsolidationDB_MigrationCopiesItemBanks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sqlText, err := os.ReadFile(filepath.Join("..", "db", "migrations", "000104_question_bank_consolidation.up.sql"))
+	sqlText, err := os.ReadFile(filepath.Join("..", "db", "migrations", "000091_question_bank_consolidation.up.sql"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := g.Exec(string(sqlText)).Error; err != nil {
-		t.Fatalf("apply 000104: %v", err)
+		t.Fatalf("apply 000091: %v", err)
 	}
 
 	var bank models.QuestionBank

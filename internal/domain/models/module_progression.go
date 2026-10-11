@@ -24,7 +24,7 @@ const (
 )
 
 // ContextModuleProgression is a student's evaluated progress through one
-// module (migration 000108). It is a cache of the evaluation, rewritten
+// module (migration 000092). It is a cache of the evaluation, rewritten
 // each time the student's progress is computed; the facts it is computed
 // from live in submissions, quiz submissions, discussion entries and
 // ModuleItemUserAction.

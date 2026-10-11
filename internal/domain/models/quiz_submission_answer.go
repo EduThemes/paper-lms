@@ -14,7 +14,7 @@ type QuizSubmissionAnswer struct {
 	// for legacy rows that pre-date the audit trail.
 	GradedVia *string `json:"graded_via" gorm:"size:32"`
 	// Comment is the grader's per-question comment shown to the student
-	// on review (Canvas "more_comments", migration 000098). Plain text.
+	// on review (Canvas "more_comments", migration 000086). Plain text.
 	Comment   string    `json:"comment" gorm:"type:text"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

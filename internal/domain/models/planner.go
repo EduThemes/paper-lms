@@ -16,7 +16,7 @@ type PlannerNote struct {
 }
 
 // PlannerOverride - allows students to mark items as done or dismissed.
-// One row per (user, plannable); migration 000163 backs the unique index.
+// One row per (user, plannable); migration 000121 backs the unique index.
 type PlannerOverride struct {
 	ID             uint      `json:"id" gorm:"column:id;primaryKey"`
 	UserID         uint      `json:"user_id" gorm:"not null;index;uniqueIndex:idx_planner_overrides_user_plannable,priority:1"`

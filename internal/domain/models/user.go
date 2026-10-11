@@ -31,7 +31,7 @@ type User struct {
 	// device choice, then the account default_locale). Migration 000076.
 	Locale       string  `json:"locale" gorm:"default:''"`
 	TimeZone     string  `json:"time_zone" gorm:"default:'America/New_York'"`
-	// Profile (migration 000165): pronouns and a short plain-text bio
+	// Profile (migration 000123): pronouns and a short plain-text bio
 	// shown on the user's profile card. AvatarKey is the storage key of
 	// an uploaded avatar image ('' = none); AvatarURL then points at
 	// GET /users/:id/avatar.

@@ -11,7 +11,7 @@ import (
 // quizItemBankRepo serves the /quiz_item_banks API from the single
 // question-bank store (question_banks), so the item-bank page, the QTI
 // importer, question groups and the course import all see the same banks
-// (G060, migration 000104). The QuizItemBank model is only the API shape.
+// (G060, migration 000091). The QuizItemBank model is only the API shape.
 type quizItemBankRepo struct {
 	db *gorm.DB
 }

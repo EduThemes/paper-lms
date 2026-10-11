@@ -8,7 +8,7 @@ import "time"
 // marks it fake. Staff enter Student View by switching their session to
 // that user (a masquerade capped at the test student's own rights). One
 // test student per course; "reset" deletes the row and retires the user's
-// enrollment so the next entry creates a fresh one. Migration 000116.
+// enrollment so the next entry creates a fresh one. Migration 000096.
 type StudentViewStudent struct {
 	ID        uint      `json:"id" gorm:"column:id;primaryKey"`
 	CourseID  uint      `json:"course_id" gorm:"not null;uniqueIndex"`

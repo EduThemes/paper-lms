@@ -21,7 +21,7 @@ const PrimaryEmailChannelID uint = 0
 
 // NotificationPolicy is one cell of the per-category x per-channel
 // notification preference grid: how often notifications of Category reach
-// the user on one channel (migration 000129). A missing row falls back to
+// the user on one channel (migration 000103). A missing row falls back to
 // the user's NotificationPreference (global policy + per-type toggles).
 type NotificationPolicy struct {
 	ID     uint `json:"id" gorm:"column:id;primaryKey"`

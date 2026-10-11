@@ -11,7 +11,7 @@ type SISBatch struct {
 	TotalRows     int    `json:"total_rows" gorm:"default:0"`
 	ProcessedRows int    `json:"processed_rows" gorm:"default:0"`
 
-	// G111 — import options (migration 000152).
+	// G111 — import options (migration 000117).
 	//
 	// UserID is the admin who started the import. BatchMode + the term
 	// make every SIS-managed course, section and enrollment of that term

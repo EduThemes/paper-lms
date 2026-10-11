@@ -7,7 +7,7 @@ import "time"
 // SharedWithAccount set, staff of every course in the same account can
 // draw from it (question groups), pull or copy its questions, but only the
 // owning course edits it. The former quiz_item_banks rows were copied in
-// by migration 000104 and the /quiz_item_banks API now reads and writes
+// by migration 000091 and the /quiz_item_banks API now reads and writes
 // these tables.
 type QuestionBank struct {
 	ID            uint      `json:"id" gorm:"column:id;primaryKey"`
@@ -16,7 +16,7 @@ type QuestionBank struct {
 	WorkflowState string    `json:"workflow_state" gorm:"default:'active'"` // active, deleted
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
-	// Quiz-items lane (migration 000104).
+	// Quiz-items lane (migration 000091).
 	Description       string `json:"description" gorm:"type:text"`
 	CreatedByUserID   *uint  `json:"created_by_user_id" gorm:"column:created_by_user_id"`
 	AccountID         *uint  `json:"account_id" gorm:"column:account_id;index"`
@@ -40,7 +40,7 @@ type QuestionBankEntry struct {
 	Position       int       `json:"position"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
-	// Quiz-items lane (migration 000104): per-outcome feedback carried over
+	// Quiz-items lane (migration 000091): per-outcome feedback carried over
 	// from item-bank items, and the source item id of copied rows.
 	CorrectComments          string `json:"correct_comments" gorm:"type:text"`
 	IncorrectComments        string `json:"incorrect_comments" gorm:"type:text"`

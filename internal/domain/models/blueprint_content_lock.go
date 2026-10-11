@@ -30,7 +30,7 @@ type BlueprintContentLock struct {
 
 func (BlueprintContentLock) TableName() string { return "blueprint_content_locks" }
 
-// BeforeCreate mirrors the NOT NULL DEFAULT '{}' of migration 000119.
+// BeforeCreate mirrors the NOT NULL DEFAULT '{}' of migration 000098.
 func (l *BlueprintContentLock) BeforeCreate(tx *gorm.DB) error {
 	if l.Restrictions == "" {
 		l.Restrictions = "{}"

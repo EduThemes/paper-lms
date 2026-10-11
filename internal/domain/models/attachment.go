@@ -21,7 +21,7 @@ type Attachment struct {
 	UpdatedAt     time.Time          `json:"updated_at"`
 
 	// File visibility (Canvas attachments.locked / hidden / lock_at /
-	// unlock_at; migration 000114). Locked = unpublished: learners can
+	// unlock_at; migration 000095). Locked = unpublished: learners can
 	// neither list nor download it. Hidden = "only available with link":
 	// left out of learner listings but downloadable by id. LockAt /
 	// UnlockAt bound the window in which learners may read the file.

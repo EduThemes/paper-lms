@@ -14,7 +14,7 @@ const (
 
 // AnnouncementReply is a comment on an announcement that allows comments
 // (Canvas announcements are discussion topics; their replies are entries).
-// ParentID threads a reply under another reply (migration 000130).
+// ParentID threads a reply under another reply (migration 000104).
 type AnnouncementReply struct {
 	ID             uint      `json:"id" gorm:"column:id;primaryKey"`
 	AnnouncementID uint      `json:"announcement_id" gorm:"not null;index:idx_announcement_replies_announcement_id"`
@@ -36,7 +36,7 @@ func (r *AnnouncementReply) BeforeCreate(_ *gorm.DB) error {
 
 // AnnouncementSectionVisibility restricts an announcement whose
 // target_audience is "sections" to the listed course sections (Canvas
-// discussion_topic_section_visibilities; migration 000130).
+// discussion_topic_section_visibilities; migration 000104).
 type AnnouncementSectionVisibility struct {
 	ID              uint      `json:"id" gorm:"column:id;primaryKey"`
 	AnnouncementID  uint      `json:"announcement_id" gorm:"not null;uniqueIndex:idx_announcement_section,priority:1"`

@@ -1,6 +1,6 @@
 package service_test
 
-// 000120 fails content migrations that were queued before the worker
+// 000099 fails content migrations that were queued before the worker
 // existed: the old API let a caller queue a course_copy of any source
 // course, and the new sweep would otherwise run it unauthorized.
 
@@ -13,11 +13,11 @@ import (
 	"github.com/EduThemes/paper-lms/internal/db"
 )
 
-func TestMigration000120_FailsLegacyQueuedMigrations(t *testing.T) {
+func TestMigration000099_FailsLegacyQueuedMigrations(t *testing.T) {
 	g, cleanup := freshDB(t)
 	defer cleanup()
 
-	require.NoError(t, db.MigrateTo(g, 119))
+	require.NoError(t, db.MigrateTo(g, 98))
 	require.NoError(t, g.Exec(`INSERT INTO content_migrations (course_id, user_id, migration_type, workflow_state, source_course_id, created_at, updated_at)
 		VALUES (1, 1, 'course_copy', 'queued', 2, now(), now()),
 		       (1, 1, 'common_cartridge', 'running', NULL, now(), now()),

@@ -48,7 +48,7 @@ type ContentExport struct {
 
 func (ContentExport) TableName() string { return "content_exports" }
 
-// BeforeCreate mirrors the NOT NULL DEFAULTs of migration 000118: GORM
+// BeforeCreate mirrors the NOT NULL DEFAULTs of migration 000097: GORM
 // writes an empty string for a zero string, defeating the SQL default.
 func (e *ContentExport) BeforeCreate(tx *gorm.DB) error {
 	if e.ExportType == "" {

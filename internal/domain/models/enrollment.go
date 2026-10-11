@@ -10,7 +10,7 @@ type Enrollment struct {
 	Type             string             `json:"type" gorm:"not null"` // StudentEnrollment, TeacherEnrollment, TaEnrollment, ObserverEnrollment, DesignerEnrollment
 	Role             string             `json:"role" gorm:"not null"`
 	// RoleID names the custom role this enrollment was granted (migration
-	// 000148). Type stays the base role; the custom role's permission set
+	// 000113). Type stays the base role; the custom role's permission set
 	// is what the permission-gated course routes check (G102). nil = the
 	// base role's defaults.
 	RoleID           *uint              `json:"role_id" gorm:"index"`
@@ -20,7 +20,7 @@ type Enrollment struct {
 	LastActivityAt   *time.Time         `json:"last_activity_at"`
 	AssociatedUserID *uint              `json:"associated_user_id" gorm:"index"` // For ObserverEnrollment linking
 
-	// Lifecycle + date-based access (migration 000143). StartAt/EndAt
+	// Lifecycle + date-based access (migration 000110). StartAt/EndAt
 	// override section, course and term dates when BOTH are set (see
 	// EnrollmentDateRanges). CompletedAt is stamped on conclude.
 	StartAt     *time.Time `json:"start_at"`

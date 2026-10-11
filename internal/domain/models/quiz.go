@@ -28,7 +28,7 @@ type Quiz struct {
 	// AssignmentID links a graded quiz (quiz_type assignment / graded_survey)
 	// to its gradebook assignment (submission_types "online_quiz"), so quiz
 	// scores flow through assignment groups, weights, late and post policy
-	// (migration 000098). Practice quizzes and ungraded surveys have none.
+	// (migration 000086). Practice quizzes and ungraded surveys have none.
 	AssignmentID *uint `json:"assignment_id" gorm:"index:idx_quizzes_assignment_id"`
 	// Answer-key release window (Canvas show_correct_answers_at /
 	// hide_correct_answers_at) and "only after the last attempt".
@@ -39,7 +39,7 @@ type Quiz struct {
 	// are hidden (Canvas one_time_results).
 	OneTimeResults bool `json:"one_time_results" gorm:"not null;default:false"`
 
-	// Quiz-items lane (migration 000103): Canvas access code (sealed with
+	// Quiz-items lane (migration 000090): Canvas access code (sealed with
 	// secretbox — never serialized), IP filter (comma-separated IPs /
 	// CIDRs) and anonymous survey submissions.
 	AccessCodeEncrypted  []byte `json:"-" gorm:"column:access_code_encrypted"`

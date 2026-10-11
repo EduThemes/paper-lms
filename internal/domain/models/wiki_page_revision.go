@@ -8,7 +8,7 @@ import "time"
 // copies an old revision back onto the page and records that as a new
 // revision, so history is never rewritten.
 //
-// EditedBy is nullable: the 000113 backfill seeds revision 1 for every
+// EditedBy is nullable: the 000094 backfill seeds revision 1 for every
 // existing page with no known author.
 type WikiPageRevision struct {
 	ID             uint      `gorm:"column:id;primaryKey" json:"id"`

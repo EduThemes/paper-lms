@@ -1,4 +1,4 @@
--- 000093_oneroster_sync_logs_errors_bigint.up.sql
+-- 000082_oneroster_sync_logs_errors_bigint.up.sql
 --
 -- one_roster_sync_logs.errors was created as `text` by 000001 (a legacy
 -- free-form error column), but the OneRosterSyncLog model has always

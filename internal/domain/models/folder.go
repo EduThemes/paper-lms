@@ -15,7 +15,7 @@ type Folder struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 
 	// Locked = unpublished, Hidden = left out of learner listings
-	// (Canvas folders.locked / hidden; migration 000114). Both apply to
+	// (Canvas folders.locked / hidden; migration 000095). Both apply to
 	// everything inside the folder.
 	Locked bool `json:"locked" gorm:"not null;default:false"`
 	Hidden bool `json:"hidden" gorm:"not null;default:false"`

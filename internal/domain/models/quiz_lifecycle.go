@@ -8,7 +8,7 @@ import (
 
 // QuizExtension holds a student's moderation settings on one quiz (Canvas
 // "Moderate this quiz": extra attempts, extra time, manual unlock;
-// migration 000099). One row per (quiz, user).
+// migration 000087). One row per (quiz, user).
 type QuizExtension struct {
 	ID     uint `json:"id" gorm:"column:id;primaryKey"`
 	QuizID uint `json:"quiz_id" gorm:"not null;uniqueIndex:idx_quiz_extensions_quiz_user,priority:1"`
@@ -42,7 +42,7 @@ const (
 )
 
 // QuizSubmissionEvent is one entry in an attempt's audit log (migration
-// 000100). Events come from the server (start, answer saves, submit,
+// 000088). Events come from the server (start, answer saves, submit,
 // auto-submit, grading) and from the take page (focus/blur, views,
 // flags). EventData is a small JSON object.
 type QuizSubmissionEvent struct {
@@ -78,7 +78,7 @@ const (
 )
 
 // QuizQuestionRegrade records one regrade run on a question after its
-// answer key changed (migration 000101): the option chosen, the answer key it
+// answer key changed (migration 000089): the option chosen, the answer key it
 // applied, who ran it and how many attempts' scores moved.
 type QuizQuestionRegrade struct {
 	ID                  uint      `json:"id" gorm:"column:id;primaryKey"`

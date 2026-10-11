@@ -19,14 +19,14 @@ type Course struct {
 	IsPublic          bool           `json:"is_public" gorm:"default:false"`
 	ApplyGroupWeights bool           `json:"apply_assignment_group_weights" gorm:"default:false"`
 	NavigationTabs    string         `json:"navigation_tabs" gorm:"type:text"`
-	// Date-based access settings (migration 000145; see
+	// Date-based access settings (migration 000112; see
 	// EffectiveEnrollmentAccess).
 	RestrictEnrollmentsToCourseDates bool `json:"restrict_enrollments_to_course_dates" gorm:"not null;default:false"`
 	RestrictStudentFutureView        bool `json:"restrict_student_future_view" gorm:"not null;default:false"`
 	RestrictStudentPastView          bool `json:"restrict_student_past_view" gorm:"not null;default:false"`
 	// HideFinalGrades hides the course total from students and observers
 	// on the Grades page (Canvas course setting hide_final_grades).
-	// Migration 000166.
+	// Migration 000124.
 	HideFinalGrades bool `json:"hide_final_grades" gorm:"not null;default:false"`
 	// PostManually is the course default post policy: new assignments
 	// start with a manual post policy when it is set (Canvas course

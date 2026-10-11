@@ -228,7 +228,7 @@ func allAutoMigrateModels() []interface{} {
 		// P3 Features: Custom Gradebook Columns
 		&models.CustomGradebookColumn{},
 		&models.CustomColumnDatum{},
-		// Grading UI lane (000094-000096): submission attempt history,
+		// Grading UI lane (000094-000084): submission attempt history,
 		// moderated grading, custom grade statuses.
 		&models.SubmissionVersion{},
 		&models.ModerationGrader{},
@@ -263,7 +263,7 @@ func allAutoMigrateModels() []interface{} {
 		&models.QuizItemBankItem{},
 		&models.QuizStimulus{},
 		&models.QuizQuestionOutcomeAlignment{},
-		// Quiz lifecycle: moderation, submission event log, regrades (000099-000101).
+		// Quiz lifecycle: moderation, submission event log, regrades (000087-000089).
 		&models.QuizExtension{},
 		&models.QuizSubmissionEvent{},
 		&models.QuizQuestionRegrade{},
@@ -294,8 +294,8 @@ func allAutoMigrateModels() []interface{} {
 		// catalog declares the typed vocabulary that maps to these rows.
 		&models.Setting{},
 		// Learner dashboard lane: planner (tables first created in the SQL
-		// chain by 000163), dashboard course preferences, observer alerts
-		// and profile links (000163-000165).
+		// chain by 000121), dashboard course preferences, observer alerts
+		// and profile links (000121-000123).
 		&models.PlannerNote{},
 		&models.PlannerOverride{},
 		&models.UserCoursePreference{},

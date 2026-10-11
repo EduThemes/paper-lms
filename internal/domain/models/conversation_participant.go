@@ -7,7 +7,7 @@ import (
 )
 
 // Per-participant inbox states (Canvas's conversation_participants
-// workflow_state). "active" is the pre-000128 value and reads as "read".
+// workflow_state). "active" is the pre-000102 value and reads as "read".
 const (
 	ConversationParticipantUnread   = "unread"
 	ConversationParticipantRead     = "read"
@@ -27,7 +27,7 @@ type ConversationParticipant struct {
 	Starred bool `json:"starred" gorm:"not null;default:false"`
 	// ClearedAt is set when the participant deletes the conversation from
 	// their inbox: messages up to this instant are hidden from them, and a
-	// later message brings the conversation back (migration 000128).
+	// later message brings the conversation back (migration 000102).
 	ClearedAt *time.Time `json:"cleared_at"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`

@@ -5,7 +5,7 @@ import "time"
 // BlackoutDate is a span of days on which course pacing schedules no
 // work (Canvas BlackoutDate: holidays, breaks). Course pacing skips
 // every day from StartDate through EndDate, inclusive, the same way it
-// skips weekends when a pace excludes them. Migration 000109.
+// skips weekends when a pace excludes them. Migration 000093.
 type BlackoutDate struct {
 	ID         uint      `json:"id" gorm:"column:id;primaryKey"`
 	CourseID   uint      `json:"course_id" gorm:"not null;index:idx_blackout_dates_course_id"`
