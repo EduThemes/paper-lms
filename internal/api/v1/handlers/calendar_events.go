@@ -120,7 +120,7 @@ func wantsAggregatedCalendar(c *fiber.Ctx) bool {
 // type=event (default; events and the caller's appointments) or
 // type=assignment (assignment and quiz due dates).
 func (h *CalendarEventHandler) listAggregated(c *fiber.Ctx, userID uint) error {
-	q, err := parseCalendarQuery(c, userID, callerAccountID(c), callerIsAdmin(c, h.authz))
+	q, err := parseCalendarQuery(c, userID, callerAccountID(c), callerIsAdmin(c, h.authz), h.eventLocation(c, ""))
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
@@ -150,29 +150,38 @@ func calendarListError(c *fiber.Ctx, err error) error {
 }
 
 // parseCalendarQuery reads start_date/end_date (YYYY-MM-DD or RFC 3339;
-// a bare end date is inclusive), context_codes[] and types[].
-func parseCalendarQuery(c *fiber.Ctx, userID, accountID uint, isAdmin bool) (service.CalendarQuery, error) {
+// a bare end date is inclusive), context_codes[] and types[]. A bare
+// date, and the default "today", are days in loc — the caller's profile
+// time zone (G157) — not UTC days.
+func parseCalendarQuery(c *fiber.Ctx, userID, accountID uint, isAdmin bool, loc *time.Location) (service.CalendarQuery, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
 	q := service.CalendarQuery{UserID: userID, AccountID: accountID, IsAdmin: isAdmin}
-	now := time.Now().UTC()
-	q.Start = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	q.End = q.Start.Add(24*time.Hour - time.Second)
+	now := time.Now().In(loc)
+	q.Start = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	q.End = endOfCalendarDay(q.Start)
 	if v := c.Query("start_date"); v != "" {
-		t, _, err := parseCalendarDate(v)
+		t, dateOnly, err := parseCalendarDate(v, loc)
 		if err != nil {
 			return q, errors.New("start_date must be YYYY-MM-DD or an ISO 8601 time")
 		}
 		q.Start = t
 		if c.Query("end_date") == "" {
-			q.End = t.Add(24*time.Hour - time.Second)
+			if dateOnly {
+				q.End = endOfCalendarDay(t)
+			} else {
+				q.End = t.Add(24*time.Hour - time.Second)
+			}
 		}
 	}
 	if v := c.Query("end_date"); v != "" {
-		t, dateOnly, err := parseCalendarDate(v)
+		t, dateOnly, err := parseCalendarDate(v, loc)
 		if err != nil {
 			return q, errors.New("end_date must be YYYY-MM-DD or an ISO 8601 time")
 		}
 		if dateOnly {
-			t = t.Add(24*time.Hour - time.Second)
+			t = endOfCalendarDay(t)
 		}
 		q.End = t
 	}
@@ -186,12 +195,24 @@ func parseCalendarQuery(c *fiber.Ctx, userID, accountID uint, isAdmin bool) (ser
 	return q, nil
 }
 
-func parseCalendarDate(v string) (time.Time, bool, error) {
-	if t, err := time.Parse("2006-01-02", v); err == nil {
+// parseCalendarDate reads YYYY-MM-DD as midnight in loc, or an RFC 3339
+// instant; the bool reports a bare date.
+func parseCalendarDate(v string, loc *time.Location) (time.Time, bool, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	if t, err := time.ParseInLocation("2006-01-02", v, loc); err == nil {
 		return t, true, nil
 	}
 	t, err := time.Parse(time.RFC3339, v)
 	return t, false, err
+}
+
+// endOfCalendarDay is the last second of the day that starts at
+// dayStart (a local midnight), in dayStart's zone. AddDate, not 24h, so a
+// DST change that day doesn't shift it.
+func endOfCalendarDay(dayStart time.Time) time.Time {
+	return dayStart.AddDate(0, 0, 1).Add(-time.Second)
 }
 
 // sectionCourse returns the course a section event belongs to (0 when
@@ -721,15 +742,18 @@ func (h *CalendarEventHandler) ExportAsICal(c *fiber.Ctx) error {
 	now := time.Now()
 	startDate := now.AddDate(0, 0, -30)
 	endDate := now.AddDate(0, 0, 365)
+	// Bare dates and all-day events are read in the caller's profile
+	// zone (G157).
+	loc := h.eventLocation(c, "")
 
 	if sd := c.Query("start_date"); sd != "" {
-		parsed, err := time.Parse("2006-01-02", sd)
+		parsed, err := time.ParseInLocation("2006-01-02", sd, loc)
 		if err == nil {
 			startDate = parsed
 		}
 	}
 	if ed := c.Query("end_date"); ed != "" {
-		parsed, err := time.Parse("2006-01-02", ed)
+		parsed, err := time.ParseInLocation("2006-01-02", ed, loc)
 		if err == nil {
 			endDate = parsed
 		}
@@ -747,10 +771,10 @@ func (h *CalendarEventHandler) ExportAsICal(c *fiber.Ctx) error {
 		if err != nil {
 			return calendarListError(c, err)
 		}
-		data = service.RenderICSIn(items, "Paper LMS calendar", c.BaseURL(), now, h.agg.UserTimeZone(c.Context(), userID))
+		data = service.RenderICSIn(items, "Paper LMS calendar", c.BaseURL(), now, loc)
 	} else {
 		var err error
-		data, err = h.calendarService.ExportAsICalendar(c.Context(), "User", userID, startDate, endDate)
+		data, err = h.calendarService.ExportAsICalendar(c.Context(), "User", userID, startDate, endDate, loc)
 		if err != nil {
 			return responses.InternalError(c, "Could not export calendar")
 		}

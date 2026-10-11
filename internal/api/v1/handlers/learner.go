@@ -48,19 +48,36 @@ func NewLearnerHandler(
 }
 
 // parsePlannerTime accepts an RFC 3339 timestamp or a YYYY-MM-DD date. A
-// bare end date is inclusive (end of that day, UTC).
-func parsePlannerTime(v string, endOfDay bool) (time.Time, error) {
+// bare date is a day in loc (the caller's profile time zone, G157); a
+// bare end date is inclusive (end of that day there).
+func parsePlannerTime(v string, endOfDay bool, loc *time.Location) (time.Time, error) {
 	if t, err := time.Parse(time.RFC3339, v); err == nil {
 		return t, nil
 	}
-	t, err := time.Parse("2006-01-02", v)
+	if loc == nil {
+		loc = time.UTC
+	}
+	t, err := time.ParseInLocation("2006-01-02", v, loc)
 	if err != nil {
 		return time.Time{}, err
 	}
 	if endOfDay {
-		t = t.Add(24*time.Hour - time.Nanosecond)
+		t = t.AddDate(0, 0, 1).Add(-time.Nanosecond)
 	}
 	return t, nil
+}
+
+// callerLocation is the caller's profile time zone (users.time_zone),
+// UTC when unset or unknown.
+func (h *LearnerHandler) callerLocation(c *fiber.Ctx, userID uint) *time.Location {
+	if h.users == nil {
+		return time.UTC
+	}
+	u, err := h.users.FindByID(c.Context(), userID, callerAccountID(c))
+	if err != nil || u == nil {
+		return time.UTC
+	}
+	return service.LoadCalendarLocation(u.TimeZone)
 }
 
 // --- Planner ---
@@ -73,15 +90,16 @@ func (h *LearnerHandler) PlannerItems(c *fiber.Ctx) error {
 	}
 	now := time.Now()
 	q := service.PlannerQuery{Start: now.AddDate(0, 0, -14), End: now.AddDate(0, 0, 14)}
+	loc := h.callerLocation(c, userID)
 	if sd := c.Query("start_date"); sd != "" {
-		t, err := parsePlannerTime(sd, false)
+		t, err := parsePlannerTime(sd, false, loc)
 		if err != nil {
 			return responses.BadRequest(c, "Invalid start_date (use YYYY-MM-DD or RFC 3339)")
 		}
 		q.Start = t
 	}
 	if ed := c.Query("end_date"); ed != "" {
-		t, err := parsePlannerTime(ed, true)
+		t, err := parsePlannerTime(ed, true, loc)
 		if err != nil {
 			return responses.BadRequest(c, "Invalid end_date (use YYYY-MM-DD or RFC 3339)")
 		}
@@ -142,15 +160,16 @@ func (h *LearnerHandler) ListPlannerNotes(c *fiber.Ctx) error {
 		return err
 	}
 	var start, end *time.Time
+	loc := h.callerLocation(c, userID)
 	if sd := c.Query("start_date"); sd != "" {
-		t, err := parsePlannerTime(sd, false)
+		t, err := parsePlannerTime(sd, false, loc)
 		if err != nil {
 			return responses.BadRequest(c, "Invalid start_date")
 		}
 		start = &t
 	}
 	if ed := c.Query("end_date"); ed != "" {
-		t, err := parsePlannerTime(ed, true)
+		t, err := parsePlannerTime(ed, true, loc)
 		if err != nil {
 			return responses.BadRequest(c, "Invalid end_date")
 		}

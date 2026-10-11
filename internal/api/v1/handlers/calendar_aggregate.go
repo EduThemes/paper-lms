@@ -43,7 +43,7 @@ func (h *CalendarHandler) ListItems(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	q, err := parseCalendarQuery(c, userID, callerAccountID(c), callerIsAdmin(c, h.authz))
+	q, err := parseCalendarQuery(c, userID, callerAccountID(c), callerIsAdmin(c, h.authz), h.agg.UserTimeZone(c.Context(), userID))
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}

@@ -51,6 +51,12 @@ var (
 // through a course's modules (Canvas ContextModuleProgression) and
 // answers "may this student open this content yet?" for the content
 // gate.
+// userTimeZoneStore is optionally implemented by a ModuleProgressionStore
+// that can look up a user's profile time zone name.
+type userTimeZoneStore interface {
+	UserTimeZone(ctx context.Context, userID uint) string
+}
+
 type ModuleProgressionService struct {
 	store      ModuleProgressionStore
 	visibility AssignmentVisibility
@@ -358,6 +364,14 @@ func (s *ModuleProgressionService) evaluate(ctx context.Context, courseID, userI
 	}
 	now := s.now()
 	progress := EvaluateModuleProgress(ModuleEvalInput{Now: now, Modules: mods, Prerequisites: prereqs, Facts: facts})
+	// Unlock dates in lock explanations read in the student's profile
+	// zone (G157) when the store can say what it is.
+	if tzs, ok := s.store.(userTimeZoneStore); ok {
+		loc := LoadCalendarLocation(tzs.UserTimeZone(ctx, userID))
+		for i := range progress {
+			progress[i].Location = loc
+		}
+	}
 
 	if err := s.persist(ctx, userID, progress, now); err != nil {
 		return nil, nil, err

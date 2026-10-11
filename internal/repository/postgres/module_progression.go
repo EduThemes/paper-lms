@@ -306,6 +306,16 @@ func (r *ModuleProgressionRepository) ObservedStudentIDs(ctx context.Context, ob
 	return ids, err
 }
 
+// UserTimeZone returns the user's profile time zone name (users.time_zone),
+// "" when unknown. Lock explanations format unlock dates in it (G157).
+func (r *ModuleProgressionRepository) UserTimeZone(ctx context.Context, userID uint) string {
+	var tz []string
+	if err := r.db.WithContext(ctx).Table("users").Where("id = ?", userID).Limit(1).Pluck("time_zone", &tz).Error; err != nil || len(tz) == 0 {
+		return ""
+	}
+	return tz[0]
+}
+
 // CourseInAccount reports whether the course belongs to the tenant
 // (accountID 0 disables the check).
 func (r *ModuleProgressionRepository) CourseInAccount(ctx context.Context, courseID, accountID uint) (bool, error) {

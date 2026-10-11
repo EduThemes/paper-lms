@@ -724,7 +724,9 @@ func (s *CalendarService) DeleteWithScope(ctx context.Context, event *models.Cal
 	}
 }
 
-func (s *CalendarService) ExportAsICalendar(ctx context.Context, contextType string, contextID uint, startAt, endAt time.Time) ([]byte, error) {
+// ExportAsICalendar renders one calendar's events as ICS, dating all-day
+// events in loc (the reader's zone; nil means UTC).
+func (s *CalendarService) ExportAsICalendar(ctx context.Context, contextType string, contextID uint, startAt, endAt time.Time, loc *time.Location) ([]byte, error) {
 	events, err := s.repo.ListByContextAndDateRange(ctx, contextType, contextID, startAt, endAt)
 	if err != nil {
 		return nil, err
@@ -745,7 +747,7 @@ func (s *CalendarService) ExportAsICalendar(ctx context.Context, contextType str
 			CreatedAt:       e.CreatedAt,
 		})
 	}
-	return RenderICS(items, "Paper LMS", "", time.Now()), nil
+	return RenderICSIn(items, "Paper LMS", "", time.Now(), loc), nil
 }
 
 // RenderICS renders calendar items as an RFC 5545 VCALENDAR. baseURL,

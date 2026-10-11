@@ -49,6 +49,15 @@ func TestEvaluate_UnlockAtInFutureLocksEverything(t *testing.T) {
 	assert.True(t, m.Items[0].Locked)
 	assert.False(t, m.Items[0].Completed, "a locked module records no progress")
 	assert.Contains(t, m.LockExplanation(func(uint) string { return "" }), "will unlock")
+	assert.Contains(t, m.LockExplanation(func(uint) string { return "" }), "Sep 3, 2026 at 12:00 PM UTC")
+
+	// G157: the date reads in the student's profile zone when known.
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("tzdata unavailable")
+	}
+	m.Location = ny
+	assert.Contains(t, m.LockExplanation(func(uint) string { return "" }), "Sep 3, 2026 at 8:00 AM EDT")
 
 	// Once the date passes the module opens.
 	out = EvaluateModuleProgress(ModuleEvalInput{Now: now.Add(72 * time.Hour), Modules: []models.ContextModule{

@@ -71,6 +71,9 @@ type ModuleProgress struct {
 	CurrentPosition *int           `json:"current_position"`
 	RequirementsMet []uint         `json:"requirements_met"`
 	Items           []ItemProgress `json:"items"`
+	// Location is the student's profile time zone, used to word the
+	// unlock date in LockExplanation (nil: UTC).
+	Location *time.Location `json:"-"`
 }
 
 // LockExplanation is a human-readable reason a module is locked, or ""
@@ -80,7 +83,11 @@ func (m ModuleProgress) LockExplanation(moduleName func(uint) string) string {
 		return ""
 	}
 	if m.LockedUntilDate && m.UnlockAt != nil {
-		return "This module will unlock on " + m.UnlockAt.UTC().Format("Jan 2, 2006 at 3:04 PM MST") + "."
+		loc := m.Location
+		if loc == nil {
+			loc = time.UTC
+		}
+		return "This module will unlock on " + m.UnlockAt.In(loc).Format("Jan 2, 2006 at 3:04 PM MST") + "."
 	}
 	if len(m.PrerequisitesUnmet) > 0 {
 		names := ""

@@ -35,7 +35,7 @@ func TestExportAsICalendar_DescriptionIsPlainText(t *testing.T) {
 	repo.On("ListByContextAndDateRange", mock.Anything, "Course", uint(5), mock.Anything, mock.Anything).Return([]models.CalendarEvent{
 		{ID: 1, Title: "Lab day", Description: "<p>Bring <strong>goggles</strong></p><p>Room 101</p>", StartAt: start},
 	}, nil)
-	out, err := NewCalendarService(repo).ExportAsICalendar(context.Background(), "Course", 5, start.Add(-time.Hour), start.Add(time.Hour))
+	out, err := NewCalendarService(repo).ExportAsICalendar(context.Background(), "Course", 5, start.Add(-time.Hour), start.Add(time.Hour), time.UTC)
 	require.NoError(t, err)
 	ics := string(out)
 	assert.Contains(t, ics, `DESCRIPTION:Bring goggles\nRoom 101`)
