@@ -19,7 +19,14 @@ type SpeedGraderHandler struct {
 	// gradingUI (optional) adds anonymous ids, attempt history, groups,
 	// moderated grading and statuses to the SpeedGrader payload.
 	gradingUI *service.GradingUIService
+
+	// anonymityCheck (optional) decides whether an anonymous assignment
+	// still hides students; without it the flag alone decides.
+	anonymityCheck AnonymityCheck
 }
+
+// SetAnonymityCheck wires the anonymous-grading check (nil-safe).
+func (h *SpeedGraderHandler) SetAnonymityCheck(fn AnonymityCheck) { h.anonymityCheck = fn }
 
 // NewSpeedGraderHandler creates a new SpeedGraderHandler.
 func NewSpeedGraderHandler(speedGraderService *service.SpeedGraderService, auditService *service.AuditService) *SpeedGraderHandler {
@@ -401,6 +408,12 @@ func (h *SpeedGraderHandler) GetStudentSubmission(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not fetch student submission")
 	}
 	anonymous := data.Assignment != nil && data.Assignment.AnonymousGrading
+	// While the assignment anonymizes students, a grader may not address
+	// one by user id: that would map SpeedGrader's anonymous ids back to
+	// students. The anonymous_submissions routes serve the grader instead.
+	if anonymous && (h.anonymityCheck == nil || h.anonymityCheck(c.Context(), uint(courseID), data.Assignment.ID, callerAccountID(c))) {
+		return responses.NotFound(c, "submission")
+	}
 
 	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
 		_ = h.auditService.LogPIIAccess(c.Context(), callerID, uint(userID), "read", "speedgrader_submission", "assignments", uint(assignmentID), c.IP(), c.Get("User-Agent"))

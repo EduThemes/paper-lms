@@ -25,7 +25,12 @@ type GradingUIHandler struct {
 	peerReviewService *service.PeerReviewService
 	fileService       *service.FileService
 	rubricService     *service.RubricService // optional (SetRubricService)
+	authz             *ResourceAuthorizer    // SetAuthorizer; course gate for course-less routes
 }
+
+// SetAuthorizer wires the course gate used by routes whose URL carries no
+// course (the peer-review file download). Without it those routes 404.
+func (h *GradingUIHandler) SetAuthorizer(a *ResourceAuthorizer) { h.authz = a }
 
 // NewGradingUIHandler wires the handler.
 func NewGradingUIHandler(svc *service.GradingUIService, subs *SubmissionHandler, userRepo repository.UserRepository, peerReviewService *service.PeerReviewService, fileService *service.FileService) *GradingUIHandler {
@@ -166,7 +171,7 @@ func (h *GradingUIHandler) DownloadPriorAttemptFile(c *fiber.Ctx) error {
 	if h.fileService == nil {
 		return responses.NotFound(c, "file")
 	}
-	_, assignment, wrote := h.courseAndAssignment(c, "assignment_id")
+	courseID, assignment, wrote := h.courseAndAssignment(c, "assignment_id")
 	if wrote {
 		return nil
 	}
@@ -180,6 +185,10 @@ func (h *GradingUIHandler) DownloadPriorAttemptFile(c *fiber.Ctx) error {
 	}
 	sub, err := h.subs.submissionService.GetByAssignmentAndUser(c.Context(), assignment.ID, uint(userID), callerAccountID(c))
 	if err != nil || sub == nil || !h.subs.callerCanViewSubmission(c, sub.UserID) || !h.fileInSubmissionHistory(c, sub, uint(fileID)) {
+		return responses.NotFound(c, "file")
+	}
+	// Anonymous grading: graders use the anonymous file route.
+	if callerID, _ := c.Locals("user_id").(uint); callerID != sub.UserID && h.subs.staffAnonymized(c, courseID, assignment) {
 		return responses.NotFound(c, "file")
 	}
 	return h.subs.streamSubmissionAttachment(c, uint(fileID), sub.UserID)
@@ -1024,6 +1033,18 @@ func (h *GradingUIHandler) DownloadPeerReviewFile(c *fiber.Ctx) error {
 	}
 	sub, err := h.peerReviewService.SubmissionForReview(c.Context(), pr, callerAccountID(c))
 	if err != nil || sub == nil || !submissionHasAttachment(sub, uint(fileID)) {
+		return responses.NotFound(c, "file")
+	}
+	// The route carries no course, so no course gate ran: the review's
+	// assignment must still be published (and not deleted) and the
+	// reviewer must still hold a usable enrollment in its course (a
+	// dropped or not-yet-started student, or one in an unpublished
+	// course, loses access exactly as on the course routes).
+	assignment, err := h.subs.assignmentRepo.FindByID(c.Context(), sub.AssignmentID, callerAccountID(c))
+	if err != nil || assignment == nil || assignment.WorkflowState == models.AssignmentDeleted || !assignment.IsPublished() {
+		return responses.NotFound(c, "file")
+	}
+	if h.authz == nil || h.authz.RequireCourseEnrolled(c, assignment.CourseID) != nil {
 		return responses.NotFound(c, "file")
 	}
 	return h.subs.streamSubmissionAttachment(c, uint(fileID), sub.UserID)

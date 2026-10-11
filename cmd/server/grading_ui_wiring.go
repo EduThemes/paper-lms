@@ -34,6 +34,7 @@ type gradingUIDeps struct {
 	assignmentHandler       *handlers.AssignmentHandler
 	peerReviewHandler       *handlers.PeerReviewHandler
 	rubricAssessmentHandler *handlers.RubricAssessmentHandler
+	gradingPolicyHandler    *handlers.GradingPolicyHandler
 }
 
 // wireGradingUI builds the GradingUIService / handler and attaches the
@@ -50,22 +51,29 @@ func wireGradingUI(database *gorm.DB, d gradingUIDeps) *handlers.GradingUIHandle
 	d.assignmentHandler.SetGradingUIDeps(d.enrollmentRepo, d.attachmentRepo)
 	d.assignmentHandler.SetGradesExistCheck(svc.GradesExist)
 	d.peerReviewHandler.SetUserRepository(d.userRepo)
+	anonymity := handlers.AnonymityCheck(func(ctx context.Context, courseID, assignmentID, accountID uint) bool {
+		a, err := d.assignmentRepo.FindByID(ctx, assignmentID, accountID)
+		if err != nil || a == nil || a.CourseID != courseID || !a.AnonymousGrading {
+			return false
+		}
+		students, err := d.submissionService.CourseStudents(ctx, courseID, accountID)
+		if err != nil {
+			return true // fail closed: keep the student hidden
+		}
+		ids := make([]uint, 0, len(students))
+		for _, s := range students {
+			ids = append(ids, s.UserID)
+		}
+		return svc.AnonymizeStudents(ctx, a, ids)
+	})
 	if d.rubricAssessmentHandler != nil {
-		d.rubricAssessmentHandler.SetAnonymityCheck(func(ctx context.Context, courseID, assignmentID, accountID uint) bool {
-			a, err := d.assignmentRepo.FindByID(ctx, assignmentID, accountID)
-			if err != nil || a == nil || a.CourseID != courseID || !a.AnonymousGrading {
-				return false
-			}
-			students, err := d.submissionService.CourseStudents(ctx, courseID, accountID)
-			if err != nil {
-				return true // fail closed: keep the student hidden
-			}
-			ids := make([]uint, 0, len(students))
-			for _, s := range students {
-				ids = append(ids, s.UserID)
-			}
-			return svc.AnonymizeStudents(ctx, a, ids)
-		})
+		d.rubricAssessmentHandler.SetAnonymityCheck(anonymity)
+	}
+	// The user-addressed SpeedGrader and history routes refuse graders
+	// while students are anonymized.
+	d.speedGraderHandler.SetAnonymityCheck(anonymity)
+	if d.gradingPolicyHandler != nil {
+		d.gradingPolicyHandler.SetAnonymityCheck(anonymity)
 	}
 
 	h := handlers.NewGradingUIHandler(svc, d.submissionHandler, d.userRepo, d.peerReviewService, d.fileService)

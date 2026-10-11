@@ -373,7 +373,8 @@ func (h *SubmissionHandler) ListSubmissions(c *fiber.Ctx) error {
 	// B009: the assignment must be in the caller's tenant AND the URL's
 	// course. Without the tie a teacher of course A could list every
 	// submission of any assignment in any tenant.
-	if _, wrote := h.requireAssignmentInCourse(c, uint(assignmentID), uint(courseID)); wrote {
+	assignment, wrote := h.requireAssignmentInCourse(c, uint(assignmentID), uint(courseID))
+	if wrote {
 		return nil
 	}
 
@@ -399,8 +400,18 @@ func (h *SubmissionHandler) ListSubmissions(c *fiber.Ctx) error {
 	}
 
 	result.Items = filterSubmissionsForSections(c, result.Items) // G107
+	// Anonymous grading: graders get the rows without user ids, addressed
+	// by anonymous id (as SpeedGrader shows them).
+	anonymized := h.staffAnonymized(c, uint(courseID), assignment)
+	if anonymized {
+		h.ensureAnonymousIDs(c, assignment, result.Items)
+	}
 	submissions := make([]fiber.Map, 0, len(result.Items))
 	for i := range result.Items {
+		if anonymized {
+			submissions = append(submissions, anonymizedStaffSubmissionJSON(uint(courseID), &result.Items[i]))
+			continue
+		}
 		submissions = append(submissions, submissionToJSON(&result.Items[i]))
 	}
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
@@ -432,12 +443,20 @@ func (h *SubmissionHandler) GetSubmission(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid user ID")
 	}
 
-	if _, wrote := h.requireAssignmentInCourse(c, uint(assignmentID), uint(courseID)); wrote {
+	assignment, wrote := h.requireAssignmentInCourse(c, uint(assignmentID), uint(courseID))
+	if wrote {
 		return nil
 	}
 
 	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c))
 	if err != nil {
+		return responses.NotFound(c, "submission")
+	}
+	// Anonymous grading: a grader may not address the student by user id
+	// (that maps anonymous ids back to students); SpeedGrader uses the
+	// anonymous_submissions routes instead. The student's own view is
+	// unaffected.
+	if callerID, _ := c.Locals("user_id").(uint); callerID != submission.UserID && h.staffAnonymized(c, uint(courseID), assignment) {
 		return responses.NotFound(c, "submission")
 	}
 

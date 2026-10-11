@@ -26,6 +26,27 @@ type GradingPolicyHandler struct {
 	submissionRepo repository.SubmissionRepository
 	standards      repository.GradingStandardRepository
 	observers      *service.ObserverService
+
+	// anonymityCheck (optional, SetAnonymityCheck) keeps graders off the
+	// user-addressed history route while an assignment anonymizes
+	// students.
+	anonymityCheck AnonymityCheck
+}
+
+// SetAnonymityCheck wires the anonymous-grading check (nil-safe).
+func (h *GradingPolicyHandler) SetAnonymityCheck(fn AnonymityCheck) { h.anonymityCheck = fn }
+
+// staffAnonymized reports whether the caller grades an assignment that
+// currently hides student identities. Without the check wired, the
+// anonymous_grading flag alone decides.
+func (h *GradingPolicyHandler) staffAnonymized(c *fiber.Ctx, courseID uint, a *models.Assignment) bool {
+	if a == nil || !a.AnonymousGrading || !callerIsCourseStaff(c) {
+		return false
+	}
+	if h.anonymityCheck == nil {
+		return true
+	}
+	return h.anonymityCheck(c.Context(), courseID, a.ID, callerAccountID(c))
 }
 
 func NewGradingPolicyHandler(policy *service.GradingPolicyService, courseRepo repository.CourseRepository, assignmentRepo repository.AssignmentRepository,
@@ -397,6 +418,11 @@ func (h *GradingPolicyHandler) SubmissionHistory(c *fiber.Ctx) error {
 		return responses.NotFound(c, "assignment")
 	}
 	if !staff && !h.callerMayViewStudent(c, uint(userID)) {
+		return responses.NotFound(c, "submission")
+	}
+	// Anonymous grading: a grader may not address the student by user id
+	// (SpeedGrader shows the history under the anonymous id).
+	if callerID, _ := c.Locals("user_id").(uint); callerID != uint(userID) && h.staffAnonymized(c, course.ID, assignment) {
 		return responses.NotFound(c, "submission")
 	}
 	sub, err := h.submissionRepo.FindByAssignmentAndUser(c.Context(), assignment.ID, uint(userID), callerAccountID(c))

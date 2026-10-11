@@ -155,11 +155,16 @@ func (h *SubmissionHandler) DownloadSubmissionFile(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid file ID")
 	}
 
-	if _, wrote := h.requireAssignmentInCourse(c, uint(assignmentID), uint(courseID)); wrote {
+	assignment, wrote := h.requireAssignmentInCourse(c, uint(assignmentID), uint(courseID))
+	if wrote {
 		return nil
 	}
 	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c))
 	if err != nil || submission == nil {
+		return responses.NotFound(c, "file")
+	}
+	// Anonymous grading: graders download through the anonymous route.
+	if callerID, _ := c.Locals("user_id").(uint); callerID != submission.UserID && h.staffAnonymized(c, uint(courseID), assignment) {
 		return responses.NotFound(c, "file")
 	}
 	if !submissionHasAttachment(submission, uint(fileID)) {
