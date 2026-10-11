@@ -1,12 +1,12 @@
 package v1
 
 import (
-	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/handlers"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/auth"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/gofiber/fiber/v2"
 )
 
 // Router holds every dependency Register needs to wire HTTP routes. All
@@ -15,21 +15,21 @@ import (
 // adding a field here and assigning it at the call site.
 type Router struct {
 	// Core domain
-	UserHandler            *handlers.UserHandler
-	AccountHandler         *handlers.AccountHandler
-	CourseHandler          *handlers.CourseHandler
-	SectionHandler         *handlers.SectionHandler
-	EnrollmentHandler      *handlers.EnrollmentHandler
-	ModuleHandler          *handlers.ModuleHandler
-	ModuleItemHandler      *handlers.ModuleItemHandler
+	UserHandler       *handlers.UserHandler
+	AccountHandler    *handlers.AccountHandler
+	CourseHandler     *handlers.CourseHandler
+	SectionHandler    *handlers.SectionHandler
+	EnrollmentHandler *handlers.EnrollmentHandler
+	ModuleHandler     *handlers.ModuleHandler
+	ModuleItemHandler *handlers.ModuleItemHandler
 	// ModuleProgressionHandler: module progress + content gate (routes_modules.go).
 	ModuleProgressionHandler *handlers.ModuleProgressionHandler
-	PageHandler            *handlers.PageHandler
-	AssignmentHandler      *handlers.AssignmentHandler
-	AssignmentGroupHandler *handlers.AssignmentGroupHandler
-	SubmissionHandler      *handlers.SubmissionHandler
-	GradebookHandler       *handlers.GradebookHandler
-	GradingStandardHandler *handlers.GradingStandardHandler
+	PageHandler              *handlers.PageHandler
+	AssignmentHandler        *handlers.AssignmentHandler
+	AssignmentGroupHandler   *handlers.AssignmentGroupHandler
+	SubmissionHandler        *handlers.SubmissionHandler
+	GradebookHandler         *handlers.GradebookHandler
+	GradingStandardHandler   *handlers.GradingStandardHandler
 
 	// Developer keys, tokens, OAuth, external tools, LTI
 	DeveloperKeyHandler *handlers.DeveloperKeyHandler
@@ -174,6 +174,8 @@ type Router struct {
 	CanvasIDs           fiber.Handler
 	// Learner dashboard lane (routes_learner.go).
 	LearnerHandler *handlers.LearnerHandler
+	// Rich content editor: per-user autosave draft key (routes_rce_editor.go)
+	RCEDraftKeyHandler *handlers.RCEDraftKeyHandler
 
 	// Middleware
 	AuthMiddleware *middleware.AuthMiddleware
@@ -894,4 +896,5 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerAPICompatRoutes(app, protected, authLimit, admin, enrolled, selfOrAdmin)
 	r.registerLearnerRoutes(protected, enrolled)
 	r.registerLearnerOutcomesRoutes(protected, enrolled, instructor)
+	r.registerRCEEditorRoutes(protected)
 }

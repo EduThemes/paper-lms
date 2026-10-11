@@ -2,7 +2,7 @@ import React, { createContext, useState, useContext, useEffect, useRef } from 'r
 import i18n from 'i18next';
 import { api } from '../services/api';
 import { setCurrentAccountId } from '../services/currentAccount';
-import { clearAllRceDrafts } from '../components/rce/rceDrafts';
+import { clearAllRceDrafts, setRceDraftUser } from '../components/rce/rceDrafts';
 import { applyUserLocale } from '../utils/localePreference';
 import { setUserTimeZone } from '../lib/userTimeZone';
 import { rememberReturnTo, markSessionExpired } from '../utils/returnTo';
@@ -39,6 +39,9 @@ export const AuthProvider = ({ children }) => {
     // G157: show and enter dates in the profile time zone.
     setUserTimeZone(value?.time_zone);
     userRef.current = value;
+    // Editor drafts are encrypted per user; a different user (or a
+    // masquerade identity) must not reuse the previous user's cached key.
+    setRceDraftUser(value?.id);
     setUserState(value);
   };
 

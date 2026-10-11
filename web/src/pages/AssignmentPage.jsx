@@ -14,7 +14,8 @@ import GradedDiscussionLink, { isDiscussionAssignment } from '../components/disc
 import SubmissionComments from '../components/SubmissionComments';
 import RichContentViewer from '../components/RichContentViewer';
 import { SubmissionBody } from '../components/SafeHTML';
-import RichContentEditor from '../components/RichContentEditor';
+import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
+import { clearRceDraft } from '../components/rce/rceDrafts';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import AssignmentQuizBanner, { isQuizAssignment } from '../components/quiz/AssignmentQuizBanner';
@@ -245,6 +246,7 @@ const AssignmentPage = () => {
         payload.group_category_id = null;
       }
       await api.updateAssignment(courseId, assignmentId, payload);
+      clearRceDraft(`assignment-${courseId}-${assignmentId}-description`);
       setAssignment((prev) => ({
         ...prev,
         ...payload,
@@ -396,12 +398,13 @@ const AssignmentPage = () => {
           </div>
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1">Description</label>
-            <RichContentEditor
+            <RichContentEditorV2
               value={editForm.description}
               onChange={(html) => { setEditForm((prev) => ({ ...prev, description: html })); setIsDirty(true); }}
               placeholder="Assignment instructions..."
-              minHeight="160px"
+              label="Assignment description"
               courseId={courseId}
+              autoSaveKey={`assignment-${courseId}-${assignmentId}-description`}
             />
           </div>
           <div className="grid grid-cols-2 gap-4">

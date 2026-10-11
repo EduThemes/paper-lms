@@ -68,7 +68,7 @@ vi.mock('../../components/RichContentViewer', () => ({
   renderMathInElement: () => {},
 }));
 
-vi.mock('../../components/RichContentEditor', () => ({
+vi.mock('../../components/rce/RichContentEditorV2', () => ({
   default: () => <div data-testid="rich-content-editor" />,
 }));
 

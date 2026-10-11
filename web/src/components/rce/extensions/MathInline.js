@@ -68,10 +68,12 @@ export const MathInline = Node.create({
   parseHTML() {
     return [
       // Ahead of the Image extension's img rule, so an equation image is
-      // an equation, not a broken picture.
-      { tag: 'span.math-tex', getAttrs: mathAttrs, priority: 100 },
-      { tag: 'span.math_equation_latex', getAttrs: mathAttrs, priority: 100 },
-      { tag: 'img[data-equation-content]', getAttrs: mathAttrs, priority: 100 },
+      // an equation, not a broken picture, and ahead of the TextStyle mark's
+      // span rule (priority 101), which would otherwise keep the class and
+      // unwrap the equation to plain text.
+      { tag: 'span.math-tex', getAttrs: mathAttrs, priority: 110 },
+      { tag: 'span.math_equation_latex', getAttrs: mathAttrs, priority: 110 },
+      { tag: 'img[data-equation-content]', getAttrs: mathAttrs, priority: 110 },
     ];
   },
 
