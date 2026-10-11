@@ -58,6 +58,7 @@ type Router struct {
 
 	// Communication
 	CalendarEventHandler *handlers.CalendarEventHandler
+	CalendarHandler      *handlers.CalendarHandler
 	ConversationHandler  *handlers.ConversationHandler
 	NotificationHandler  *handlers.NotificationHandler
 
@@ -220,6 +221,7 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerPublicRoutes(api, authLimit)
 	r.registerLTIToolRoutes(api, enrolled, instructor, authLimit)
 	r.registerLearnerOutcomesPublicRoutes(api)
+	r.registerCalendarPublicRoutes(api)
 
 	// Protected routes (authentication required)
 	protected := api.Group("", r.AuthMiddleware.Protected(), middleware.CSRFProtection())
@@ -901,4 +903,5 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerLearnerRoutes(protected, enrolled)
 	r.registerLearnerOutcomesRoutes(protected, enrolled, instructor)
 	r.registerRCEEditorRoutes(protected)
+	r.registerCalendarRoutes(protected)
 }

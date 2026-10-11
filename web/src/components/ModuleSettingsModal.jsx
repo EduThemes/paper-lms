@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Lock, ListChecks, Settings2, X } from 'lucide-react';
 import { api } from '../services/api';
+import { dateTimeLocalToISO, isoToDateTimeLocal } from '../utils/datetimeLocal';
 import {
   Dialog,
   DialogContent,
@@ -49,13 +50,10 @@ const COMPLETION_TYPES = {
   SubHeader: [],
 };
 
-// toLocalInput formats an ISO timestamp for <input type="datetime-local">.
+// toLocalInput formats an ISO timestamp for <input type="datetime-local">,
+// in the profile time zone (G157).
 export function toLocalInput(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return isoToDateTimeLocal(iso);
 }
 
 const TABS = [
@@ -118,7 +116,7 @@ const ModuleSettingsModal = ({ courseId, module, modules, prerequisites, onClose
     try {
       // Save module settings (sequential progress, unlock date, complete
       // all / one requirement).
-      const unlockISO = unlockAt ? new Date(unlockAt).toISOString() : null;
+      const unlockISO = unlockAt ? dateTimeLocalToISO(unlockAt) : null;
       await api.updateModule(courseId, module.id, {
         require_sequential_progress: requireSequential,
         requirement_count: requirementCount,

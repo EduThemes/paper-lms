@@ -16,6 +16,12 @@ type CalendarEventRepository interface {
 	Delete(ctx context.Context, id uint) error
 	ListByContext(ctx context.Context, contextType string, contextID uint, params PaginationParams) (*PaginatedResult[models.CalendarEvent], error)
 	ListByContextAndDateRange(ctx context.Context, contextType string, contextID uint, startAt, endAt time.Time) ([]models.CalendarEvent, error)
+	// Recurring series and section-specific child events (G095).
+	ListBySeries(ctx context.Context, seriesUUID string) ([]models.CalendarEvent, error)
+	ListChildren(ctx context.Context, parentID uint) ([]models.CalendarEvent, error)
+	CreateMany(ctx context.Context, events []*models.CalendarEvent) error
+	SaveMany(ctx context.Context, events []*models.CalendarEvent) error
+	DeleteMany(ctx context.Context, ids []uint) error
 }
 
 type ConversationRepository interface {

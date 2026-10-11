@@ -4,20 +4,16 @@
 // anonymous topics can't be graded, grouped or section-specific, and
 // section-specific topics can't be graded or grouped.
 
-/** datetime-local value ("YYYY-MM-DDTHH:mm") for an ISO time, in local time. */
+import { isoToZonedWallClock, zonedWallClockToISO } from '../lib/userTimeZone';
+
+/** datetime-local value ("YYYY-MM-DDTHH:mm") for an ISO time, in the profile time zone (G157). */
 export function toLocalInput(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return isoToZonedWallClock(iso);
 }
 
 /** ISO time for a datetime-local value, or null when empty / invalid. */
 export function fromLocalInput(value) {
-  if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  return zonedWallClockToISO(value) || null;
 }
 
 export function emptyTopicForm() {

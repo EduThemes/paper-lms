@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, Users, Check, MapPin } from 'lucide-react';
+import { Calendar, Users, Check, MapPin, Trash2 } from 'lucide-react';
 
 /**
  * SlotPicker — student-facing grid of available appointment slots.
@@ -11,8 +11,11 @@ import { Calendar, Users, Check, MapPin } from 'lucide-react';
  *  - onCancel:     (slot) => void  (called for slots the user already reserved)
  *  - locationName: string (optional, displayed once at top)
  *  - busy:         boolean — disables buttons while a request is in flight
+ *  - manager:      boolean — instructor view: shows who booked each slot
+ *                  and a delete button instead of Reserve
+ *  - onDeleteSlot: (slot) => void (manager view)
  */
-const SlotPicker = ({ slots = [], reservedIds = new Set(), onReserve, onCancel, locationName, busy }) => {
+const SlotPicker = ({ slots = [], reservedIds = new Set(), onReserve, onCancel, locationName, busy, manager = false, onDeleteSlot }) => {
   if (!slots.length) {
     return (
       <div className="rounded-lg border border-dashed border-border-strong bg-surface-1 px-6 py-10 text-center text-text-tertiary">
@@ -46,7 +49,7 @@ const SlotPicker = ({ slots = [], reservedIds = new Set(), onReserve, onCancel, 
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {daySlots.map((slot) => {
               const reserved = reservedIds.has(slot.id);
-              const full = !slot.available && !reserved;
+              const full = !manager && !slot.available && !reserved;
               return (
                 <div
                   key={slot.id}
@@ -67,8 +70,22 @@ const SlotPicker = ({ slots = [], reservedIds = new Set(), onReserve, onCancel, 
                       {slot.reservation_count ?? 0}/{slot.effective_limit ?? 1}
                     </div>
                   </div>
+                  {manager && (slot.participants || []).length > 0 && (
+                    <ul className="mt-2 space-y-0.5 text-xs text-text-secondary" aria-label="Signed up">
+                      {slot.participants.map((p) => <li key={p.reservation_id}>{p.name}</li>)}
+                    </ul>
+                  )}
                   <div className="mt-3">
-                    {reserved ? (
+                    {manager ? (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteSlot && onDeleteSlot(slot)}
+                        disabled={busy}
+                        className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-border-strong px-3 py-1.5 text-sm text-text-secondary hover:bg-accent-danger/10 hover:text-accent-danger disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4" /> Delete slot
+                      </button>
+                    ) : reserved ? (
                       <button
                         type="button"
                         onClick={() => onCancel && onCancel(slot)}
