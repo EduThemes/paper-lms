@@ -19,6 +19,7 @@ import {
 import CalendarEventForm from '../components/calendar/CalendarEventForm';
 import { SubmissionBody as RichOrPlainText } from '../components/SafeHTML';
 import CalendarFeedPanel from '../components/calendar/CalendarFeedPanel';
+import { getUserTimeZone } from '../lib/userTimeZone';
 
 const VIEW_KEY = 'paper.calendar.view';
 const HIDDEN_KEY = 'paper.calendar.hidden';
@@ -212,9 +213,10 @@ const CalendarPage = () => {
   };
 
   const heading = useMemo(() => {
-    if (view === 'month') return anchor.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+    const timeZone = getUserTimeZone();
+    if (view === 'month') return anchor.toLocaleString(undefined, { month: 'long', year: 'numeric', timeZone });
     const last = new Date(range.end.getTime() - 1);
-    const fmt = (d) => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    const fmt = (d) => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone });
     return `${fmt(range.start)} – ${fmt(last)}`;
   }, [view, anchor, range]);
 
@@ -395,7 +397,7 @@ function ItemDetail({ item, busy, onClose, onEdit, onDelete, onCancelReservation
   const [askScope, setAskScope] = useState(false);
   const isEvent = item.type === 'event';
   const date = new Date(item.start_at).toLocaleDateString(undefined, {
-    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: getUserTimeZone(),
   });
   return (
     <section className="bg-surface-0 rounded-lg shadow-lg border border-border-default p-4 mb-4" aria-labelledby="calendar-item-title">

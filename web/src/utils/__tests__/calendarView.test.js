@@ -1,6 +1,8 @@
 import {
   viewRange, shiftDate, buildRRule, parseRRule, describeRRule, itemsByDay, dayKey, emptyRepeat,
+  dayKeysIn, daysIn, addDays, startOfDay, formatDayKey,
 } from '../calendarView';
+import { browserTimeZone, setUserTimeZone, zonedWallClockToISO } from '../../lib/userTimeZone';
 
 const t = (key, opts = {}) => {
   const table = {
@@ -70,5 +72,63 @@ describe('calendarView', () => {
     const byDay = itemsByDay(items);
     expect(byDay['2030-01-02'].map((i) => i.id)).toEqual(['c', 'a', 'b']);
     expect(byDay['2030-01-03']).toHaveLength(1);
+  });
+});
+
+// G157: the calendar's days are the profile zone's days, whatever zone
+// the device (here: the test runner) is in. Pick a profile zone that
+// differs from the runner's so a browser-zone fallback would fail.
+describe('calendarView in the profile time zone', () => {
+  const profile = browserTimeZone() === 'America/New_York' ? 'America/Los_Angeles' : 'America/New_York';
+  // Profile-zone wall clock -> instant, independent of the runner's zone.
+  const at = (wall) => zonedWallClockToISO(wall, profile);
+
+  beforeEach(() => setUserTimeZone(profile));
+  afterEach(() => setUserTimeZone(null));
+
+  test('an 11 PM event lands on its own day, not the next', () => {
+    const late = { id: 'late', start_at: at('2030-01-01T23:00'), all_day: false };
+    const early = { id: 'early', start_at: at('2030-01-02T00:30'), all_day: false };
+    const byDay = itemsByDay([late, early]);
+    expect(byDay['2030-01-01'].map((i) => i.id)).toEqual(['late']);
+    expect(byDay['2030-01-02'].map((i) => i.id)).toEqual(['early']);
+  });
+
+  test('ranges start at profile-zone midnight', () => {
+    const anchor = new Date(at('2030-01-16T22:00')); // Wednesday evening
+    const week = viewRange('week', anchor);
+    expect(week.start.toISOString()).toBe(at('2030-01-13'));
+    expect(week.end.toISOString()).toBe(at('2030-01-20'));
+    expect(dayKey(week.start)).toBe('2030-01-13');
+
+    const agenda = viewRange('agenda', anchor);
+    expect(agenda.start.toISOString()).toBe(at('2030-01-16'));
+    expect(dayKey(agenda.end)).toBe('2030-02-13');
+
+    const month = viewRange('month', new Date(at('2030-03-31T23:30')));
+    expect(month.start.toISOString()).toBe(at('2030-02-24'));
+    expect(month.end.toISOString()).toBe(at('2030-04-07'));
+  });
+
+  test('grid days follow profile days across a DST change', () => {
+    // US DST starts 2030-03-10.
+    const keys = dayKeysIn(new Date(at('2030-03-08')), new Date(at('2030-03-12')));
+    expect(keys).toEqual(['2030-03-08', '2030-03-09', '2030-03-10', '2030-03-11']);
+    expect(daysIn(new Date(at('2030-03-08')), new Date(at('2030-03-12'))).map((d) => d.toISOString()))
+      .toEqual(keys.map((k) => at(k)));
+    expect(addDays(new Date(at('2030-03-09T09:00')), 2).toISOString()).toBe(at('2030-03-11T09:00'));
+  });
+
+  test('shiftDate moves months and weeks in the profile zone', () => {
+    const anchor = new Date(at('2030-01-31T23:30'));
+    expect(dayKey(shiftDate('month', anchor, 1))).toBe('2030-02-01');
+    expect(dayKey(shiftDate('month', anchor, -1))).toBe('2029-12-01');
+    expect(dayKey(shiftDate('week', anchor, 1))).toBe('2030-02-07');
+    expect(startOfDay(anchor).toISOString()).toBe(at('2030-01-31'));
+  });
+
+  test('day labels come from the key, not a zone', () => {
+    expect(formatDayKey('2030-01-01', { weekday: 'long', month: 'long', day: 'numeric' }, 'en-US'))
+      .toBe('Tuesday, January 1');
   });
 });

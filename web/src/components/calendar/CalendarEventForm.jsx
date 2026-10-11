@@ -4,7 +4,7 @@ import { calendarApi } from '../../services/api_calendar';
 import {
   WEEKDAY_CODES, buildRRule, parseRRule, toLocalInput, fromLocalInput, dayKey,
 } from '../../utils/calendarView';
-import { getUserTimeZone } from '../../lib/userTimeZone';
+import { getUserTimeZone, zonedWallClockToISO } from '../../lib/userTimeZone';
 import RichContentEditorV2 from '../rce/RichContentEditorV2';
 import { toEditorHTML, richValueOrEmpty } from '../../utils/richContent';
 
@@ -81,8 +81,9 @@ const CalendarEventForm = ({ contexts, defaultContextCode, event, initialStart, 
   const toISO = (value) => {
     if (!value) return null;
     if (form.all_day) {
-      const [y, m, d] = value.substring(0, 10).split('-').map(Number);
-      return new Date(y, m - 1, d).toISOString();
+      // An all-day event starts at midnight of its day in the profile
+      // zone (sent as time_zone below), not the browser's midnight.
+      return zonedWallClockToISO(value.substring(0, 10)) || null;
     }
     return fromLocalInput(value);
   };

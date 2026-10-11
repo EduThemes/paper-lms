@@ -1,74 +1,130 @@
 // Date helpers for the calendar views (month, week, agenda) and the
 // simple repeat editor that writes an RFC 5545 RRULE (G095).
 
-import { isoToZonedWallClock, zonedWallClockToISO } from '../lib/userTimeZone';
+import {
+  dayKeyInZone, getUserTimeZone, isoToZonedWallClock, zonedWallClockToISO,
+} from '../lib/userTimeZone';
 
 export const VIEWS = ['month', 'week', 'agenda'];
 export const AGENDA_DAYS = 28;
 
 const pad = (n) => String(n).padStart(2, '0');
 
-// Local calendar day key, YYYY-MM-DD.
-export function dayKey(date) {
-  const d = date instanceof Date ? date : new Date(date);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+// Every calendar day here is a day in the user's profile time zone
+// (G157), not the browser's: the views format times in the profile zone,
+// so they must also bucket, label and fetch by its days. Otherwise a
+// profile in New York on a UTC laptop shows an 11 PM event in the next
+// day's cell. Each helper takes an optional tz (default: the profile
+// zone) so tests and callers can pin it.
+
+// Calendar day key, YYYY-MM-DD, in tz.
+export function dayKey(date, tz = getUserTimeZone()) {
+  return dayKeyInZone(date instanceof Date ? date : new Date(date), tz);
 }
 
-export function startOfDay(date) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
+const keyParts = (key) => key.split('-').map(Number);
+
+// keyToUTCDate is the day as a UTC-midnight Date, for weekday/date math
+// and for formatting a label with { timeZone: 'UTC' } (no zone can then
+// move it to a neighbouring day).
+export function keyToUTCDate(key) {
+  const [y, m, d] = keyParts(key);
+  return new Date(Date.UTC(y, m - 1, d));
 }
 
-export function addDays(date, n) {
-  const d = new Date(date);
-  d.setDate(d.getDate() + n);
-  return d;
+// shiftKey moves a day key by n calendar days.
+export function shiftKey(key, n) {
+  const d = keyToUTCDate(key);
+  d.setUTCDate(d.getUTCDate() + n);
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 }
 
-export function startOfWeek(date) {
-  const d = startOfDay(date);
-  return addDays(d, -d.getDay());
+// keyWeekday is the day's weekday, 0 = Sunday.
+export const keyWeekday = (key) => keyToUTCDate(key).getUTCDay();
+
+// keyDayOfMonth / keyMonth read the day key's own fields (month 0-based).
+export const keyDayOfMonth = (key) => keyParts(key)[2];
+export const keyMonth = (key) => keyParts(key)[1] - 1;
+
+// keyStart is the instant the day begins in tz.
+export function keyStart(key, tz = getUserTimeZone()) {
+  return new Date(zonedWallClockToISO(key, tz));
 }
 
-// The visible range of a view around date: [start, end) local.
-export function viewRange(view, date) {
+// formatDayKey formats a day key without letting any zone shift it.
+export function formatDayKey(key, options = {}, locale = undefined) {
+  return keyToUTCDate(key).toLocaleDateString(locale, { ...options, timeZone: 'UTC' });
+}
+
+export function startOfDay(date, tz = getUserTimeZone()) {
+  return keyStart(dayKey(date, tz), tz);
+}
+
+// addDays moves date by n calendar days in tz, keeping its wall-clock
+// time (a DST change in between doesn't shift it by an hour).
+export function addDays(date, n, tz = getUserTimeZone()) {
+  const wall = isoToZonedWallClock(date instanceof Date ? date : new Date(date), tz);
+  if (!wall) return new Date(NaN);
+  const key = shiftKey(wall.slice(0, 10), n);
+  return new Date(zonedWallClockToISO(`${key}${wall.slice(10)}`, tz));
+}
+
+export function startOfWeek(date, tz = getUserTimeZone()) {
+  const key = dayKey(date, tz);
+  return keyStart(shiftKey(key, -keyWeekday(key)), tz);
+}
+
+// The visible range of a view around date: [start, end), each the start
+// of a day in tz.
+export function viewRange(view, date, tz = getUserTimeZone()) {
+  const key = dayKey(date, tz);
   if (view === 'week') {
-    const start = startOfWeek(date);
-    return { start, end: addDays(start, 7) };
+    const startKey = shiftKey(key, -keyWeekday(key));
+    return { start: keyStart(startKey, tz), end: keyStart(shiftKey(startKey, 7), tz) };
   }
   if (view === 'agenda') {
-    const start = startOfDay(date);
-    return { start, end: addDays(start, AGENDA_DAYS) };
+    return { start: keyStart(key, tz), end: keyStart(shiftKey(key, AGENDA_DAYS), tz) };
   }
   // Month: whole weeks covering the month, as the grid shows them.
-  const first = new Date(date.getFullYear(), date.getMonth(), 1);
-  const start = startOfWeek(first);
-  const last = new Date(date.getFullYear(), date.getMonth() + 1, 0);
-  const end = addDays(startOfWeek(last), 7);
-  return { start, end };
+  const [y, m] = keyParts(key);
+  const firstKey = `${y}-${pad(m)}-01`;
+  const lastKey = `${y}-${pad(m)}-${pad(new Date(Date.UTC(y, m, 0)).getUTCDate())}`;
+  const startKey = shiftKey(firstKey, -keyWeekday(firstKey));
+  const endKey = shiftKey(lastKey, 7 - keyWeekday(lastKey));
+  return { start: keyStart(startKey, tz), end: keyStart(endKey, tz) };
 }
 
 // Moves the anchor date one view-length back (-1) or forward (+1).
-export function shiftDate(view, date, dir) {
-  if (view === 'week') return addDays(date, 7 * dir);
-  if (view === 'agenda') return addDays(date, AGENDA_DAYS * dir);
-  return new Date(date.getFullYear(), date.getMonth() + dir, 1);
+export function shiftDate(view, date, dir, tz = getUserTimeZone()) {
+  if (view === 'week') return addDays(date, 7 * dir, tz);
+  if (view === 'agenda') return addDays(date, AGENDA_DAYS * dir, tz);
+  const [y, m] = keyParts(dayKey(date, tz));
+  const first = new Date(Date.UTC(y, m - 1 + dir, 1));
+  return keyStart(`${first.getUTCFullYear()}-${pad(first.getUTCMonth() + 1)}-01`, tz);
 }
 
-// The days of a range, one Date per local day.
-export function daysIn(start, end) {
+// The day keys of a range [start, end), one per day in tz.
+export function dayKeysIn(start, end, tz = getUserTimeZone()) {
   const out = [];
-  for (let d = startOfDay(start); d < end; d = addDays(d, 1)) out.push(d);
+  const endMs = new Date(end).getTime();
+  for (let key = dayKey(start, tz); keyStart(key, tz).getTime() < endMs; key = shiftKey(key, 1)) {
+    out.push(key);
+    if (out.length > 400) break; // a malformed range can't loop forever
+  }
   return out;
 }
 
-// Groups items by the local day they start on, sorted by start time
+// The days of a range, one Date (the day's start in tz) per day.
+export function daysIn(start, end, tz = getUserTimeZone()) {
+  return dayKeysIn(start, end, tz).map((key) => keyStart(key, tz));
+}
+
+// Groups items by the day (in tz) they start on, sorted by start time
 // (all-day items first).
-export function itemsByDay(items) {
+export function itemsByDay(items, tz = getUserTimeZone()) {
   const map = {};
   items.forEach((item) => {
-    const key = dayKey(item.start_at);
+    const key = dayKey(item.start_at, tz);
     (map[key] = map[key] || []).push(item);
   });
   Object.values(map).forEach((list) => list.sort((a, b) => {
