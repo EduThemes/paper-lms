@@ -87,7 +87,7 @@ export function computeTotals(summary, scores = {}) {
     const override = Object.prototype.hasOwnProperty.call(scores, a.id) ? scores[a.id] : undefined;
     const excused = a.excused && override === undefined;
     if (!a.counts_toward_total && override === undefined) return;
-    if (excused || a.grading_type === 'not_graded') return;
+    if (excused || a.grading_type === 'not_graded' || a.omit_from_final_grade) return;
     const possible = Number(a.points_possible) || 0;
     let score = override !== undefined ? override : a.score;
     score = score === '' || score === null || score === undefined ? null : Number(score);

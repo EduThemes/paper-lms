@@ -38,6 +38,14 @@ type Submission struct {
 	// CachedDueDate is the student's effective due date (overrides and
 	// accommodations applied), refreshed whenever dates change.
 	CachedDueDate *time.Time `json:"cached_due_date"`
-	CreatedAt      time.Time          `json:"created_at"`
-	UpdatedAt      time.Time          `json:"updated_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+
+	// AnonymousID is the stable 5-character handle graders see instead of
+	// the student under anonymous grading (Canvas submissions.anonymous_id).
+	AnonymousID *string `json:"-" gorm:"column:anonymous_id;index"`
+	// ExtraAttempts are granted on top of the assignment's allowed_attempts.
+	ExtraAttempts *int `json:"extra_attempts"`
+	// CustomGradeStatusID is an account-defined status (custom_grade_statuses).
+	CustomGradeStatusID *uint `json:"custom_grade_status_id" gorm:"index"`
 }

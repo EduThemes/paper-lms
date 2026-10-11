@@ -228,6 +228,13 @@ func allAutoMigrateModels() []interface{} {
 		// P3 Features: Custom Gradebook Columns
 		&models.CustomGradebookColumn{},
 		&models.CustomColumnDatum{},
+		// Grading UI lane (000094-000096): submission attempt history,
+		// moderated grading, custom grade statuses.
+		&models.SubmissionVersion{},
+		&models.ModerationGrader{},
+		&models.ProvisionalGrade{},
+		&models.ModerationSelection{},
+		&models.CustomGradeStatus{},
 		// P3 Features: Mastery Paths (Conditional Release)
 		&models.ConditionalReleaseRule{},
 		&models.ConditionalReleaseScoringRange{},

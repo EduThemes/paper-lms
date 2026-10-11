@@ -51,6 +51,7 @@ const buildSecondaryGroups = (t) => [
       { to: '/admin/oneroster',       icon: RefreshCw,      label: t('adminNav.oneRoster') },
       { to: '/admin/terms',           icon: GraduationCap,  label: t('adminNav.terms') },
       { to: '/admin/grading_periods', icon: ClipboardCheck, label: t('adminNav.gradingPeriods') },
+      { to: '/admin/grade_statuses',  icon: ClipboardCheck, label: t('adminNav.gradeStatuses', 'Grade Statuses') },
     ],
   },
   {

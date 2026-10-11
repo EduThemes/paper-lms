@@ -194,7 +194,7 @@ type calcItem struct {
 // countedItem applies the per-assignment counting rules; ok=false means
 // the assignment does not take part in the grade at all.
 func countedItem(a *models.Assignment, sub *models.Submission, unassigned map[uint]bool) (calcItem, bool) {
-	if a == nil || !a.IsPublished() || a.GradingType == "not_graded" || unassigned[a.ID] {
+	if a == nil || !a.IsPublished() || a.GradingType == "not_graded" || a.OmitFromFinalGrade || unassigned[a.ID] {
 		return calcItem{}, false
 	}
 	if sub != nil && sub.Excused {

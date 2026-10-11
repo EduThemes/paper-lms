@@ -52,6 +52,10 @@ const DocumentViewer = ({
   readOnly = false,
   documentContent = '',
   documentTitle = '',
+  // documentNode (optional) renders a non-HTML document (an image or a
+  // PDF to annotate) in place of documentContent; point, comment and
+  // freehand annotations are drawn over it.
+  documentNode = null,
 }) => {
   const { user } = useAuth();
   const [annotations, setAnnotations] = useState([]);
@@ -785,7 +789,11 @@ const DocumentViewer = ({
             )}
 
             {/* Rendered document content */}
-            {renderHighlightedContent()}
+            {documentNode ? (
+              <div style={{ pointerEvents: activeTool ? 'none' : 'auto' }}>{documentNode}</div>
+            ) : (
+              renderHighlightedContent()
+            )}
 
             {/* Annotation overlays */}
             {renderAnnotationOverlays()}

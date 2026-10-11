@@ -203,27 +203,29 @@ type GradeSummaryRubric struct {
 
 // GradeSummaryAssignment is one row of the Grades page.
 type GradeSummaryAssignment struct {
-	ID                uint                  `json:"id"`
-	Name              string                `json:"name"`
-	AssignmentGroupID *uint                 `json:"assignment_group_id"`
-	DueAt             *time.Time            `json:"due_at"`
-	PointsPossible    *float64              `json:"points_possible"`
-	GradingType       string                `json:"grading_type"`
-	GradingPeriodID   *uint                 `json:"grading_period_id"`
-	Score             *float64              `json:"score"`
-	Grade             *string               `json:"grade"`
-	PointsDeducted    *float64              `json:"points_deducted"`
-	SubmittedAt       *time.Time            `json:"submitted_at"`
-	GradedAt          *time.Time            `json:"graded_at"`
-	Posted            bool                  `json:"posted"`
-	Status            string                `json:"status"` // graded | submitted | missing | late | excused | not_posted | unsubmitted
-	Late              bool                  `json:"late"`
-	Missing           bool                  `json:"missing"`
-	Excused           bool                  `json:"excused"`
-	Dropped           bool                  `json:"dropped"`
-	CountsTowardTotal bool                  `json:"counts_toward_total"`
-	Comments          []GradeSummaryComment `json:"comments"`
-	Rubric            *GradeSummaryRubric   `json:"rubric,omitempty"`
+	ID                uint       `json:"id"`
+	Name              string     `json:"name"`
+	AssignmentGroupID *uint      `json:"assignment_group_id"`
+	DueAt             *time.Time `json:"due_at"`
+	PointsPossible    *float64   `json:"points_possible"`
+	GradingType       string     `json:"grading_type"`
+	GradingPeriodID   *uint      `json:"grading_period_id"`
+	Score             *float64   `json:"score"`
+	Grade             *string    `json:"grade"`
+	PointsDeducted    *float64   `json:"points_deducted"`
+	SubmittedAt       *time.Time `json:"submitted_at"`
+	GradedAt          *time.Time `json:"graded_at"`
+	Posted            bool       `json:"posted"`
+	Status            string     `json:"status"` // graded | submitted | missing | late | excused | not_posted | unsubmitted
+	Late              bool       `json:"late"`
+	Missing           bool       `json:"missing"`
+	Excused           bool       `json:"excused"`
+	Dropped           bool       `json:"dropped"`
+	CountsTowardTotal bool       `json:"counts_toward_total"`
+	// OmitFromFinalGrade: never counts, even with a What-If score.
+	OmitFromFinalGrade bool                  `json:"omit_from_final_grade"`
+	Comments           []GradeSummaryComment `json:"comments"`
+	Rubric             *GradeSummaryRubric   `json:"rubric,omitempty"`
 }
 
 // GradeSummaryTotals is the course total.
@@ -502,7 +504,8 @@ func (s *GradeSummaryService) Summary(ctx context.Context, courseID, studentID, 
 		row := GradeSummaryAssignment{
 			ID: a.ID, Name: a.Name, AssignmentGroupID: a.AssignmentGroupID, DueAt: due,
 			PointsPossible: a.PointsPossible, GradingType: a.GradingType, GradingPeriodID: pid,
-			Posted: posted, Comments: commentsBy[a.ID], Rubric: rubricBy[a.ID],
+			OmitFromFinalGrade: a.OmitFromFinalGrade,
+			Posted:             posted, Comments: commentsBy[a.ID], Rubric: rubricBy[a.ID],
 		}
 		if row.Comments == nil {
 			row.Comments = []GradeSummaryComment{}

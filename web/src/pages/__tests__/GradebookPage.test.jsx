@@ -27,6 +27,16 @@ vi.mock('../../services/api_grading_policy', () => ({
   LATE_STATUSES: [],
 }));
 
+// The grading-period filter (filter bar) lists the course's periods.
+vi.mock('../../services/api_grading_ui', () => ({
+  default: {
+    listCourseGradingPeriods: vi.fn().mockResolvedValue([
+      { id: 50, title: 'Quarter 1', start_date: '2026-01-01T00:00:00Z', end_date: '2026-12-31T00:00:00Z' },
+    ]),
+    listCourseGradeStatuses: vi.fn().mockResolvedValue([]),
+  },
+}));
+
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
     user: { id: 1, name: 'Test User', role: 'admin' },

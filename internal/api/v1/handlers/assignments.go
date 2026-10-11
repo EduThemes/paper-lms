@@ -5,11 +5,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/gofiber/fiber/v2"
 )
 
 type AssignmentHandler struct {
@@ -17,10 +18,19 @@ type AssignmentHandler struct {
 	// gradingPolicy (optional): course post-policy default, grading
 	// scheme checks and late/missing refresh when dates change.
 	gradingPolicy *service.GradingPolicyService
+
+	// Optional (SetGradingUIDeps): validate final grader / annotatable doc.
+	enrollmentRepo repository.EnrollmentRepository
+	attachmentRepo repository.AttachmentRepository
+	// gradesExist (SetGradesExistCheck) reports graded or provisionally
+	// graded work, which freezes the moderated-grading switch.
+	gradesExist gradesExistFunc
 }
 
 // SetGradingPolicyService wires the grading-policy collaborator.
-func (h *AssignmentHandler) SetGradingPolicyService(p *service.GradingPolicyService) { h.gradingPolicy = p }
+func (h *AssignmentHandler) SetGradingPolicyService(p *service.GradingPolicyService) {
+	h.gradingPolicy = p
+}
 
 func NewAssignmentHandler(assignmentService *service.AssignmentService) *AssignmentHandler {
 	return &AssignmentHandler{assignmentService: assignmentService}
@@ -60,32 +70,34 @@ func withStudentDates(a *models.Assignment, d service.EffectiveDueDate) fiber.Ma
 }
 
 func assignmentToJSON(a *models.Assignment) fiber.Map {
-	return fiber.Map{
-		"id":                   a.ID,
-		"course_id":            a.CourseID,
-		"assignment_group_id":  a.AssignmentGroupID,
-		"name":                 a.Name,
-		"description":          a.Description,
-		"due_at":               a.DueAt,
-		"unlock_at":            a.UnlockAt,
-		"lock_at":              a.LockAt,
-		"points_possible":      a.PointsPossible,
-		"grading_type":         a.GradingType,
-		"submission_types":     strings.Split(a.SubmissionTypes, ","),
-		"position":             a.Position,
-		"workflow_state":       a.WorkflowState,
-		"published":            a.Published,
-		"anonymous_grading":    a.AnonymousGrading,
-		"post_policy":          a.PostPolicy,
-		"peer_reviews_enabled": a.PeerReviewsEnabled,
-		"peer_review_count":    a.PeerReviewCount,
-		"group_category_id":    a.GroupCategoryID,
-		"is_group_assignment":  a.GroupCategoryID != nil && *a.GroupCategoryID > 0,
+	m := fiber.Map{
+		"id":                        a.ID,
+		"course_id":                 a.CourseID,
+		"assignment_group_id":       a.AssignmentGroupID,
+		"name":                      a.Name,
+		"description":               a.Description,
+		"due_at":                    a.DueAt,
+		"unlock_at":                 a.UnlockAt,
+		"lock_at":                   a.LockAt,
+		"points_possible":           a.PointsPossible,
+		"grading_type":              a.GradingType,
+		"submission_types":          strings.Split(a.SubmissionTypes, ","),
+		"position":                  a.Position,
+		"workflow_state":            a.WorkflowState,
+		"published":                 a.Published,
+		"anonymous_grading":         a.AnonymousGrading,
+		"post_policy":               a.PostPolicy,
+		"peer_reviews_enabled":      a.PeerReviewsEnabled,
+		"peer_review_count":         a.PeerReviewCount,
+		"group_category_id":         a.GroupCategoryID,
+		"is_group_assignment":       a.GroupCategoryID != nil && *a.GroupCategoryID > 0,
 		"only_visible_to_overrides": a.OnlyVisibleToOverrides,
 		"grading_standard_id":       a.GradingStandardID,
-		"created_at":           a.CreatedAt,
-		"updated_at":           a.UpdatedAt,
+		"created_at":                a.CreatedAt,
+		"updated_at":                a.UpdatedAt,
 	}
+	addGradingUIFields(m, a)
+	return m
 }
 
 func (h *AssignmentHandler) ListAssignments(c *fiber.Ctx) error {
@@ -164,24 +176,24 @@ func (h *AssignmentHandler) CreateAssignment(c *fiber.Ctx) error {
 
 	var input struct {
 		Assignment struct {
-			Name               string     `json:"name"`
-			Description        string     `json:"description"`
-			DueAt              *time.Time `json:"due_at"`
-			UnlockAt           *time.Time `json:"unlock_at"`
-			LockAt             *time.Time `json:"lock_at"`
-			PointsPossible     *float64   `json:"points_possible"`
-			GradingType        string     `json:"grading_type"`
-			SubmissionTypes    []string   `json:"submission_types"`
-			Position           int        `json:"position"`
-			Published          bool       `json:"published"`
-			AssignmentGroupID  *uint      `json:"assignment_group_id"`
-			AnonymousGrading   bool       `json:"anonymous_grading"`
-			PostPolicy         string     `json:"post_policy"`
-			PeerReviewsEnabled bool       `json:"peer_reviews_enabled"`
-			PeerReviewCount    int        `json:"peer_review_count"`
-			GroupCategoryID    *uint      `json:"group_category_id"`
-			OnlyVisibleToOverrides bool  `json:"only_visible_to_overrides"`
-			GradingStandardID      *uint `json:"grading_standard_id"`
+			Name                   string     `json:"name"`
+			Description            string     `json:"description"`
+			DueAt                  *time.Time `json:"due_at"`
+			UnlockAt               *time.Time `json:"unlock_at"`
+			LockAt                 *time.Time `json:"lock_at"`
+			PointsPossible         *float64   `json:"points_possible"`
+			GradingType            string     `json:"grading_type"`
+			SubmissionTypes        []string   `json:"submission_types"`
+			Position               int        `json:"position"`
+			Published              bool       `json:"published"`
+			AssignmentGroupID      *uint      `json:"assignment_group_id"`
+			AnonymousGrading       bool       `json:"anonymous_grading"`
+			PostPolicy             string     `json:"post_policy"`
+			PeerReviewsEnabled     bool       `json:"peer_reviews_enabled"`
+			PeerReviewCount        int        `json:"peer_review_count"`
+			GroupCategoryID        *uint      `json:"group_category_id"`
+			OnlyVisibleToOverrides bool       `json:"only_visible_to_overrides"`
+			GradingStandardID      *uint      `json:"grading_standard_id"`
 		} `json:"assignment"`
 	}
 
@@ -219,24 +231,24 @@ func (h *AssignmentHandler) CreateAssignment(c *fiber.Ctx) error {
 	}
 
 	assignment := &models.Assignment{
-		CourseID:           uint(courseID),
-		AssignmentGroupID:  input.Assignment.AssignmentGroupID,
-		Name:               input.Assignment.Name,
-		Description:        service.SanitizeHTML(input.Assignment.Description),
-		DueAt:              input.Assignment.DueAt,
-		UnlockAt:           input.Assignment.UnlockAt,
-		LockAt:             input.Assignment.LockAt,
-		PointsPossible:     input.Assignment.PointsPossible,
-		GradingType:        input.Assignment.GradingType,
-		SubmissionTypes:    submissionTypes,
-		Position:           input.Assignment.Position,
-		Published:          input.Assignment.Published,
-		WorkflowState:      state,
-		AnonymousGrading:   input.Assignment.AnonymousGrading,
-		PostPolicy:         postPolicy,
-		PeerReviewsEnabled: input.Assignment.PeerReviewsEnabled,
-		PeerReviewCount:    input.Assignment.PeerReviewCount,
-		GroupCategoryID:    input.Assignment.GroupCategoryID,
+		CourseID:               uint(courseID),
+		AssignmentGroupID:      input.Assignment.AssignmentGroupID,
+		Name:                   input.Assignment.Name,
+		Description:            service.SanitizeHTML(input.Assignment.Description),
+		DueAt:                  input.Assignment.DueAt,
+		UnlockAt:               input.Assignment.UnlockAt,
+		LockAt:                 input.Assignment.LockAt,
+		PointsPossible:         input.Assignment.PointsPossible,
+		GradingType:            input.Assignment.GradingType,
+		SubmissionTypes:        submissionTypes,
+		Position:               input.Assignment.Position,
+		Published:              input.Assignment.Published,
+		WorkflowState:          state,
+		AnonymousGrading:       input.Assignment.AnonymousGrading,
+		PostPolicy:             postPolicy,
+		PeerReviewsEnabled:     input.Assignment.PeerReviewsEnabled,
+		PeerReviewCount:        input.Assignment.PeerReviewCount,
+		GroupCategoryID:        input.Assignment.GroupCategoryID,
 		OnlyVisibleToOverrides: input.Assignment.OnlyVisibleToOverrides,
 		GradingStandardID:      nonZeroUint(input.Assignment.GradingStandardID),
 	}
@@ -246,6 +258,9 @@ func (h *AssignmentHandler) CreateAssignment(c *fiber.Ctx) error {
 	}
 	if assignment.SubmissionTypes == "" {
 		assignment.SubmissionTypes = "online_text_entry"
+	}
+	if err := h.applyGradingUISettings(c, assignment, true); err != nil {
+		return responses.BadRequest(c, err.Error())
 	}
 
 	if err := h.assignmentService.Create(c.Context(), assignment); err != nil {
@@ -287,24 +302,24 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 
 	var input struct {
 		Assignment struct {
-			Name               *string    `json:"name"`
-			Description        *string    `json:"description"`
-			DueAt              *time.Time `json:"due_at"`
-			UnlockAt           *time.Time `json:"unlock_at"`
-			LockAt             *time.Time `json:"lock_at"`
-			PointsPossible     *float64   `json:"points_possible"`
-			GradingType        *string    `json:"grading_type"`
-			SubmissionTypes    []string   `json:"submission_types"`
-			Position           *int       `json:"position"`
-			Published          *bool      `json:"published"`
-			AssignmentGroupID  *uint      `json:"assignment_group_id"`
-			AnonymousGrading   *bool      `json:"anonymous_grading"`
-			PostPolicy         *string    `json:"post_policy"`
-			PeerReviewsEnabled *bool      `json:"peer_reviews_enabled"`
-			PeerReviewCount    *int       `json:"peer_review_count"`
-			GroupCategoryID    *uint      `json:"group_category_id"`
-			OnlyVisibleToOverrides *bool `json:"only_visible_to_overrides"`
-			GradingStandardID      *uint `json:"grading_standard_id"`
+			Name                   *string    `json:"name"`
+			Description            *string    `json:"description"`
+			DueAt                  *time.Time `json:"due_at"`
+			UnlockAt               *time.Time `json:"unlock_at"`
+			LockAt                 *time.Time `json:"lock_at"`
+			PointsPossible         *float64   `json:"points_possible"`
+			GradingType            *string    `json:"grading_type"`
+			SubmissionTypes        []string   `json:"submission_types"`
+			Position               *int       `json:"position"`
+			Published              *bool      `json:"published"`
+			AssignmentGroupID      *uint      `json:"assignment_group_id"`
+			AnonymousGrading       *bool      `json:"anonymous_grading"`
+			PostPolicy             *string    `json:"post_policy"`
+			PeerReviewsEnabled     *bool      `json:"peer_reviews_enabled"`
+			PeerReviewCount        *int       `json:"peer_review_count"`
+			GroupCategoryID        *uint      `json:"group_category_id"`
+			OnlyVisibleToOverrides *bool      `json:"only_visible_to_overrides"`
+			GradingStandardID      *uint      `json:"grading_standard_id"`
 		} `json:"assignment"`
 	}
 
@@ -423,6 +438,9 @@ func (h *AssignmentHandler) UpdateAssignment(c *fiber.Ctx) error {
 	if assignment.AnonymousGrading {
 		// G018: anonymous assignments always post manually (Canvas).
 		assignment.PostPolicy = "manual"
+	}
+	if err := h.applyGradingUISettings(c, assignment, false); err != nil {
+		return responses.BadRequest(c, err.Error())
 	}
 
 	if err := h.assignmentService.Update(c.Context(), assignment); err != nil {

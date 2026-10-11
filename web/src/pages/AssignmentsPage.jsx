@@ -33,6 +33,8 @@ const AssignmentsPage = () => {
     description: '',
     points_possible: 100,
     due_at: '',
+    unlock_at: '',
+    lock_at: '',
     submission_types: ['online_text_entry'],
     anonymous_grading: false,
     post_policy: '',
@@ -77,6 +79,10 @@ const AssignmentsPage = () => {
   }, [showCreate, courseId]);
 
   const doCreate = async () => {
+    if (newAssignment.unlock_at && newAssignment.lock_at && new Date(newAssignment.unlock_at) >= new Date(newAssignment.lock_at)) {
+      setActionError('"Available from" must be before "Until".');
+      return;
+    }
     setCreating(true);
     setActionError(null);
     try {
@@ -85,6 +91,8 @@ const AssignmentsPage = () => {
         description: newAssignment.description,
         points_possible: Number(newAssignment.points_possible),
         due_at: newAssignment.due_at ? dateTimeLocalToISO(newAssignment.due_at) : null,
+        unlock_at: newAssignment.unlock_at ? dateTimeLocalToISO(newAssignment.unlock_at) : null,
+        lock_at: newAssignment.lock_at ? dateTimeLocalToISO(newAssignment.lock_at) : null,
         submission_types: newAssignment.submission_types,
         anonymous_grading: newAssignment.anonymous_grading,
         grading_type: newAssignment.grading_type,
@@ -98,7 +106,7 @@ const AssignmentsPage = () => {
       const created = await api.createAssignment(courseId, payload);
       clearRceDraft(`assignment-${courseId}-new-description`);
       setAssignments((prev) => [...prev, created]);
-      setNewAssignment({ name: '', description: '', points_possible: 100, due_at: '', submission_types: ['online_text_entry'], anonymous_grading: false, post_policy: '', grading_type: 'points', is_group_assignment: false, group_category_id: '' });
+      setNewAssignment({ name: '', description: '', points_possible: 100, due_at: '', unlock_at: '', lock_at: '', submission_types: ['online_text_entry'], anonymous_grading: false, post_policy: '', grading_type: 'points', is_group_assignment: false, group_category_id: '' });
       setShowCreate(false);
     } catch (err) {
       setActionError(err.message || 'Could not create assignment. Please try again.');
@@ -214,6 +222,12 @@ const AssignmentsPage = () => {
           <div className="flex items-center space-x-3 text-xs text-text-disabled mt-0.5">
             {assignment.due_at && (
               <span>Due {formatDate(assignment.due_at)}</span>
+            )}
+            {assignment.unlock_at && new Date(assignment.unlock_at) > new Date() && (
+              <span>Available {formatDate(assignment.unlock_at)}</span>
+            )}
+            {assignment.lock_at && (
+              <span>{new Date(assignment.lock_at) < new Date() ? 'Closed' : 'Until'} {formatDate(assignment.lock_at)}</span>
             )}
             {assignment.points_possible != null && (
               <span>{assignment.points_possible} pts</span>
@@ -357,6 +371,28 @@ const AssignmentsPage = () => {
                 type="datetime-local"
                 value={newAssignment.due_at}
                 onChange={(e) => setNewAssignment({ ...newAssignment, due_at: e.target.value })}
+                className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="assignment-unlock-at" className="block text-sm font-medium text-text-secondary mb-1">Available from</label>
+              <input
+                id="assignment-unlock-at"
+                type="datetime-local"
+                value={newAssignment.unlock_at}
+                onChange={(e) => setNewAssignment({ ...newAssignment, unlock_at: e.target.value })}
+                className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label htmlFor="assignment-lock-at" className="block text-sm font-medium text-text-secondary mb-1">Until</label>
+              <input
+                id="assignment-lock-at"
+                type="datetime-local"
+                value={newAssignment.lock_at}
+                onChange={(e) => setNewAssignment({ ...newAssignment, lock_at: e.target.value })}
                 className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
               />
             </div>

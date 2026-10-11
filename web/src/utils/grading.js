@@ -68,13 +68,13 @@ export const isAssignmentPublished = (assignment) => {
 
 /**
  * Canvas grade-calculator rules for one assignment/submission pair.
- * Returns { counts, possible }: unpublished, deleted and not_graded
- * assignments never count, an excused submission is dropped from both
+ * Returns { counts, possible }: unpublished, deleted, not_graded and
+ * omitted-from-final-grade assignments never count, an excused submission is dropped from both
  * earned and possible, and a 0-point assignment's score is extra credit
  * (earned only). Mirrors service.assignmentCounts on the server.
  */
 export const assignmentGradeWeight = (assignment, cell) => {
-  if (!isAssignmentPublished(assignment) || assignment.grading_type === 'not_graded') {
+  if (!isAssignmentPublished(assignment) || assignment.grading_type === 'not_graded' || assignment.omit_from_final_grade) {
     return { counts: false, possible: 0 };
   }
   if (cell?.excused) return { counts: false, possible: 0 };
