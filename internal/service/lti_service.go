@@ -703,22 +703,3 @@ func (s *LTIService) BuildLaunchToken(ctx context.Context, userID, accountID, co
 // IsSignedLTIMessageHint reports whether hint is a platform-signed hint
 // (as opposed to the legacy "course:link:key" format).
 func IsSignedLTIMessageHint(hint string) bool { return looksLikeJWT(hint) }
-
-// mapEnrollmentTypeToLTIRoles converts a Canvas-style enrollment type string
-// to one or more LTI 1.3 context role URIs.
-func mapEnrollmentTypeToLTIRoles(enrollmentType string) []string {
-	switch enrollmentType {
-	case "StudentEnrollment":
-		return []string{ltiRoleLearner}
-	case "TeacherEnrollment":
-		return []string{ltiRoleInstructor}
-	case "TaEnrollment":
-		return []string{ltiRoleTA, ltiRoleInstructor}
-	case "ObserverEnrollment":
-		return []string{ltiRoleMentor}
-	case "DesignerEnrollment":
-		return []string{ltiRoleContentDev}
-	default:
-		return []string{}
-	}
-}
