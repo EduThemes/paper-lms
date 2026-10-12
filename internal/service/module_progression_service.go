@@ -29,6 +29,7 @@ type ModuleProgressionStore interface {
 	CourseInAccount(ctx context.Context, courseID, accountID uint) (bool, error)
 	ListItemsForContent(ctx context.Context, courseID uint, contentTypes []string, contentID uint) ([]models.ContentTag, error)
 	ResolvePageID(ctx context.Context, courseID uint, key string) (uint, bool, error)
+	ResolveFrontPageID(ctx context.Context, courseID uint) (uint, bool, error)
 	AttachmentCourseID(ctx context.Context, attachmentID uint) (uint, bool, error)
 	UnpublishedContent(ctx context.Context, courseID uint) (map[string]map[uint]bool, error)
 }
@@ -689,6 +690,11 @@ func (s *ModuleProgressionService) RecordContentView(ctx context.Context, userID
 // ResolvePageID maps a page URL key (slug or id) to a page id.
 func (s *ModuleProgressionService) ResolvePageID(ctx context.Context, courseID uint, key string) (uint, bool, error) {
 	return s.store.ResolvePageID(ctx, courseID, key)
+}
+
+// ResolveFrontPageID returns the course's front page id.
+func (s *ModuleProgressionService) ResolveFrontPageID(ctx context.Context, courseID uint) (uint, bool, error) {
+	return s.store.ResolveFrontPageID(ctx, courseID)
 }
 
 // AttachmentCourseID returns the course an attachment belongs to.

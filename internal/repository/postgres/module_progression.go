@@ -368,6 +368,22 @@ func (r *ModuleProgressionRepository) ResolvePageID(ctx context.Context, courseI
 	return ids[0], true, nil
 }
 
+// ResolveFrontPageID returns the course's front page id, chosen as
+// PageRepository.FindFrontPage chooses it (latest updated wins).
+func (r *ModuleProgressionRepository) ResolveFrontPageID(ctx context.Context, courseID uint) (uint, bool, error) {
+	var ids []uint
+	err := r.db.WithContext(ctx).Table("wiki_pages").
+		Where("course_id = ? AND front_page = ? AND workflow_state <> ?", courseID, true, "deleted").
+		Order("updated_at DESC").Limit(1).Pluck("id", &ids).Error
+	if err != nil {
+		return 0, false, err
+	}
+	if len(ids) == 0 {
+		return 0, false, nil
+	}
+	return ids[0], true, nil
+}
+
 // AttachmentCourseID returns the course an attachment belongs to (ok is
 // false for user/group files and unknown ids).
 func (r *ModuleProgressionRepository) AttachmentCourseID(ctx context.Context, attachmentID uint) (uint, bool, error) {

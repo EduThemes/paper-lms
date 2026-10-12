@@ -261,6 +261,9 @@ type gatedRoute struct {
 	// file: the second capture is an attachment id and the route has no
 	// course id (the course comes from the attachment).
 	file bool
+	// frontPage: the route names no page; the course's front page is
+	// the content.
+	frontPage bool
 }
 
 // gatedRoutes are the content reads/writes a locked module item must
@@ -277,6 +280,8 @@ var gatedRoutes = []gatedRoute{
 	{method: fiber.MethodGet, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/assignments/([^/]+)$`), kind: service.GatedAssignment, view: true},
 	{method: fiber.MethodPost, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/assignments/([^/]+)/submissions(?:/self/files)?$`), kind: service.GatedAssignment},
 	{method: fiber.MethodGet, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/pages/([^/]+)$`), kind: service.GatedPage, view: true},
+	// The front page is a page too: a locked one stays locked here.
+	{method: fiber.MethodGet, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/front_page$`), kind: service.GatedPage, view: true, frontPage: true},
 	{method: fiber.MethodGet, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/quizzes/([^/]+)$`), kind: service.GatedQuiz, view: true},
 	{method: fiber.MethodPost, re: regexp.MustCompile(`(?i)^(?:/api/v1)?/courses/([^/]+)/quizzes/([^/]+)/submissions$`), kind: service.GatedQuiz},
 	// The topic and its full views (/view, /view_v2 — the discussion
@@ -351,7 +356,17 @@ func (h *ModuleProgressionHandler) ContentGate() fiber.Handler {
 				return c.Next()
 			}
 			courseID = cid
-			if route.kind == service.GatedPage {
+			if route.frontPage {
+				pid, found, err := h.svc.ResolveFrontPageID(ctx, courseID)
+				if err != nil {
+					slog.Warn("module content gate: front page lookup failed", "course_id", courseID, "err", err)
+					return responses.InternalError(c, "Could not check module access")
+				}
+				if !found {
+					return c.Next()
+				}
+				contentID = pid
+			} else if route.kind == service.GatedPage {
 				pid, found, err := h.svc.ResolvePageID(ctx, courseID, m[2])
 				if err != nil {
 					slog.Warn("module content gate: page lookup failed", "course_id", courseID, "err", err)
