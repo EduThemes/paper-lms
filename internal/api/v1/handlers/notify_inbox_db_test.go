@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,11 +49,30 @@ type niFixture struct {
 	recorder *niNotifier
 }
 
-type niNotifier struct{ calls []string }
+// niNotifier records queued notifications; announcement fan-out runs in
+// a goroutine, so access is locked.
+type niNotifier struct {
+	mu    sync.Mutex
+	calls []string
+}
 
 func (n *niNotifier) QueueNotification(_ context.Context, userID uint, kind, _, _, _ string, _ uint) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	n.calls = append(n.calls, fmt.Sprintf("%d:%s", userID, kind))
 	return nil
+}
+
+func (n *niNotifier) reset() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.calls = nil
+}
+
+func (n *niNotifier) snapshot() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]string(nil), n.calls...)
 }
 
 func newNIFixture(t *testing.T) *niFixture {
@@ -222,7 +242,7 @@ func TestInboxDB_IndividualSendsAndParticipantState(t *testing.T) {
 	})
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 	assert.Len(t, body["conversation_ids"], 2, "one private conversation per student")
-	assert.ElementsMatch(t, []string{fmt.Sprintf("%d:new_message", niStudent1), fmt.Sprintf("%d:new_message", niStudent2)}, f.recorder.calls)
+	assert.ElementsMatch(t, []string{fmt.Sprintf("%d:new_message", niStudent1), fmt.Sprintf("%d:new_message", niStudent2)}, f.recorder.snapshot())
 
 	s1 := f.app(niStudent1)
 	resp = testutil.MakeRequest(s1, http.MethodGet, "/conversations/unread_count", nil)
@@ -314,10 +334,10 @@ func TestInboxDB_AttachmentsRepliesAndForward(t *testing.T) {
 
 	// Ben replies to the teacher only.
 	s1 := f.app(niStudent1)
-	f.recorder.calls = nil
+	f.recorder.reset()
 	resp = testutil.MakeRequest(s1, http.MethodPost, fmt.Sprintf("/conversations/%d/messages", convID), testutil.JSONBody(map[string]any{"message": "Can I work alone?", "recipients": []uint{niTeacher}}))
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
-	assert.Equal(t, []string{fmt.Sprintf("%d:new_message", niTeacher)}, f.recorder.calls, "only the addressed participant is notified")
+	assert.Equal(t, []string{fmt.Sprintf("%d:new_message", niTeacher)}, f.recorder.snapshot(), "only the addressed participant is notified")
 	resp = testutil.MakeRequest(s2, http.MethodGet, fmt.Sprintf("/conversations/%d/messages", convID), nil)
 	msgs, _ = testutil.ParseJSONArray(resp)
 	assert.Len(t, msgs, 1, "Cy does not see a reply addressed to the teacher")
@@ -356,13 +376,13 @@ func TestAnnouncementRepliesDB(t *testing.T) {
 	annID := notifyIDOf(ann)
 
 	s1 := f.app(niStudent1)
-	f.recorder.calls = nil
+	f.recorder.reset()
 	resp = testutil.MakeRequest(s1, http.MethodPost, fmt.Sprintf("/announcements/%d/replies", annID), testutil.JSONBody(map[string]any{"message": "<p>Is it paid?</p><script>alert(1)</script>"}))
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 	reply, _ := testutil.ParseJSONMap(resp)
 	assert.NotContains(t, reply["message"], "<script>", "rich replies are sanitized")
 	assert.Equal(t, "Ben Student", reply["user_name"])
-	assert.Contains(t, f.recorder.calls, fmt.Sprintf("%d:announcement_reply", niTeacher))
+	assert.Contains(t, f.recorder.snapshot(), fmt.Sprintf("%d:announcement_reply", niTeacher))
 
 	resp = testutil.MakeRequest(teacher, http.MethodPost, fmt.Sprintf("/announcements/%d/replies", annID), testutil.JSONBody(map[string]any{"message": "<p>Free</p>", "parent_id": notifyIDOf(reply)}))
 	require.Equal(t, http.StatusCreated, resp.StatusCode)

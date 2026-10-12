@@ -141,10 +141,18 @@ func (s *SubmissionService) RecordQuizScore(ctx context.Context, assignment *mod
 		// regrade changed the grade they can see. The student's own
 		// finished attempt (a new attempt / finish time) shows its score
 		// on screen, and a score still awaiting review is not final.
-		sameAttempt := oldAttempt == sub.Attempt && oldSubmittedAt != nil && oldSubmittedAt.Equal(submittedAt)
+		sameAttempt := oldAttempt == sub.Attempt && oldSubmittedAt != nil && sameDBInstant(*oldSubmittedAt, submittedAt)
 		if !rec.PendingReview && (rec.GraderID != 0 || (!isNew && sameAttempt)) {
 			s.notifyGradeChange(ctx, assignment, sub, oldGrade, oldScore, wasPosted)
 		}
 	}
 	return sub, nil
+}
+
+// sameDBInstant compares a stored timestamp with one that may not have
+// round-tripped through Postgres yet: timestamptz keeps microseconds, so
+// an in-memory time.Now() differs from its stored copy below that.
+func sameDBInstant(a, b time.Time) bool {
+	d := a.Sub(b)
+	return d > -time.Microsecond && d < time.Microsecond
 }

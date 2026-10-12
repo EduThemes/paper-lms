@@ -8,6 +8,7 @@ import (
 	"html"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -105,6 +106,7 @@ type DiscussionParityService struct {
 	submissionRepo       repository.SubmissionRepository
 	attachmentRepo       repository.AttachmentRepository
 	notifier             Notifier
+	clockMu              sync.RWMutex
 	now                  func() time.Time
 }
 
@@ -169,7 +171,20 @@ func (s *DiscussionParityService) Attachments(ctx context.Context, ids []uint) m
 }
 
 // SetClock swaps the clock (tests).
-func (s *DiscussionParityService) SetClock(now func() time.Time) { s.now = now }
+func (s *DiscussionParityService) SetClock(now func() time.Time) {
+	s.clockMu.Lock()
+	defer s.clockMu.Unlock()
+	s.now = now
+}
+
+// clock reads the current time; the notification goroutines read it
+// concurrently with SetClock.
+func (s *DiscussionParityService) clock() time.Time {
+	s.clockMu.RLock()
+	now := s.now
+	s.clockMu.RUnlock()
+	return now()
+}
 
 // ---------------------------------------------------------------------------
 // Availability (G083 / G085 / G087)
@@ -1053,7 +1068,7 @@ func (s *DiscussionParityService) audienceFilter(ctx context.Context, topic *mod
 			staff[id] = true
 		}
 	}
-	now := s.now()
+	now := s.clock()
 	var out []uint
 	for _, id := range active {
 		if staff[id] {
@@ -1212,7 +1227,7 @@ func (s *DiscussionParityService) NotifyNewTopic(ctx context.Context, topic *mod
 	if s.notifier == nil || topic == nil || topic.RootTopicID != nil {
 		return
 	}
-	if !DiscussionTopicVisibleToStudents(topic, s.now()) {
+	if !DiscussionTopicVisibleToStudents(topic, s.clock()) {
 		return
 	}
 	users, err := s.parity.ListActiveCourseUserIDs(ctx, topic.CourseID)
@@ -1240,7 +1255,7 @@ func (s *DiscussionParityService) NotifyNewTopic(ctx context.Context, topic *mod
 // sends the "new discussion" notification on time. Returns how many
 // topics were released.
 func (s *DiscussionParityService) ReleaseDelayedTopics(ctx context.Context) (int, error) {
-	due, err := s.parity.ListDueDelayedTopics(ctx, s.now(), 200)
+	due, err := s.parity.ListDueDelayedTopics(ctx, s.clock(), 200)
 	if err != nil {
 		return 0, err
 	}
@@ -1304,7 +1319,7 @@ func (s *DiscussionParityService) MentionableUsers(ctx context.Context, topic *m
 // groups for a student).
 func (s *DiscussionParityService) ListIndex(ctx context.Context, q repository.DiscussionIndexQuery) ([]DiscussionIndexItem, int64, error) {
 	if q.Now.IsZero() {
-		q.Now = s.now()
+		q.Now = s.clock()
 	}
 	res, err := s.parity.ListTopicsIndex(ctx, q)
 	if err != nil {
