@@ -306,6 +306,9 @@ func TestBlueprintLockGuard_RefusesLockedEditsInChildCourses(t *testing.T) {
 		app.Post("/api/v1/courses/:course_id/assignments/bulk_update_dates", ok)
 		app.Post("/api/v1/courses/:course_id/date_shift", ok)
 		app.Get("/api/v1/courses/:course_id/assignments/:id", ok)
+		app.Post("/api/v1/courses/:course_id/pages/:url_or_id/revisions/:revision_id", ok)
+		app.Put("/api/v1/courses/:course_id/assignments/:assignment_id/external_tool", ok)
+		app.Delete("/api/v1/courses/:course_id/assignments/:assignment_id/external_tool", ok)
 		return app
 	}
 	app := mount(contentAuthStub(1, "TeacherEnrollment", false))
@@ -379,6 +382,21 @@ func TestBlueprintLockGuard_RefusesLockedEditsInChildCourses(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp = testutil.MakeRequest(app, http.MethodPost, fmt.Sprintf("/api/v1/courses/%d/quizzes/%d/questions", child.ID, childQ.Items[0].ID), testutil.JSONBody(map[string]any{"question": map[string]any{"question_text": "New?"}}))
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+
+	// Attaching or detaching the locked assignment's external tool
+	// rewrites its content.
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		resp = testutil.MakeRequest(app, method, aPath+"/external_tool", testutil.JSONBody(map[string]any{"tool_id": 1}))
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode, "%s external_tool", method)
+	}
+	// Reverting the unlocked page passes; once its content is locked, a
+	// revert (which replaces the body) is refused.
+	revert := fmt.Sprintf("/api/v1/courses/%d/pages/%s/revisions/1", child.ID, childP.Items[0].URL)
+	assert.Equal(t, http.StatusOK, testutil.MakeRequest(app, http.MethodPost, revert, nil).StatusCode)
+	require.NoError(t, svc.SetItemRestrictions(ctx, tmpl, 1, "WikiPage", page.ID, &service.BlueprintRestrictions{Content: true}))
+	assert.Equal(t, http.StatusForbidden, testutil.MakeRequest(app, http.MethodPost, revert, nil).StatusCode, "locked page revert")
+	assert.Equal(t, http.StatusForbidden, testutil.MakeRequest(app, http.MethodPost, fmt.Sprintf("/api/v1/courses/%d/pages/%d/revisions/1", child.ID, childP.Items[0].ID), nil).StatusCode, "by page id")
+	require.NoError(t, svc.SetItemRestrictions(ctx, tmpl, 1, "WikiPage", page.ID, &service.BlueprintRestrictions{}))
 
 	// No date lock yet: a whole-course date shift passes.
 	resp = testutil.MakeRequest(app, http.MethodPost, fmt.Sprintf("/api/v1/courses/%d/date_shift", child.ID), testutil.JSONBody(map[string]any{"day_shift": 7}))

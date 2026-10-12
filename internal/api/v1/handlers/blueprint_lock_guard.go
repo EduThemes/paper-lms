@@ -23,11 +23,12 @@ type BlueprintLockGuardDeps struct {
 }
 
 // reBlueprintGuardedPath matches the content write routes the guard
-// checks: an assignment, quiz, page or discussion topic itself, and a
-// quiz's questions / question groups. Case-insensitive, as Fiber's
+// checks: an assignment, quiz, page or discussion topic itself, a quiz's
+// questions / question groups, a page revert (revisions/:id) and an
+// assignment's external tool. Case-insensitive, as Fiber's
 // router is: /API/V1/Courses/1/Assignments/2 reaches the same handler.
 var reBlueprintGuardedPath = regexp.MustCompile(
-	`(?i)^/api/v1/courses/(\d+)/(assignments|quizzes|pages|discussion_topics)/([^/]+)(?:/(questions|groups)(?:/[^/]+)?)?/?$`)
+	`(?i)^/api/v1/courses/(\d+)/(assignments|quizzes|pages|discussion_topics)/([^/]+)(?:/(questions|groups|revisions|external_tool)(?:/[^/]+)?)?/?$`)
 
 var blueprintGuardTypes = map[string]string{
 	"assignments":       "Assignment",
@@ -90,7 +91,16 @@ func NewBlueprintLockGuard(d BlueprintLockGuardDeps) fiber.Handler {
 		if method == fiber.MethodPost && sub == "" {
 			return c.Next()
 		}
-		if sub != "" && section != "quizzes" {
+		// Sub-resource writes that always change the content: a quiz's
+		// questions / groups, reverting a page to an earlier revision
+		// (replaces its body), and attaching / detaching an assignment's
+		// external tool (G131).
+		switch {
+		case sub == "":
+		case section == "quizzes" && (sub == "questions" || sub == "groups"):
+		case section == "pages" && sub == "revisions" && method == fiber.MethodPost:
+		case section == "assignments" && sub == "external_tool" && (method == fiber.MethodPut || method == fiber.MethodDelete):
+		default:
 			return c.Next()
 		}
 		courseID64, err := strconv.ParseUint(m[1], 10, 64)
