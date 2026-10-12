@@ -49,7 +49,7 @@ func (l *PGLeaderLock) WithLock(ctx context.Context, jobName, window string, fn 
 	if err != nil {
 		return false, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	var acquired bool
 	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", key).Scan(&acquired); err != nil {

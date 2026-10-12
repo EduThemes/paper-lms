@@ -169,7 +169,7 @@ func ComposeRelativeWindow(ranked []repository.RankRow, viewerID uint, pool pseu
 // real enrollments in the same pool's combinatorial space.
 func fillerNameAt(pool pseudonym.Pool, viewerEnrollmentID uint, slotIndex int) string {
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(fmt.Sprintf("paper-lms.filler.v1|%s|%d|%d", pool.Code, viewerEnrollmentID, slotIndex)))
+	_, _ = fmt.Fprintf(h, "paper-lms.filler.v1|%s|%d|%d", pool.Code, viewerEnrollmentID, slotIndex)
 	seed := h.Sum64()
 	if len(pool.Adjectives) == 0 || len(pool.Nouns) == 0 {
 		return "Anonymous Wanderer"

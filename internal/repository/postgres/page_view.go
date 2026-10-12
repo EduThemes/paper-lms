@@ -83,7 +83,7 @@ func (r *pageViewRepo) CountByContextGrouped(ctx context.Context, contextType st
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var date string

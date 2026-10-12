@@ -128,13 +128,9 @@ func (s *FileService) ValidateUpload(filename string, sizeBytes int64) error {
 	if blockedExtensions[ext] {
 		return fmt.Errorf("file type %s is not allowed", ext)
 	}
-	// Enforce allowlist: if the extension is known, it must match an allowed type.
-	// Unknown extensions are allowed through (e.g., custom file types for assignments).
-	if ext != "" {
-		if _, knownExt := allowedMIMETypes[ext]; !knownExt {
-			// Unknown extension — allow unless blocked above
-		}
-	}
+	// Unknown extensions are allowed through unless blocked above (e.g.,
+	// custom file types for assignments). Known extensions have their
+	// Content-Type checked against allowedMIMETypes in ValidateUploadWithMIME.
 	return nil
 }
 

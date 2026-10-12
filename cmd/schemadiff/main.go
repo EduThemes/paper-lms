@@ -177,7 +177,7 @@ func run() int {
 	if err != nil {
 		return fatal("open admin: %v", err)
 	}
-	defer admin.Close()
+	defer func() { _ = admin.Close() }()
 
 	if err := createDB(ctx, admin, amName); err != nil {
 		return fatal("create %s: %v", amName, err)
@@ -349,7 +349,7 @@ func bootstrapExtensions(dbURL string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_, err = conn.Exec(`CREATE EXTENSION IF NOT EXISTS vector`)
 	return err
 }

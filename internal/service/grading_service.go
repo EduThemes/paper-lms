@@ -258,12 +258,6 @@ var defaultGradingScale = []GradeEntry{
 	{"F", 0.0},
 }
 
-// scoreToLetterGrade converts a percentage (0–100) to a letter grade using the
-// default grading scale. Kept for backward compatibility with tests.
-func scoreToLetterGrade(score float64) string {
-	return scoreToLetterGradeWithScale(score, nil)
-}
-
 // scoreToLetterGradeWithScale converts a percentage (0–100) to a letter grade.
 // If scale is nil, the default grading scale is used.
 // The scale entries must be sorted descending by Value.

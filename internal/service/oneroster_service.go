@@ -421,7 +421,7 @@ func (s *OneRosterService) fetchPaginated(baseURL, path, token, filter string) (
 		}
 
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("request to %s failed with status %d: %s", path, resp.StatusCode, string(body))

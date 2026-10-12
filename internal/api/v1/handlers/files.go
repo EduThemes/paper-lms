@@ -162,7 +162,7 @@ func (h *FileHandler) UploadCourseFile(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.InternalError(c, "Could not open uploaded file")
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	uploaderID, err := getUserID(c)
 	if err != nil {

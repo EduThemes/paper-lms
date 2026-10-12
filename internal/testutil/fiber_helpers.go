@@ -59,7 +59,7 @@ func JSONBody(v interface{}) io.Reader {
 
 // ParseJSONResponse reads and parses the response body into the target.
 func ParseJSONResponse(resp *http.Response, target interface{}) error {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return json.NewDecoder(resp.Body).Decode(target)
 }
 

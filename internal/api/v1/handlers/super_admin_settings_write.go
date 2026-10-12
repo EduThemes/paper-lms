@@ -421,7 +421,7 @@ func (h *SuperAdminSettingsHandler) TestOIDC(c *fiber.Ctx) error {
 		result.Detail = "OIDC discovery request failed"
 		return c.Status(fiber.StatusBadGateway).JSON(result)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		result.Detail = fmt.Sprintf("OIDC discovery returned HTTP %d", resp.StatusCode)
@@ -514,7 +514,7 @@ func (h *SuperAdminSettingsHandler) TestAnthropic(c *fiber.Ctx) error {
 		result.Detail = "Anthropic API request failed"
 		return c.Status(fiber.StatusBadGateway).JSON(result)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {

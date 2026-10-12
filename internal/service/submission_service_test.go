@@ -14,9 +14,8 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-func ptrString(s string) *string     { return &s }
-func ptrFloat64(f float64) *float64  { return &f }
-func ptrTime(t time.Time) *time.Time { return &t }
+func ptrString(s string) *string    { return &s }
+func ptrFloat64(f float64) *float64 { return &f }
 
 func TestCreate_NewSubmission(t *testing.T) {
 	assignmentRepo := new(mocks.MockAssignmentRepository)

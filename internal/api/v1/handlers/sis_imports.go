@@ -59,7 +59,7 @@ func (h *SISImportHandler) CreateSISImport(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.InternalError(c, "Could not open uploaded file")
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Read file into buffer so it persists beyond the request lifecycle
 	var buf bytes.Buffer

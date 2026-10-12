@@ -96,7 +96,7 @@ func (h *SetupHandler) withBootstrapLock(ctx context.Context, fn func() error) e
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", bootstrapAdvisoryLockKey); err != nil {
 		return err

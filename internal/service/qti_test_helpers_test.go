@@ -29,8 +29,12 @@ func makeFileHeader(t *testing.T, filePath, filename string) *multipart.FileHead
 	if err != nil {
 		t.Fatal(err)
 	}
-	io.Copy(part, bytes.NewReader(data))
-	mw.Close()
+	if _, err := io.Copy(part, bytes.NewReader(data)); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	req, err := http.NewRequest("POST", "/upload", strings.NewReader(buf.String()))
 	if err != nil {
@@ -55,7 +59,7 @@ func buildTinyClassicIMSCC(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	zw := zip.NewWriter(f)
 	files := map[string]string{
@@ -99,8 +103,12 @@ func buildTinyClassicIMSCC(t *testing.T) string {
 	}
 	for name, data := range files {
 		w, _ := zw.Create(name)
-		w.Write([]byte(data))
+		if _, err := w.Write([]byte(data)); err != nil {
+			t.Fatal(err)
+		}
 	}
-	zw.Close()
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
 	return filepath.Clean(f.Name())
 }

@@ -133,7 +133,7 @@ func TestPendingPasswordResetToken_TTLWindow(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 	c := parsed.Claims.(*PendingPasswordResetClaims)
-	delta := c.ExpiresAt.Time.Sub(before)
+	delta := c.ExpiresAt.Sub(before)
 	if delta < passwordResetPendingTTL-5*time.Second || delta > passwordResetPendingTTL+5*time.Second {
 		t.Errorf("exp delta %v not within ±5s of %v", delta, passwordResetPendingTTL)
 	}

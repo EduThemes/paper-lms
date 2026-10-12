@@ -174,19 +174,6 @@ func DecodeSecretFromStorage(ciphertext []byte) (string, error) {
 	return string(pt), nil
 }
 
-// randomDigits is a small helper used in tests / future "send a code
-// over a side channel" flows. Not exported for primary use because
-// TOTP itself is the only code generator users see.
-func randomDigits(n int) string {
-	var sb strings.Builder
-	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	for _, x := range b {
-		sb.WriteByte('0' + x%10)
-	}
-	return sb.String()
-}
-
 // SanitizeCode strips whitespace + non-digit characters from
 // user-typed TOTP codes. Authenticator apps display "123 456" with
 // a space; users sometimes paste that. The handler normalizes

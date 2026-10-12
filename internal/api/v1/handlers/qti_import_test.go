@@ -77,9 +77,13 @@ func makeTinyIMSCC(t *testing.T) []byte {
 		if err != nil {
 			t.Fatal(err)
 		}
-		w.Write([]byte(e.data))
+		if _, err := w.Write([]byte(e.data)); err != nil {
+			t.Fatal(err)
+		}
 	}
-	zw.Close()
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
 	return buf.Bytes()
 }
 
@@ -114,8 +118,12 @@ func TestQTIImportHandler_PostMultipartIMSCC(t *testing.T) {
 	body := &bytes.Buffer{}
 	mw := multipart.NewWriter(body)
 	part, _ := mw.CreateFormFile("file", "tiny.imscc")
-	io.Copy(part, bytes.NewReader(makeTinyIMSCC(t)))
-	mw.Close()
+	if _, err := io.Copy(part, bytes.NewReader(makeTinyIMSCC(t))); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "/courses/9/qti_import", body)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
@@ -166,8 +174,12 @@ func TestQTIImportHandler_BadFileExt(t *testing.T) {
 	body := &bytes.Buffer{}
 	mw := multipart.NewWriter(body)
 	part, _ := mw.CreateFormFile("file", "wrong.txt")
-	part.Write([]byte("not a zip"))
-	mw.Close()
+	if _, err := part.Write([]byte("not a zip")); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "/courses/1/qti_import", body)
 	req.Header.Set("Content-Type", mw.FormDataContentType())

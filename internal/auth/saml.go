@@ -129,18 +129,6 @@ func (h *SAMLHandler) resolveCertPath(ctx context.Context) string {
 	return h.config.CertPEM
 }
 
-// resolveKeyPath returns the live SP key filesystem path. Reserved for
-// future AuthnRequest signing — kept alongside its siblings so all
-// three settings keys are wired in one place.
-func (h *SAMLHandler) resolveKeyPath(ctx context.Context) string {
-	if h.lookup != nil {
-		if v, err := h.lookup(ctx, "auth.saml.key_file"); err == nil && v != "" {
-			return v
-		}
-	}
-	return h.config.KeyPEM
-}
-
 // loadCertPEM returns the SP signing cert as raw PEM bytes.
 // Resolution priority (Wave 9):
 //
@@ -178,30 +166,6 @@ func (h *SAMLHandler) loadCertPEM(ctx context.Context) (string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read SAML cert at %q: %w", path, err)
-	}
-	return string(b), nil
-}
-
-// loadKeyPEM returns the SP signing key as raw PEM bytes. Same
-// resolution priority as loadCertPEM. Returns empty + nil when
-// nothing is configured.
-//
-// Reserved for future AuthnRequest signing — not currently called
-// from the ceremony path. Wired in this wave so the inline-PEM
-// resolution is consistent across cert and key.
-func (h *SAMLHandler) loadKeyPEM(ctx context.Context) (string, error) {
-	if h.lookup != nil {
-		if v, err := h.lookup(ctx, "auth.saml.key_pem"); err == nil && v != "" {
-			return v, nil
-		}
-	}
-	path := h.resolveKeyPath(ctx)
-	if path == "" {
-		return "", nil
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read SAML key at %q: %w", path, err)
 	}
 	return string(b), nil
 }

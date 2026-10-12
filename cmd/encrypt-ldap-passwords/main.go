@@ -87,7 +87,7 @@ func run() int {
 		return 2
 	}
 	sqlDB, _ := db.DB()
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()

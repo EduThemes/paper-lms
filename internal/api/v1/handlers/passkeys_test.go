@@ -357,7 +357,7 @@ func testJSON(t *testing.T, app *fiber.App, method, path string, payload any) *h
 
 func readAll(t *testing.T, r io.ReadCloser) []byte {
 	t.Helper()
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	b, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatalf("read body: %v", err)

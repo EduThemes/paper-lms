@@ -16,7 +16,7 @@ func TestImportQTIFileStandaloneClassic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 
 	// One-item Classic file (no manifest, no zip).
 	xmlDoc := `<?xml version="1.0"?>
@@ -43,8 +43,12 @@ func TestImportQTIFileStandaloneClassic(t *testing.T) {
     </section>
   </assessment>
 </questestinterop>`
-	tmp.WriteString(xmlDoc)
-	tmp.Close()
+	if _, err := tmp.WriteString(xmlDoc); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	imp := NewImporter()
 	result, err := imp.ImportQTIFile(context.Background(), tmp.Name(), 0)
@@ -65,9 +69,9 @@ func TestImportQTIFileStandaloneNewQuizzes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 
-	tmp.WriteString(`<?xml version="1.0"?>
+	if _, err := tmp.WriteString(`<?xml version="1.0"?>
 <assessmentItem identifier="solo">
   <responseDeclaration identifier="RESPONSE" cardinality="single" baseType="identifier">
     <correctResponse><value>a</value></correctResponse>
@@ -78,8 +82,12 @@ func TestImportQTIFileStandaloneNewQuizzes(t *testing.T) {
       <simpleChoice identifier="b">B</simpleChoice>
     </choiceInteraction>
   </itemBody>
-</assessmentItem>`)
-	tmp.Close()
+</assessmentItem>`); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	imp := NewImporter()
 	result, err := imp.ImportQTIFile(context.Background(), tmp.Name(), 0)
@@ -98,9 +106,13 @@ func TestImportQTIFileStandaloneNewQuizzes(t *testing.T) {
 // an error rather than a confusing partial result.
 func TestImportQTIFileUnknownDialect(t *testing.T) {
 	tmp, _ := os.CreateTemp("", "bogus-*.xml")
-	defer os.Remove(tmp.Name())
-	tmp.WriteString(`<?xml version="1.0"?><randomroot>nope</randomroot>`)
-	tmp.Close()
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, err := tmp.WriteString(`<?xml version="1.0"?><randomroot>nope</randomroot>`); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	imp := NewImporter()
 	_, err := imp.ImportQTIFile(context.Background(), tmp.Name(), 0)

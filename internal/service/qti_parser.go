@@ -528,13 +528,6 @@ type answerChoice struct {
 	End                 *float64 `json:"end,omitempty"`
 }
 
-// matchOption is a single right-hand-side option in a matching question.
-// Stored on QuizQuestion alongside `answers` as the question's `matches` JSON.
-type matchOption struct {
-	MatchID string `json:"match_id"`
-	Text    string `json:"text"`
-}
-
 func extractAnswers(item qtiItem, questionType string) []answerChoice {
 	switch questionType {
 	case "multiple_choice", "true_false", "multiple_answer":
