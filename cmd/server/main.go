@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"log"
 	"log/slog"
 	"net/url"
@@ -726,6 +728,12 @@ func main() {
 	// before SAML/LDAP/CAS so the legacy SSO handlers can take it as
 	// a dependency (Sprint 10-C).
 	federatedIdentityRepo := postgres.NewFederatedIdentityRepository(database)
+	// Quiz presentation order is keyed by a subkey of the JWT secret so a
+	// student can't recompute it from the ids (and recover the answer order).
+	shuffleKey := hmac.New(sha256.New, []byte(cfg.JWTSecret))
+	_, _ = shuffleKey.Write([]byte("paper-lms quiz shuffle v1"))
+	service.SetQuizShuffleKey(shuffleKey.Sum(nil))
+
 	authAudit := auth.NewAuthAudit(auditService)
 	loginPipeline := auth.NewLoginPipeline(
 		userRepo,

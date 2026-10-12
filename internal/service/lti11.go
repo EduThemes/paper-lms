@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"crypto/hmac"
-	"crypto/sha1" //nolint:gosec // OAuth 1.0a HMAC-SHA1 and oauth_body_hash are mandated by LTI 1.1
+	"crypto/sha1" // #nosec G505 -- OAuth 1.0a HMAC-SHA1 and oauth_body_hash are mandated by LTI 1.1
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
@@ -93,7 +93,7 @@ func OAuth1Signature(method, rawURL string, params map[string]string, consumerSe
 		parts[i] = p.k + "=" + p.v
 	}
 	baseString := strings.ToUpper(method) + "&" + oauthPercentEncode(base) + "&" + oauthPercentEncode(strings.Join(parts, "&"))
-	mac := hmac.New(sha1.New, []byte(oauthPercentEncode(consumerSecret)+"&"))
+	mac := hmac.New(sha1.New, []byte(oauthPercentEncode(consumerSecret)+"&")) // #nosec G401 -- OAuth 1.0a HMAC-SHA1 (LTI 1.1)
 	mac.Write([]byte(baseString))
 	return base64.StdEncoding.EncodeToString(mac.Sum(nil)), nil
 }
@@ -454,7 +454,7 @@ func (s *LTIService) HandleLTI11Outcome(ctx context.Context, toolID uint, reques
 	if math.Abs(float64(time.Now().Unix()-ts)) > 300 {
 		return fail(401, "", "", "OAuth timestamp is out of range")
 	}
-	sum := sha1.Sum(body) //nolint:gosec // oauth_body_hash is SHA-1 by spec
+	sum := sha1.Sum(body) // #nosec G401 -- oauth_body_hash is SHA-1 by spec
 	if oauth["oauth_body_hash"] != base64.StdEncoding.EncodeToString(sum[:]) {
 		return fail(401, "", "", "oauth_body_hash does not match")
 	}
