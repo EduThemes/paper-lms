@@ -61,7 +61,25 @@ func (h *QuizLifecycleHandler) attemptInQuiz(c *fiber.Ctx, quiz *models.Quiz) (*
 		return nil, true
 	}
 	sub, err := h.quizService.GetSubmission(c.Context(), uint(sid))
-	if err != nil || sub == nil || sub.QuizID != quiz.ID {
+	// G107: a section-limited grader reaches only their sections'
+	// attempts (the course gate checks user-id params, not attempt ids).
+	if err != nil || sub == nil || sub.QuizID != quiz.ID || !sectionVisibleUser(c, sub.UserID) {
+		_ = responses.NotFound(c, "quiz submission")
+		return nil, true
+	}
+	return sub, false
+}
+
+// attemptForStaffView is attemptInQuiz for the staff routes that expose
+// an attempt's individual responses (manual scoring, the event log): on
+// an anonymous survey those stay with the respondent (the same gate as
+// the answers and file routes), so staff get a 404.
+func (h *QuizLifecycleHandler) attemptForStaffView(c *fiber.Ctx, quiz *models.Quiz) (*models.QuizSubmission, bool) {
+	sub, wrote := h.attemptInQuiz(c, quiz)
+	if wrote {
+		return nil, true
+	}
+	if anonymousSurveyHidden(c, quiz, sub) {
 		_ = responses.NotFound(c, "quiz submission")
 		return nil, true
 	}
@@ -79,7 +97,7 @@ func (h *QuizLifecycleHandler) UpdateScores(c *fiber.Ctx) error {
 	if wrote {
 		return nil
 	}
-	sub, wrote := h.attemptInQuiz(c, quiz)
+	sub, wrote := h.attemptForStaffView(c, quiz)
 	if wrote {
 		return nil
 	}
@@ -158,7 +176,7 @@ func (h *QuizLifecycleHandler) ListEvents(c *fiber.Ctx) error {
 	if wrote {
 		return nil
 	}
-	sub, wrote := h.attemptInQuiz(c, quiz)
+	sub, wrote := h.attemptForStaffView(c, quiz)
 	if wrote {
 		return nil
 	}
@@ -222,9 +240,12 @@ func (h *QuizLifecycleHandler) Moderation(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.InternalError(c, "Could not load the quiz roster")
 	}
-	out := make([]fiber.Map, len(rows))
-	for i, r := range rows {
-		out[i] = fiber.Map{
+	out := make([]fiber.Map, 0, len(rows))
+	for _, r := range rows {
+		if !sectionVisibleUser(c, r.UserID) { // G107
+			continue
+		}
+		out = append(out, fiber.Map{
 			"user_id":            r.UserID,
 			"attempts_used":      r.AttemptsUsed,
 			"attempts_left":      r.AttemptsLeft,
@@ -235,7 +256,7 @@ func (h *QuizLifecycleHandler) Moderation(c *fiber.Ctx) error {
 			"extra_attempts":     r.ExtraAttempts,
 			"extra_time":         r.ExtraTime,
 			"manually_unlocked":  r.ManuallyUnlocked,
-		}
+		})
 	}
 	return c.JSON(fiber.Map{
 		"quiz":     quizToJSON(quiz),
@@ -280,7 +301,7 @@ func (h *QuizLifecycleHandler) SetExtensions(c *fiber.Ctx) error {
 			ExtendFromNow:    e.ExtendFromNow,
 			ExtendFromEndAt:  e.ExtendFromEndAt,
 		}
-		if e.UserID == 0 || !h.quizService.IsQuizCourseStudent(c.Context(), quiz.CourseID, e.UserID, callerAccountID(c)) {
+		if e.UserID == 0 || !h.quizService.IsQuizCourseStudent(c.Context(), quiz.CourseID, e.UserID, callerAccountID(c)) || !sectionVisibleUser(c, e.UserID) { // G107
 			return responses.NotFound(c, "student")
 		}
 		if err := rows[i].Validate(); err != nil {
