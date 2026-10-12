@@ -48,36 +48,25 @@ func SortForAnonymity(assignmentID uint, students []CourseStudent) {
 	})
 }
 
-// CourseGradingPeriods returns the active grading periods that apply to
-// a course (its account's active grading period groups), for the
-// gradebook's grading-period filter. accountID scopes the course.
+// CourseGradingPeriods returns the grading periods that apply to a
+// course, for the gradebook's grading-period filter: the active periods
+// of the period set linked to the course's term, the same set the course
+// grade calculator, final grade overrides and the student Grades page
+// use. accountID scopes the course.
 func (s *SubmissionService) CourseGradingPeriods(ctx context.Context, courseID, accountID uint) ([]models.GradingPeriod, error) {
 	course, err := s.courseRepo.FindByID(ctx, courseID, accountID)
 	if err != nil || course == nil {
 		return nil, ErrAssignmentUnavailable
 	}
 	out := make([]models.GradingPeriod, 0)
-	if s.gradingPeriodGroupRepo == nil || s.gradingPeriodRepo == nil {
+	if s.periodResolver == nil {
 		return out, nil
 	}
-	groups, err := s.gradingPeriodGroupRepo.ListByAccountID(ctx, course.AccountID, repository.PaginationParams{Page: 1, PerPage: 100})
-	if err != nil || groups == nil {
-		return out, nil
+	periods, _, err := s.periodResolver.CoursePeriods(ctx, course.ID)
+	if err != nil {
+		return nil, err
 	}
-	for _, g := range groups.Items {
-		if g.WorkflowState != "active" {
-			continue
-		}
-		periods, err := s.gradingPeriodRepo.ListByGroupID(ctx, g.ID, 0)
-		if err != nil {
-			continue
-		}
-		for _, p := range periods {
-			if p.WorkflowState == "active" {
-				out = append(out, p)
-			}
-		}
-	}
+	out = append(out, periods...)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].StartDate.Before(out[j].StartDate) })
 	return out, nil
 }

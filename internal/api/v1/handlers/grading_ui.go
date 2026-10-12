@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -1065,8 +1066,9 @@ func maskAnonymizedGradebook(c *fiber.Ctx, g *service.GradingUIService, courseID
 }
 
 // ListCourseGradingPeriods lists the grading periods that apply to the
-// course (the account-level period routes are admin-only), for the
-// gradebook's grading-period filter.
+// course (its term's period set; the account-level period routes are
+// admin-only), for the gradebook's grading-period filter. is_closed
+// honours the close date.
 //
 //	GET /courses/:course_id/grading_periods
 func (h *GradingUIHandler) ListCourseGradingPeriods(c *fiber.Ctx) error {
@@ -1078,15 +1080,18 @@ func (h *GradingUIHandler) ListCourseGradingPeriods(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.NotFound(c, "course")
 	}
+	now := time.Now()
 	out := make([]fiber.Map, 0, len(periods))
-	for _, p := range periods {
+	for i := range periods {
+		p := &periods[i]
 		out = append(out, fiber.Map{
 			"id":         p.ID,
 			"title":      p.Title,
 			"start_date": p.StartDate,
 			"end_date":   p.EndDate,
 			"close_date": p.CloseDate,
-			"is_closed":  p.IsClosed,
+			"weight":     p.Weight,
+			"is_closed":  service.GradingPeriodClosed(p, now),
 		})
 	}
 	return c.JSON(out)
