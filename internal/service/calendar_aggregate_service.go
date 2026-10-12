@@ -121,6 +121,93 @@ type enrollmentRow struct {
 	CourseSectionID *uint
 }
 
+// currentEnrollmentRows lists the user's enrollments (in the tenant) that
+// are current once the date windows apply: an "active" row whose
+// enrollment / section / course / term dates have not started yet or
+// have ended, or whose course is concluded, is not a calendar context
+// (Canvas shows the calendars of current enrollments only).
+func (s *CalendarAggregateService) currentEnrollmentRows(ctx context.Context, userID, accountID uint) ([]enrollmentRow, error) {
+	db := s.db.WithContext(ctx)
+	var enrollments []models.Enrollment
+	if err := db.Joins("JOIN courses c ON c.id = enrollments.course_id").
+		Where("enrollments.user_id = ? AND enrollments.workflow_state = ? AND c.account_id = ? AND c.workflow_state <> ?",
+			userID, string(models.EnrollmentActive), accountID, string(models.CourseDeleted)).
+		Find(&enrollments).Error; err != nil {
+		return nil, err
+	}
+	if len(enrollments) == 0 {
+		return nil, nil
+	}
+	courseIDs := make([]uint, 0, len(enrollments))
+	var sectionIDs []uint
+	for _, e := range enrollments {
+		courseIDs = append(courseIDs, e.CourseID)
+		if e.CourseSectionID != nil {
+			sectionIDs = append(sectionIDs, *e.CourseSectionID)
+		}
+	}
+	var courses []models.Course
+	if err := db.Where("id IN ? AND account_id = ?", courseIDs, accountID).Find(&courses).Error; err != nil {
+		return nil, err
+	}
+	byCourse := make(map[uint]*models.Course, len(courses))
+	var termIDs []uint
+	for i := range courses {
+		byCourse[courses[i].ID] = &courses[i]
+		if courses[i].EnrollmentTermID != nil {
+			termIDs = append(termIDs, *courses[i].EnrollmentTermID)
+		}
+	}
+	sections := map[uint]*models.CourseSection{}
+	if len(sectionIDs) > 0 {
+		var secs []models.CourseSection
+		if err := db.Where("id IN ?", sectionIDs).Find(&secs).Error; err != nil {
+			return nil, err
+		}
+		for i := range secs {
+			sections[secs[i].ID] = &secs[i]
+		}
+	}
+	terms := map[uint]*models.EnrollmentTerm{}
+	if len(termIDs) > 0 {
+		var ts []models.EnrollmentTerm
+		if err := db.Where("id IN ?", termIDs).Find(&ts).Error; err != nil {
+			return nil, err
+		}
+		for i := range ts {
+			terms[ts[i].ID] = &ts[i]
+		}
+	}
+	now := time.Now()
+	rows := make([]enrollmentRow, 0, len(enrollments))
+	for i := range enrollments {
+		e := &enrollments[i]
+		course := byCourse[e.CourseID]
+		if course == nil {
+			continue
+		}
+		var section *models.CourseSection
+		if e.CourseSectionID != nil {
+			section = sections[*e.CourseSectionID]
+		}
+		var term *models.EnrollmentTerm
+		if course.EnrollmentTermID != nil {
+			term = terms[*course.EnrollmentTermID]
+		}
+		if models.EffectiveEnrollmentState(e, section, course, term, now) != models.EffectiveActive {
+			continue
+		}
+		rows = append(rows, enrollmentRow{CourseID: course.ID, CourseName: course.Name, CourseState: string(course.WorkflowState), Type: e.Type, CourseSectionID: e.CourseSectionID})
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].CourseName != rows[j].CourseName {
+			return rows[i].CourseName < rows[j].CourseName
+		}
+		return rows[i].CourseID < rows[j].CourseID
+	})
+	return rows, nil
+}
+
 // ListContexts returns every calendar the user can see, the personal
 // calendar first.
 func (s *CalendarAggregateService) ListContexts(ctx context.Context, userID, accountID uint, isAdmin bool) ([]CalendarContext, error) {
@@ -137,14 +224,8 @@ func (s *CalendarAggregateService) ListContexts(ctx context.Context, userID, acc
 		CanCreateEvents: true,
 	}}
 
-	var rows []enrollmentRow
-	if err := db.Table("enrollments e").
-		Select("e.course_id, c.name AS course_name, c.workflow_state AS course_state, e.type, e.course_section_id").
-		Joins("JOIN courses c ON c.id = e.course_id").
-		Where("e.user_id = ? AND e.workflow_state = ? AND c.account_id = ? AND c.workflow_state <> ?",
-			userID, string(models.EnrollmentActive), accountID, string(models.CourseDeleted)).
-		Order("c.name ASC, e.course_id ASC").
-		Scan(&rows).Error; err != nil {
+	rows, err := s.currentEnrollmentRows(ctx, userID, accountID)
+	if err != nil {
 		return nil, err
 	}
 	byCourse := map[uint]*CalendarContext{}
@@ -641,6 +722,11 @@ func (s *CalendarAggregateService) assignmentItems(ctx context.Context, q Calend
 			if noDate {
 				due = nil
 			}
+		} else if a.OnlyVisibleToOverrides {
+			// Assigned only to its overrides' students and sections, none
+			// of which is this user: it is not on their calendar (or ICS
+			// feed) at the base date — it does not exist for them.
+			continue
 		}
 		if inWindow(due) {
 			items = append(items, item(a, *due, "", c))

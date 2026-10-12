@@ -243,42 +243,32 @@ func (h *CalendarEventHandler) isGroupMember(c *fiber.Ctx, groupID uint) bool {
 //   - Account context: everyone in the tenant.
 //   - Group: members of the group, the creator, or an admin.
 func (h *CalendarEventHandler) authorizeEventRead(c *fiber.Ctx, event *models.CalendarEvent) (bool, error) {
+	if !h.eventReadable(c, event) {
+		// Not visible to the caller: the same 404 as a missing event, so
+		// event ids can't be probed (course events included).
+		return true, responses.NotFound(c, "calendar event")
+	}
+	return false, nil
+}
+
+// eventReadable reports whether the caller may see the event. It never
+// writes a response.
+func (h *CalendarEventHandler) eventReadable(c *fiber.Ctx, event *models.CalendarEvent) bool {
 	userID, _ := c.Locals("user_id").(uint)
 	switch event.ContextType {
 	case "User":
-		if event.ContextID == userID || event.CreatedByUserID == userID {
-			return false, nil
-		}
-		if callerIsAdmin(c, h.authz) {
-			return false, nil
-		}
-		return true, responses.NotFound(c, "calendar event")
+		return event.ContextID == userID || event.CreatedByUserID == userID || callerIsAdmin(c, h.authz)
 	case "Course":
-		if err := h.authz.RequireCourseEnrolled(c, event.ContextID); authzDenied(c, err) {
-			return true, err
-		}
-		return false, nil
+		return h.authz.RequireCourseEnrolled(c, event.ContextID) == nil
 	case models.CalendarContextCourseSection:
 		courseID := h.sectionCourse(c, event.ContextID)
-		if courseID == 0 {
-			return true, responses.NotFound(c, "calendar event")
-		}
-		if err := h.authz.RequireCourseEnrolled(c, courseID); authzDenied(c, err) {
-			return true, err
-		}
-		return false, nil
+		return courseID != 0 && h.authz.RequireCourseEnrolled(c, courseID) == nil
 	case "Account":
-		return false, nil
+		return true
 	case models.CalendarContextGroup:
-		if event.CreatedByUserID == userID || h.isGroupMember(c, event.ContextID) || callerIsAdmin(c, h.authz) {
-			return false, nil
-		}
-		return true, responses.NotFound(c, "calendar event")
+		return event.CreatedByUserID == userID || h.isGroupMember(c, event.ContextID) || callerIsAdmin(c, h.authz)
 	default:
-		if event.CreatedByUserID == userID || callerIsAdmin(c, h.authz) {
-			return false, nil
-		}
-		return true, responses.NotFound(c, "calendar event")
+		return event.CreatedByUserID == userID || callerIsAdmin(c, h.authz)
 	}
 }
 
@@ -365,6 +355,11 @@ func (h *CalendarEventHandler) authorizeEventCreate(c *fiber.Ctx, event *models.
 // refusal; the caller MUST return err.
 func (h *CalendarEventHandler) authorizeEventManage(c *fiber.Ctx, event *models.CalendarEvent) (bool, error) {
 	userID, _ := c.Locals("user_id").(uint)
+	// An event the caller can't even see is a 404, as on read; only a
+	// visible event the caller may not change is a 403.
+	if !h.eventReadable(c, event) {
+		return true, responses.NotFound(c, "calendar event")
+	}
 	if event.ContextType == models.CalendarContextCourseSection {
 		return true, responses.BadRequest(c, "edit the course event this section time belongs to")
 	}

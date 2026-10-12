@@ -476,9 +476,9 @@ func TestCalendarLane_Scheduler(t *testing.T) {
 	ogID := uint(og["id"].(float64))
 	assert.Equal(t, []interface{}{fmt.Sprintf("course_section_%d", calSectionA)}, og["sub_context_codes"])
 
-	// Section B can't see or book it.
+	// Section B can't see or book it: for them it does not exist.
 	resp = testutil.MakeRequest(f.app(calStudent2, 1), http.MethodGet, fmt.Sprintf("/appointment_groups/%d", ogID), nil)
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	var list []map[string]interface{}
 	resp = testutil.MakeRequest(f.app(calStudent2, 1), http.MethodGet, "/appointment_groups?scope=reservable", nil)
 	calJSON(t, resp, &list)

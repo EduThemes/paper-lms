@@ -134,25 +134,19 @@ func (h *AppointmentGroupHandler) groupAccess(c *fiber.Ctx, g *models.Appointmen
 		}
 	}
 	userID, _ := c.Locals("user_id").(uint)
-	var firstErr error
 	for _, cid := range courses {
-		err := h.authz.RequireCourseEnrolled(c, cid)
-		if err == nil {
-			if !h.svc.SectionAllowed(c.Context(), contexts, cid, userID) {
-				err = authzForbidden("this appointment group is for other sections")
-			}
+		if h.authz.RequireCourseEnrolled(c, cid) != nil || !h.svc.SectionAllowed(c.Context(), contexts, cid, userID) {
+			continue
 		}
-		if err == nil {
-			if g.WorkflowState != "active" {
-				return false, nil, authzNotFound("appointment group")
-			}
-			return false, contexts, nil
+		if g.WorkflowState != "active" {
+			return false, nil, authzNotFound("appointment group")
 		}
-		if firstErr == nil {
-			firstErr = err
-		}
+		return false, contexts, nil
 	}
-	return false, nil, firstErr
+	// Not enrolled in any of its courses, or enrolled only in sections
+	// the group is not for: the group does not exist for the caller (404,
+	// not 403, so group ids can't be probed).
+	return false, nil, authzNotFound("appointment group")
 }
 
 // ----- Group handlers -----
