@@ -2,6 +2,9 @@ version: '3.8'
 
 services:
   backend:
+    # Named so deploy.sh can tag :<version> / :latest / :previous and roll
+    # back by retagging (scripts/deploy.sh, scripts/deploy-rollback.sh).
+    image: paper-lms-backend:${IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile.backend
@@ -34,6 +37,7 @@ services:
       start_period: 10s
 
   frontend:
+    image: paper-lms-frontend:${IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile.frontend

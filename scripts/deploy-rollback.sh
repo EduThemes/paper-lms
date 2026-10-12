@@ -17,9 +17,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="${COMPOSE_FILE:-$PROJECT_DIR/deployments/docker/docker-compose.prod.yml}"
+# Same compose inputs as deploy.sh: the host override (TLS/port topology,
+# env passthrough) and the project-root .env. Without them a restart drops
+# the override's env and port remap and the site 502s.
+OVERRIDE_FILE="${OVERRIDE_FILE:-$PROJECT_DIR/deployments/docker/docker-compose.override.yml}"
+ENV_FILE="${ENV_FILE:-$PROJECT_DIR/.env}"
 DEPLOY_DIR="$PROJECT_DIR/.deploy"
 LOG_DIR="$PROJECT_DIR/logs/deploys"
-HEALTH_URL="http://127.0.0.1:3000/health"
+# Health is checked inside the backend container (the backend port is not
+# published on the host), as deploy.sh does.
+HEALTH_PATH="/health"
 HEALTH_TIMEOUT=30
 
 # ---------------------------------------------------------------------------
@@ -50,6 +57,21 @@ ok()    { echo -e "${GREEN}[   OK   ]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[  WARN  ]${NC} $*"; }
 fail()  { echo -e "${RED}[ FAILED ]${NC} $*"; exit 1; }
 
+dc() {
+  local compose_args=(-f "$COMPOSE_FILE")
+  [ -f "$OVERRIDE_FILE" ] && compose_args+=(-f "$OVERRIDE_FILE")
+  [ -f "$ENV_FILE" ] && compose_args+=(--env-file "$ENV_FILE")
+  docker compose "${compose_args[@]}" "$@"
+}
+
+probe_backend() {
+  set +e +o pipefail
+  dc exec -T backend wget -qO- "http://127.0.0.1:3000${HEALTH_PATH}" >/dev/null 2>&1
+  local rc=$?
+  set -eo pipefail
+  return $rc
+}
+
 confirm() {
   if [ "$AUTO_YES" = true ]; then return 0; fi
   read -r -p "$1 [y/N] " answer
@@ -72,8 +94,14 @@ if [ ! -f "$DEPLOY_DIR/previous_deploy" ]; then
   fail "No rollback metadata found at $DEPLOY_DIR/previous_deploy"
 fi
 
-# shellcheck source=/dev/null
-source "$DEPLOY_DIR/previous_deploy"
+# Parse key=value lines (not `source`: values such as the migration
+# version contain spaces and parentheses).
+meta() { sed -n "s/^$1=//p" "$DEPLOY_DIR/previous_deploy" | head -1; }
+previous_version=$(meta previous_version)
+migration_version=$(meta migration_version)
+backup_filename=$(meta backup_filename)
+deploy_timestamp=$(meta deploy_timestamp)
+rolled_back=$(meta rolled_back)
 
 log "Previous deployment info:"
 log "  Previous version:    ${previous_version:-unknown}"
@@ -150,7 +178,7 @@ echo ""
 # Step 5: Stop backend and frontend
 # ---------------------------------------------------------------------------
 log "Stopping backend and frontend..."
-docker compose -f "$COMPOSE_FILE" stop backend frontend
+dc stop backend frontend
 ok "Services stopped"
 
 echo ""
@@ -162,15 +190,23 @@ if [ "$RESTORE_DB" = true ]; then
   log "Restoring database from ${backup_filename}..."
 
   # Ensure postgres is still running
-  if ! docker compose -f "$COMPOSE_FILE" ps postgres 2>/dev/null | grep -q "Up"; then
+  if ! dc ps postgres 2>/dev/null | grep -q "Up"; then
     log "Starting PostgreSQL..."
-    docker compose -f "$COMPOSE_FILE" up -d postgres
+    dc up -d postgres
     sleep 5
   fi
 
-  # Restore via the backup container
-  docker compose -f "$COMPOSE_FILE" run --rm \
-    backup sh -c "gunzip -c /backups/${backup_filename} | psql \"\$DATABASE_URL\" --quiet --single-transaction"
+  # Restore via the backup container. Its entrypoint is ["/bin/sh", "-c"],
+  # so override it — otherwise `sh -c "..."` runs a bare shell and nothing
+  # is restored. The dump is plain SQL for the pre-deploy schema, so the
+  # current (migrated) schema is dropped first; the drop and the restore
+  # run in one transaction, so a failed restore leaves the database as it
+  # was.
+  dc run --rm -T --entrypoint /bin/sh backup -c "set -o pipefail; \
+    gzip -t /backups/${backup_filename} && \
+    { printf 'DROP SCHEMA public CASCADE;\\nCREATE SCHEMA public;\\n'; gunzip -c /backups/${backup_filename}; } \
+      | psql \"\$DATABASE_URL\" --quiet --single-transaction -v ON_ERROR_STOP=1" \
+    || fail "Database restore from ${backup_filename} failed; the database was left unchanged. Services are stopped."
 
   ok "Database restored from ${backup_filename}"
   echo ""
@@ -179,6 +215,7 @@ fi
 # ---------------------------------------------------------------------------
 # Step 7: Retag previous images
 # ---------------------------------------------------------------------------
+# The compose services run paper-lms-<svc>:${IMAGE_TAG:-latest}.
 log "Retagging images..."
 docker tag paper-lms-backend:previous paper-lms-backend:latest
 ok "paper-lms-backend:previous → :latest"
@@ -192,12 +229,12 @@ echo ""
 # Step 8: Start backend, wait for health
 # ---------------------------------------------------------------------------
 log "Starting backend..."
-docker compose -f "$COMPOSE_FILE" up -d --no-deps backend
+IMAGE_TAG=latest dc up -d --no-deps --force-recreate backend
 
 log "Waiting for backend health check (timeout: ${HEALTH_TIMEOUT}s)..."
 HEALTHY=false
 for i in $(seq 1 $HEALTH_TIMEOUT); do
-  if curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
+  if probe_backend; then
     HEALTHY=true
     ok "Backend healthy after ${i}s"
     break
@@ -215,13 +252,13 @@ echo ""
 # Step 9: Start frontend
 # ---------------------------------------------------------------------------
 log "Starting frontend..."
-docker compose -f "$COMPOSE_FILE" up -d --no-deps frontend
+IMAGE_TAG=latest dc up -d --no-deps --force-recreate frontend
 sleep 3
 
-if docker compose -f "$COMPOSE_FILE" ps frontend 2>/dev/null | grep -q "Up"; then
+if dc ps frontend 2>/dev/null | grep -q "Up"; then
   ok "Frontend started"
 else
-  warn "Frontend may not have started correctly. Check: docker compose -f $COMPOSE_FILE ps"
+  warn "Frontend may not have started correctly. Check: docker compose ps"
 fi
 
 # Mark as rolled back
@@ -246,5 +283,5 @@ if [ "$RESTORE_DB" = true ]; then
 fi
 log ""
 log "  Service status:"
-docker compose -f "$COMPOSE_FILE" ps
+dc ps
 log "================================================="
