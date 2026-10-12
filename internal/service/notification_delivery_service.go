@@ -397,6 +397,29 @@ func (s *NotificationDeliveryService) QueueNotification(
 	return nil
 }
 
+// LatestNotificationAt returns when the user was last sent a notification
+// of notificationType about (contextType, contextID), looking at their
+// most recent in-app notifications; nil when none is found. Used to avoid
+// re-sending notifications that were already delivered.
+func (s *NotificationDeliveryService) LatestNotificationAt(ctx context.Context, userID uint, notificationType, contextType string, contextID uint) *time.Time {
+	if s == nil || s.notifRepo == nil {
+		return nil
+	}
+	// Background lookup for a user a tenant-checked request already
+	// resolved: accountID=0.
+	page, err := s.notifRepo.ListByUserID(ctx, userID, 0, repository.PaginationParams{Page: 1, PerPage: 200})
+	if err != nil || page == nil {
+		return nil
+	}
+	for _, n := range page.Items { // newest first
+		if n.NotificationType == notificationType && n.ContextType == contextType && n.ContextID == contextID {
+			at := n.CreatedAt
+			return &at
+		}
+	}
+	return nil
+}
+
 // notificationPreview turns an (HTML) notification body into the short
 // plain-text preview shown in the in-app feed, which renders text.
 func notificationPreview(body string) string {

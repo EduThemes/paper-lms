@@ -10,11 +10,24 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 )
+
+// QuizGradeWritable reports (as an error wrapping ErrGradingPeriodClosed)
+// whether a grader may change the student's quiz grade on assignment, so
+// manual quiz scoring refuses up front instead of saving question scores
+// the gradebook will then reject.
+func (s *SubmissionService) QuizGradeWritable(ctx context.Context, assignment *models.Assignment, userID uint) error {
+	if assignment == nil {
+		return nil
+	}
+	if closed, periodTitle := s.isGradingPeriodClosedFor(ctx, assignment, userID); closed {
+		return gradingPeriodClosedError(periodTitle)
+	}
+	return nil
+}
 
 // QuizScorePosted reports whether a student may see their quiz grade: an
 // automatically-posted assignment always shows it; a manual one only once
@@ -58,8 +71,10 @@ func (s *SubmissionService) RecordQuizScore(ctx context.Context, assignment *mod
 			return nil, ErrQuizScoreNotStudent
 		}
 	}
-	if closed, periodTitle := s.isGradingPeriodClosed(ctx, assignment); closed {
-		return nil, fmt.Errorf("grading period %q is closed — grades cannot be modified", periodTitle)
+	// G025: the closed-period lock follows the course's own grading
+	// period set and the student's effective due date, like Grade.
+	if closed, periodTitle := s.isGradingPeriodClosedFor(ctx, assignment, rec.UserID); closed {
+		return nil, gradingPeriodClosedError(periodTitle)
 	}
 
 	// accountID=0: internal caller — the assignment was resolved from a
@@ -71,6 +86,13 @@ func (s *SubmissionService) RecordQuizScore(ctx context.Context, assignment *mod
 		sub = &models.Submission{AssignmentID: assignment.ID, UserID: rec.UserID}
 	}
 	oldGrade, oldScore := sub.Grade, sub.Score
+	wasPosted := sub.PostedAt != nil
+	oldAttempt := sub.Attempt
+	var oldSubmittedAt *time.Time
+	if sub.SubmittedAt != nil {
+		t := *sub.SubmittedAt
+		oldSubmittedAt = &t
+	}
 
 	subType := quizSubmissionType
 	submittedAt := rec.SubmittedAt
@@ -82,9 +104,13 @@ func (s *SubmissionService) RecordQuizScore(ctx context.Context, assignment *mod
 	if rec.Attempt > 0 {
 		sub.Attempt = rec.Attempt
 	}
+	// Lateness honours a manual late_policy_status (none / extended /
+	// late with its seconds-late override), so a regrade never resets an
+	// instructor's decision; handing the quiz in clears a manual
+	// "missing" (markSubmitted, as for any submission).
 	dueAt, _, _ := s.EffectiveDates(ctx, assignment, rec.UserID)
-	sub.Late = dueAt != nil && submittedAt.After(*dueAt)
-	sub.Missing = false
+	sub.CachedDueDate = dueAt
+	markSubmitted(assignment, sub, dueAt, submittedAt)
 
 	if sub.Excused {
 		// Keep the excusal; record only that the quiz was taken.
@@ -111,6 +137,14 @@ func (s *SubmissionService) RecordQuizScore(ctx context.Context, assignment *mod
 	if !sub.Excused {
 		s.logGradeChange(ctx, assignment, sub, rec.GraderID, oldGrade, oldScore)
 		s.fireIfPosted(sub)
+		// Tell the student when an instructor (manual scoring) or a
+		// regrade changed the grade they can see. The student's own
+		// finished attempt (a new attempt / finish time) shows its score
+		// on screen, and a score still awaiting review is not final.
+		sameAttempt := oldAttempt == sub.Attempt && oldSubmittedAt != nil && oldSubmittedAt.Equal(submittedAt)
+		if !rec.PendingReview && (rec.GraderID != 0 || (!isNew && sameAttempt)) {
+			s.notifyGradeChange(ctx, assignment, sub, oldGrade, oldScore, wasPosted)
+		}
 	}
 	return sub, nil
 }

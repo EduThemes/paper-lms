@@ -286,9 +286,21 @@ func (h *GradingUIHandler) updateComment(c *fiber.Ctx, courseID uint, assignment
 	// Publishing a grader's draft on an automatically-posted assignment
 	// posts the submission (every member's, for a group comment), as
 	// sending the comment directly would.
-	if wasDraft && !cm.Draft && callerIsCourseStaff(c) && !assignment.UsesManualPostPolicy() && assignment.GradesPublished() {
-		for _, target := range h.svc.CommentCopySubmissions(c.Context(), cm, sub) {
-			_ = h.subs.submissionService.MarkPosted(c.Context(), target)
+	if wasDraft && !cm.Draft {
+		targets := h.svc.CommentCopySubmissions(c.Context(), cm, sub)
+		if callerIsCourseStaff(c) && !assignment.UsesManualPostPolicy() && assignment.GradesPublished() {
+			for _, target := range targets {
+				_ = h.subs.submissionService.MarkPosted(c.Context(), target)
+			}
+		}
+		// The comment is sent now: notify each recipient, with the same
+		// gates as a comment sent directly (hidden / moderated stay quiet).
+		authorName := ""
+		if author, err := h.subs.userRepo.FindByID(c.Context(), callerID, callerAccountID(c)); err == nil && author != nil {
+			authorName = author.Name
+		}
+		for _, target := range targets {
+			h.subs.notifySubmissionComment(c.Context(), assignment, target, callerID, authorName, cm.Comment)
 		}
 	}
 	return c.JSON(commentJSON(courseID, assignment.ID, commentPathKey(sub, anonymize), cm))

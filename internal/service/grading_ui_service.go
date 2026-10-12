@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"strconv"
 	"strings"
 	"time"
 
@@ -377,13 +376,25 @@ func (s *GradingUIService) SaveProvisionalGrade(ctx context.Context, a *models.A
 		return nil, ErrNotModerator
 	}
 	var score *float64
+	var grade string
 	postedGrade = strings.TrimSpace(postedGrade)
 	if postedGrade != "" {
-		v, err := strconv.ParseFloat(postedGrade, 64)
-		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+		// G023: a provisional grade is read like a final one, per the
+		// assignment's grading type ("85%", "B+", "complete", points), so
+		// the published grade matches what the grader typed.
+		scheme := DefaultGradingScheme()
+		if s.submissions != nil {
+			scheme = s.submissions.resolveScheme(ctx, a)
+		}
+		v, err := InterpretGrade(a, scheme, postedGrade)
+		if err != nil {
+			return nil, err
+		}
+		if math.IsNaN(v) || math.IsInf(v, 0) {
 			return nil, fmt.Errorf("invalid grade value: %s", postedGrade)
 		}
 		score = &v
+		grade = FormatGrade(a, scheme, v, postedGrade)
 	}
 	if _, err := s.ensureModerationGrader(ctx, a, graderID, isModerator); err != nil {
 		return nil, err
@@ -399,7 +410,7 @@ func (s *GradingUIService) SaveProvisionalGrade(ctx context.Context, a *models.A
 	now := time.Now()
 	pg.Score = score
 	if score != nil {
-		g := strconv.FormatFloat(*score, 'f', -1, 64)
+		g := grade
 		pg.Grade = &g
 		pg.GradedAt = &now
 	} else {
@@ -584,7 +595,11 @@ func (s *GradingUIService) PublishGrades(ctx context.Context, a *models.Assignme
 		if chosen == nil || chosen.Score == nil {
 			continue
 		}
-		if _, err := s.submissions.PublishModeratedGrade(ctx, a, sub.UserID, moderatorID, accountID, *chosen.Score); err != nil {
+		given := ""
+		if chosen.Grade != nil {
+			given = *chosen.Grade
+		}
+		if _, err := s.submissions.PublishModeratedGrade(ctx, a, sub.UserID, moderatorID, accountID, *chosen.Score, given); err != nil {
 			res.Errors = append(res.Errors, fmt.Sprintf("student %d: %v", sub.UserID, err))
 			continue
 		}

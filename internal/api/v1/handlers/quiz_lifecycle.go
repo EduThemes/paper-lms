@@ -114,7 +114,8 @@ func (h *QuizLifecycleHandler) UpdateScores(c *fiber.Ctx) error {
 	switch {
 	case errors.Is(err, service.ErrQuestionNotInSubmission):
 		return responses.NotFound(c, "quiz question")
-	case errors.Is(err, service.ErrQuizAttemptNotFinished), errors.Is(err, service.ErrInvalidQuizScore):
+	case errors.Is(err, service.ErrQuizAttemptNotFinished), errors.Is(err, service.ErrInvalidQuizScore),
+		errors.Is(err, service.ErrGradingPeriodClosed):
 		return responses.BadRequest(c, err.Error())
 	case err != nil:
 		return responses.InternalError(c, "Could not update quiz scores")

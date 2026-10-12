@@ -486,6 +486,8 @@ func (h *GradingPolicyHandler) SetLateStatus(c *fiber.Ctx) error {
 		return responses.BadRequest(c, err.Error())
 	case errors.Is(err, service.ErrGradeCrossTenant):
 		return responses.NotFound(c, "assignment")
+	case errors.Is(err, service.ErrModerationInProgress):
+		return responses.Error(c, fiber.StatusConflict, err.Error())
 	case err != nil:
 		return responses.BadRequest(c, err.Error())
 	}

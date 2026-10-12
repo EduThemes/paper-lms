@@ -18,7 +18,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -173,8 +172,14 @@ func (s *SubmissionService) SetLatePolicyStatus(ctx context.Context, assignmentI
 	if err != nil {
 		return nil, ErrGradeCrossTenant
 	}
+	// Moderated grading: a status can re-derive (late) or write (missing
+	// policy) the student's grade and post it, so it waits until the
+	// moderator publishes, like any other grade write.
+	if !assignment.GradesPublished() {
+		return nil, ErrModerationInProgress
+	}
 	if closed, periodTitle := s.isGradingPeriodClosedFor(ctx, assignment, userID); closed {
-		return nil, fmt.Errorf("grading period %q is closed — grades cannot be modified", periodTitle)
+		return nil, gradingPeriodClosedError(periodTitle)
 	}
 	sub, findErr := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, accountID)
 	isNew := findErr != nil || sub == nil
@@ -205,8 +210,9 @@ func (s *SubmissionService) SetLatePolicyStatus(ctx context.Context, assignmentI
 
 	switch {
 	case sub.EnteredScore != nil:
-		// Re-derive the late deduction from what the grader typed.
-		s.applyGrade(ctx, assignment, sub, *sub.EnteredScore, graderID, now)
+		// Re-derive the late deduction from what the grader typed (the
+		// typed grade labels a point-less "complete" / letter grade).
+		s.applyGradeGiven(ctx, assignment, sub, *sub.EnteredScore, enteredGradeOf(sub), graderID, now)
 		sub.Late, sub.Missing = t.Late, t.Missing
 	case t.Missing && sub.Score == nil:
 		s.applyMissingPolicy(ctx, assignment, sub, now)
@@ -224,6 +230,16 @@ func (s *SubmissionService) SetLatePolicyStatus(ctx context.Context, assignmentI
 		s.fireIfPosted(sub)
 	}
 	return sub, nil
+}
+
+// enteredGradeOf returns the grade the grader entered on sub ("" when
+// none), used to re-format a point-less letter / pass-fail grade when the
+// score is re-derived.
+func enteredGradeOf(sub *models.Submission) string {
+	if sub == nil || sub.EnteredGrade == nil {
+		return ""
+	}
+	return *sub.EnteredGrade
 }
 
 // applyMissingPolicy grades a missing, ungraded submission per the course

@@ -78,6 +78,11 @@ func (s *QuizService) UpdateQuizScores(ctx context.Context, quiz *models.Quiz, s
 			return nil, nil, ErrInvalidQuizScore
 		}
 	}
+	// A closed grading period locks the gradebook grade: refuse before
+	// saving question scores the gradebook sync would then drop.
+	if err := s.quizGradeWritable(ctx, quiz, sub.UserID); err != nil {
+		return nil, nil, err
+	}
 
 	questions, _, err := s.attemptQuestions(ctx, sub)
 	if err != nil {
@@ -159,6 +164,28 @@ func (s *QuizService) UpdateQuizScores(ctx context.Context, quiz *models.Quiz, s
 		out = append(out, *a)
 	}
 	return sub, out, nil
+}
+
+// quizGradeWriteChecker is implemented by *SubmissionService.
+type quizGradeWriteChecker interface {
+	QuizGradeWritable(ctx context.Context, assignment *models.Assignment, userID uint) error
+}
+
+// quizGradeWritable refuses a manual score change on a graded quiz whose
+// linked assignment's grade is locked (closed grading period).
+func (s *QuizService) quizGradeWritable(ctx context.Context, quiz *models.Quiz, userID uint) error {
+	if s.lifecycle == nil || quiz == nil || !quiz.IsGraded() {
+		return nil
+	}
+	checker, ok := s.lifecycle.Gradebook.(quizGradeWriteChecker)
+	if !ok {
+		return nil
+	}
+	a := s.linkedAssignment(ctx, quiz)
+	if a == nil {
+		return nil
+	}
+	return checker.QuizGradeWritable(ctx, a, userID)
 }
 
 // rescoreAttempt recomputes an attempt's score (question points + fudge

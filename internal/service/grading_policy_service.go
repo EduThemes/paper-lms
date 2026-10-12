@@ -506,20 +506,36 @@ type PostOptions struct {
 // PostGrades posts the assignment's grades per opts and returns the
 // submissions whose grades became visible (for notifications).
 func (s *GradingPolicyService) PostGrades(ctx context.Context, course *models.Course, assignment *models.Assignment, opts PostOptions) ([]models.Submission, error) {
+	released, _, err := s.setPosted(ctx, course, assignment, opts, true)
+	return released, err
+}
+
+// PostGradesWithPosted is PostGrades that also returns every existing
+// submission it newly posted, graded or not (their held-back comments
+// became visible too).
+func (s *GradingPolicyService) PostGradesWithPosted(ctx context.Context, course *models.Course, assignment *models.Assignment, opts PostOptions) (released, posted []models.Submission, err error) {
 	return s.setPosted(ctx, course, assignment, opts, true)
 }
 
 // HideGrades hides the assignment's posted grades (optionally for some
-// sections only).
+// sections only). As in Canvas, hiding switches an automatically-posted
+// assignment to a manual post policy: otherwise the next grade, comment or
+// missing-policy score would post the hidden grades straight back.
 func (s *GradingPolicyService) HideGrades(ctx context.Context, course *models.Course, assignment *models.Assignment, opts PostOptions) error {
-	_, err := s.setPosted(ctx, course, assignment, opts, false)
+	if !assignment.UsesManualPostPolicy() {
+		if err := s.repo.SetAssignmentPostPolicy(ctx, assignment.ID, "manual"); err != nil {
+			return err
+		}
+		assignment.PostPolicy = "manual"
+	}
+	_, _, err := s.setPosted(ctx, course, assignment, opts, false)
 	return err
 }
 
-func (s *GradingPolicyService) setPosted(ctx context.Context, course *models.Course, assignment *models.Assignment, opts PostOptions, post bool) ([]models.Submission, error) {
+func (s *GradingPolicyService) setPosted(ctx context.Context, course *models.Course, assignment *models.Assignment, opts PostOptions, post bool) ([]models.Submission, []models.Submission, error) {
 	d, err := s.load(ctx, course, nil, false)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	inScope := map[uint]bool{}
 	sectionFilter := map[uint]bool{}
@@ -545,12 +561,12 @@ func (s *GradingPolicyService) setPosted(ctx context.Context, course *models.Cou
 	}
 	subs, err := s.repo.ListAssignmentSubmissions(ctx, assignment.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	now := s.now()
 	have := map[uint]bool{}
 	var ids []uint
-	var released []models.Submission
+	var released, posted []models.Submission
 	for _, sub := range subs {
 		have[sub.UserID] = true
 		if !inScope[sub.UserID] {
@@ -567,8 +583,9 @@ func (s *GradingPolicyService) setPosted(ctx context.Context, course *models.Cou
 			continue
 		}
 		ids = append(ids, sub.ID)
+		sub.PostedAt = &now
+		posted = append(posted, sub)
 		if gradedOrExcused {
-			sub.PostedAt = &now
 			released = append(released, sub)
 		}
 	}
@@ -577,7 +594,7 @@ func (s *GradingPolicyService) setPosted(ctx context.Context, course *models.Cou
 		postedAt = &now
 	}
 	if err := s.repo.SetSubmissionsPostedAt(ctx, assignment.ID, ids, postedAt); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if post && !opts.GradedOnly {
 		// "Everyone": students without a submission row get a posted,
@@ -596,7 +613,7 @@ func (s *GradingPolicyService) setPosted(ctx context.Context, course *models.Cou
 			_ = s.repo.CreateSubmission(ctx, row)
 		}
 	}
-	return released, nil
+	return released, posted, nil
 }
 
 // RefreshDueStatus recomputes cached_due_date, late and missing on the
@@ -722,12 +739,17 @@ func inClosedPeriod(dd EffectiveDueDate) bool { return dd.InClosedGradingPeriod 
 
 // reapplyLateDeduction recomputes a graded submission's late deduction
 // from its entered score against dueAt and the course late policy, and
-// saves the new score when it changed. Missing-policy scores (no grader)
-// and excused work are left alone. Returns whether the row changed.
+// saves the new score when it changed. Missing-policy scores (no grader
+// and nothing submitted) and excused work are left alone; an auto-graded
+// quiz score (no grader, but submitted) follows the late policy like any
+// other grade. Returns whether the row changed.
 func (s *GradingPolicyService) reapplyLateDeduction(ctx context.Context, a *models.Assignment, sub *models.Submission, policy *models.LatePolicy,
 	dueAt *time.Time, schemeFor func() *GradingScheme) bool {
-	if s.submissions == nil || sub.Excused || sub.EnteredScore == nil || sub.Score == nil || sub.GraderID == nil {
+	if s.submissions == nil || sub.Excused || sub.EnteredScore == nil || sub.Score == nil {
 		return false
+	}
+	if sub.GraderID == nil && sub.SubmittedAt == nil {
+		return false // missing-policy score
 	}
 	deducted := LateDeductionFor(policy, a, sub, *sub.EnteredScore, dueAt)
 	current := 0.0
@@ -739,7 +761,7 @@ func (s *GradingPolicyService) reapplyLateDeduction(ctx context.Context, a *mode
 	}
 	oldGrade, oldScore := sub.Grade, sub.Score
 	final := *sub.EnteredScore - deducted
-	grade := FormatGrade(a, schemeFor(), final, "")
+	grade := FormatGrade(a, schemeFor(), final, enteredGradeOf(sub))
 	sub.Score = &final
 	sub.Grade = &grade
 	if deducted > 0 {

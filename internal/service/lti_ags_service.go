@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -13,12 +12,15 @@ import (
 )
 
 // AGSGrader writes a score into the gradebook through the normal grading
-// path. *SubmissionService satisfies it: Grade enforces the caller's
-// tenant, closed grading periods and the late policy, creates the
-// submission when the student never submitted in Paper, and fires the
-// post-grade callbacks (B082).
+// path. *SubmissionService satisfies it: GradeScore enforces the caller's
+// tenant, moderation, closed grading periods and the late policy, creates
+// the submission when the student never submitted in Paper, fires the
+// post-grade callbacks (B082) and notifies the student. A tool's score is
+// in points and is never read as a typed grade (a 7 on a percent
+// assignment is 7 points, not 7%). Grade with "" clears a grade.
 type AGSGrader interface {
 	Grade(ctx context.Context, assignmentID, userID, graderID, callerAccountID uint, postedGrade string) (*models.Submission, error)
+	GradeScore(ctx context.Context, assignmentID, userID, graderID, callerAccountID uint, points float64) (*models.Submission, error)
 }
 
 // externalToolActivityRecorder is implemented by *SubmissionService:
@@ -252,8 +254,7 @@ func (s *LTIAGSService) PostScore(ctx context.Context, lineItem *models.LTILineI
 				targetMax = *assignment.PointsPossible
 			}
 			score := *result.ResultScore * agsScoreScale(targetMax, result.ResultMaximum)
-			grade := strconv.FormatFloat(score, 'f', -1, 64)
-			if _, gErr := s.grader.Grade(ctx, assignment.ID, result.UserID, graderID, accountID, grade); gErr != nil {
+			if _, gErr := s.grader.GradeScore(ctx, assignment.ID, result.UserID, graderID, accountID, score); gErr != nil {
 				return agsErr(ErrAGSGradeRefused, gErr.Error())
 			}
 		}

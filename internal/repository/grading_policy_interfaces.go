@@ -44,8 +44,10 @@ type GradingPolicyRepository interface {
 	ListSubmissionVersions(ctx context.Context, submissionID uint) ([]models.SubmissionVersion, error)
 
 	// SetAssignmentsPostPolicy sets post_policy on every non-deleted,
-	// non-anonymous assignment of the course.
+	// non-anonymous, non-moderated assignment of the course.
 	SetAssignmentsPostPolicy(ctx context.Context, courseID uint, policy string) error
+	// SetAssignmentPostPolicy sets one assignment's post_policy.
+	SetAssignmentPostPolicy(ctx context.Context, assignmentID uint, policy string) error
 	SetCoursePostManually(ctx context.Context, courseID uint, postManually bool) error
 	SetCourseGradingScheme(ctx context.Context, courseID uint, standardID *uint, disabled bool) error
 	// SetSubmissionsPostedAt sets posted_at on the assignment's

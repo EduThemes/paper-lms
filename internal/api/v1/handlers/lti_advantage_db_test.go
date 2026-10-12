@@ -101,6 +101,13 @@ func (g *recordingGrader) Grade(_ context.Context, assignmentID, userID, graderI
 	return &models.Submission{AssignmentID: assignmentID, UserID: userID}, nil
 }
 
+func (g *recordingGrader) GradeScore(_ context.Context, assignmentID, userID, graderID, accountID uint, points float64) (*models.Submission, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.calls = append(g.calls, fmt.Sprintf("a=%d u=%d g=%d acct=%d score=%s", assignmentID, userID, graderID, accountID, strconv.FormatFloat(points, 'f', -1, 64)))
+	return &models.Submission{AssignmentID: assignmentID, UserID: userID}, nil
+}
+
 func (g *recordingGrader) last() string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -554,7 +561,7 @@ func TestLTIAdvantage_EndToEnd(t *testing.T) {
 			body: jsonReader(map[string]interface{}{"userId": strconv.Itoa(int(l.student.ID)), "scoreGiven": 15, "scoreMaximum": 20,
 				"activityProgress": "Completed", "gradingProgress": "FullyGraded", "timestamp": now.Format(time.RFC3339)})})
 		require.Equal(t, http.StatusNoContent, resp.StatusCode, body)
-		assert.Equal(t, fmt.Sprintf("a=%d u=%d g=0 acct=1 grade=15", aid, l.student.ID), l.grader.last())
+		assert.Equal(t, fmt.Sprintf("a=%d u=%d g=0 acct=1 score=15", aid, l.student.ID), l.grader.last())
 
 		resp, _ = l.do(ltiReq{method: "POST", path: itemPath + "/scores", bearer: accessToken, contentType: "application/vnd.ims.lis.v1.score+json",
 			body: jsonReader(map[string]interface{}{"userId": strconv.Itoa(int(l.student.ID)), "scoreGiven": 1, "scoreMaximum": 20,
@@ -762,7 +769,7 @@ func TestLTIAdvantage_EndToEnd(t *testing.T) {
 		resp, body = post("legacy-secret", "nonce-1", sourcedID)
 		require.Equal(t, http.StatusOK, resp.StatusCode, body)
 		assert.Contains(t, body, "<imsx_codeMajor>success</imsx_codeMajor>")
-		assert.Equal(t, fmt.Sprintf("a=%d u=%d g=0 acct=1 grade=8", a.ID, l.student.ID), l.grader.last())
+		assert.Equal(t, fmt.Sprintf("a=%d u=%d g=0 acct=1 score=8", a.ID, l.student.ID), l.grader.last())
 
 		resp, _ = post("wrong-secret", "nonce-2", sourcedID)
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
@@ -943,7 +950,7 @@ func TestLTIAdvantage_EndToEnd(t *testing.T) {
 		resp, body = lti11Outcome(l, lti11, before["lis_outcome_service_url"], "legacy2-secret", "rot-nonce-1", before["lis_result_sourcedid"], "0.5")
 		require.Equal(t, http.StatusOK, resp.StatusCode, body)
 		assert.Contains(t, body, "<imsx_codeMajor>success</imsx_codeMajor>", "a sourcedid issued before two rotations still grades")
-		assert.Equal(t, fmt.Sprintf("a=%d u=%d g=0 acct=1 grade=5", a.ID, l.student.ID), l.grader.last())
+		assert.Equal(t, fmt.Sprintf("a=%d u=%d g=0 acct=1 score=5", a.ID, l.student.ID), l.grader.last())
 	})
 }
 

@@ -581,6 +581,11 @@ func main() {
 		notificationDeliveryRepo, communicationChannelRepo, notificationPrefRepo,
 		notificationRepo, userRepo, settingsLookup,
 	)
+	// Machine-written grades (LTI score passback, quiz scores, gradebook
+	// import scores) notify the student like a grader's grade does.
+	submissionService.SetGradeNotifier(func(ctx context.Context, a *models.Assignment, sub *models.Submission) {
+		service.NotifyGradePosted(ctx, notificationDeliveryService, a, sub)
+	})
 	// services
 	customRoleService := service.NewCustomRoleService(customRoleRepo, roleOverrideRepo, enrollmentRepo)
 	onerosterService := service.NewOneRosterService(onerosterConnRepo, onerosterSyncLogRepo, userRepo, courseRepo, sectionRepo, enrollmentRepo, accountRepo, database)

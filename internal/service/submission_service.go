@@ -53,6 +53,12 @@ type SubmissionService struct {
 	policyRepo          repository.GradingPolicyRepository
 	periodResolver      CoursePeriodResolver
 
+	// gradeNotifier (nil-safe) tells a student about a grade the
+	// student can see when it was written by a machine path with no HTTP
+	// handler around it (LTI passback, quiz scores). Handler-driven
+	// grading notifies from the handler.
+	gradeNotifier GradeNotifier
+
 	// onGradedCallbacks fire (in goroutines) after a successful Grade(...).
 	// Registered via OnGraded; never invoked in tests unless explicitly wired.
 	onGradedCallbacks []SubmissionGradedCallback
@@ -97,6 +103,41 @@ func (s *SubmissionService) SetOverrideService(o *OverrideService) { s.overrideS
 // into the effective due/lock dates.
 func (s *SubmissionService) SetAccommodationService(a *AccommodationService) {
 	s.accommodationService = a
+}
+
+// GradeNotifier queues the "grade posted" notification for a submission
+// whose grade the student can see.
+type GradeNotifier func(ctx context.Context, assignment *models.Assignment, sub *models.Submission)
+
+// SetGradeNotifier wires grade notifications for machine-written grades
+// (LTI score passback, quiz scores).
+func (s *SubmissionService) SetGradeNotifier(n GradeNotifier) { s.gradeNotifier = n }
+
+// notifyGradeChange notifies the student when a machine write changed the
+// grade they can see (or released it). Re-sending an unchanged score
+// stays quiet.
+func (s *SubmissionService) notifyGradeChange(ctx context.Context, assignment *models.Assignment, sub *models.Submission, oldGrade *string, oldScore *float64, wasPosted bool) {
+	if s.gradeNotifier == nil || assignment == nil || sub == nil || sub.PostedAt == nil || (sub.Score == nil && !sub.Excused) {
+		return
+	}
+	if wasPosted && sameScore(oldScore, sub.Score) && sameString(oldGrade, sub.Grade) {
+		return
+	}
+	s.gradeNotifier(ctx, assignment, sub)
+}
+
+func sameScore(a, b *float64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return math.Abs(*a-*b) < 1e-9
+}
+
+func sameString(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 // SetGradeChangeLogger registers the grade-change audit sink.
@@ -569,8 +610,14 @@ func (s *SubmissionService) SetExcused(ctx context.Context, assignmentID, userID
 	if err != nil {
 		return nil, ErrGradeCrossTenant
 	}
+	// Moderated grading: excusing is a final-grade decision; until the
+	// moderator publishes, nothing may touch (or post) the student's
+	// submission grade.
+	if !assignment.GradesPublished() {
+		return nil, ErrModerationInProgress
+	}
 	if closed, periodTitle := s.isGradingPeriodClosedFor(ctx, assignment, userID); closed {
-		return nil, fmt.Errorf("grading period %q is closed — grades cannot be modified", periodTitle)
+		return nil, gradingPeriodClosedError(periodTitle)
 	}
 	now := time.Now()
 
@@ -712,11 +759,6 @@ func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, gra
 	postedGrade = strings.TrimSpace(postedGrade)
 	clearing := postedGrade == ""
 
-	// G021: "EX" in a grade box excuses the student (Canvas gradebook).
-	if strings.EqualFold(postedGrade, "EX") || strings.EqualFold(postedGrade, "excused") {
-		return s.SetExcused(ctx, assignmentID, userID, graderID, callerAccountID, true)
-	}
-
 	// Tenant gate — assignment lookup MUST scope to the caller's
 	// tenant. A miss = cross-tenant grading attempt = refuse.
 	assignment, aErr := s.assignmentRepo.FindByID(ctx, assignmentID, callerAccountID)
@@ -726,8 +768,14 @@ func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, gra
 
 	// Moderated grading: until the moderator publishes, graders record
 	// provisional grades (GradingUIService), never the student's grade.
+	// Checked before "EX" so excusing is gated too.
 	if !assignment.GradesPublished() {
 		return nil, ErrModerationInProgress
+	}
+
+	// G021: "EX" in a grade box excuses the student (Canvas gradebook).
+	if strings.EqualFold(postedGrade, "EX") || strings.EqualFold(postedGrade, "excused") {
+		return s.SetExcused(ctx, assignmentID, userID, graderID, callerAccountID, true)
 	}
 
 	// G023: the typed grade is read per the assignment's grading type
@@ -746,11 +794,65 @@ func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, gra
 
 	// Check if grading period is closed for this assignment
 	if closed, periodTitle := s.isGradingPeriodClosedFor(ctx, assignment, userID); closed {
-		return nil, fmt.Errorf("grading period %q is closed — grades cannot be modified", periodTitle)
+		return nil, gradingPeriodClosedError(periodTitle)
 	}
 
 	return s.gradeLoaded(ctx, assignment, userID, graderID, callerAccountID, clearing, entered, postedGrade)
 }
+
+// GradeScore writes a machine-reported score, already in points, onto the
+// student's submission: LTI score passback (AGS / LTI 1.1 Outcomes) and
+// gradebook imports. Unlike Grade it never runs the typed-grade
+// interpretation (a 7 on a percent assignment is 7 points, not 7%; a
+// pass/fail or GPA assignment takes the score as points too). The same
+// tenant, moderation and closed-grading-period gates as Grade apply, the
+// late policy is applied to the entered score, and the student is
+// notified when the visible grade changed (SetGradeNotifier).
+func (s *SubmissionService) GradeScore(ctx context.Context, assignmentID, userID, graderID, callerAccountID uint, points float64) (*models.Submission, error) {
+	if math.IsNaN(points) || math.IsInf(points, 0) {
+		return nil, fmt.Errorf("invalid score: %v", points)
+	}
+	assignment, aErr := s.assignmentRepo.FindByID(ctx, assignmentID, callerAccountID)
+	if aErr != nil {
+		return nil, ErrGradeCrossTenant
+	}
+	if !assignment.GradesPublished() {
+		return nil, ErrModerationInProgress
+	}
+	if assignment.GradingType == "not_graded" {
+		return nil, ErrNotGradable
+	}
+	if closed, periodTitle := s.isGradingPeriodClosedFor(ctx, assignment, userID); closed {
+		return nil, gradingPeriodClosedError(periodTitle)
+	}
+	var oldGrade *string
+	var oldScore *float64
+	wasPosted := false
+	if prev, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, callerAccountID); err == nil && prev != nil {
+		oldGrade, oldScore, wasPosted = prev.Grade, prev.Score, prev.PostedAt != nil
+	}
+	points = math.Round(points*1e6) / 1e6
+	sub, err := s.gradeLoaded(ctx, assignment, userID, graderID, callerAccountID, false, points, "")
+	if err != nil {
+		return nil, err
+	}
+	s.notifyGradeChange(ctx, assignment, sub, oldGrade, oldScore, wasPosted)
+	return sub, nil
+}
+
+// ErrGradingPeriodClosed is wrapped by every "grading period is closed"
+// refusal (errors.Is).
+var ErrGradingPeriodClosed = errors.New("grading period is closed")
+
+type closedPeriodError struct{ title string }
+
+func (e closedPeriodError) Error() string {
+	return fmt.Sprintf("grading period %q is closed — grades cannot be modified", e.title)
+}
+
+func (e closedPeriodError) Unwrap() error { return ErrGradingPeriodClosed }
+
+func gradingPeriodClosedError(title string) error { return closedPeriodError{title: title} }
 
 // ErrModerationInProgress is returned when a grade is posted directly to
 // a moderated assignment whose grades the moderator has not published.
@@ -758,9 +860,11 @@ var ErrModerationInProgress = errors.New("this assignment is moderated: enter a 
 
 // PublishModeratedGrade writes the moderator's selected grade onto the
 // student's submission while publishing a moderated assignment. The
-// assignment has already been loaded under the moderator's tenant.
-func (s *SubmissionService) PublishModeratedGrade(ctx context.Context, assignment *models.Assignment, userID, graderID, accountID uint, score float64) (*models.Submission, error) {
-	return s.gradeLoaded(ctx, assignment, userID, graderID, accountID, false, score, "")
+// assignment has already been loaded under the moderator's tenant. given
+// is the provisional grade as recorded ("complete", "B+"), which labels
+// point-less pass/fail and letter grades.
+func (s *SubmissionService) PublishModeratedGrade(ctx context.Context, assignment *models.Assignment, userID, graderID, accountID uint, score float64, given string) (*models.Submission, error) {
+	return s.gradeLoaded(ctx, assignment, userID, graderID, accountID, false, score, given)
 }
 
 // gradeLoaded is Grade after the tenant, moderation and grading-period
@@ -830,7 +934,7 @@ func (s *SubmissionService) gradeLoaded(ctx context.Context, assignment *models.
 	// (unless the assignment grades each student individually). Tenant is
 	// already enforced via the assignment load above.
 	if assignment.GradesGroupTogether() {
-		s.gradeGroupMembers(ctx, assignment, userID, graderID, entered, now)
+		s.gradeGroupMembers(ctx, assignment, userID, graderID, entered, given, now)
 	}
 
 	// Fire post-grade callbacks (mastery paths, etc.) asynchronously, but
@@ -980,12 +1084,13 @@ func (s *SubmissionService) createGroupSubmissions(ctx context.Context, assignme
 	}
 }
 
-// gradeGroupMembers applies the same entered grade to all other group
-// members when grading a group assignment submission. The caller has
-// already loaded the assignment under its tenant scope; the per-member
-// late deduction is computed from each member's own submission (their
+// gradeGroupMembers applies the same entered grade (and typed grade, so a
+// point-less "complete" or "B+" carries over) to all other group members
+// when grading a group assignment submission. The caller has already
+// loaded the assignment under its tenant scope; the per-member late
+// deduction is computed from each member's own submission (their
 // lateness can differ when overrides or accommodations apply).
-func (s *SubmissionService) gradeGroupMembers(ctx context.Context, assignment *models.Assignment, gradedUserID, graderID uint, entered float64, gradedAt time.Time) {
+func (s *SubmissionService) gradeGroupMembers(ctx context.Context, assignment *models.Assignment, gradedUserID, graderID uint, entered float64, given string, gradedAt time.Time) {
 	memberIDs := s.getGroupMemberIDs(ctx, gradedUserID, *assignment.GroupCategoryID)
 	// Resolve the assignment's tenant scope from its course (assignment
 	// rows don't carry account_id directly).
@@ -997,7 +1102,7 @@ func (s *SubmissionService) gradeGroupMembers(ctx context.Context, assignment *m
 		existing, _ := s.submissionRepo.FindByAssignmentAndUser(ctx, assignment.ID, memberID, tenantScope)
 		if existing != nil {
 			oldGrade, oldScore := existing.Grade, existing.Score
-			s.applyGrade(ctx, assignment, existing, entered, graderID, gradedAt)
+			s.applyGradeGiven(ctx, assignment, existing, entered, given, graderID, gradedAt)
 			if err := s.submissionRepo.Update(ctx, existing); err == nil {
 				s.recordAttemptGrade(ctx, existing)
 				s.logGradeChange(ctx, assignment, existing, graderID, oldGrade, oldScore)
@@ -1008,7 +1113,7 @@ func (s *SubmissionService) gradeGroupMembers(ctx context.Context, assignment *m
 				AssignmentID: assignment.ID,
 				UserID:       memberID,
 			}
-			s.applyGrade(ctx, assignment, memberSubmission, entered, graderID, gradedAt)
+			s.applyGradeGiven(ctx, assignment, memberSubmission, entered, given, graderID, gradedAt)
 			if err := s.submissionRepo.Create(ctx, memberSubmission); err == nil {
 				s.logGradeChange(ctx, assignment, memberSubmission, graderID, nil, nil)
 				s.fireIfPosted(memberSubmission)

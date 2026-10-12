@@ -192,7 +192,14 @@ func (r *gradingPolicyRepo) ListSubmissionVersions(ctx context.Context, submissi
 
 func (r *gradingPolicyRepo) SetAssignmentsPostPolicy(ctx context.Context, courseID uint, policy string) error {
 	return r.db.WithContext(ctx).Model(&models.Assignment{}).
-		Where("course_id = ? AND workflow_state <> ? AND anonymous_grading = ?", courseID, models.AssignmentDeleted, false).
+		Where("course_id = ? AND workflow_state <> ? AND anonymous_grading = ? AND moderated_grading = ?", courseID, models.AssignmentDeleted, false, false).
+		Update("post_policy", policy).Error
+}
+
+// SetAssignmentPostPolicy sets one assignment's post_policy. The caller
+// has loaded the assignment under its tenant.
+func (r *gradingPolicyRepo) SetAssignmentPostPolicy(ctx context.Context, assignmentID uint, policy string) error {
+	return r.db.WithContext(ctx).Model(&models.Assignment{}).Where("id = ?", assignmentID).
 		Update("post_policy", policy).Error
 }
 

@@ -194,6 +194,12 @@ func (h *AssignmentHandler) applyGradingUISettings(c *fiber.Ctx, a *models.Assig
 	if a.ModeratedGrading && a.GraderCount < 1 {
 		a.GraderCount = 2 // Canvas default
 	}
+	if a.ModeratedGrading {
+		// Canvas: moderated assignments always post manually, so neither
+		// a grader's comment nor the publish step shows grades or
+		// feedback to students before the instructor posts them.
+		a.PostPolicy = "manual"
+	}
 	if isNull("final_grader_id") {
 		a.FinalGraderID = nil
 	} else if in.FinalGraderID != nil {

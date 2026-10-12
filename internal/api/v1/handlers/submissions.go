@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"sort"
 	"strconv"
 	"strings"
@@ -562,22 +561,7 @@ func (h *SubmissionHandler) CreateSubmission(c *fiber.Ctx) error {
 // notifyGradePosted queues the "grade posted" notification for a
 // submission whose grade the student can now see.
 func (h *SubmissionHandler) notifyGradePosted(ctx context.Context, assignment *models.Assignment, sub *models.Submission) {
-	if h.notificationDeliveryService == nil || assignment == nil || sub == nil || sub.PostedAt == nil || (sub.Score == nil && !sub.Excused) {
-		return
-	}
-	assignmentName := html.EscapeString(assignment.Name)
-	subject := fmt.Sprintf("Grade posted: %s", assignment.Name)
-	var body string
-	if sub.Excused {
-		body = fmt.Sprintf("You have been excused from <strong>%s</strong>.", assignmentName)
-	} else {
-		gradeDisplay := ""
-		if sub.Grade != nil {
-			gradeDisplay = *sub.Grade
-		}
-		body = fmt.Sprintf("Your submission for <strong>%s</strong> has been graded. You received a score of <strong>%s</strong>.", assignmentName, html.EscapeString(gradeDisplay))
-	}
-	_ = h.notificationDeliveryService.QueueNotification(ctx, sub.UserID, "submission_grade", subject, body, "Assignment", assignment.ID)
+	service.NotifyGradePosted(ctx, h.notificationDeliveryService, assignment, sub)
 }
 
 // recordOutcomeResults upserts the learning-outcome results of a graded,
@@ -679,6 +663,8 @@ func (h *SubmissionHandler) updateSubmissionFor(c *fiber.Ctx, courseID, assignme
 		switch {
 		case sErr == service.ErrCustomStatusNotFound:
 			return nil, true, responses.NotFound(c, "custom grade status")
+		case errors.Is(sErr, service.ErrModerationInProgress):
+			return nil, true, responses.Error(c, fiber.StatusConflict, sErr.Error())
 		case sErr != nil:
 			return nil, true, responses.BadRequest(c, sErr.Error())
 		}
@@ -693,6 +679,8 @@ func (h *SubmissionHandler) updateSubmissionFor(c *fiber.Ctx, courseID, assignme
 		switch {
 		case exErr == service.ErrGradeCrossTenant:
 			return nil, true, responses.NotFound(c, "assignment")
+		case exErr == service.ErrModerationInProgress:
+			return nil, true, responses.Error(c, fiber.StatusConflict, exErr.Error())
 		case exErr == service.ErrSubmissionNotFound:
 			// Un-excusing a student with no submission row: nothing to
 			// change. Fall through to grading if a grade was also sent.
@@ -1053,6 +1041,11 @@ func (h *SubmissionHandler) BulkGrade(c *fiber.Ctx) error {
 			AssignmentID uint   `json:"assignment_id"`
 			UserID       uint   `json:"user_id"`
 			PostedGrade  string `json:"posted_grade"`
+			// Score is a score already in points (gradebook CSV import,
+			// curve): written as-is, never read as a typed grade (a 7 on a
+			// percent assignment stays 7 points). Takes precedence over
+			// posted_grade.
+			Score *float64 `json:"score"`
 		} `json:"grade_data"`
 	}
 
@@ -1091,7 +1084,15 @@ func (h *SubmissionHandler) BulkGrade(c *fiber.Ctx) error {
 			results = append(results, gradeResult{AssignmentID: entry.AssignmentID, UserID: entry.UserID, Error: "user not found"})
 			continue
 		}
-		sub, err := h.submissionService.Grade(c.Context(), entry.AssignmentID, entry.UserID, graderID, callerAcct, entry.PostedGrade)
+		var sub *models.Submission
+		var err error
+		if entry.Score != nil {
+			// GradeScore notifies the student itself when the visible
+			// grade changed (SetGradeNotifier).
+			sub, err = h.submissionService.GradeScore(c.Context(), entry.AssignmentID, entry.UserID, graderID, callerAcct, *entry.Score)
+		} else {
+			sub, err = h.submissionService.Grade(c.Context(), entry.AssignmentID, entry.UserID, graderID, callerAcct, entry.PostedGrade)
+		}
 		if err != nil {
 			errMsg := err.Error()
 			if err == service.ErrGradeCrossTenant {
@@ -1104,7 +1105,9 @@ func (h *SubmissionHandler) BulkGrade(c *fiber.Ctx) error {
 			})
 			continue
 		}
-		h.notifyGradePosted(c.Context(), assignmentCache[entry.AssignmentID], sub)
+		if entry.Score == nil {
+			h.notifyGradePosted(c.Context(), assignmentCache[entry.AssignmentID], sub)
+		}
 		// Curve, CSV import and bulk entry post at once on an automatic
 		// post policy, so they record outcome results like SpeedGrader.
 		h.recordOutcomeResults(c.Context(), assignmentCache[entry.AssignmentID], sub, callerAcct)
@@ -1155,7 +1158,7 @@ func (h *SubmissionHandler) PostGrades(c *fiber.Ctx) error {
 		if cErr != nil {
 			return responses.NotFound(c, "course")
 		}
-		released, pErr := h.gradingPolicy.PostGrades(c.Context(), course, assignment, opts)
+		released, posted, pErr := h.gradingPolicy.PostGradesWithPosted(c.Context(), course, assignment, opts)
 		if pErr != nil {
 			return responses.InternalError(c, "Could not post grades")
 		}
@@ -1165,17 +1168,25 @@ func (h *SubmissionHandler) PostGrades(c *fiber.Ctx) error {
 			h.recordOutcomeResults(c.Context(), assignment, &released[i], callerAccountID(c))
 			postedIDs = append(postedIDs, released[i].ID)
 		}
+		// Comments held back while the submissions were hidden become
+		// visible now: tell the students (G091).
+		for i := range posted {
+			h.notifyHeldComments(c.Context(), assignment, &posted[i])
+		}
 		h.submissionService.FirePosted(postedIDs...)
 		return c.JSON(fiber.Map{"posted": true, "posted_at": time.Now(), "posted_count": len(released)})
 	}
 
 	// Collect the submissions this call newly posts so their students
 	// can be notified once the update lands.
-	var newlyPosted []models.Submission
+	var newlyPosted, unposted []models.Submission
 	if existing, lErr := h.submissionService.ListByAssignment(c.Context(), assignment.ID, repository.PaginationParams{Page: 1, PerPage: 10000}); lErr == nil {
 		for _, s := range existing.Items {
-			if s.PostedAt == nil && (s.Score != nil || s.Excused) {
-				newlyPosted = append(newlyPosted, s)
+			if s.PostedAt == nil {
+				unposted = append(unposted, s)
+				if s.Score != nil || s.Excused {
+					newlyPosted = append(newlyPosted, s)
+				}
 			}
 		}
 	}
@@ -1191,6 +1202,10 @@ func (h *SubmissionHandler) PostGrades(c *fiber.Ctx) error {
 		h.notifyGradePosted(c.Context(), assignment, &newlyPosted[i])
 		h.recordOutcomeResults(c.Context(), assignment, &newlyPosted[i], callerAccountID(c))
 		postedIDs = append(postedIDs, newlyPosted[i].ID)
+	}
+	for i := range unposted {
+		unposted[i].PostedAt = &now
+		h.notifyHeldComments(c.Context(), assignment, &unposted[i])
 	}
 	// Mastery paths, gamification, etc. react to a grade when the student
 	// can see it: for a manual post policy, that is now.
@@ -1226,17 +1241,25 @@ func (h *SubmissionHandler) HideGrades(c *fiber.Ctx) error {
 		if cErr != nil {
 			return responses.NotFound(c, "course")
 		}
+		// Hiding switches the assignment to manual posting (Canvas), so
+		// later grades and comments stay hidden until grades are posted.
 		if err := h.gradingPolicy.HideGrades(c.Context(), course, assignment, opts); err != nil {
 			return responses.InternalError(c, "Could not hide grades")
 		}
-		return c.JSON(fiber.Map{"hidden": true})
+		return c.JSON(fiber.Map{"hidden": true, "post_policy": assignment.PostPolicy})
 	}
 
+	if !assignment.UsesManualPostPolicy() {
+		assignment.PostPolicy = "manual"
+		if err := h.assignmentRepo.Update(c.Context(), assignment); err != nil {
+			return responses.InternalError(c, "Could not hide grades")
+		}
+	}
 	if err := h.submissionService.PostGradesByAssignment(c.Context(), assignment.ID, nil); err != nil {
 		return responses.InternalError(c, "Could not hide grades")
 	}
 
-	return c.JSON(fiber.Map{"hidden": true})
+	return c.JSON(fiber.Map{"hidden": true, "post_policy": assignment.PostPolicy})
 }
 
 // parsePostOptions reads the optional post / hide body:

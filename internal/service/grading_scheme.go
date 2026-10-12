@@ -339,10 +339,12 @@ func FormatGrade(a *models.Assignment, scheme *GradingScheme, score float64, giv
 		return formatNumber(math.Round(p*100)/100) + "%"
 	case "pass_fail":
 		passed := false
-		if possible > 0 {
+		g := strings.ToLower(strings.TrimSpace(given))
+		if possible > 0 || g == "" {
+			// Canvas score_to_grade: without a typed grade (a machine
+			// score) any positive score passes.
 			passed = score > 0
 		} else {
-			g := strings.ToLower(strings.TrimSpace(given))
 			passed = g == "complete" || g == "pass"
 		}
 		if passed {

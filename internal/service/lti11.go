@@ -500,8 +500,7 @@ func (s *LTIService) HandleLTI11Outcome(ctx context.Context, toolID uint, reques
 		if perr != nil || math.IsNaN(score) || score < 0 || score > 1 {
 			return fail(200, msgRef, op, "resultScore must be a decimal between 0.0 and 1.0")
 		}
-		grade := strconv.FormatFloat(score*pts, 'f', -1, 64)
-		if _, gErr := s.adv.Grader.Grade(ctx, assignment.ID, userID, 0, accountID, grade); gErr != nil {
+		if _, gErr := s.adv.Grader.GradeScore(ctx, assignment.ID, userID, 0, accountID, score*pts); gErr != nil {
 			return fail(200, msgRef, op, gErr.Error())
 		}
 		s.recordLTI11Result(ctx, assignment.ID, userID, &score)
