@@ -1,4 +1,4 @@
--- 000082_oneroster_sync_logs_errors_bigint.down.sql
+-- 000073_oneroster_sync_logs_errors_bigint.down.sql
 
 BEGIN;
 

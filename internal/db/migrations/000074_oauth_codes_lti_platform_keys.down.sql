@@ -1,4 +1,4 @@
--- 000083_oauth_codes_lti_platform_keys.down.sql
+-- 000074_oauth_codes_lti_platform_keys.down.sql
 
 BEGIN;
 

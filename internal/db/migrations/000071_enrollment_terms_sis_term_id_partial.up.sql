@@ -1,4 +1,4 @@
--- 000091_enrollment_terms_sis_term_id_partial.up.sql
+-- 000071_enrollment_terms_sis_term_id_partial.up.sql
 --
 -- B071: idx_enrollment_terms_sis_term_id was a plain UNIQUE index on
 -- sis_term_id. The admin UI sends sis_term_id = '' for a term without a

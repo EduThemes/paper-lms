@@ -1,4 +1,4 @@
--- 000082_blueprint_content_tags.down.sql
+-- 000070_blueprint_content_tags.down.sql
 
 BEGIN;
 

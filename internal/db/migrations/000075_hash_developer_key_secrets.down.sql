@@ -1,4 +1,4 @@
--- 000084_hash_developer_key_secrets.down.sql
+-- 000075_hash_developer_key_secrets.down.sql
 --
 -- Irreversible by design: a SHA-256 digest cannot be turned back into
 -- the client secret. Rolling back the code is still safe — affected

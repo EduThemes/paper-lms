@@ -1,4 +1,4 @@
--- 000072_override_student_unique_per_assignment.up.sql
+-- 000067_override_student_unique_per_assignment.up.sql
 --
 -- idx_override_user was UNIQUE on assignment_override_students(user_id)
 -- alone, so a student could belong to only ONE assignment override in

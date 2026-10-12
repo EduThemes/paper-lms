@@ -1,4 +1,4 @@
--- 000071_submission_entered_score_post_policy.up.sql
+-- 000066_submission_entered_score_post_policy.up.sql
 --
 -- Grading parity with Canvas.
 --

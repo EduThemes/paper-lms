@@ -8,12 +8,12 @@
 -- Canvas's real_user on page views / auditors.
 --
 -- Nullable, no default: existing rows predate masquerade attribution.
+-- The index on it is built CONCURRENTLY by 000129 so audit_logs stays
+-- writable during the build.
 
 BEGIN;
 
 ALTER TABLE audit_logs
     ADD COLUMN IF NOT EXISTS real_user_id bigint;
-
-CREATE INDEX IF NOT EXISTS idx_audit_logs_real_user_id ON audit_logs (real_user_id);
 
 COMMIT;

@@ -1,4 +1,4 @@
--- 000083_oauth_codes_lti_platform_keys.up.sql
+-- 000074_oauth_codes_lti_platform_keys.up.sql
 --
 -- Integrations parity wave.
 --

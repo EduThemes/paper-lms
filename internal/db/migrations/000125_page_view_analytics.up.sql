@@ -7,11 +7,8 @@
 -- of course content viewed (asset_category: assignments, discussions,
 -- pages, ...), so:
 --   * asset_category records that kind ('' when unknown);
---   * two indexes serve the per-course and per-student aggregations.
+--   * two indexes serve the per-course and per-student aggregations. They
+--     are built CONCURRENTLY in their own single-statement migrations
+--     (000132, 000133) so page_views stays writable during the build.
 
 ALTER TABLE page_views ADD COLUMN IF NOT EXISTS asset_category text NOT NULL DEFAULT '';
-
-CREATE INDEX IF NOT EXISTS idx_page_views_ctx_created
-    ON page_views (context_type, context_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_page_views_user_ctx
-    ON page_views (user_id, context_type, context_id);

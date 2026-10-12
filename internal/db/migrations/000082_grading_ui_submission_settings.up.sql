@@ -29,8 +29,8 @@ CREATE INDEX IF NOT EXISTS idx_assignments_annotatable_attachment_id ON public.a
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS anonymous_id text;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS extra_attempts bigint;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS custom_grade_status_id bigint;
-CREATE INDEX IF NOT EXISTS idx_submissions_anonymous_id ON public.submissions USING btree (anonymous_id);
-CREATE INDEX IF NOT EXISTS idx_submissions_custom_grade_status_id ON public.submissions USING btree (custom_grade_status_id);
+-- idx_submissions_anonymous_id / idx_submissions_custom_grade_status_id are
+-- built CONCURRENTLY by 000130 / 000131 so submissions stays writable.
 
 ALTER TABLE submission_comments ADD COLUMN IF NOT EXISTS attachments text;
 ALTER TABLE submission_comments ADD COLUMN IF NOT EXISTS group_comment_id text;

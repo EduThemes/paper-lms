@@ -1,4 +1,4 @@
--- 000076_quiz_questions_bank_entry_id.up.sql
+-- 000068_quiz_questions_bank_entry_id.up.sql
 --
 -- Bank-linked question groups used to put question_bank_entries.id values
 -- straight into a submission's selected_questions list, which is resolved
