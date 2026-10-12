@@ -1013,6 +1013,33 @@ func TestLTIAdvantage_EndToEnd(t *testing.T) {
 		assert.Contains(t, body, "<imsx_codeMajor>success</imsx_codeMajor>", "a sourcedid issued before two rotations still grades")
 		assert.Equal(t, fmt.Sprintf("a=%d u=%d g=0 acct=1 score=5", a.ID, l.student.ID), l.grader.last())
 	})
+
+	t.Run("LTI 1.1 per-link launch URLs stay on the tool's domain", func(t *testing.T) {
+		lti11 := &models.ContextExternalTool{ContextType: "Course", ContextID: l.course.ID, Name: "Legacy 3", URL: "https://legacy3.example.com/lti",
+			Domain: "legacy3.example.com", ConsumerKey: "legacy3-key", SharedSecret: "legacy3-secret", WorkflowState: "active", PrivacyLevel: "public"}
+		require.NoError(t, postgres.NewContextExternalToolRepository(l.g).Create(ctx, lti11))
+		a := &models.Assignment{CourseID: l.course.ID, Name: "Legacy 3 quiz", WorkflowState: models.AssignmentPublished, Published: true}
+		pts := 10.0
+		a.PointsPossible = &pts
+		require.NoError(t, postgres.NewAssignmentRepository(l.g).Create(ctx, a))
+		attach := func(u string) int {
+			resp, _ := l.do(ltiReq{method: "PUT", path: fmt.Sprintf("/courses/%d/assignments/%d/external_tool", l.course.ID, a.ID), user: l.teacher.ID, account: 1, enrollment: "TeacherEnrollment",
+				body: jsonReader(map[string]interface{}{"tool_id": lti11.ID, "url": u})})
+			return resp.StatusCode
+		}
+		assert.Equal(t, http.StatusBadRequest, attach("https://collector.example.net/steal"), "another host")
+		assert.Equal(t, http.StatusBadRequest, attach("https://legacy3.example.com.evil.example.net/x"), "a look-alike host")
+		assert.Equal(t, http.StatusOK, attach("https://content.legacy3.example.com/unit/4"), "a subdomain of the tool's domain")
+		resp, body := l.do(ltiReq{method: "POST", path: fmt.Sprintf("/courses/%d/modules/%d/external_tool_items", l.course.ID, l.module.ID), user: l.teacher.ID, account: 1, enrollment: "TeacherEnrollment",
+			body: jsonReader(map[string]interface{}{"tool_id": lti11.ID, "title": "Elsewhere", "url": "https://collector.example.net/steal"})})
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode, body)
+
+		// A link stored before the rule existed does not get a signed launch.
+		require.NoError(t, l.g.Model(&models.LTIResourceLink{}).Where("assignment_id = ?", a.ID).Update("url", "https://collector.example.net/steal").Error)
+		resp, body = l.do(ltiReq{method: "GET", path: fmt.Sprintf("/courses/%d/external_tools/%d/launch?assignment_id=%d", l.course.ID, lti11.ID, a.ID), user: l.student.ID, account: 1, enrollment: "StudentEnrollment"})
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		assert.NotContains(t, body, "lis_result_sourcedid")
+	})
 }
 
 // lti11Outcome posts an OAuth1-signed Basic Outcomes replaceResult.

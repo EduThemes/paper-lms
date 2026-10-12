@@ -210,11 +210,35 @@ func (s *LTIService) OutcomesURL(toolID uint) string {
 	return fmt.Sprintf("%s/lti/v1p1/tools/%d/outcomes", s.APIBaseURL(), toolID)
 }
 
+// lti11LinkURLAllowed reports whether a per-link launch URL may be used
+// with an LTI 1.1 install: it must be on the tool's configured URL host
+// or its domain (or a subdomain of it), as Canvas matches tools by
+// domain.
+func lti11LinkURLAllowed(tool *models.ContextExternalTool, raw string) bool {
+	return tool != nil && sameHost(raw, tool.URL, tool.Domain)
+}
+
+// toolLinkURLAllowed is the per-link URL rule applied when a link is
+// stored: https always, and for an LTI 1.1 tool (whose signed launch
+// goes straight to the URL) the tool's own host or domain.
+func toolLinkURLAllowed(tool *models.ContextExternalTool, raw string) bool {
+	if !validToolURL(raw) {
+		return false
+	}
+	return !tool.IsLTI11() || lti11LinkURLAllowed(tool, raw)
+}
+
 // buildLTI11Launch signs an LTI 1.1 basic launch for an LTI 1.1 install.
 func (s *LTIService) buildLTI11Launch(ctx context.Context, req LTILaunchRequest, course *models.Course, tool *models.ContextExternalTool, link *models.LTIResourceLink) (*LTILaunchResult, error) {
 	launchURL := tool.URL
 	if link != nil && link.URL != "" {
 		launchURL = link.URL
+		// The signed launch carries the user's identity and an outcomes
+		// sourcedid: only the tool's own host may receive it (a link
+		// stored before this check was enforced is refused too).
+		if !lti11LinkURLAllowed(tool, launchURL) {
+			return nil, ltiInvalid("the link's launch URL is not on the tool's domain")
+		}
 	}
 	if !validToolURL(launchURL) {
 		return nil, ltiInvalid("the tool's launch URL is invalid")

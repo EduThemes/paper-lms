@@ -534,8 +534,8 @@ func (s *LTIService) AttachToolToAssignment(ctx context.Context, in AssignmentTo
 	if err != nil || tool == nil {
 		return nil, ErrLTILaunchNotFound
 	}
-	if in.URL != "" && !validToolURL(in.URL) {
-		return nil, ltiInvalid("launch URL must be an https URL")
+	if in.URL != "" && !toolLinkURLAllowed(tool, in.URL) {
+		return nil, ltiInvalid("launch URL must be an https URL on the tool's domain")
 	}
 
 	link, findErr := s.adv.Store.FindResourceLinkByAssignment(ctx, a.ID, in.AccountID)
@@ -757,8 +757,8 @@ func (s *LTIService) CreateExternalToolModuleItem(ctx context.Context, in Module
 	if err != nil || tool == nil {
 		return nil, ErrLTILaunchNotFound
 	}
-	if in.URL != "" && !validToolURL(in.URL) {
-		return nil, ltiInvalid("launch URL must be an https URL")
+	if in.URL != "" && !toolLinkURLAllowed(tool, in.URL) {
+		return nil, ltiInvalid("launch URL must be an https URL on the tool's domain")
 	}
 	title := SanitizePlainText(strings.TrimSpace(in.Title))
 	if title == "" {
