@@ -109,11 +109,11 @@ func FormulaSeed(submissionID, questionID uint) int64 {
 // Instance computes the variable values and expected answer for a seed.
 func (c FormulaConfig) Instance(seed int64) (FormulaInstance, error) {
 	if len(c.AnswerSets) > 0 {
-		idx := int(uint64(seed) % uint64(len(c.AnswerSets)))
+		idx := int(uint64(seed) % uint64(len(c.AnswerSets))) // #nosec G115 -- modulo of a non-negative length
 		set := c.AnswerSets[idx]
 		return FormulaInstance{Values: set.Variables, Expected: set.Answer, Margin: c.margin()}, nil
 	}
-	r := mathrand.New(mathrand.NewSource(seed))
+	r := mathrand.New(mathrand.NewSource(seed)) // #nosec G404 -- reproducible per-attempt values; the seed is keyed (QuizShuffleSeed)
 	values := make([]FormulaVarValue, 0, len(c.Variables))
 	env := map[string]float64{}
 	for _, v := range c.Variables {

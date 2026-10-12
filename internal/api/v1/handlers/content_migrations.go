@@ -281,7 +281,7 @@ func (h *ContentMigrationHandler) CreateMigration(c *fiber.Ctx) error {
 			root = "uploads"
 		}
 		dir := filepath.Join(root, "content_migrations", strconv.Itoa(courseID))
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return responses.InternalError(c, "Could not save uploaded file")
 		}
 		path := filepath.Join(dir, uuid.New().String()+ext)

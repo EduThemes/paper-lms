@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/md5" // #nosec G501 -- content checksum, not a security control
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -132,7 +132,7 @@ func (s *FileService) ReplaceContent(ctx context.Context, attachment *models.Att
 		return err
 	}
 	key := filepath.Join(attachment.ContextType, fmt.Sprintf("%d", attachment.ContextID), uuid.New().String(), filename)
-	hash := md5.New()
+	hash := md5.New() // #nosec G401 -- content checksum, not a security control
 	if err := s.storageBackend.Put(ctx, key, io.TeeReader(data, hash), contentType); err != nil {
 		return fmt.Errorf("could not store file: %w", err)
 	}

@@ -170,7 +170,7 @@ func (s *QuestionBankService) DrawRandomToQuiz(ctx context.Context, bank *models
 	if err != nil {
 		return 0, err
 	}
-	r := mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
+	r := mathrand.New(mathrand.NewSource(time.Now().UnixNano())) // #nosec G404 -- random question draw, not security sensitive
 	r.Shuffle(len(entries), func(i, j int) { entries[i], entries[j] = entries[j], entries[i] })
 	if count > len(entries) {
 		count = len(entries)

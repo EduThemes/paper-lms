@@ -360,7 +360,7 @@ func (s *SISImportService) StartImport(ctx context.Context, accountID, userID ui
 	}
 	if s.async {
 		id := batch.ID
-		go func() {
+		go func() { // #nosec G118 -- the import job outlives the request that queued it
 			defer recoverFromPanic("sis import")
 			_ = s.RunBatch(context.Background(), id)
 		}()

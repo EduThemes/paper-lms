@@ -174,7 +174,7 @@ func (s *ContentExportService) build(ctx context.Context, export *models.Content
 	export.Progress = 80
 	_ = s.repo.Update(ctx, export)
 
-	f, err := os.Open(zipPath)
+	f, err := os.Open(zipPath) // #nosec G304 -- path built by the exporter inside its own temp dir
 	if err != nil {
 		return fmt.Errorf("could not open package: %w", err)
 	}

@@ -103,7 +103,7 @@ func (s *GroupService) syncLeadership(ctx context.Context, group *models.Group, 
 	}
 	pick := candidates[0]
 	if category.AutoLeader == "random" {
-		pick = candidates[rand.IntN(len(candidates))] //nolint:gosec // not security sensitive
+		pick = candidates[rand.IntN(len(candidates))] // #nosec G404 -- group placement is not security sensitive
 	}
 	if s.groupRepo.SetLeader(ctx, group.ID, &pick) == nil {
 		group.LeaderID = &pick
@@ -413,7 +413,7 @@ func CheckAutoAssign(category *models.GroupCategory) error {
 func planEvenly(groups []models.Group, counts map[uint]int64, category *models.GroupCategory, students []GroupSetStudent) map[uint][]uint {
 	order := make([]GroupSetStudent, len(students))
 	copy(order, students)
-	rand.Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] }) //nolint:gosec // not security sensitive
+	rand.Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] }) // #nosec G404 -- group placement is not security sensitive
 
 	size := make(map[uint]int64, len(groups))
 	for _, g := range groups {
@@ -504,7 +504,7 @@ func planBySection(groups []models.Group, counts map[uint]int64, category *model
 		mine := groups[next : next+allot[sec]]
 		next += allot[sec]
 		members := bySec[sec]
-		rand.Shuffle(len(members), func(i, j int) { members[i], members[j] = members[j], members[i] }) //nolint:gosec // not security sensitive
+		rand.Shuffle(len(members), func(i, j int) { members[i], members[j] = members[j], members[i] }) // #nosec G404 -- group placement is not security sensitive
 		for i, st := range members {
 			id := mine[i%len(mine)].ID
 			plan[id] = append(plan[id], st.ID)

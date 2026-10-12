@@ -137,7 +137,7 @@ func (s *AccountReportService) Start(ctx context.Context, accountID, userID uint
 	}
 	if s.async {
 		id := r.ID
-		go func() {
+		go func() { // #nosec G118 -- the report job outlives the request that queued it
 			defer recoverFromPanic("account report")
 			s.run(context.Background(), id)
 		}()
