@@ -73,6 +73,10 @@ logs/
 memory/
 CLAUDE.md
 .simplicity-audit/
+# Internal engineering-history / handoff archives carved out of CLAUDE.md.
+# Same reason CLAUDE.md is ignored: they carry Claude-Code-specific notes
+# (memory [[links]], subagent/worktree workflow) the public repo shouldn't expose.
+docs/status/*-internal.md
 # Defensive: never let phase-progress notes land in the tree even if a copy
 # ends up outside .claude/ or memory/.
 project_phase_progress.md
