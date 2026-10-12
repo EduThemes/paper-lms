@@ -89,7 +89,7 @@ func (h *GradingStandardHandler) loadAccountStandard(c *fiber.Ctx) (*models.Grad
 		_ = responses.BadRequest(c, "Invalid grading standard ID")
 		return nil, true
 	}
-	gs, err := h.repo.FindByID(c.Context(), uint(id))
+	gs, err := h.repo.FindByIDInAccount(c.Context(), uint(id), callerAccountID(c))
 	if err != nil || gs == nil || gs.ContextType != "Account" || gs.ContextID != uint(accountID) || gs.WorkflowState == "deleted" {
 		_ = responses.NotFound(c, "grading standard")
 		return nil, true

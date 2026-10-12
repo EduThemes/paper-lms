@@ -348,6 +348,9 @@ func (s *GradingUIService) checkGraderSlot(ctx context.Context, a *models.Assign
 // unsubmitted placeholder when there is none (a grade or comment can be
 // left on a student who never submitted).
 func (s *GradingUIService) submissionRowFor(ctx context.Context, a *models.Assignment, userID uint) (*models.Submission, error) {
+	// AUTH-INTERNAL (accountID=0): a is an assignment the caller already
+	// loaded under its tenant and course; the row is looked up by that
+	// assignment's id, so no other tenant's submission can match.
 	if sub, err := s.submissionRepo.FindByAssignmentAndUser(ctx, a.ID, userID, 0); err == nil && sub != nil {
 		return sub, nil
 	}
@@ -796,7 +799,7 @@ func (s *GradingUIService) UpdateSubmissionStatus(ctx context.Context, a *models
 	if err := s.repo.UpdateSubmissionColumns(ctx, sub.ID, cols); err != nil {
 		return nil, err
 	}
-	return s.submissionRepo.FindByID(ctx, sub.ID, 0)
+	return s.submissionRepo.FindByID(ctx, sub.ID, courseAccountID)
 }
 
 // ---------------------------------------------------------------------
@@ -851,8 +854,10 @@ func (s *GradingUIService) CommentCopySubmissions(ctx context.Context, c *models
 		if cp.SubmissionID == sub.ID {
 			continue
 		}
-		// The copies were written by this lane for members of the same
-		// assignment; the id comes from our own row, not the request.
+		// AUTH-INTERNAL (accountID=0): the copies were written by this
+		// lane for members of the same assignment; the id comes from our
+		// own comment row, not the request, and the assignment tie below
+		// keeps the result inside sub's (tenant-checked) assignment.
 		if other, err := s.submissionRepo.FindByID(ctx, cp.SubmissionID, 0); err == nil && other != nil && other.AssignmentID == sub.AssignmentID {
 			out = append(out, other)
 		}

@@ -28,6 +28,19 @@ func (r *gradingStandardRepo) FindByID(ctx context.Context, id uint) (*models.Gr
 	return &standard, nil
 }
 
+func (r *gradingStandardRepo) FindByIDInAccount(ctx context.Context, id, accountID uint) (*models.GradingStandard, error) {
+	var standard models.GradingStandard
+	err := r.db.WithContext(ctx).
+		Where("id = ?", id).
+		Where(`(context_type = 'Account' AND context_id = ?)
+			OR (context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))`, accountID, accountID).
+		First(&standard).Error
+	if err != nil {
+		return nil, err
+	}
+	return &standard, nil
+}
+
 func (r *gradingStandardRepo) Update(ctx context.Context, standard *models.GradingStandard) error {
 	return r.db.WithContext(ctx).Save(standard).Error
 }

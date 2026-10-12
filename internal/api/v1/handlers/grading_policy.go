@@ -374,7 +374,7 @@ func (h *GradingPolicyHandler) SetCourseScheme(c *fiber.Ctx) error {
 			if err := json.Unmarshal(input.GradingStandardID, &id); err != nil || id == 0 {
 				return responses.BadRequest(c, "grading_standard_id must be a scheme id or null")
 			}
-			gs, err := h.standards.FindByID(c.Context(), id)
+			gs, err := h.standards.FindByIDInAccount(c.Context(), id, course.AccountID)
 			if err != nil || gs == nil || gs.WorkflowState == "deleted" || !service.StandardVisibleToCourse(gs, course) {
 				return responses.NotFound(c, "grading scheme")
 			}

@@ -879,7 +879,7 @@ func (s *GradingPolicyService) SchemeUsableByCourse(ctx context.Context, courseI
 	if err != nil || course == nil {
 		return false
 	}
-	gs, err := s.standards.FindByID(ctx, standardID)
+	gs, err := s.standards.FindByIDInAccount(ctx, standardID, course.AccountID)
 	return err == nil && gs != nil && gs.WorkflowState != "deleted" && StandardVisibleToCourse(gs, course)
 }
 
