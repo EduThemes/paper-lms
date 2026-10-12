@@ -51,6 +51,34 @@ func filterGradebookForSections(c *fiber.Ctx, gb *service.GradebookEntry) {
 	}
 }
 
+// clampPostSections narrows a post / hide grades request to a
+// section-limited caller's sections: no section_ids means "my sections"
+// (not "every section"), and naming a section outside theirs is refused
+// (ok=false; answer 404). Callers who are not section-limited pass
+// through unchanged.
+func clampPostSections(c *fiber.Ctx, ids []uint) ([]uint, bool) {
+	visible, limited := middleware.VisibleSectionIDs(c)
+	if !limited {
+		return ids, true
+	}
+	if len(visible) == 0 {
+		return nil, false
+	}
+	if len(ids) == 0 {
+		return append([]uint(nil), visible...), true
+	}
+	allowed := make(map[uint]bool, len(visible))
+	for _, v := range visible {
+		allowed[v] = true
+	}
+	for _, id := range ids {
+		if !allowed[id] {
+			return nil, false
+		}
+	}
+	return ids, true
+}
+
 // filterSubmissionsForSections keeps only the submissions of users a
 // section-limited caller may see.
 func filterSubmissionsForSections(c *fiber.Ctx, subs []models.Submission) []models.Submission {

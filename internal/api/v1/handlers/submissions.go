@@ -1173,6 +1173,11 @@ func (h *SubmissionHandler) PostGrades(c *fiber.Ctx) error {
 		if !ok {
 			return responses.BadRequest(c, "Invalid input")
 		}
+		// G107: a section-limited grader posts / hides only their own
+		// sections (no section_ids must not mean "every section").
+		if opts.SectionIDs, ok = clampPostSections(c, opts.SectionIDs); !ok {
+			return responses.NotFound(c, "section")
+		}
 		course, cErr := h.gradingPolicy.Repo().FindCourse(c.Context(), assignment.CourseID)
 		if cErr != nil {
 			return responses.NotFound(c, "course")
@@ -1194,6 +1199,12 @@ func (h *SubmissionHandler) PostGrades(c *fiber.Ctx) error {
 		}
 		h.submissionService.FirePosted(postedIDs...)
 		return c.JSON(fiber.Map{"posted": true, "posted_at": time.Now(), "posted_count": len(released)})
+	}
+
+	// Without the grading-policy service posting is all-or-nothing, which
+	// a section-limited grader may not do (G107).
+	if _, limited := middleware.VisibleSectionIDs(c); limited {
+		return responses.NotFound(c, "section")
 	}
 
 	// Collect the submissions this call newly posts so their students
@@ -1256,6 +1267,11 @@ func (h *SubmissionHandler) HideGrades(c *fiber.Ctx) error {
 		if !ok {
 			return responses.BadRequest(c, "Invalid input")
 		}
+		// G107: a section-limited grader posts / hides only their own
+		// sections (no section_ids must not mean "every section").
+		if opts.SectionIDs, ok = clampPostSections(c, opts.SectionIDs); !ok {
+			return responses.NotFound(c, "section")
+		}
 		course, cErr := h.gradingPolicy.Repo().FindCourse(c.Context(), assignment.CourseID)
 		if cErr != nil {
 			return responses.NotFound(c, "course")
@@ -1268,6 +1284,9 @@ func (h *SubmissionHandler) HideGrades(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"hidden": true, "post_policy": assignment.PostPolicy})
 	}
 
+	if _, limited := middleware.VisibleSectionIDs(c); limited { // G107: see PostGrades
+		return responses.NotFound(c, "section")
+	}
 	if !assignment.UsesManualPostPolicy() {
 		assignment.PostPolicy = "manual"
 		if err := h.assignmentRepo.Update(c.Context(), assignment); err != nil {

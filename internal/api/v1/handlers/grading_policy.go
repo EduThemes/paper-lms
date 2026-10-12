@@ -13,6 +13,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -132,6 +133,17 @@ func (h *GradingPolicyHandler) CourseGrades(c *fiber.Ctx) error {
 			grades.Students[i].Unassigned = nil
 		}
 	}
+	// G107: a section-limited grader sees only their sections' students
+	// (?user_ids= naming others included).
+	if _, limited := middleware.SectionVisibleUsers(c); limited {
+		kept := grades.Students[:0]
+		for _, s := range grades.Students {
+			if sectionVisibleUser(c, s.UserID) {
+				kept = append(kept, s)
+			}
+		}
+		grades.Students = kept
+	}
 	return c.JSON(grades)
 }
 
@@ -157,6 +169,9 @@ func (h *GradingPolicyHandler) EffectiveDueDates(c *fiber.Ctx) error {
 		}
 		m := map[string]service.EffectiveDueDate{}
 		for uid, d := range per {
+			if !sectionVisibleUser(c, uid) { // G107
+				continue
+			}
 			m[strconv.FormatUint(uint64(uid), 10)] = d
 		}
 		out[strconv.FormatUint(uint64(aid), 10)] = m

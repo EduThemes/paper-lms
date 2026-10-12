@@ -547,7 +547,9 @@ func (s *GradingPolicyService) setPosted(ctx context.Context, course *models.Cou
 			continue
 		}
 		if len(sectionFilter) > 0 {
-			match := false
+			// Section 0 is the course's default (section-less)
+			// enrollments, as in middleware.VisibleSectionIDs.
+			match := len(d.sections[uid]) == 0 && sectionFilter[0]
 			for _, sid := range d.sections[uid] {
 				if sectionFilter[sid] {
 					match = true

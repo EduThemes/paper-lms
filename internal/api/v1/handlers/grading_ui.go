@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -65,7 +66,9 @@ func (h *GradingUIHandler) anonymousSubmission(c *fiber.Ctx) (uint, *models.Assi
 		return 0, nil, nil, true
 	}
 	sub, err := h.svc.ResolveAnonymousID(c.Context(), assignment.ID, c.Params("anonymous_id"), callerAccountID(c))
-	if err != nil {
+	// G107: the anonymous id must not reach past a section-limited
+	// grader's sections (the course gate only checks user-id params).
+	if err != nil || !sectionVisibleUser(c, sub.UserID) {
 		_ = responses.NotFound(c, "submission")
 		return 0, nil, nil, true
 	}
@@ -554,13 +557,14 @@ func (h *GradingUIHandler) GetAnnotatableDocument(c *fiber.Ctx) error {
 func (h *GradingUIHandler) studentFromBody(c *fiber.Ctx, courseID uint, assignment *models.Assignment, userID uint, anonymousID string) (uint, bool) {
 	if anonymousID != "" {
 		sub, err := h.svc.ResolveAnonymousID(c.Context(), assignment.ID, anonymousID, callerAccountID(c))
-		if err != nil {
+		if err != nil || !sectionVisibleUser(c, sub.UserID) { // G107
 			_ = responses.NotFound(c, "submission")
 			return 0, true
 		}
 		return sub.UserID, false
 	}
-	if userID == 0 || !h.subs.submissionService.IsCourseStudent(c.Context(), courseID, userID, callerAccountID(c)) {
+	if userID == 0 || !h.subs.submissionService.IsCourseStudent(c.Context(), courseID, userID, callerAccountID(c)) ||
+		!sectionVisibleUser(c, userID) { // G107
 		_ = responses.NotFound(c, "user")
 		return 0, true
 	}
@@ -696,7 +700,7 @@ func (h *GradingUIHandler) GetModeration(c *fiber.Ctx) error {
 	studentJSON := make([]fiber.Map, 0, len(students))
 	for i, s := range students {
 		row := rows[s.UserID]
-		if row == nil {
+		if row == nil || !sectionVisibleUser(c, s.UserID) { // G107
 			continue
 		}
 		entry := fiber.Map{"submission_id": row.ID}
@@ -941,7 +945,8 @@ func (h *GradingUIHandler) AssignPeerReview(c *fiber.Ctx) error {
 	}
 	acct := callerAccountID(c)
 	if !h.subs.submissionService.IsCourseStudent(c.Context(), courseID, input.ReviewerID, acct) ||
-		!h.subs.submissionService.IsCourseStudent(c.Context(), courseID, input.RevieweeID, acct) {
+		!h.subs.submissionService.IsCourseStudent(c.Context(), courseID, input.RevieweeID, acct) ||
+		!sectionVisibleUser(c, input.ReviewerID) || !sectionVisibleUser(c, input.RevieweeID) { // G107
 		return responses.NotFound(c, "user")
 	}
 	pr, err := h.svc.AssignPeerReview(c.Context(), assignment, input.ReviewerID, input.RevieweeID)
@@ -965,6 +970,18 @@ func (h *GradingUIHandler) DeletePeerReview(c *fiber.Ctx) error {
 	reviewID, err := c.ParamsInt("review_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid review ID")
+	}
+	// G107: a section-limited grader manages only reviews between their
+	// sections' students.
+	if _, limited := middleware.SectionVisibleUsers(c); limited {
+		if h.peerReviewService == nil {
+			return responses.NotFound(c, "peer review")
+		}
+		pr, prErr := h.peerReviewService.GetByID(c.Context(), uint(reviewID), callerAccountID(c))
+		if prErr != nil || pr == nil || pr.AssignmentID != assignment.ID ||
+			!sectionVisibleUser(c, pr.ReviewerID) || !sectionVisibleUser(c, pr.RevieweeID) {
+			return responses.NotFound(c, "peer review")
+		}
 	}
 	if err := h.svc.DeletePeerReview(c.Context(), assignment, uint(reviewID), callerAccountID(c)); err != nil {
 		return responses.NotFound(c, "peer review")

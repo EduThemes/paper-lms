@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/service"
@@ -172,6 +173,17 @@ func (h *SpeedGraderHandler) GetSpeedGraderData(c *fiber.Ctx) error {
 	callerID, _ := getUserID(c)
 	if callerID != 0 && h.auditService != nil {
 		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "speedgrader_bulk", "assignments", uint(assignmentID), c.IP(), c.Get("User-Agent"))
+	}
+
+	// G107: a section-limited grader sees only their sections' students.
+	if _, limited := middleware.SectionVisibleUsers(c); limited {
+		kept := data.Students[:0]
+		for _, s := range data.Students {
+			if sectionVisibleUser(c, s.UserID) {
+				kept = append(kept, s)
+			}
+		}
+		data.Students = kept
 	}
 
 	assignment := data.Assignment

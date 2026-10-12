@@ -113,6 +113,11 @@ func (h *PeerReviewHandler) ListPeerReviews(c *fiber.Ctx) error {
 	out := make([]fiber.Map, 0, len(reviews))
 	for i := range reviews {
 		r := &reviews[i]
+		// G107: a section-limited grader sees reviews between their
+		// sections' students only.
+		if !sectionVisibleUser(c, r.ReviewerID) || !sectionVisibleUser(c, r.RevieweeID) {
+			continue
+		}
 		for _, id := range []uint{r.ReviewerID, r.RevieweeID} {
 			if _, ok := names[id]; !ok {
 				names[id] = h.userName(c, id)
