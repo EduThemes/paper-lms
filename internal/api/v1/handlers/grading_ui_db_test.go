@@ -629,3 +629,42 @@ func TestGradingUI_AssignmentSettings(t *testing.T) {
 	require.Equal(t, http.StatusOK, code, body)
 	assert.True(t, strings.Contains(body, `"allowed_attempts":null`), body)
 }
+
+// The gradebook's grading-period filter lists the course term's periods
+// only (the set the grade calculator and overrides use), not every period
+// in the account; is_closed honours the close date.
+func TestGradingUI_CourseGradingPeriodsFromTerm(t *testing.T) {
+	e := newGUEnv(t)
+	policy := service.NewGradingPolicyService(postgres.NewGradingPolicyRepository(e.g), postgres.NewGradingStandardRepository(e.g), e.subSvc)
+	e.subSvc.SetPeriodResolver(policy)
+	now := time.Now()
+	mine := &models.GradingPeriodGroup{AccountID: 1, Title: "This year", WorkflowState: "active"}
+	other := &models.GradingPeriodGroup{AccountID: 1, Title: "Other term", WorkflowState: "active"}
+	require.NoError(t, e.g.Create(mine).Error)
+	require.NoError(t, e.g.Create(other).Error)
+	closed := now.Add(-24 * time.Hour)
+	q1 := &models.GradingPeriod{GradingPeriodGroupID: mine.ID, Title: "Q1", StartDate: now.AddDate(0, -3, 0), EndDate: now.AddDate(0, -2, 0),
+		CloseDate: &closed, WorkflowState: "active"}
+	q2 := &models.GradingPeriod{GradingPeriodGroupID: mine.ID, Title: "Q2", StartDate: now.AddDate(0, -2, 0), EndDate: now.AddDate(0, 1, 0), WorkflowState: "active"}
+	foreign := &models.GradingPeriod{GradingPeriodGroupID: other.ID, Title: "Other Q1", StartDate: now.AddDate(0, -1, 0), EndDate: now.AddDate(0, 1, 0), WorkflowState: "active"}
+	for _, p := range []*models.GradingPeriod{q1, q2, foreign} {
+		require.NoError(t, e.g.Create(p).Error)
+	}
+	term := &models.EnrollmentTerm{AccountID: 1, Name: "2026", GradingPeriodGroupID: &mine.ID, WorkflowState: "active"}
+	require.NoError(t, e.g.Create(term).Error)
+	require.NoError(t, e.g.Model(&models.Course{}).Where("id = ?", guCourse).Update("enrollment_term_id", term.ID).Error)
+
+	code, body := guDo(t, e.teacher(), http.MethodGet, fmt.Sprintf("/courses/%d/grading_periods", guCourse), nil)
+	require.Equal(t, http.StatusOK, code, body)
+	var periods []map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(body), &periods))
+	require.Len(t, periods, 2, "only the course term's periods")
+	assert.Equal(t, "Q1", periods[0]["title"])
+	assert.Equal(t, true, periods[0]["is_closed"], "past close_date")
+	assert.Equal(t, "Q2", periods[1]["title"])
+	assert.Equal(t, false, periods[1]["is_closed"])
+
+	// Another tenant's course is a 404.
+	code, _ = guDo(t, e.teacher(), http.MethodGet, fmt.Sprintf("/courses/%d/grading_periods", guCourse2), nil)
+	assert.Equal(t, http.StatusNotFound, code)
+}

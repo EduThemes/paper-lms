@@ -438,3 +438,53 @@ func mustCourse(t *testing.T, g *gorm.DB, id uint) *models.Course {
 	require.NoError(t, g.First(&c, id).Error)
 	return &c
 }
+
+// hide_final_grades hides the course total, grades and overrides from
+// students on GET /grades (staff still see them); with "display totals for
+// all grading periods" off the course-level override is withheld too.
+func TestGradingPolicy_StudentTotalsVisibility(t *testing.T) {
+	f := newGPFixture(t)
+	require.NoError(t, f.g.Create(&models.CourseScoreOverride{CourseID: gpCourse, UserID: gpStudentA, OverrideScore: 88, UpdatedByID: gpTeacher}).Error)
+	url := fmt.Sprintf("/courses/%d/grades", gpCourse)
+	studentView := func() map[string]interface{} {
+		resp := testutil.MakeRequest(f.app(gpStudentA, 1, "StudentEnrollment"), http.MethodGet, url, nil)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := testutil.ParseJSONMap(resp)
+		require.NoError(t, err)
+		return gpStudent(t, body, gpStudentA)
+	}
+	me := studentView()
+	assert.NotNil(t, me["current_score"])
+	assert.Equal(t, 88.0, me["override_score"])
+
+	require.NoError(t, f.g.Model(&models.Course{}).Where("id = ?", gpCourse).Update("hide_final_grades", true).Error)
+	me = studentView()
+	assert.Nil(t, me["current_score"], "hide_final_grades")
+	assert.Nil(t, me["final_score"])
+	assert.Nil(t, me["override_score"])
+	assert.Empty(t, me["current_grade"])
+	resp := testutil.MakeRequest(f.app(gpTeacher, 1, "TeacherEnrollment"), http.MethodGet, url, nil)
+	body, err := testutil.ParseJSONMap(resp)
+	require.NoError(t, err)
+	staff := gpStudent(t, body, gpStudentA)
+	assert.NotNil(t, staff["current_score"], "staff still see totals")
+	assert.Equal(t, 88.0, staff["override_score"])
+
+	// Grading periods without "display totals for all grading periods":
+	// no course-level total or override for the student.
+	require.NoError(t, f.g.Model(&models.Course{}).Where("id = ?", gpCourse).Update("hide_final_grades", false).Error)
+	now := time.Now()
+	gpg := &models.GradingPeriodGroup{AccountID: 1, Title: "Year", WorkflowState: "active"}
+	require.NoError(t, f.g.Create(gpg).Error)
+	require.NoError(t, f.g.Create(&models.GradingPeriod{GradingPeriodGroupID: gpg.ID, Title: "Term", StartDate: now.AddDate(0, -1, 0),
+		EndDate: now.AddDate(0, 1, 0), WorkflowState: "active"}).Error)
+	term := &models.EnrollmentTerm{AccountID: 1, Name: "2026", GradingPeriodGroupID: &gpg.ID, WorkflowState: "active"}
+	require.NoError(t, f.g.Create(term).Error)
+	require.NoError(t, f.g.Model(&models.Course{}).Where("id = ?", gpCourse).Update("enrollment_term_id", term.ID).Error)
+	me = studentView()
+	assert.Nil(t, me["current_score"])
+	assert.Nil(t, me["override_score"], "course-level override withheld with all-periods totals off")
+	periods, _ := me["grading_periods"].([]interface{})
+	require.Len(t, periods, 1)
+	assert.NotNil(t, periods[0].(map[string]interface{})["current_score"], "per-period totals stay")
+}

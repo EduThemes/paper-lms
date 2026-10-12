@@ -97,8 +97,9 @@ type learnerFixture struct {
 	g     *gorm.DB
 	app   *fiber.App
 	store storage.Backend
-	obs   *service.ObserverService
-	alert *service.ObserverAlertService
+	obs    *service.ObserverService
+	alert  *service.ObserverAlertService
+	policy *service.GradingPolicyService
 }
 
 func newLearnerFixture(t *testing.T) *learnerFixture {
@@ -195,7 +196,7 @@ func newLearnerFixture(t *testing.T) *learnerFixture {
 	app.Post("/users/self/avatar", h.UploadAvatar)
 	app.Get("/users/:id/profile_card", h.GetProfileCard)
 	app.Get("/users/:id/avatar", h.GetAvatar)
-	return &learnerFixture{t: t, g: g, app: app, store: store, obs: obs, alert: alerts}
+	return &learnerFixture{t: t, g: g, app: app, store: store, obs: obs, alert: alerts, policy: policy}
 }
 
 func (f *learnerFixture) do(method, path string, user, account uint, body any, enrollment string) (*http.Response, []byte) {
@@ -680,4 +681,145 @@ func TestLearnerProfile(t *testing.T) {
 	assert.Equal(t, png, data)
 	resp, _ = f.do("GET", fmt.Sprintf("/users/%d/avatar", lnStudent), lnOtherTen, 2, nil, "")
 	assert.Equal(t, 404, resp.StatusCode, "another tenant")
+}
+
+// The Grades page total is the gradebook engine's total: never_drop items
+// stay in the drop decision, group weights over 100 are not normalised
+// (Canvas), an assignment not assigned to the student is left out (not
+// listed, not missing, not 0), a pending_review quiz's partial score does
+// not count yet, and the instructor's final grade override is returned.
+// The observer overview and course-grade alerts read the same grade.
+func TestLearnerGradeSummary_MatchesGradebookEngine(t *testing.T) {
+	f := newLearnerFixture(t)
+	ctx := context.Background()
+	require.NoError(t, f.g.Model(&models.Course{}).Where("id = ?", lnCourse).Update("apply_group_weights", true).Error)
+	hw := &models.AssignmentGroup{CourseID: lnCourse, Name: "Homework", GroupWeight: 70, WorkflowState: "available"}
+	exams := &models.AssignmentGroup{CourseID: lnCourse, Name: "Tests", GroupWeight: 50, WorkflowState: "available"}
+	require.NoError(t, f.g.Create(hw).Error)
+	require.NoError(t, f.g.Create(exams).Error)
+	keep := f.assignment(lnCourse, "Keep", nil, 10, &hw.ID)
+	low := f.assignment(lnCourse, "Low", nil, 10, &hw.ID)
+	high := f.assignment(lnCourse, "High", nil, 10, &hw.ID)
+	require.NoError(t, f.g.Model(hw).Update("rules", fmt.Sprintf(`{"drop_lowest":1,"never_drop":[%d]}`, keep.ID)).Error)
+	f.grade(keep.ID, lnStudent, 2, true)
+	f.grade(low.ID, lnStudent, 3, true)
+	f.grade(high.ID, lnStudent, 9, true)
+	exam := f.assignment(lnCourse, "Exam", nil, 10, &exams.ID)
+	f.grade(exam.ID, lnStudent, 8, true)
+	// Pending review: a partial auto-graded score, posted.
+	quiz := f.assignment(lnCourse, "Essay quiz", nil, 10, &exams.ID)
+	pending := f.grade(quiz.ID, lnStudent, 4, true)
+	require.NoError(t, f.g.Model(pending).Update("workflow_state", models.SubmissionPendingReview).Error)
+	// Only visible to overrides and none applies to the student; past due.
+	makeup := f.assignment(lnCourse, "Make-up", ptrTime(time.Now().Add(-48*time.Hour)), 10, &exams.ID)
+	require.NoError(t, f.g.Model(makeup).Update("only_visible_to_overrides", true).Error)
+	require.NoError(t, f.g.Create(&models.CourseScoreOverride{CourseID: lnCourse, UserID: lnStudent, OverrideScore: 91, UpdatedByID: lnTeacher}).Error)
+
+	course := &models.Course{}
+	require.NoError(t, f.g.First(course, lnCourse).Error)
+	cg, err := f.policy.CourseGrades(ctx, course, service.CourseGradesOptions{UserIDs: []uint{lnStudent}, PostedOnly: true})
+	require.NoError(t, err)
+	require.Len(t, cg.Students, 1)
+	engine := cg.Students[0]
+	// Homework: never-drop Keep 2/10 stays, so dropping Low (keeping
+	// High) is best: 11/20 = 55%. Tests: Exam 8/10 (the pending quiz is
+	// not graded yet) = 80%. Weights 70 + 50 = 120 are used as is:
+	// 0.55*70 + 0.80*50 = 78.5.
+	require.NotNil(t, engine.CurrentScore)
+	assert.InDelta(t, 78.5, *engine.CurrentScore, 0.001)
+	// Final counts the pending quiz as 0: Tests 8/20 -> 38.5 + 20 = 58.5.
+	require.NotNil(t, engine.FinalScore)
+	assert.InDelta(t, 58.5, *engine.FinalScore, 0.001)
+
+	path := fmt.Sprintf("/courses/%d/grade_summary", lnCourse)
+	resp, data := f.do("GET", path, lnStudent, 1, nil, "StudentEnrollment")
+	require.Equal(t, 200, resp.StatusCode, string(data))
+	sum := decodeLearnerMap(t, data)
+	totals := sum["totals"].(map[string]any)
+	assert.InDelta(t, *engine.CurrentScore, totals["current_score"].(float64), 0.001, "summary == gradebook engine")
+	assert.InDelta(t, *engine.FinalScore, totals["final_score"].(float64), 0.001)
+	assert.Equal(t, 91.0, totals["override_score"], "final grade override returned")
+	assert.NotEmpty(t, totals["override_grade"])
+	byName := map[string]map[string]any{}
+	for _, a := range sum["assignments"].([]any) {
+		m := a.(map[string]any)
+		byName[m["name"].(string)] = m
+	}
+	assert.NotContains(t, byName, "Make-up", "unassigned work is not listed")
+	assert.Equal(t, true, byName["Low"]["dropped"])
+	assert.Equal(t, false, byName["Keep"]["dropped"], "never_drop")
+	assert.Equal(t, "pending_review", byName["Essay quiz"]["status"])
+	assert.Equal(t, true, byName["Essay quiz"]["pending_review"])
+
+	// ...and the unassigned make-up is not missing work either.
+	resp, data = f.do("GET", "/users/self/missing_submissions", lnStudent, 1, nil, "")
+	require.Equal(t, 200, resp.StatusCode, string(data))
+	for _, m := range decodeList(t, data) {
+		assert.NotEqual(t, float64(makeup.ID), m["id"], "unassigned work never missing")
+	}
+
+	// The observer course-grade alert sees the same (overridden) grade.
+	resp, data = f.do("POST", "/observer_alert_thresholds", lnParent, 1, map[string]any{
+		"threshold": map[string]any{"user_id": lnStudent, "alert_type": models.ObserverAlertCourseGradeHigh, "threshold": 90},
+	}, "")
+	require.Equal(t, 201, resp.StatusCode, string(data))
+	require.NoError(t, f.alert.EvaluateAll(ctx))
+	_, data = f.do("GET", "/users/self/observer_alerts", lnParent, 1, nil, "")
+	alerts := decodeList(t, data)
+	require.Len(t, alerts, 1, "the 91% override crosses the 90% threshold")
+	assert.Contains(t, alerts[0]["title"], "91.0%")
+
+	// The observer overview shows the same number.
+	f.obs.SetOverviewDeps(postgres.NewAssignmentRepository(f.g), postgres.NewSubmissionRepository(f.g), postgres.NewQuizRepository(f.g),
+		postgres.NewAnnouncementRepository(f.g), postgres.NewPageRepository(f.g))
+	overview, err := f.obs.GetChildOverview(ctx, lnParent, lnStudent)
+	require.NoError(t, err)
+	found := false
+	for _, c := range overview.Courses {
+		if c.CourseID == lnCourse {
+			found = true
+			require.NotNil(t, c.CurrentGrade)
+			assert.InDelta(t, 91.0, *c.CurrentGrade, 0.001)
+		}
+	}
+	assert.True(t, found)
+}
+
+// Missing status follows the gradebook: an accommodation's extra days
+// move the due date, and a teacher's manual "missing" status wins.
+func TestLearnerMissing_AccommodationAndManualStatus(t *testing.T) {
+	f := newLearnerFixture(t)
+	now := time.Now()
+	extended := f.assignment(lnCourse, "Extended", ptrTime(now.Add(-24*time.Hour)), 10, nil)
+	marked := f.assignment(lnCourse, "Marked", ptrTime(now.Add(72*time.Hour)), 10, nil)
+	days := 3
+	cid := lnCourse
+	require.NoError(t, f.g.Create(&models.StudentAccommodation{UserID: lnStudent, CourseID: &cid, AccommodationType: "modified_due_dates",
+		ExtraDays: &days, Status: "active", CreatedByID: lnTeacher, EffectiveFrom: now.Add(-time.Hour)}).Error)
+	status := models.LatePolicyStatusMissing
+	require.NoError(t, f.g.Create(&models.Submission{AssignmentID: marked.ID, UserID: lnStudent, WorkflowState: models.SubmissionUnsubmitted,
+		LatePolicyStatus: &status}).Error)
+
+	resp, data := f.do("GET", "/users/self/missing_submissions", lnStudent, 1, nil, "")
+	require.Equal(t, 200, resp.StatusCode, string(data))
+	ids := map[float64]bool{}
+	for _, m := range decodeList(t, data) {
+		ids[m["id"].(float64)] = true
+	}
+	assert.False(t, ids[float64(extended.ID)], "due date + 3 extra days has not passed")
+	assert.True(t, ids[float64(marked.ID)], "manual missing status")
+
+	_, data = f.do("GET", fmt.Sprintf("/courses/%d/grade_summary", lnCourse), lnStudent, 1, nil, "StudentEnrollment")
+	seen := false
+	for _, a := range decodeLearnerMap(t, data)["assignments"].([]any) {
+		m := a.(map[string]any)
+		if m["name"] == "Extended" {
+			seen = true
+			assert.Equal(t, false, m["missing"])
+			due, err := time.Parse(time.RFC3339, m["due_at"].(string))
+			require.NoError(t, err)
+			assert.True(t, due.After(now), "the Grades page shows the accommodated due date")
+		}
+	}
+	assert.True(t, seen)
 }
