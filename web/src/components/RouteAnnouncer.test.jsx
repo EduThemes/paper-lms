@@ -4,6 +4,7 @@ import { render, screen, act, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, Link } from 'react-router-dom';
 import RouteAnnouncer from './RouteAnnouncer';
 import { titleForPath, ROUTE_TITLES } from '../utils/routeTitles';
+import appSource from '../App.jsx?raw';
 
 afterEach(() => vi.useRealTimers());
 
@@ -17,6 +18,16 @@ describe('route titles (G159)', () => {
     expect(titleForPath('/nope/nothing')).toBe('Page not found');
     const patterns = ROUTE_TITLES.map(([p]) => p);
     expect(new Set(patterns).size).toBe(patterns.length);
+  });
+
+  test('every route in App.jsx has a title', () => {
+    // Nested routes sit under /courses/:courseId; "*" routes are the
+    // not-found catch-alls.
+    const paths = [...appSource.matchAll(/path="([^"]+)"/g)]
+      .map(([, p]) => (p.startsWith('/') ? p : `/courses/:courseId/${p}`))
+      .filter((p) => !p.endsWith('*'));
+    const untitled = paths.filter((p) => titleForPath(p.replace(/:\w+/g, '7')) === 'Page not found');
+    expect(untitled).toEqual([]);
   });
 });
 
