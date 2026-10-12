@@ -1,4 +1,4 @@
--- 000096_hash_developer_key_secrets.up.sql
+-- 000075_hash_developer_key_secrets.up.sql
 --
 -- B191: OAuth2 client secrets were stored in plaintext in
 -- developer_keys.client_secret. The secret is only ever compared (it is

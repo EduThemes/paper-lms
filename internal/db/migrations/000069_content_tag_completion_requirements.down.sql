@@ -1,4 +1,4 @@
--- 000080_content_tag_completion_requirements.down.sql
+-- 000069_content_tag_completion_requirements.down.sql
 
 BEGIN;
 

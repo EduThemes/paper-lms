@@ -1,4 +1,4 @@
--- 000082_blueprint_content_tags.up.sql
+-- 000070_blueprint_content_tags.up.sql
 --
 -- Blueprint sync identity map (Canvas MasterContentTag/ChildContentTag).
 -- One row per (template, child course, content type, source id) records

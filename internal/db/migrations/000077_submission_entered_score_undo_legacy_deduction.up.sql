@@ -14,10 +14,16 @@
 -- carrying the 000066 backfill (entered_score = score, no points_deducted).
 -- Rows where the old penalty reached 100% or hit the minimum-percent floor
 -- can't be inverted and are left as they are.
+--
+-- entered_grade is only rewritten for points-graded assignments, where the
+-- grade string is the number itself. For letter_grade / percent / pass_fail /
+-- gpa_scale assignments it holds the grader's display value ("B-", "85%"),
+-- which a raw number would clobber, so it is left as it is.
 
 WITH legacy AS (
     SELECT s.id,
            s.score,
+           COALESCE(NULLIF(a.grading_type, ''), 'points') AS grading_type,
            LEAST(
                CEIL(EXTRACT(EPOCH FROM (s.submitted_at - a.due_at))
                     / CASE WHEN lp.late_submission_interval = 'hour' THEN 3600.0 ELSE 86400.0 END)
@@ -43,6 +49,7 @@ WITH legacy AS (
 ), recovered AS (
     SELECT id,
            score,
+           grading_type,
            ROUND((score / (1 - pct / 100.0))::numeric, 6) AS entered
       FROM legacy
      WHERE pct < 100
@@ -50,7 +57,11 @@ WITH legacy AS (
 )
 UPDATE submissions s
    SET entered_score   = r.entered::double precision,
-       entered_grade   = RTRIM(RTRIM(r.entered::text, '0'), '.'),
+       entered_grade   = CASE
+                             WHEN r.grading_type = 'points'
+                                 THEN RTRIM(RTRIM(r.entered::text, '0'), '.')
+                             ELSE s.entered_grade
+                         END,
        points_deducted = ROUND((r.entered - r.score::numeric), 6)::double precision
   FROM recovered r
  WHERE s.id = r.id;

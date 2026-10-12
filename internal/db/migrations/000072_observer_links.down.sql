@@ -1,4 +1,4 @@
--- 000092_observer_links.down.sql
+-- 000072_observer_links.down.sql
 
 BEGIN;
 

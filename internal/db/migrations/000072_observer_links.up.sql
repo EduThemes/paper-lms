@@ -1,4 +1,4 @@
--- 000092_observer_links.up.sql
+-- 000072_observer_links.up.sql
 --
 -- B177: a durable observer -> student pairing (Canvas's
 -- user_observation_links). Previously the pairing existed only as the

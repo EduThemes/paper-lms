@@ -1,4 +1,4 @@
--- 000080_content_tag_completion_requirements.up.sql
+-- 000069_content_tag_completion_requirements.up.sql
 --
 -- Module item completion requirements (Canvas ContextModule
 -- completion_requirements). Each module item can carry one requirement:

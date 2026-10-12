@@ -1,4 +1,4 @@
--- 000091_enrollment_terms_sis_term_id_partial.down.sql
+-- 000071_enrollment_terms_sis_term_id_partial.down.sql
 --
 -- Restores the original deployment-wide UNIQUE index on sis_term_id.
 -- NULL rows are allowed by a plain UNIQUE index, so blank ids stay NULL.
