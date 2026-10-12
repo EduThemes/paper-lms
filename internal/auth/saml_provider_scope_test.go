@@ -76,7 +76,7 @@ func resolveProviderIDFor(t *testing.T, repo *fakeSAMLProviderRepo, target strin
 	}
 	body, _ := io.ReadAll(resp.Body)
 	var id uint
-	fmt.Sscan(string(body), &id)
+	_, _ = fmt.Sscan(string(body), &id)
 	return id
 }
 

@@ -470,7 +470,7 @@ func (e *discEnv) do(t *testing.T, method, path string, body any) (int, []byte) 
 		r = bytes.NewReader(b)
 	}
 	resp := testutil.MakeRequest(e.app, method, path, r)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, out
 }

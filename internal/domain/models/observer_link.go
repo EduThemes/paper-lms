@@ -90,8 +90,8 @@ func SyncObserverEnrollmentsForStudent(db *gorm.DB, student *Enrollment) error {
 			link.ObserverID, student.CourseID, "ObserverEnrollment", student.UserID).
 			Order("(workflow_state = 'deleted') ASC, id ASC").
 			First(&existing).Error
-		switch {
-		case err == nil:
+		switch err {
+		case nil:
 			if existing.WorkflowState == target {
 				continue
 			}
@@ -99,7 +99,7 @@ func SyncObserverEnrollmentsForStudent(db *gorm.DB, student *Enrollment) error {
 				Update("workflow_state", target).Error; err != nil {
 				return err
 			}
-		case err == gorm.ErrRecordNotFound:
+		case gorm.ErrRecordNotFound:
 			if target != EnrollmentActive {
 				continue // nothing to mirror into
 			}

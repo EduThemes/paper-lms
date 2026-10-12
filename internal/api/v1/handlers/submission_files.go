@@ -61,7 +61,7 @@ func (h *SubmissionHandler) UploadSubmissionFile(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.InternalError(c, "Could not open uploaded file")
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Same content-type hardening as the course upload path: never trust
 	// a client claim of an inline-safe type the bytes contradict.

@@ -805,7 +805,7 @@ func (h *PortfolioHandler) UploadArtifactFile(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.InternalError(c, "Could not open uploaded file")
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var sectionID *uint
 	if raw := strings.TrimSpace(c.FormValue("section_id")); raw != "" && raw != "null" {
