@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -94,11 +93,7 @@ func (h *PortfolioHandler) loadViewablePortfolio(c *fiber.Ctx, paramName string)
 // private sharing token (?share_token=, G155): a viewer who opened the
 // shared link may read the portfolio and its comments, and comment.
 func sharedLinkMatches(c *fiber.Ctx, p *models.Portfolio) bool {
-	token := c.Query("share_token")
-	if token == "" || p.ShareToken == nil || *p.ShareToken == "" {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(token), []byte(*p.ShareToken)) == 1
+	return service.ShareTokenMatches(p, c.Query("share_token"))
 }
 
 func isPubliclyVisible(p *models.Portfolio) bool {
@@ -274,14 +269,13 @@ func (h *PortfolioHandler) portfolioDetailJSON(c *fiber.Ctx, p *models.Portfolio
 	if publicOnly && !isPubliclyVisible(p) && sharedLinkMatches(c, p) {
 		// A private portfolio read through its sharing link: files come
 		// from the token-scoped route.
-		base = fmt.Sprintf("/api/v1/portfolios/shared/%s/files", url.PathEscape(*p.ShareToken))
+		base = fmt.Sprintf("/api/v1/portfolios/shared/%s/files", url.PathEscape(c.Query("share_token")))
 	}
 	out := h.portfolioDetailJSONWithFiles(c, p, publicOnly, base)
 	if !publicOnly {
-		// Owner/admin view: the sharing link and comment setting.
-		if p.ShareToken != nil && *p.ShareToken != "" {
-			out["share_token"] = *p.ShareToken
-		}
+		// Owner/admin view: whether a sharing link exists. Only its digest
+		// is stored, so the link itself is shown once, when created.
+		out["has_share_link"] = p.ShareToken != nil && *p.ShareToken != ""
 	}
 	return out
 }

@@ -37,7 +37,8 @@ type sharingFixture struct {
 
 func newSharingFixture(t *testing.T, callerID uint) *sharingFixture {
 	t.Helper()
-	tok := sharedToken
+	// Only the token's digest is stored (migration 000128).
+	tok := service.HashShareToken(sharedToken)
 	f := &sharingFixture{
 		portfolioRepo:  new(mocks.MockPortfolioRepository),
 		sectionRepo:    new(mocks.MockPortfolioSectionRepository),
@@ -51,7 +52,7 @@ func newSharingFixture(t *testing.T, callerID uint) *sharingFixture {
 	userRepo.On("FindByID", mock.Anything, mock.Anything, mock.Anything).Return(&models.User{ID: 7, Role: "student"}, nil).Maybe()
 	userRepo.On("FindByIDs", mock.Anything, mock.Anything, mock.Anything).Return([]models.User{{ID: 5, Name: "Jane Doe"}}, nil).Maybe()
 	f.portfolioRepo.On("FindByID", mock.Anything, uint(10), uint(1)).Return(f.portfolio, nil).Maybe()
-	f.portfolioRepo.On("FindByShareToken", mock.Anything, sharedToken).Return(f.portfolio, nil).Maybe()
+	f.portfolioRepo.On("FindByShareToken", mock.Anything, service.HashShareToken(sharedToken)).Return(f.portfolio, nil).Maybe()
 	f.portfolioRepo.On("FindByShareToken", mock.Anything, mock.Anything).Return(nil, gorm.ErrRecordNotFound).Maybe()
 	f.portfolioRepo.On("IncrementViewCount", mock.Anything, uint(10)).Return(nil).Maybe()
 	f.sectionRepo.On("ListByPortfolioID", mock.Anything, uint(10)).Return([]models.PortfolioSection{
@@ -103,6 +104,9 @@ func TestSharedPortfolio_LinkGivesVisitorView(t *testing.T) {
 
 	resp = testutil.MakeRequest(f.app, http.MethodGet, "/portfolios/shared/wrong-token-000000000", nil)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	// The stored digest is not itself a working link.
+	resp = testutil.MakeRequest(f.app, http.MethodGet, "/portfolios/shared/"+service.HashShareToken(sharedToken), nil)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 
 	// Logged in, the private portfolio is readable only with the token.
 	resp = testutil.MakeRequest(f.app, http.MethodGet, "/portfolios/10", nil)
@@ -128,8 +132,18 @@ func TestShareLink_OwnerOnly(t *testing.T) {
 	tok, _ := m["share_token"].(string)
 	assert.GreaterOrEqual(t, len(tok), 30)
 	require.NotNil(t, saved.ShareToken)
-	assert.Equal(t, tok, *saved.ShareToken)
+	assert.Equal(t, service.HashShareToken(tok), *saved.ShareToken, "only the digest is stored")
+	assert.NotEqual(t, tok, *saved.ShareToken)
 	assert.NotEqual(t, sharedToken, tok, "a new link replaces the old one")
+
+	// The owner view says a link exists but cannot show the token again.
+	resp = testutil.MakeRequest(owner.app, http.MethodGet, "/portfolios/10", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	m, err = testutil.ParseJSONMap(resp)
+	require.NoError(t, err)
+	assert.Equal(t, true, m["has_share_link"])
+	_, echoed := m["share_token"]
+	assert.False(t, echoed)
 
 	resp = testutil.MakeRequest(owner.app, http.MethodDelete, "/portfolios/10/share_link", nil)
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)

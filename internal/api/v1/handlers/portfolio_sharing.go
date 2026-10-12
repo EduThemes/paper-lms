@@ -68,7 +68,9 @@ func (h *PortfolioHandler) GetSharedPortfolio(c *fiber.Ctx) error {
 		return responses.NotFound(c, "portfolio")
 	}
 	_ = h.portfolioService.RecordView(c.Context(), portfolio.ID)
-	base := fmt.Sprintf("/api/v1/portfolios/shared/%s/files", url.PathEscape(*portfolio.ShareToken))
+	// Only the token's digest is stored: file links carry the token the
+	// visitor came with.
+	base := fmt.Sprintf("/api/v1/portfolios/shared/%s/files", url.PathEscape(strings.TrimSpace(c.Params("token"))))
 	out := h.portfolioDetailJSONWithFiles(c, portfolio, true, base)
 	out["shared_via_link"] = true
 	return c.JSON(out)

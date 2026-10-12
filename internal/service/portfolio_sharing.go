@@ -3,7 +3,10 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"sort"
 	"time"
@@ -24,12 +27,31 @@ func (s *PortfolioService) CreateShareLink(ctx context.Context, portfolio *model
 		return "", err
 	}
 	token := base64.RawURLEncoding.EncodeToString(buf)
-	portfolio.ShareToken = &token
+	// Only the digest is stored (migration 000128): the token itself is
+	// shown to the owner once, here.
+	digest := HashShareToken(token)
+	portfolio.ShareToken = &digest
 	portfolio.UpdatedAt = time.Now()
 	if err := s.portfolioRepo.Update(ctx, portfolio); err != nil {
 		return "", err
 	}
 	return token, nil
+}
+
+// HashShareToken is the stored form of a portfolio sharing token: the
+// lower-case hex SHA-256 digest (what migration 000128 computes in SQL).
+func HashShareToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// ShareTokenMatches reports, in constant time, whether token is the
+// sharing token behind the portfolio's stored digest.
+func ShareTokenMatches(portfolio *models.Portfolio, token string) bool {
+	if portfolio == nil || portfolio.ShareToken == nil || *portfolio.ShareToken == "" || token == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(HashShareToken(token)), []byte(*portfolio.ShareToken)) == 1
 }
 
 // RevokeShareLink removes the portfolio's sharing link.
@@ -44,7 +66,7 @@ func (s *PortfolioService) GetBySharedLink(ctx context.Context, token string) (*
 	if len(token) < 16 {
 		return nil, errors.New("portfolio not found")
 	}
-	return s.portfolioRepo.FindByShareToken(ctx, token)
+	return s.portfolioRepo.FindByShareToken(ctx, HashShareToken(token))
 }
 
 // SetCommentsDisabled turns viewer comments on or off.

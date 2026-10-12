@@ -10,7 +10,9 @@ import { sharedPortfolioUrl } from '../../utils/portfolioSharing';
  * works without publishing, turning viewer comments on/off, and the
  * feedback left on the portfolio (deletable).
  *
- * Props: portfolio (normalized, with share_token / comments_disabled),
+ * Props: portfolio (normalized, with has_share_link / comments_disabled;
+ * share_token only right after a link is created — the server stores a
+ * digest and cannot return it later),
  * onPortfolioChange(patch) to merge server changes into the editor state.
  */
 export default function PortfolioSharingPanel({ portfolio, onPortfolioChange }) {
@@ -29,12 +31,12 @@ export default function PortfolioSharingPanel({ portfolio, onPortfolioChange }) 
 
   const createLink = useMutation({
     mutationFn: () => portfolioApi.createShareLink(portfolio.id),
-    onSuccess: (res) => onPortfolioChange({ share_token: res.share_token }),
+    onSuccess: (res) => onPortfolioChange({ share_token: res.share_token, has_share_link: true }),
     onError: (err) => setError(err.message),
   });
   const revokeLink = useMutation({
     mutationFn: () => portfolioApi.revokeShareLink(portfolio.id),
-    onSuccess: () => onPortfolioChange({ share_token: undefined }),
+    onSuccess: () => onPortfolioChange({ share_token: undefined, has_share_link: false }),
     onError: (err) => setError(err.message),
   });
   const toggleComments = useMutation({
@@ -78,6 +80,18 @@ export default function PortfolioSharingPanel({ portfolio, onPortfolioChange }) 
             </button>
             <button type="button" onClick={() => createLink.mutate()} className="px-3 py-1.5 text-sm rounded-lg border border-border-strong hover:bg-surface-1">New link</button>
             <button type="button" onClick={() => revokeLink.mutate()} className="px-3 py-1.5 text-sm rounded-lg text-accent-danger hover:bg-accent-danger/10">Turn off</button>
+          </div>
+        ) : portfolio.has_share_link ? (
+          // The server keeps only a digest of the link's secret, so an
+          // existing link can't be shown again after the page reloads.
+          <div className="space-y-2">
+            <p className="text-sm text-text-secondary">
+              A private link is active. For security it is only shown when it is created: make a new link to copy it (the old one stops working), or turn it off.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => createLink.mutate()} disabled={createLink.isPending} className="px-3 py-1.5 text-sm rounded-lg border border-border-strong hover:bg-surface-1 disabled:opacity-50">New link</button>
+              <button type="button" onClick={() => revokeLink.mutate()} className="px-3 py-1.5 text-sm rounded-lg text-accent-danger hover:bg-accent-danger/10">Turn off</button>
+            </div>
           </div>
         ) : (
           <button type="button" onClick={() => createLink.mutate()} disabled={createLink.isPending}

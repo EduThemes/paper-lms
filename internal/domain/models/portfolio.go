@@ -34,8 +34,9 @@ type Portfolio struct {
 	WorkflowState  string     `json:"workflow_state" gorm:"not null;default:'draft'"` // draft, published, archived
 	ViewCount      int64      `json:"view_count" gorm:"default:0"`
 	LastExportedAt *time.Time `json:"last_exported_at"`
-	// ShareToken is the secret of the private sharing link
-	// (/portfolios/shared/:token). NULL = no link. *string because a
+	// ShareToken is the SHA-256 hex digest of the private sharing link's
+	// secret (/portfolios/shared/:token; service.HashShareToken, migration
+	// 000128) — never the token itself. NULL = no link. *string because a
 	// partial UNIQUE index (migration 000126) skips NULL rows only.
 	ShareToken *string `json:"-" gorm:"column:share_token"`
 	// CommentsDisabled turns viewer comments off (Canvas allow_comments).
