@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -13,12 +12,22 @@ import (
 )
 
 // AGSGrader writes a score into the gradebook through the normal grading
-// path. *SubmissionService satisfies it: Grade enforces the caller's
-// tenant, closed grading periods and the late policy, creates the
-// submission when the student never submitted in Paper, and fires the
-// post-grade callbacks (B082).
+// path. *SubmissionService satisfies it: GradeScore enforces the caller's
+// tenant, moderation, closed grading periods and the late policy, creates
+// the submission when the student never submitted in Paper, fires the
+// post-grade callbacks (B082) and notifies the student. A tool's score is
+// in points and is never read as a typed grade (a 7 on a percent
+// assignment is 7 points, not 7%). Grade with "" clears a grade.
 type AGSGrader interface {
 	Grade(ctx context.Context, assignmentID, userID, graderID, callerAccountID uint, postedGrade string) (*models.Submission, error)
+	GradeScore(ctx context.Context, assignmentID, userID, graderID, callerAccountID uint, points float64) (*models.Submission, error)
+}
+
+// externalToolActivityRecorder is implemented by *SubmissionService:
+// it records a basic_lti_launch submission for an external_tool
+// assignment when the tool reports the student submitted.
+type externalToolActivityRecorder interface {
+	RecordExternalToolActivity(ctx context.Context, assignment *models.Assignment, userID uint) error
 }
 
 // AGS errors. Handlers map ErrAGSInvalid → 400, ErrAGSUserNotInCourse and
@@ -49,7 +58,18 @@ type LTIAGSService struct {
 	assignmentRepo repository.AssignmentRepository
 	enrollmentRepo repository.EnrollmentRepository
 	grader         AGSGrader
+	// store (optional) backs the filtered line item listing and resource
+	// link lookups of tool callers (G128).
+	store repository.LTIAdvantageRepository
 }
+
+// SetAdvantageStore wires the LTI Advantage store (G128 filters and
+// tool-created line items).
+func (s *LTIAGSService) SetAdvantageStore(store repository.LTIAdvantageRepository) { s.store = store }
+
+// ErrAGSConflict is a score older than the result already on record
+// (AGS 2.0 §3.4.6: the platform must not apply it). Handlers answer 409.
+var ErrAGSConflict = errors.New("a newer score has already been recorded")
 
 // NewLTIAGSService creates a new LTIAGSService.
 func NewLTIAGSService(
@@ -201,10 +221,28 @@ func (s *LTIAGSService) PostScore(ctx context.Context, lineItem *models.LTILineI
 		return agsErr(ErrAGSUserNotInCourse, ErrAGSUserNotInCourse.Error())
 	}
 
+	// AGS §3.4.6: a score whose timestamp is older than the one on record
+	// must not be applied (out-of-order delivery).
+	if result.Timestamp != nil {
+		if prev, pErr := s.resultRepo.ListByLineItem(ctx, lineItem.ID, result.UserID, repository.PaginationParams{Page: 1, PerPage: 1}); pErr == nil && prev != nil && len(prev.Items) > 0 {
+			if ts := prev.Items[0].Timestamp; ts != nil && ts.After(*result.Timestamp) {
+				return agsErr(ErrAGSConflict, ErrAGSConflict.Error())
+			}
+		}
+	}
+
 	if lineItem.AssignmentID != nil {
 		assignment, aErr := s.assignmentRepo.FindByID(ctx, *lineItem.AssignmentID, accountID)
 		if aErr != nil || assignment == nil || assignment.CourseID != lineItem.CourseID {
 			return agsErr(ErrAGSNotFound, "line item assignment not found")
+		}
+
+		// A tool reporting the student's work as submitted creates the
+		// basic_lti_launch submission (grading-ui lane, G026).
+		if result.ActivityProgress == "Submitted" || result.ActivityProgress == "Completed" {
+			if rec, ok := s.grader.(externalToolActivityRecorder); ok {
+				_ = rec.RecordExternalToolActivity(ctx, assignment, result.UserID)
+			}
 		}
 
 		if result.ResultScore != nil && acceptGivenScore[result.GradingProgress] {
@@ -216,8 +254,7 @@ func (s *LTIAGSService) PostScore(ctx context.Context, lineItem *models.LTILineI
 				targetMax = *assignment.PointsPossible
 			}
 			score := *result.ResultScore * agsScoreScale(targetMax, result.ResultMaximum)
-			grade := strconv.FormatFloat(score, 'f', -1, 64)
-			if _, gErr := s.grader.Grade(ctx, assignment.ID, result.UserID, graderID, accountID, grade); gErr != nil {
+			if _, gErr := s.grader.GradeScore(ctx, assignment.ID, result.UserID, graderID, accountID, score); gErr != nil {
 				return agsErr(ErrAGSGradeRefused, gErr.Error())
 			}
 		}
@@ -256,4 +293,96 @@ func (s *LTIAGSService) GetResults(ctx context.Context, lineItemID, userID uint,
 	}
 
 	return s.resultRepo.ListByLineItem(ctx, lineItemID, userID, params)
+}
+
+// ListLineItemsFiltered lists a course's line items with the AGS filters
+// (resource_link_id, resource_id, tag) and, for a tool caller, only the
+// line items that tool owns (G128). Falls back to the unfiltered list
+// when no store is wired.
+func (s *LTIAGSService) ListLineItemsFiltered(ctx context.Context, courseID uint, filter repository.LTILineItemFilter, params repository.PaginationParams) (*repository.PaginatedResult[models.LTILineItem], error) {
+	if s.store == nil {
+		return s.lineItemRepo.ListByCourse(ctx, courseID, params)
+	}
+	return s.store.ListLineItems(ctx, courseID, filter, params)
+}
+
+// CreateToolLineItem is a tool's AGS line item POST (G128). Unless it
+// names an assignment of the course, Paper creates a published
+// placeholder assignment (points = scoreMaximum, due/unlock from the AGS
+// dates) so the tool's scores land in the gradebook; the line item is
+// owned by the tool.
+func (s *LTIAGSService) CreateToolLineItem(ctx context.Context, courseID, accountID, devKeyID uint, item *models.LTILineItem) error {
+	if item.Label == "" {
+		return agsErr(ErrAGSInvalid, "line item label is required")
+	}
+	if item.ScoreMaximum <= 0 {
+		return agsErr(ErrAGSInvalid, "scoreMaximum must be greater than 0")
+	}
+	if item.AssignmentID != nil && !s.toolOwnsAssignment(ctx, *item.AssignmentID, courseID, accountID, devKeyID) {
+		// A tool may only add a line item to an assignment that launches
+		// it; otherwise it could post grades to any assignment.
+		return agsErr(ErrAGSInvalid, "assignmentId is not an assignment of this tool")
+	}
+	if item.AssignmentID == nil && item.ResourceLinkIDStr != "" && s.store != nil {
+		// resourceLinkId of one of the tool's assignment links: the line
+		// item belongs to that assignment.
+		if link, err := s.store.FindResourceLinkByUUID(ctx, item.ResourceLinkIDStr, accountID); err == nil && link != nil &&
+			link.ContextID == courseID && link.AssignmentID != nil && s.toolOwnsAssignment(ctx, *link.AssignmentID, courseID, accountID, devKeyID) {
+			aid := *link.AssignmentID
+			item.AssignmentID = &aid
+		}
+	}
+	if item.AssignmentID == nil {
+		pts := item.ScoreMaximum
+		a := &models.Assignment{
+			CourseID: courseID, Name: item.Label, PointsPossible: &pts, GradingType: "points",
+			SubmissionTypes: "none", WorkflowState: models.AssignmentPublished, Published: true,
+			DueAt: item.EndDateTime, UnlockAt: item.StartDateTime,
+		}
+		if err := s.assignmentRepo.Create(ctx, a); err != nil {
+			return fmt.Errorf("create assignment: %w", err)
+		}
+		aid := a.ID
+		item.AssignmentID = &aid
+	}
+	dk := devKeyID
+	item.DeveloperKeyID = &dk
+	return s.CreateLineItem(ctx, courseID, accountID, item)
+}
+
+// toolOwnsAssignment reports whether the assignment (of the course, in
+// the tenant) launches an install of the tool's developer key.
+func (s *LTIAGSService) toolOwnsAssignment(ctx context.Context, assignmentID, courseID, accountID, devKeyID uint) bool {
+	if s.store == nil {
+		return false
+	}
+	link, err := s.store.FindResourceLinkByAssignment(ctx, assignmentID, accountID)
+	if err != nil || link == nil || link.ContextID != courseID {
+		return false
+	}
+	tool, err := s.store.FindActiveToolForCourse(ctx, link.ContextExternalToolID, courseID, accountID)
+	return err == nil && tool != nil && tool.DeveloperKeyID == devKeyID
+}
+
+// SyncToolLineItemAssignment keeps a tool-owned line item's assignment
+// in step with it: the label is the assignment name, scoreMaximum its
+// points and the AGS dates its unlock/due dates (Canvas parity).
+func (s *LTIAGSService) SyncToolLineItemAssignment(ctx context.Context, item *models.LTILineItem, accountID uint) error {
+	if item.AssignmentID == nil || item.DeveloperKeyID == nil {
+		return nil
+	}
+	a, err := s.assignmentRepo.FindByID(ctx, *item.AssignmentID, accountID)
+	if err != nil || a == nil || a.CourseID != item.CourseID {
+		return nil
+	}
+	pts := item.ScoreMaximum
+	a.Name = item.Label
+	a.PointsPossible = &pts
+	if item.EndDateTime != nil {
+		a.DueAt = item.EndDateTime
+	}
+	if item.StartDateTime != nil {
+		a.UnlockAt = item.StartDateTime
+	}
+	return s.assignmentRepo.Update(ctx, a)
 }

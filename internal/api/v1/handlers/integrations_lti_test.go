@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -68,6 +69,14 @@ type fakeGrader struct {
 
 func (g *fakeGrader) Grade(_ context.Context, assignmentID, userID, graderID, accountID uint, grade string) (*models.Submission, error) {
 	g.calls = append(g.calls, fmt.Sprintf("a=%d u=%d g=%d acct=%d grade=%s", assignmentID, userID, graderID, accountID, grade))
+	if g.err != nil {
+		return nil, g.err
+	}
+	return &models.Submission{AssignmentID: assignmentID, UserID: userID}, nil
+}
+
+func (g *fakeGrader) GradeScore(_ context.Context, assignmentID, userID, graderID, accountID uint, points float64) (*models.Submission, error) {
+	g.calls = append(g.calls, fmt.Sprintf("a=%d u=%d g=%d acct=%d score=%s", assignmentID, userID, graderID, accountID, strconv.FormatFloat(points, 'f', -1, 64)))
 	if g.err != nil {
 		return nil, g.err
 	}
@@ -300,7 +309,7 @@ func TestAGSPostScore_StringUserIDGradesThroughGradebook(t *testing.T) {
 	// B082: graded through SubmissionService.Grade (which creates the
 	// submission when none exists), scaled to the line item's maximum.
 	require.Len(t, f.grader.calls, 1)
-	assert.Equal(t, "a=70 u=500 g=3 acct=1 grade=16", f.grader.calls[0])
+	assert.Equal(t, "a=70 u=500 g=3 acct=1 score=16", f.grader.calls[0])
 	f.resultRepo.AssertCalled(t, "Upsert", mock.Anything, mock.Anything)
 }
 
@@ -324,7 +333,7 @@ func TestAGSPostScore_ScalesToAssignmentPointsPossible(t *testing.T) {
 	}))
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 	require.Len(t, f.grader.calls, 1)
-	assert.Equal(t, "a=70 u=500 g=3 acct=1 grade=80", f.grader.calls[0])
+	assert.Equal(t, "a=70 u=500 g=3 acct=1 score=80", f.grader.calls[0])
 }
 
 func TestAGSPostScore_PendingIsNotWrittenToGradebook(t *testing.T) {

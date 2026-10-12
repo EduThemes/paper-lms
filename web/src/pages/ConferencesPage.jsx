@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Video, Plus, X, Pencil, Trash2, Play, Square, LogIn, Film } from 'lucide-react';
 import { api } from '../services/api';
+import { useConferenceProviders, providerFor } from '../services/api_groups_conferences';
+import ConferenceRecordings from '../components/conferences/ConferenceRecordings';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
@@ -11,7 +13,12 @@ const ConferencesPage = () => {
   // Start / End / Edit / Delete are instructor actions (the API enforces
   // it too); students only see Join once a conference is running.
   const isTeacher = useIsTeacher(courseId);
+  // G098: which providers the tenant has configured (BBB / Zoom).
+  const providersQuery = useConferenceProviders(courseId);
   const [conferences, setConferences] = useState([]);
+  // Errors from an action (start / join / end / delete) show inline; only
+  // a failed list load replaces the page.
+  const [actionError, setActionError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showForm, setShowForm] = useState(false);
@@ -22,6 +29,7 @@ const ConferencesPage = () => {
     conference_type: 'BigBlueButton',
     duration: 60,
     join_url: '',
+    recording_enabled: false,
   });
   const [submitting, setSubmitting] = useState(false);
   const [selectedConference, setSelectedConference] = useState(null);
@@ -62,6 +70,7 @@ const ConferencesPage = () => {
       conference_type: conf.conference_type,
       duration: conf.duration || 60,
       join_url: /^https?:\/\//.test(conf.join_url || '') ? conf.join_url : '',
+      recording_enabled: !!conf.recording_enabled,
     });
     setEditingId(conf.id);
     setShowForm(true);
@@ -93,19 +102,20 @@ const ConferencesPage = () => {
       setLoading(true);
       await fetchConferences();
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     }
   };
 
   const handleJoin = async (id) => {
     try {
       const result = await api.joinConference(id);
+      setActionError(null);
       if (result?.join_url) {
         window.open(result.join_url, '_blank', 'noopener,noreferrer');
       }
       await fetchConferences();
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     }
   };
 
@@ -115,7 +125,7 @@ const ConferencesPage = () => {
       await api.startConference(id);
       await handleJoin(id);
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     }
   };
 
@@ -126,19 +136,14 @@ const ConferencesPage = () => {
       setLoading(true);
       await fetchConferences();
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     }
   };
 
-  const handleViewRecordings = async (conf) => {
-    try {
-      const result = await api.getConferenceRecordings(conf.id);
-      setRecordings(result.recordings);
-      setSelectedConference(conf);
-      setParticipants(null);
-    } catch (err) {
-      setError(err.message);
-    }
+  const handleViewRecordings = (conf) => {
+    setRecordings(true);
+    setSelectedConference(conf);
+    setParticipants(null);
   };
 
   const handleViewParticipants = async (conf) => {
@@ -168,6 +173,8 @@ const ConferencesPage = () => {
     if (conf.started_at) return { label: 'In Progress', color: 'bg-accent-success/20 text-accent-success' };
     return { label: 'Not Started', color: 'bg-accent-warning/20 text-accent-warning' };
   };
+
+  const selectedProvider = providerFor(providersQuery.data, formData.conference_type);
 
   if (loading) {
     return <Layout><div className="flex items-center justify-center py-12 gap-2 text-text-tertiary">
@@ -262,9 +269,21 @@ const ConferencesPage = () => {
                 className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
               />
               <p className="text-xs text-text-tertiary mt-1">
-                Used when no BigBlueButton server is configured, or for Zoom and other external meetings.
+                {selectedProvider.configured
+                  ? `Leave empty to hold the meeting on ${formData.conference_type}; a link overrides it.`
+                  : `No ${formData.conference_type} server is configured, so add a meeting link (or ask an administrator to configure ${formData.conference_type}).`}
               </p>
             </div>
+            {selectedProvider.supports_recording && !formData.join_url && (
+              <label className="flex items-center gap-2 text-sm text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={formData.recording_enabled}
+                  onChange={(e) => setFormData({ ...formData, recording_enabled: e.target.checked })}
+                />
+                Allow this conference to be recorded
+              </label>
+            )}
             <div className="flex justify-end space-x-3">
               <button
                 type="button"
@@ -282,6 +301,15 @@ const ConferencesPage = () => {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {actionError && (
+        <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-md border border-accent-danger/40 bg-accent-danger/10 px-4 py-2 text-sm text-accent-danger">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError(null)} aria-label="Dismiss" className="flex-shrink-0">
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
@@ -312,6 +340,11 @@ const ConferencesPage = () => {
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-brand-50 text-brand-700">
                             {conf.conference_type}
                           </span>
+                          {conf.recording_enabled && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-surface-2 text-text-secondary">
+                              Recorded
+                            </span>
+                          )}
                         </div>
                         {conf.description && (
                           <p className="text-sm text-text-tertiary truncate">{conf.description}</p>
@@ -401,22 +434,11 @@ const ConferencesPage = () => {
 
       {/* Recordings panel */}
       {selectedConference && recordings !== null && (
-        <div className="mt-6 bg-surface-0 rounded-lg shadow p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">Recordings - {selectedConference.title}</h3>
-            <button
-              onClick={() => { setRecordings(null); setSelectedConference(null); }}
-              className="text-text-disabled hover:text-text-secondary"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          {recordings === '[]' || !recordings ? (
-            <p className="text-sm text-text-tertiary">No recordings available for this conference.</p>
-          ) : (
-            <pre className="text-sm bg-surface-1 rounded p-3 overflow-auto">{recordings}</pre>
-          )}
-        </div>
+        <ConferenceRecordings
+          conference={selectedConference}
+          isTeacher={isTeacher}
+          onClose={() => { setRecordings(null); setSelectedConference(null); }}
+        />
       )}
 
       {/* Participants panel */}

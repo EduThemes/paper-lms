@@ -588,6 +588,15 @@ func (s *OneRosterService) runSync(ctx context.Context, conn *models.OneRosterCo
 		errDetails = append(errDetails, errs...)
 	}
 
+	// 3b. Sync academic sessions -> EnrollmentTerm (G112), so classes can
+	// be placed in their term.
+	if sessions, serr := s.fetchAcademicSessions(conn.BaseURL, token); serr != nil {
+		errDetails = append(errDetails, fmt.Sprintf("academicSessions fetch failed: %v", serr))
+	} else {
+		_, _, errs := s.syncAcademicSessions(ctx, conn.AccountID, sessions)
+		errDetails = append(errDetails, errs...)
+	}
+
 	// 4. Sync classes -> Course + CourseSection
 	classes, err := s.fetchClasses(conn.BaseURL, token, filter)
 	if err != nil {
@@ -846,9 +855,13 @@ func (s *OneRosterService) syncClasses(ctx context.Context, accountID uint, clas
 			errs = append(errs, fmt.Sprintf("class %s belongs to another account", class.SourcedID))
 			continue
 		}
+		termID := s.classTermID(ctx, accountID, class)
 		if existing != nil {
 			existing.Name = class.Title
 			existing.CourseCode = courseCode
+			if termID != nil {
+				existing.EnrollmentTermID = termID
+			}
 			if err := s.courseRepo.Update(ctx, existing); err != nil {
 				errs = append(errs, fmt.Sprintf("failed to update course for class %s: %v", class.SourcedID, err))
 			} else {
@@ -861,6 +874,8 @@ func (s *OneRosterService) syncClasses(ctx context.Context, accountID uint, clas
 				CourseCode:     courseCode,
 				SISCourseID:   &sisCourseID,
 				WorkflowState: models.CourseAvailable,
+				// G112: the class's academic session term.
+				EnrollmentTermID: termID,
 			}
 			if err := s.courseRepo.Create(ctx, newCourse); err != nil {
 				errs = append(errs, fmt.Sprintf("failed to create course for class %s: %v", class.SourcedID, err))
@@ -990,11 +1005,22 @@ func (s *OneRosterService) syncEnrollments(ctx context.Context, accountID uint, 
 
 		res.present[onerosterEnrollmentKey{user.ID, course.ID, enrollType}] = true
 
+		// G112: roster enrollments land in the class's section.
+		sectionID := s.classSectionID(ctx, course.ID, orEnroll.Class.SourcedID)
+
 		if existing != nil {
-			if existing.Type != enrollType || existing.WorkflowState != models.EnrollmentActive {
-				existing.Type = enrollType
-				existing.Role = enrollType
+			if existing.Type != enrollType || existing.WorkflowState != models.EnrollmentActive || (existing.CourseSectionID == nil && sectionID != nil) {
+				if existing.Type != enrollType {
+					// A new base type drops any custom role (G102): the
+					// role was granted on top of the old type.
+					existing.Type = enrollType
+					existing.Role = enrollType
+					existing.RoleID = nil
+				}
 				existing.WorkflowState = models.EnrollmentActive
+				if existing.CourseSectionID == nil {
+					existing.CourseSectionID = sectionID
+				}
 				if err := s.enrollmentRepo.Update(ctx, existing); err != nil {
 					res.errs = append(res.errs, fmt.Sprintf("failed to update enrollment %s: %v", orEnroll.SourcedID, err))
 				} else {
@@ -1005,11 +1031,12 @@ func (s *OneRosterService) syncEnrollments(ctx context.Context, accountID uint, 
 		}
 
 		newEnroll := &models.Enrollment{
-			UserID:        user.ID,
-			CourseID:      course.ID,
-			Type:          enrollType,
-			Role:          enrollType,
-			WorkflowState: models.EnrollmentActive,
+			UserID:          user.ID,
+			CourseID:        course.ID,
+			CourseSectionID: sectionID,
+			Type:            enrollType,
+			Role:            enrollType,
+			WorkflowState:   models.EnrollmentActive,
 		}
 		if err := s.enrollmentRepo.Create(ctx, newEnroll); err != nil {
 			res.errs = append(res.errs, fmt.Sprintf("failed to create enrollment %s: %v", orEnroll.SourcedID, err))

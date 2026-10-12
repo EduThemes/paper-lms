@@ -17,6 +17,7 @@ import {
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { SubmissionBody } from './SafeHTML';
+import { clickableProps } from '../utils/a11y';
 
 const ANNOTATION_TYPES = {
   highlight: { label: 'Highlight', icon: Highlighter, color: '#FFFF00' },
@@ -51,6 +52,10 @@ const DocumentViewer = ({
   readOnly = false,
   documentContent = '',
   documentTitle = '',
+  // documentNode (optional) renders a non-HTML document (an image or a
+  // PDF to annotate) in place of documentContent; point, comment and
+  // freehand annotations are drawn over it.
+  documentNode = null,
 }) => {
   const { user } = useAuth();
   const [annotations, setAnnotations] = useState([]);
@@ -317,7 +322,7 @@ const DocumentViewer = ({
               top: `${annotation.y}%`,
               transform: 'translate(-50%, -50%)',
             }}
-            onClick={() => setSelectedAnnotation(annotation)}
+            {...clickableProps(() => setSelectedAnnotation(annotation))}
             title={annotation.content}
           >
             <div
@@ -627,7 +632,7 @@ const DocumentViewer = ({
                   {/* Annotation header */}
                   <div
                     className="p-3 cursor-pointer"
-                    onClick={() => scrollToAnnotation(annotation)}
+                    {...clickableProps(() => scrollToAnnotation(annotation))}
                   >
                     <div className="flex items-start gap-2">
                       <div
@@ -784,7 +789,11 @@ const DocumentViewer = ({
             )}
 
             {/* Rendered document content */}
-            {renderHighlightedContent()}
+            {documentNode ? (
+              <div style={{ pointerEvents: activeTool ? 'none' : 'auto' }}>{documentNode}</div>
+            ) : (
+              renderHighlightedContent()
+            )}
 
             {/* Annotation overlays */}
             {renderAnnotationOverlays()}

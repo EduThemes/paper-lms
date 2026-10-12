@@ -10,6 +10,9 @@ type ContextModule struct {
 	UnlockAt                  *time.Time `json:"unlock_at"`
 	EndAt                     *time.Time `json:"end_at"`
 	RequireSequentialProgress bool       `json:"require_sequential_progress" gorm:"default:false"`
+	// RequirementCount: 0 = complete every requirement, 1 = complete any
+	// one (Canvas requirement_count). Migration 000092.
+	RequirementCount int `json:"requirement_count" gorm:"not null;default:0"`
 	WorkflowState             string     `json:"workflow_state" gorm:"not null;default:'active'"`
 	CreatedAt                 time.Time  `json:"created_at"`
 	UpdatedAt                 time.Time  `json:"updated_at"`

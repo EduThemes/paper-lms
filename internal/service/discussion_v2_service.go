@@ -33,6 +33,8 @@ type EntryViewV2 struct {
 	EditedAt          *time.Time    `json:"edited_at"`
 	VersionCount      int           `json:"version_count"`
 	WorkflowState     string        `json:"workflow_state"`
+	AttachmentID      *uint         `json:"attachment_id"`
+	IsAnonymousAuthor bool          `json:"is_anonymous_author"`
 	CreatedAt         time.Time     `json:"created_at"`
 	UpdatedAt         time.Time     `json:"updated_at"`
 	Replies           []EntryViewV2 `json:"replies"`
@@ -61,6 +63,7 @@ type v2RatingRepoWithSum interface {
 // course scope first (see handlers.requireTopicInCourse /
 // requireEntryInTopic).
 type DiscussionV2Service struct {
+	discussionAudienceHolder
 	topicRepo            repository.DiscussionTopicRepository
 	entryRepo            repository.DiscussionEntryRepository
 	ratingRepo           v2RatingRepoWithSum
@@ -185,6 +188,8 @@ func (s *DiscussionV2Service) buildTreeV2(entries []models.DiscussionEntry, unre
 			EditedAt:          editedAt,
 			VersionCount:      versionCounts[e.ID],
 			WorkflowState:     e.WorkflowState,
+			AttachmentID:      e.AttachmentID,
+			IsAnonymousAuthor: e.IsAnonymousAuthor,
 			CreatedAt:         e.CreatedAt,
 			UpdatedAt:         e.UpdatedAt,
 			Replies:           []EntryViewV2{},

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, Navigate } from 'react-router-dom';
 import {
   ThumbsUp,
   MessageSquare,
@@ -19,20 +19,23 @@ import {
   Pin,
   CornerDownRight,
   History,
-  Bold,
-  Italic,
-  List,
-  ListOrdered,
-  LinkIcon,
   ArrowLeft,
+  Paperclip,
+  Award,
+  Lock,
+  Users,
+  EyeOff,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
-import RichContentViewer, { sanitizeHTML } from '../components/RichContentViewer';
+import RichContentViewer from '../components/RichContentViewer';
 import { highlightMentions } from '../utils/html';
 import DiscussionCheckpointsPanel from '../components/DiscussionCheckpointsPanel';
+import DiscussionComposer from '../components/discussions/DiscussionComposer';
+import { discussionsApi } from '../services/api_discussions';
+import { formatFileSize } from '../utils/discussionMentions';
 import {
   isEntryUnread,
   isEntryDeleted,
@@ -154,145 +157,22 @@ const UserAvatar = ({ name, avatarUrl, size = 'md' }) => {
 };
 
 // ---------------------------------------------------------------------------
-// ComposeArea - inline rich compose (toolbar + contentEditable)
+// EntryAttachment - a file attached to a post
 // ---------------------------------------------------------------------------
 
-const ComposeArea = ({ initialValue = '', onSubmit, onCancel, submitLabel = 'Post', placeholder = 'Write your reply...', autoFocus = false }) => {
-  const editorRef = useRef(null);
-  const [isEmpty, setIsEmpty] = useState(!initialValue);
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (editorRef.current && initialValue) {
-      // Live contenteditable: sanitize before assigning or <img onerror>
-      // in the stored message runs as soon as Edit is clicked (B001).
-      editorRef.current.innerHTML = sanitizeHTML(initialValue);
-      setIsEmpty(false);
-    }
-  }, [initialValue]);
-
-  useEffect(() => {
-    if (autoFocus && editorRef.current) {
-      editorRef.current.focus();
-    }
-  }, [autoFocus]);
-
-  const handleInput = () => {
-    const text = editorRef.current?.textContent?.trim() || '';
-    setIsEmpty(text.length === 0);
-  };
-
-  const execCommand = (command, value = null) => {
-    document.execCommand(command, false, value);
-    editorRef.current?.focus();
-  };
-
-  const handleInsertLink = () => {
-    const url = window.prompt('Enter URL:');
-    if (url) {
-      execCommand('createLink', url);
-    }
-  };
-
-  const handleSubmit = async () => {
-    const html = editorRef.current?.innerHTML?.trim() || '';
-    if (!html || html === '<br>' || html === '<div><br></div>') return;
-    setSubmitting(true);
-    try {
-      await onSubmit(html);
-      if (editorRef.current) {
-        editorRef.current.innerHTML = '';
-        setIsEmpty(true);
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  };
-
-  const toolbarButton = (label, icon, action) => (
-    <button
-      type="button"
-      onClick={action}
-      className="p-1.5 rounded hover:bg-border-default text-text-secondary hover:text-text-primary transition-colors"
-      aria-label={label}
-      title={label}
-      tabIndex={-1}
-    >
-      {icon}
-    </button>
-  );
-
+const EntryAttachment = ({ attachment }) => {
+  if (!attachment?.url) return null;
   return (
-    <div className="border border-border-strong rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-brand-500 focus-within:border-brand-500 bg-surface-0">
-      {/* Toolbar */}
-      <div className="flex items-center gap-0.5 px-2 py-1 border-b border-border-default bg-surface-1" role="toolbar" aria-label="Text formatting">
-        {toolbarButton('Bold', <Bold className="w-4 h-4" />, () => execCommand('bold'))}
-        {toolbarButton('Italic', <Italic className="w-4 h-4" />, () => execCommand('italic'))}
-        <div className="w-px h-5 bg-border-strong mx-1" aria-hidden="true" />
-        {toolbarButton('Bulleted list', <List className="w-4 h-4" />, () => execCommand('insertUnorderedList'))}
-        {toolbarButton('Numbered list', <ListOrdered className="w-4 h-4" />, () => execCommand('insertOrderedList'))}
-        <div className="w-px h-5 bg-border-strong mx-1" aria-hidden="true" />
-        {toolbarButton('Insert link', <LinkIcon className="w-4 h-4" />, handleInsertLink)}
-      </div>
-
-      {/* Editor */}
-      <div className="relative">
-        {isEmpty && (
-          <div className="absolute top-2 left-3 text-sm text-text-disabled pointer-events-none select-none" aria-hidden="true">
-            {placeholder}
-          </div>
-        )}
-        <div
-          ref={editorRef}
-          contentEditable
-          role="textbox"
-          aria-multiline="true"
-          aria-label={placeholder}
-          className="min-h-[80px] max-h-[300px] overflow-y-auto px-3 py-2 text-sm text-text-primary focus:outline-none prose prose-sm max-w-none"
-          onInput={handleInput}
-          onKeyDown={handleKeyDown}
-          suppressContentEditableWarning
-        />
-      </div>
-
-      {/* Actions */}
-      <div className="flex items-center justify-between px-3 py-2 border-t border-border-default bg-surface-1">
-        <span className="text-xs text-text-disabled">
-          {navigator.platform?.includes('Mac') ? '\u2318' : 'Ctrl'}+Enter to submit
-        </span>
-        <div className="flex items-center gap-2">
-          {onCancel && (
-            <button
-              type="button"
-              onClick={onCancel}
-              className="px-3 py-1.5 text-sm text-text-secondary hover:text-text-primary rounded-md hover:bg-surface-2 transition-colors"
-            >
-              Cancel
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={isEmpty || submitting}
-            className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-brand-600 text-white text-sm font-medium rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {submitting ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Send className="w-3.5 h-3.5" />
-            )}
-            {submitLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+    <a
+      href={attachment.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-2 inline-flex items-center gap-1.5 px-2 py-1 rounded border border-border-default text-xs text-brand-600 hover:bg-surface-1"
+    >
+      <Paperclip className="w-3.5 h-3.5" aria-hidden="true" />
+      <span>{attachment.display_name || attachment.filename}</span>
+      {attachment.size ? <span className="text-text-tertiary">{formatFileSize(attachment.size)}</span> : null}
+    </a>
   );
 };
 
@@ -444,6 +324,7 @@ const EntryItem = ({
   canRate = false,
   canModerate = false,
   lockedForUser = false,
+  allowAnonymous = false,
 }) => {
   const [showReplyForm, setShowReplyForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
@@ -482,13 +363,13 @@ const EntryItem = ({
     return () => observer.disconnect();
   }, [isUnread, entry.id, onMarkRead]);
 
-  const handleReplySubmit = async (html) => {
-    await onReply(entry.id, html);
+  const handleReplySubmit = async (body) => {
+    await onReply(entry.id, body);
     setShowReplyForm(false);
   };
 
-  const handleEditSubmit = async (html) => {
-    await onEdit(entry.id, html);
+  const handleEditSubmit = async (body) => {
+    await onEdit(entry.id, body);
     setShowEditForm(false);
   };
 
@@ -582,17 +463,22 @@ const EntryItem = ({
               <p className="mt-1 text-sm italic text-text-tertiary">This post has been deleted.</p>
             ) : showEditForm ? (
               <div className="mt-2">
-                <ComposeArea
+                <DiscussionComposer
+                  courseId={courseId}
+                  topicId={topicId}
                   initialValue={entry.message}
                   onSubmit={handleEditSubmit}
                   onCancel={() => setShowEditForm(false)}
                   submitLabel="Save"
                   placeholder="Edit your message..."
-                  autoFocus
+                  allowAttachment={false}
                 />
               </div>
             ) : (
-              <RichContentViewer content={highlightMentions(entry.message)} className="mt-1 text-sm text-text-primary break-words" />
+              <>
+                <RichContentViewer content={highlightMentions(entry.message)} className="mt-1 text-sm text-text-primary break-words" />
+                <EntryAttachment attachment={entry.attachment} />
+              </>
             )}
 
             {/* Action bar */}
@@ -701,12 +587,14 @@ const EntryItem = ({
             {/* Inline reply form */}
             {showReplyForm && (
               <div className="mt-3" role="region" aria-label="Reply form">
-                <ComposeArea
+                <DiscussionComposer
+                  courseId={courseId}
+                  topicId={topicId}
                   onSubmit={handleReplySubmit}
                   onCancel={() => setShowReplyForm(false)}
                   submitLabel="Reply"
                   placeholder="Write a reply..."
-                  autoFocus
+                  allowAnonymous={allowAnonymous}
                 />
               </div>
             )}
@@ -735,6 +623,7 @@ const EntryItem = ({
               canRate={canRate}
               canModerate={canModerate}
               lockedForUser={lockedForUser}
+              allowAnonymous={allowAnonymous}
             />
           ))}
         </div>
@@ -754,6 +643,86 @@ const EntryItem = ({
         />
       )}
     </article>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// TopicNotices - grading, availability, anonymity and group context
+// ---------------------------------------------------------------------------
+
+const TopicNotices = ({ topic, isTeacher }) => {
+  const notes = [];
+  const now = new Date();
+  if (topic.assignment) {
+    const a = topic.assignment;
+    const due = a.due_at ? ` · Due ${fullDate(a.due_at)}` : '';
+    notes.push({ key: 'graded', icon: Award, text: `Graded discussion · ${a.points_possible ?? 0} points${due}` });
+  }
+  if (topic.group_name) {
+    notes.push({ key: 'group', icon: Users, text: `Group discussion: ${topic.group_name}` });
+  }
+  if (isTeacher && topic.delayed_post_at && new Date(topic.delayed_post_at) > now) {
+    notes.push({ key: 'delayed', icon: Clock, text: `Students can see this from ${fullDate(topic.delayed_post_at)}` });
+  }
+  if (topic.lock_at) {
+    const past = new Date(topic.lock_at) <= now;
+    notes.push({ key: 'lock', icon: Lock, text: past ? `Closed since ${fullDate(topic.lock_at)}` : `Open until ${fullDate(topic.lock_at)}` });
+  } else if (topic.locked) {
+    notes.push({ key: 'lock', icon: Lock, text: 'Closed for comments' });
+  }
+  if (topic.anonymous_state === 'full_anonymity') {
+    notes.push({ key: 'anon', icon: EyeOff, text: 'Anonymous discussion: names are hidden from everyone.' });
+  } else if (topic.anonymous_state === 'partial_anonymity') {
+    notes.push({ key: 'anon', icon: EyeOff, text: 'You can choose to post anonymously.' });
+  }
+  if (notes.length === 0) return null;
+  return (
+    <ul className="mt-4 space-y-1" aria-label="Discussion details">
+      {notes.map(({ key, icon: Icon, text }) => (
+        <li key={key} className="flex items-center gap-2 text-sm text-text-secondary">
+          <Icon className="w-4 h-4 text-text-tertiary" aria-hidden="true" />
+          {text}
+        </li>
+      ))}
+    </ul>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// GroupTopicsList - the per-group topics of a group discussion
+// ---------------------------------------------------------------------------
+
+const GroupTopicsList = ({ topic, courseId, isTeacher }) => {
+  if (!isTeacher) {
+    return (
+      <div className="py-12 text-center text-sm text-text-tertiary" role="status">
+        This is a group discussion. You will see it once you join a group in its group set.
+      </div>
+    );
+  }
+  const groups = topic.group_topics || [];
+  if (groups.length === 0) {
+    return (
+      <div className="py-12 text-center text-sm text-text-tertiary" role="status">
+        The group set has no groups yet.
+      </div>
+    );
+  }
+  return (
+    <ul className="divide-y" aria-label="Group discussions">
+      {groups.map((g) => (
+        <li key={g.id} className="flex items-center justify-between px-6 py-3">
+          <Link to={`/courses/${courseId}/discussions/${g.id}`} className="inline-flex items-center gap-2 text-brand-600 hover:underline">
+            <Users className="w-4 h-4" aria-hidden="true" />
+            {g.group_name || `Group ${g.group_id}`}
+          </Link>
+          <span className="text-xs text-text-tertiary">
+            {g.entry_count} {g.entry_count === 1 ? 'post' : 'posts'}
+            {g.unread_count > 0 ? ` · ${g.unread_count} unread` : ''}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 };
 
@@ -833,13 +802,13 @@ const DiscussionTopicPageV2 = () => {
 
   // --- Handlers ---
 
-  const handleReply = useCallback(async (entryId, message) => {
-    await api.createDiscussionReply(courseId, topicId, entryId, message);
+  const handleReply = useCallback(async (entryId, body) => {
+    await discussionsApi.createReply(courseId, topicId, entryId, body);
     await fetchData();
   }, [courseId, topicId, fetchData]);
 
-  const handleNewEntry = useCallback(async (message) => {
-    await api.createDiscussionEntry(courseId, topicId, message);
+  const handleNewEntry = useCallback(async (body) => {
+    await discussionsApi.createEntry(courseId, topicId, body);
     setShowNewEntryForm(false);
     await fetchData();
   }, [courseId, topicId, fetchData]);
@@ -858,8 +827,8 @@ const DiscussionTopicPageV2 = () => {
     await fetchData();
   }, [courseId, topicId, fetchData]);
 
-  const handleEdit = useCallback(async (entryId, message) => {
-    await api.updateDiscussionEntryV2(courseId, topicId, entryId, message);
+  const handleEdit = useCallback(async (entryId, body) => {
+    await discussionsApi.updateEntry(courseId, topicId, entryId, body);
     await fetchData();
   }, [courseId, topicId, fetchData]);
 
@@ -983,6 +952,16 @@ const DiscussionTopicPageV2 = () => {
   // locked for them (staff are never locked out).
   const canRate = topic.can_rate !== undefined ? !!topic.can_rate : !!topic.allow_rating;
   const lockedForUser = !!topic.locked_for_user;
+  // A group discussion's root holds no posts: students go to their
+  // group's topic, staff pick a group below.
+  const isGroupRoot = !!topic.is_group_root;
+  const canPost = !lockedForUser && topic.can_post !== false && !isGroupRoot;
+  const initialPostRequired = !!topic.initial_post_required;
+  const allowAnonymous = topic.anonymous_state === 'partial_anonymity';
+
+  if (isGroupRoot && !isTeacher && topic.group_topic_id) {
+    return <Navigate to={`/courses/${courseId}/discussions/${topic.group_topic_id}`} replace />;
+  }
 
   return (
     <Layout>
@@ -1033,6 +1012,8 @@ const DiscussionTopicPageV2 = () => {
             {topic.message && (
               <RichContentViewer content={highlightMentions(topic.message)} className="mt-4 text-sm text-text-primary" />
             )}
+
+            <TopicNotices topic={topic} isTeacher={!!isTeacher} />
 
             {/* Discussion checkpoints (only render once role
                 is known so teacher/student UIs don't flicker). */}
@@ -1128,7 +1109,7 @@ const DiscussionTopicPageV2 = () => {
             </h2>
             {lockedForUser ? (
               <span className="text-sm text-text-tertiary">This discussion is locked.</span>
-            ) : (
+            ) : !canPost ? null : (
             <button
               onClick={() => setShowNewEntryForm(!showNewEntryForm)}
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors"
@@ -1141,24 +1122,36 @@ const DiscussionTopicPageV2 = () => {
           </div>
 
           {/* New entry form (top) */}
-          {showNewEntryForm && !lockedForUser && (
+          {showNewEntryForm && canPost && (
             <div className="px-6 py-4 border-b border-border-default bg-brand-50/30" role="region" aria-label="New reply form">
-              <ComposeArea
+              <DiscussionComposer
+                courseId={courseId}
+                topicId={topicId}
                 onSubmit={handleNewEntry}
                 onCancel={() => setShowNewEntryForm(false)}
                 submitLabel="Post Reply"
                 placeholder="Share your thoughts..."
-                autoFocus
+                allowAnonymous={allowAnonymous}
+                draftKey={`discussion-${courseId}-${topicId}-reply`}
               />
             </div>
           )}
 
+          {initialPostRequired && (
+            <div className="mx-6 mt-4 flex items-center gap-2 rounded-md bg-brand-50 px-3 py-2 text-sm text-brand-800" role="status">
+              <EyeOff className="w-4 h-4" aria-hidden="true" />
+              Post your reply first to see what others wrote.
+            </div>
+          )}
+
           {/* Entries list */}
-          {entries.length === 0 ? (
+          {isGroupRoot ? (
+            <GroupTopicsList topic={topic} courseId={courseId} isTeacher={!!isTeacher} />
+          ) : entries.length === 0 ? (
             <div className="py-16 text-center" role="status">
               <MessageSquare className="w-12 h-12 text-text-disabled mx-auto mb-3" />
               <p className="text-text-tertiary text-sm">No replies yet. Be the first to respond!</p>
-              {!showNewEntryForm && !lockedForUser && (
+              {!showNewEntryForm && canPost && (
                 <button
                   onClick={() => setShowNewEntryForm(true)}
                   className="mt-3 text-sm text-brand-600 hover:text-brand-700 font-medium"
@@ -1186,7 +1179,8 @@ const DiscussionTopicPageV2 = () => {
                   toggleCollapse={toggleCollapse}
                   canRate={canRate}
                   canModerate={!!isTeacher}
-                  lockedForUser={lockedForUser}
+                  lockedForUser={lockedForUser || !canPost}
+                  allowAnonymous={allowAnonymous}
                 />
               ))}
             </div>
@@ -1194,17 +1188,21 @@ const DiscussionTopicPageV2 = () => {
         </div>
 
         {/* Bottom compose area (shown when there are entries) */}
-        {entries.length > 0 && !showNewEntryForm && !lockedForUser && (
+        {entries.length > 0 && !showNewEntryForm && canPost && (
           <div className="bg-surface-0 rounded-xl shadow-sm border border-border-default overflow-hidden mb-6">
             <div className="px-6 py-4">
               <h3 className="font-semibold text-text-primary mb-3 flex items-center gap-2">
                 <Send className="w-4 h-4 text-text-disabled" />
                 Post a Reply
               </h3>
-              <ComposeArea
+              <DiscussionComposer
+                courseId={courseId}
+                topicId={topicId}
                 onSubmit={handleNewEntry}
                 submitLabel="Post Reply"
                 placeholder="Share your thoughts..."
+                allowAnonymous={allowAnonymous}
+                draftKey={`discussion-${courseId}-${topicId}-reply`}
               />
             </div>
           </div>

@@ -1,6 +1,7 @@
 import {
   NEW_CONTENT,
   buildModuleItemPayload,
+  canCreateContent,
   fetchContentOptions,
   getModuleItemLink,
   isExternalItemLink,
@@ -80,5 +81,27 @@ describe('module item content picker', () => {
 
   test('a new item without a title is refused', async () => {
     await expect(buildModuleItemPayload(api, 3, { title: ' ', type: 'Quiz', selection: '', position: 1 })).rejects.toThrow(/title/);
+  });
+
+  // G064: File and External Tool items link existing content only.
+  test('file and external tool items', async () => {
+    api.getCourseFiles = vi.fn().mockResolvedValue({ data: [{ id: 5, display_name: 'syllabus.pdf' }] });
+    api.getExternalTools = vi.fn().mockResolvedValue({ data: [
+      { id: 6, name: 'Lab Sim', workflow_state: 'active' },
+      { id: 7, name: 'Retired', workflow_state: 'deleted' },
+    ] });
+    expect(itemNeedsContent('File')).toBe(true);
+    expect(canCreateContent('File')).toBe(false);
+    expect(canCreateContent('ExternalTool')).toBe(false);
+    expect(canCreateContent('Assignment')).toBe(true);
+    expect(await fetchContentOptions(api, 3, 'File')).toEqual([{ id: 5, label: 'syllabus.pdf' }]);
+    expect(await fetchContentOptions(api, 3, 'ExternalTool')).toEqual([{ id: 6, label: 'Lab Sim' }]);
+
+    expect(await buildModuleItemPayload(api, 3, { title: '', type: 'File', selection: '5', position: 1 }))
+      .toEqual({ title: '', type: 'File', position: 1, content_id: 5 });
+    const tool = await buildModuleItemPayload(api, 3, { title: '', type: 'ExternalTool', selection: '6', externalUrl: 'https://labsim.example.org/u/1', newTab: true, position: 2 });
+    expect(tool).toEqual({ title: '', type: 'ExternalTool', position: 2, content_id: 6, external_url: 'https://labsim.example.org/u/1', new_tab: true });
+    await expect(buildModuleItemPayload(api, 3, { title: 'x', type: 'File', selection: '', position: 1 })).rejects.toThrow(/file/);
+    expect(getModuleItemLink({ type: 'ExternalTool', content_id: 6 }, 3)).toBeNull();
   });
 });

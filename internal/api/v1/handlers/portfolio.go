@@ -80,13 +80,20 @@ func (h *PortfolioHandler) loadViewablePortfolio(c *fiber.Ctx, paramName string)
 	if err != nil {
 		return nil, true, responses.NotFound(c, "portfolio")
 	}
-	if isPubliclyVisible(portfolio) {
+	if isPubliclyVisible(portfolio) || sharedLinkMatches(c, portfolio) {
 		return portfolio, false, nil
 	}
 	if wrote, err := h.requireOwnerOrAdmin(c, portfolio.UserID); wrote {
 		return nil, true, err
 	}
 	return portfolio, false, nil
+}
+
+// sharedLinkMatches reports whether the request carries the portfolio's
+// private sharing token (?share_token=, G155): a viewer who opened the
+// shared link may read the portfolio and its comments, and comment.
+func sharedLinkMatches(c *fiber.Ctx, p *models.Portfolio) bool {
+	return service.ShareTokenMatches(p, c.Query("share_token"))
 }
 
 func isPubliclyVisible(p *models.Portfolio) bool {
@@ -165,6 +172,7 @@ func portfolioToJSON(p *models.Portfolio) fiber.Map {
 		"workflow_state":   p.WorkflowState,
 		"view_count":       p.ViewCount,
 		"last_exported_at": p.LastExportedAt,
+		"comments_disabled": p.CommentsDisabled,
 		"created_at":       p.CreatedAt,
 		"updated_at":       p.UpdatedAt,
 	}
@@ -257,6 +265,24 @@ func portfolioTemplateToJSON(t *models.PortfolioTemplate) fiber.Map {
 // publicOnly drops hidden sections (and their artifacts) and rewrites
 // uploaded-file links to the public, slug-scoped download route.
 func (h *PortfolioHandler) portfolioDetailJSON(c *fiber.Ctx, p *models.Portfolio, publicOnly bool) fiber.Map {
+	base := fmt.Sprintf("/api/v1/portfolios/public/%s/files", url.PathEscape(p.Slug))
+	if publicOnly && !isPubliclyVisible(p) && sharedLinkMatches(c, p) {
+		// A private portfolio read through its sharing link: files come
+		// from the token-scoped route.
+		base = fmt.Sprintf("/api/v1/portfolios/shared/%s/files", url.PathEscape(c.Query("share_token")))
+	}
+	out := h.portfolioDetailJSONWithFiles(c, p, publicOnly, base)
+	if !publicOnly {
+		// Owner/admin view: whether a sharing link exists. Only its digest
+		// is stored, so the link itself is shown once, when created.
+		out["has_share_link"] = p.ShareToken != nil && *p.ShareToken != ""
+	}
+	return out
+}
+
+// portfolioDetailJSONWithFiles is portfolioDetailJSON with the URL base the
+// public view uses for uploaded files.
+func (h *PortfolioHandler) portfolioDetailJSONWithFiles(c *fiber.Ctx, p *models.Portfolio, publicOnly bool, fileBase string) fiber.Map {
 	sections, artifacts, reflections := h.portfolioService.GetPortfolioDetail(c.Context(), p.ID)
 
 	hidden := map[uint]bool{}
@@ -277,7 +303,7 @@ func (h *PortfolioHandler) portfolioDetailJSON(c *fiber.Ctx, p *models.Portfolio
 		}
 		m := portfolioArtifactToJSON(a)
 		if publicOnly && a.SourceType == "upload" && a.SourceID != nil {
-			m["content_url"] = fmt.Sprintf("/api/v1/portfolios/public/%s/files/%d", url.PathEscape(p.Slug), *a.SourceID)
+			m["content_url"] = fmt.Sprintf("%s/%d", fileBase, *a.SourceID)
 		}
 		rs := reflections[a.ID]
 		rsJSON := make([]fiber.Map, len(rs))
@@ -399,7 +425,7 @@ func (h *PortfolioHandler) GetPortfolio(c *fiber.Ctx) error {
 // same way as a private one.
 func (h *PortfolioHandler) viewsAsPublic(c *fiber.Ctx, p *models.Portfolio) bool {
 	callerID, _ := c.Locals("user_id").(uint)
-	if callerID == p.UserID || !isPubliclyVisible(p) {
+	if callerID == p.UserID || (!isPubliclyVisible(p) && !sharedLinkMatches(c, p)) {
 		return false
 	}
 	if h.authz != nil && h.authz.RequireOwnerOrAdmin(c, p.UserID) == nil {
@@ -428,6 +454,8 @@ func (h *PortfolioHandler) UpdatePortfolio(c *fiber.Ctx) error {
 			WebsiteURL     *string `json:"website_url"`
 			CustomDomain   *string `json:"custom_domain"`
 			WorkflowState  *string `json:"workflow_state"`
+			// G155: the owner can turn viewer comments off.
+			CommentsDisabled *bool `json:"comments_disabled"`
 		} `json:"portfolio"`
 	}
 
@@ -476,6 +504,9 @@ func (h *PortfolioHandler) UpdatePortfolio(c *fiber.Ctx) error {
 	}
 	if input.Portfolio.CustomDomain != nil {
 		portfolio.CustomDomain = *input.Portfolio.CustomDomain
+	}
+	if input.Portfolio.CommentsDisabled != nil {
+		portfolio.CommentsDisabled = *input.Portfolio.CommentsDisabled
 	}
 	// B197: "Archive" sends a workflow_state change, which used to be
 	// silently ignored.
@@ -1125,6 +1156,8 @@ func (h *PortfolioHandler) ImportFromCourse(c *fiber.Ctx) error {
 	var input struct {
 		CourseID      uint   `json:"course_id"`
 		SubmissionIDs []uint `json:"submission_ids"`
+		// G155: optional section the imported work goes into.
+		SectionID *uint `json:"section_id"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
@@ -1134,8 +1167,14 @@ func (h *PortfolioHandler) ImportFromCourse(c *fiber.Ctx) error {
 	if input.CourseID == 0 && len(input.SubmissionIDs) == 0 {
 		return responses.BadRequest(c, "course_id or submission_ids is required")
 	}
+	if input.SectionID != nil && *input.SectionID == 0 {
+		input.SectionID = nil
+	}
 
-	imported, err := h.portfolioService.ImportFromCourse(c.Context(), portfolio.ID, input.CourseID, input.SubmissionIDs, callerAccountID(c))
+	imported, err := h.portfolioService.ImportSubmissions(c.Context(), portfolio.ID, input.CourseID, input.SubmissionIDs, input.SectionID, callerAccountID(c))
+	if errors.Is(err, service.ErrPortfolioChildNotFound) {
+		return responses.NotFound(c, "section")
+	}
 	if err != nil {
 		return responses.InternalError(c, "Could not import from course")
 	}
@@ -1203,6 +1242,10 @@ func (h *PortfolioHandler) AddComment(c *fiber.Ctx) error {
 	callerID, ok := c.Locals("user_id").(uint)
 	if !ok || callerID == 0 {
 		return responses.BadRequest(c, "Invalid user ID")
+	}
+	// G155: the owner can turn viewer comments off (they can still reply).
+	if portfolio.CommentsDisabled && callerID != portfolio.UserID {
+		return responses.Error(c, fiber.StatusForbidden, "Comments are turned off for this portfolio")
 	}
 
 	var input struct {

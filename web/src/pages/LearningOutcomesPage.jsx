@@ -16,17 +16,22 @@ import {
   X,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { outcomesApi } from '../services/api_learner_outcomes';
 import { fetchAllOutcomeRollups, fetchAllPages, rollupResponseToView } from '../utils/outcomeRollups';
+import {
+  CALCULATION_METHODS,
+  methodInfo,
+  methodLabel,
+  intForMethod,
+  describeCalculation,
+  validateOutcomeForm,
+} from '../utils/outcomeCalculation';
+import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
-
-const CALCULATION_METHODS = [
-  { value: 'decaying_average', label: 'Decaying Average', description: 'Average of scores weighted toward recent results' },
-  { value: 'n_mastery', label: 'n Number of Times', description: 'Must achieve mastery n times' },
-  { value: 'latest', label: 'Most Recent Score', description: 'Uses the most recent score' },
-  { value: 'highest', label: 'Highest Score', description: 'Uses the highest score achieved' },
-  { value: 'average', label: 'Average', description: 'Simple average of all scores' },
-];
+import { clickableProps } from '../utils/a11y';
+import OutcomeEditForm from '../components/outcomes/OutcomeEditForm';
+import OutcomeAlignments from '../components/outcomes/OutcomeAlignments';
 
 const DEFAULT_RATINGS = [
   { description: 'Exceeds Mastery', points: 4, color: 'bg-accent-success' },
@@ -74,6 +79,58 @@ const LearningOutcomesPage = () => {
   const [showRollup, setShowRollup] = useState(false);
   const [rollupData, setRollupData] = useState(null);
   const [rollupLoading, setRollupLoading] = useState(false);
+
+  // G151: staff manage outcomes; students and observers get a read-only
+  // page with a link to their own Learning Mastery view.
+  const canManage = useIsTeacher(courseId) === true;
+  const [editingOutcome, setEditingOutcome] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState(null);
+  const [groupDraft, setGroupDraft] = useState({ title: '', description: '' });
+  const selectedOutcomeId = selectedOutcome?.id;
+  useEffect(() => { setEditingOutcome(false); }, [selectedOutcomeId]);
+
+  const refreshGroupOutcomes = async (groupId) => {
+    try {
+      const result = await api.getOutcomeGroupOutcomes(courseId, groupId);
+      const list = Array.isArray(result) ? result : result.data || [];
+      setGroupOutcomes((prev) => ({ ...prev, [groupId]: list }));
+      return list;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleSaveOutcome = async (patch) => {
+    const updated = await outcomesApi.updateOutcome(courseId, selectedOutcome.id, patch);
+    setSelectedOutcome(updated);
+    setEditingOutcome(false);
+    await refreshGroupOutcomes(updated.outcome_group_id ?? selectedOutcome.outcome_group_id);
+  };
+
+  const startEditGroup = (group) => {
+    setEditingGroupId(group.id);
+    setGroupDraft({ title: group.title || '', description: group.description || '' });
+  };
+
+  const handleSaveGroup = async (e) => {
+    e.preventDefault();
+    if (!groupDraft.title.trim()) return;
+    try {
+      const updated = await outcomesApi.updateGroup(courseId, editingGroupId, {
+        title: groupDraft.title.trim(),
+        description: groupDraft.description,
+      });
+      setGroups((prev) => prev.map((g) => (g.id === updated.id ? { ...g, ...updated } : g)));
+      setEditingGroupId(null);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const changeNewOutcomeMethod = (method) => {
+    setNewOutcomeCalcMethod(method);
+    setNewOutcomeCalcInt(intForMethod(method, newOutcomeCalcInt) ?? '');
+  };
 
   const fetchGroups = useCallback(async () => {
     try {
@@ -156,14 +213,31 @@ const LearningOutcomesPage = () => {
   const handleCreateOutcome = async (e) => {
     e.preventDefault();
     const groupId = showCreateOutcome;
+    const problem = validateOutcomeForm({
+      title: newOutcomeTitle,
+      masteryPoints: newOutcomeMasteryPoints,
+      method: newOutcomeCalcMethod,
+      calcInt: newOutcomeCalcInt,
+      ratings: newOutcomeRatings,
+    });
+    if (problem) {
+      setError(problem);
+      return;
+    }
     try {
+      const ratings = newOutcomeRatings.map((r) => ({ description: r.description, points: Number(r.points) || 0 }));
       await api.createOutcome(courseId, groupId, {
         title: newOutcomeTitle,
         description: newOutcomeDescription,
-        mastery_points: parseFloat(newOutcomeMasteryPoints) || 3,
+        mastery_points: parseFloat(newOutcomeMasteryPoints) || 0,
         calculation_method: newOutcomeCalcMethod,
-        calculation_int: parseInt(newOutcomeCalcInt) || 65,
-        ratings: JSON.stringify(newOutcomeRatings),
+        // Only the averages and n_mastery take a parameter (G150): sending
+        // 65 for n_mastery made mastery unreachable.
+        ...(methodInfo(newOutcomeCalcMethod)?.defaultInt != null
+          ? { calculation_int: parseInt(newOutcomeCalcInt, 10) }
+          : {}),
+        ratings: JSON.stringify(ratings),
+        points_possible: Math.max(...ratings.map((r) => r.points)),
       });
 
       // Reset form
@@ -265,10 +339,7 @@ const LearningOutcomesPage = () => {
     }
   };
 
-  const getCalcMethodLabel = (method) => {
-    const found = CALCULATION_METHODS.find((m) => m.value === method);
-    return found ? found.label : method || 'Decaying Average';
-  };
+  const getCalcMethodLabel = methodLabel;
 
   if (loading) {
     return (
@@ -291,6 +362,25 @@ const LearningOutcomesPage = () => {
         <div className="flex items-center justify-between mt-2">
           <h2 className="text-2xl font-bold text-text-primary">Learning Outcomes</h2>
           <div className="flex items-center space-x-2">
+            {!canManage && (
+              <Link
+                to={`/courses/${courseId}/outcomes/mastery`}
+                className="flex items-center space-x-2 px-4 py-2 rounded-md text-sm bg-brand-600 text-white hover:bg-brand-700"
+              >
+                <Target className="w-4 h-4" />
+                <span>My Learning Mastery</span>
+              </Link>
+            )}
+            {canManage && (
+              <Link
+                to={`/courses/${courseId}/mastery_gradebook`}
+                className="flex items-center space-x-2 px-4 py-2 rounded-md text-sm border bg-surface-0 border-border-strong text-text-secondary hover:bg-surface-1"
+              >
+                <Target className="w-4 h-4" />
+                <span>Learning Mastery Gradebook</span>
+              </Link>
+            )}
+            {canManage && (
             <button
               onClick={handleViewRollup}
               className={`flex items-center space-x-2 px-4 py-2 rounded-md text-sm border ${
@@ -302,6 +392,8 @@ const LearningOutcomesPage = () => {
               <BarChart3 className="w-4 h-4" />
               <span>Mastery Rollup</span>
             </button>
+            )}
+            {canManage && (
             <button
               onClick={() => setShowCreateGroup(!showCreateGroup)}
               className="flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
@@ -309,6 +401,7 @@ const LearningOutcomesPage = () => {
               <Plus className="w-4 h-4" />
               <span>New Group</span>
             </button>
+            )}
           </div>
         </div>
       </div>
@@ -543,12 +636,14 @@ const LearningOutcomesPage = () => {
             <div className="bg-surface-0 rounded-lg shadow p-8 text-center">
               <Target className="w-12 h-12 text-text-disabled mx-auto mb-3" />
               <p className="text-text-tertiary mb-4">No outcome groups yet.</p>
+              {canManage && (
               <button
                 onClick={() => setShowCreateGroup(true)}
                 className="text-brand-600 hover:underline text-sm"
               >
                 Create your first outcome group
               </button>
+              )}
             </div>
           ) : (
             <div className="space-y-3">
@@ -557,7 +652,7 @@ const LearningOutcomesPage = () => {
                   {/* Group Header */}
                   <div
                     className="flex items-center justify-between px-4 py-3 bg-surface-1 cursor-pointer hover:bg-surface-2 transition-colors"
-                    onClick={() => toggleGroup(group.id)}
+                    {...clickableProps(() => toggleGroup(group.id))}
                   >
                     <div className="flex items-center space-x-3">
                       {expandedGroups[group.id] ? (
@@ -566,17 +661,56 @@ const LearningOutcomesPage = () => {
                         <ChevronRight className="w-4 h-4 text-text-tertiary" />
                       )}
                       <FolderOpen className="w-5 h-5 text-accent-warning" />
+                      {editingGroupId === group.id ? (
+                        <form
+                          onSubmit={handleSaveGroup}
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex flex-wrap items-center gap-2"
+                          aria-label="Edit outcome group"
+                        >
+                          <input
+                            aria-label="Group title"
+                            value={groupDraft.title}
+                            onChange={(e) => setGroupDraft((d) => ({ ...d, title: e.target.value }))}
+                            className="border border-border-strong rounded px-2 py-1 text-sm"
+                            required
+                          />
+                          <input
+                            aria-label="Group description"
+                            value={groupDraft.description}
+                            onChange={(e) => setGroupDraft((d) => ({ ...d, description: e.target.value }))}
+                            placeholder="Description"
+                            className="border border-border-strong rounded px-2 py-1 text-sm"
+                          />
+                          <button type="submit" className="p-1 text-brand-600" title="Save group"><Save className="w-4 h-4" /></button>
+                          <button type="button" className="p-1 text-text-tertiary" title="Cancel" onClick={() => setEditingGroupId(null)}><X className="w-4 h-4" /></button>
+                        </form>
+                      ) : (
                       <div>
                         <p className="font-semibold text-text-primary">{group.title}</p>
                         {group.description && (
                           <p className="text-xs text-text-tertiary mt-0.5">{group.description}</p>
                         )}
                       </div>
+                      )}
                     </div>
                     <div className="flex items-center space-x-2">
                       <span className="text-xs text-text-disabled">
                         {(groupOutcomes[group.id] || []).length} outcomes
                       </span>
+                      {canManage && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startEditGroup(group);
+                        }}
+                        className="text-text-disabled hover:text-brand-600 p-1"
+                        title="Edit group"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      )}
+                      {canManage && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -589,6 +723,8 @@ const LearningOutcomesPage = () => {
                       >
                         <Plus className="w-4 h-4" />
                       </button>
+                      )}
+                      {canManage && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -599,6 +735,7 @@ const LearningOutcomesPage = () => {
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
+                      )}
                     </div>
                   </div>
 
@@ -638,7 +775,7 @@ const LearningOutcomesPage = () => {
                                 </label>
                                 <select
                                   value={newOutcomeCalcMethod}
-                                  onChange={(e) => setNewOutcomeCalcMethod(e.target.value)}
+                                  onChange={(e) => changeNewOutcomeMethod(e.target.value)}
                                   className="w-full border border-border-strong rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                                 >
                                   {CALCULATION_METHODS.map((m) => (
@@ -664,22 +801,15 @@ const LearningOutcomesPage = () => {
                                     className="w-full border border-border-strong rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                                   />
                                 </div>
-                                {(newOutcomeCalcMethod === 'decaying_average' ||
-                                  newOutcomeCalcMethod === 'n_mastery') && (
+                                {methodInfo(newOutcomeCalcMethod)?.defaultInt != null && (
                                   <div>
                                     <label className="block text-xs font-medium text-text-secondary mb-1">
-                                      {newOutcomeCalcMethod === 'decaying_average'
-                                        ? 'Decay %'
-                                        : 'N Count'}
+                                      {methodInfo(newOutcomeCalcMethod).intLabel}
                                     </label>
                                     <input
                                       type="number"
-                                      min="1"
-                                      max={
-                                        newOutcomeCalcMethod === 'decaying_average'
-                                          ? 99
-                                          : 10
-                                      }
+                                      min={methodInfo(newOutcomeCalcMethod).min}
+                                      max={methodInfo(newOutcomeCalcMethod).max}
                                       value={newOutcomeCalcInt}
                                       onChange={(e) => setNewOutcomeCalcInt(e.target.value)}
                                       className="w-full border border-border-strong rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -772,12 +902,14 @@ const LearningOutcomesPage = () => {
                       {(groupOutcomes[group.id] || []).length === 0 ? (
                         <div className="px-4 py-6 text-center text-text-disabled text-sm">
                           No outcomes in this group.{' '}
+                          {canManage && (
                           <button
                             onClick={() => setShowCreateOutcome(group.id)}
                             className="text-brand-500 hover:underline"
                           >
                             Add one
                           </button>
+                          )}
                         </div>
                       ) : (
                         <div className="divide-y">
@@ -792,9 +924,9 @@ const LearningOutcomesPage = () => {
                                     ? 'bg-brand-50 border-l-4 border-l-blue-500'
                                     : 'hover:bg-surface-1 border-l-4 border-l-transparent'
                                 }`}
-                                onClick={() =>
+                                {...clickableProps(() =>
                                   setSelectedOutcome(isSelected ? null : outcome)
-                                }
+                                )}
                               >
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center space-x-3">
@@ -826,15 +958,18 @@ const LearningOutcomesPage = () => {
                                     <span className="text-xs text-text-disabled whitespace-nowrap">
                                       Mastery: {outcome.mastery_points ?? 3}
                                     </span>
+                                    {canManage && (
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         handleDeleteOutcome(group.id, outcome.id);
                                       }}
                                       className="text-text-disabled hover:text-accent-danger p-1"
+                                      aria-label={`Delete ${outcome.title}`}
                                     >
                                       <Trash2 className="w-3.5 h-3.5" />
                                     </button>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -865,7 +1000,26 @@ const LearningOutcomesPage = () => {
                   </button>
                 </div>
               </div>
+              {editingOutcome && canManage ? (
+                <div className="p-4">
+                  <OutcomeEditForm
+                    key={selectedOutcome.id}
+                    outcome={selectedOutcome}
+                    onSave={handleSaveOutcome}
+                    onCancel={() => setEditingOutcome(false)}
+                  />
+                </div>
+              ) : (
               <div className="p-4 space-y-4">
+                {canManage && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingOutcome(true)}
+                    className="float-right inline-flex items-center gap-1 text-sm text-brand-600 hover:underline"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" /> Edit
+                  </button>
+                )}
                 <div>
                   <h4 className="text-lg font-semibold text-text-primary">
                     {selectedOutcome.title}
@@ -885,16 +1039,12 @@ const LearningOutcomesPage = () => {
                   <p className="text-sm font-medium text-text-primary">
                     {getCalcMethodLabel(selectedOutcome.calculation_method)}
                   </p>
-                  {selectedOutcome.calculation_int && (
-                    <p className="text-xs text-text-tertiary mt-0.5">
-                      {selectedOutcome.calculation_method === 'decaying_average'
-                        ? `${selectedOutcome.calculation_int}% weighted to most recent`
-                        : selectedOutcome.calculation_method === 'n_mastery'
-                        ? `Must achieve mastery ${selectedOutcome.calculation_int} times`
-                        : ''}
-                    </p>
-                  )}
+                  <p className="text-xs text-text-tertiary mt-0.5">
+                    {describeCalculation(selectedOutcome.calculation_method, selectedOutcome.calculation_int)}
+                  </p>
                 </div>
+
+                <OutcomeAlignments courseId={courseId} outcomeId={selectedOutcome.id} canManage={canManage} />
 
                 {/* Mastery */}
                 <div className="bg-brand-50 rounded-lg p-3">
@@ -972,6 +1122,7 @@ const LearningOutcomesPage = () => {
                   </div>
                 </div>
               </div>
+              )}
             </div>
           </div>
         )}

@@ -17,6 +17,14 @@ type Conference struct {
 	Recordings     string     `json:"recordings" gorm:"type:jsonb;default:'[]'"`
 	Settings       string     `json:"settings" gorm:"type:jsonb;default:'{}'"`
 	WorkflowState  string     `json:"workflow_state" gorm:"not null;default:'active'"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	// RecordingEnabled asks the provider to make the meeting recordable.
+	RecordingEnabled bool `json:"recording_enabled" gorm:"column:recording_enabled;not null;default:false"`
+	// ProviderMeetingID is the provider's meeting id (Zoom); empty for
+	// BigBlueButton, whose meeting id is derived from the conference id.
+	ProviderMeetingID string `json:"-" gorm:"column:provider_meeting_id"`
+	// ProviderJoinURL is the attendee link the provider returned (Zoom
+	// join_url). The host start link carries a token and is never stored.
+	ProviderJoinURL string    `json:"-" gorm:"column:provider_join_url"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }

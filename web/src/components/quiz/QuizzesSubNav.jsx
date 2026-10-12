@@ -1,10 +1,10 @@
 import React from 'react';
 import { Link, useParams, useLocation } from 'react-router-dom';
-import { ClipboardList, Layers, BookOpen, BarChart3 } from 'lucide-react';
+import { ClipboardList, Layers, BookOpen, BarChart3, ListChecks, Users, RefreshCcw } from 'lucide-react';
 
 /**
  * Sub-navigation rendered under CourseNav on every Quizzes-section page.
- * Shows: Quizzes | Item Banks | Stimuli (and Item Analysis when scoped to a quiz).
+ * Shows: Quizzes | Question Banks | Stimuli (and Item Analysis when scoped to a quiz).
  *
  * Matches the existing CourseNav styling — light border-bottom and small
  * tab buttons, neutral by default with a brand-coloured active state.
@@ -17,7 +17,8 @@ const QuizzesSubNav = ({ quizId = null }) => {
   const basePath = `/courses/${courseId}`;
   const tabs = [
     { path: '/quizzes', label: 'Quizzes', icon: ClipboardList, match: '/quizzes' },
-    { path: '/item-banks', label: 'Item Banks', icon: Layers, match: '/item-banks' },
+    // One bank system (G060): Question Banks replaced the separate item banks.
+    { path: '/question_banks', label: 'Question Banks', icon: Layers, match: '/question_banks' },
     { path: '/stimuli', label: 'Stimuli', icon: BookOpen, match: '/stimuli' },
   ];
   if (quizId) {
@@ -27,16 +28,23 @@ const QuizzesSubNav = ({ quizId = null }) => {
       icon: BarChart3,
       match: '/item-analysis',
     });
+    // Quiz lifecycle tools (staff pages only pass quizId).
+    tabs.push(
+      { path: `/quizzes/${quizId}/submissions`, label: 'Attempts', icon: ListChecks, match: '/submissions' },
+      { path: `/quizzes/${quizId}/moderate`, label: 'Moderate', icon: Users, match: '/moderate' },
+      { path: `/quizzes/${quizId}/regrade`, label: 'Regrade', icon: RefreshCcw, match: '/regrade' },
+    );
   }
 
   const isActive = (tab) => {
     if (tab.path === '/quizzes') {
       // Highlight Quizzes only when on the list/edit/take view, not on the
-      // /item-banks etc sibling pages.
+      // /question_banks etc sibling pages.
       const onQuizSection = location.pathname.startsWith(`${basePath}/quizzes`);
-      const onSubsection = ['/item-banks', '/stimuli'].some(s => location.pathname.includes(s));
+      const onSubsection = ['/question_banks', '/stimuli'].some(s => location.pathname.includes(s));
       const onItemAnalysis = location.pathname.includes('/item-analysis');
-      return onQuizSection && !onSubsection && !onItemAnalysis;
+      const onQuizTool = ['/submissions', '/moderate', '/regrade'].some(s => location.pathname.includes(s));
+      return onQuizSection && !onSubsection && !onItemAnalysis && !onQuizTool;
     }
     return location.pathname.includes(tab.match);
   };

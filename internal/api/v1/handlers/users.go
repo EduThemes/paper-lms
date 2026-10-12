@@ -489,9 +489,12 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 
 	var input struct {
 		User struct {
-			Name     string `json:"name"`
-			Locale   string `json:"locale"`
-			TimeZone string `json:"time_zone"`
+			Name string `json:"name"`
+			// G158: a pointer so "" can clear the saved language (back to
+			// the device choice / account default) while an absent field
+			// leaves it unchanged.
+			Locale   *string `json:"locale"`
+			TimeZone string  `json:"time_zone"`
 		} `json:"user"`
 	}
 
@@ -502,10 +505,24 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 	if input.User.Name != "" {
 		user.Name = input.User.Name
 	}
-	if input.User.Locale != "" {
-		user.Locale = input.User.Locale
+	// A profile form echoes the stored locale back on every save; a value
+	// saved before validation existed (e.g. "fr") must not block saving
+	// the name or time zone, so an unchanged locale is left as is.
+	if input.User.Locale != nil && *input.User.Locale != user.Locale {
+		locale, err := service.NormalizeUserLocale(*input.User.Locale)
+		if err != nil {
+			return responses.BadRequest(c, "locale is not a supported language")
+		}
+		user.Locale = locale
 	}
-	if input.User.TimeZone != "" {
+	if input.User.TimeZone != "" && input.User.TimeZone != user.TimeZone {
+		// G157: due dates are shown and entered in this zone, so a new
+		// value must be a real IANA zone name. (The old settings form took
+		// free text; re-sending a legacy stored value unchanged must not
+		// block saving the other fields.)
+		if _, tzErr := time.LoadLocation(input.User.TimeZone); tzErr != nil || input.User.TimeZone == "Local" {
+			return responses.BadRequest(c, "time_zone must be an IANA time zone name such as America/Chicago")
+		}
 		user.TimeZone = input.User.TimeZone
 	}
 
@@ -710,6 +727,8 @@ func (h *UserHandler) GetSelf(c *fiber.Ctx) error {
 		"avatar_url":    user.AvatarURL,
 		"locale":        user.Locale,
 		"time_zone":     user.TimeZone,
+		"pronouns":      user.Pronouns,
+		"bio":           user.Bio,
 		"role":          user.Role,
 		"account_id":    user.AccountID,
 		"account_default_locale": h.accountDefaultLocale(c.Context(), user.AccountID),
@@ -977,6 +996,9 @@ func (h *UserHandler) ListUsers(c *fiber.Ctx) error {
 			"locale":        u.Locale,
 			"role":          u.Role,
 			"created_at":    u.CreatedAt,
+			// G114: the admin People page shows and bulk-edits suspension.
+			"sis_user_id": u.SISUserID,
+			"suspended":   u.Suspended,
 		}
 	}
 

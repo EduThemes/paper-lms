@@ -6,6 +6,7 @@ import {
   GripVertical, MessageSquare, X, Pencil, Check, Lock, Settings2,
   MoreHorizontal, Indent as IndentIncrease, Outdent as IndentDecrease, ArrowRight,
   ArrowUp, ArrowDown, Heading, Copy, Paperclip, Megaphone,
+  CheckCircle2, Wrench, BarChart3,
 } from 'lucide-react';
 import {
   DndContext,
@@ -28,16 +29,27 @@ import { api } from '../services/api';
 import {
   NEW_CONTENT,
   buildModuleItemPayload,
+  canCreateContent,
   fetchContentOptions,
   getModuleItemLink,
   isExternalItemLink,
   itemNeedsContent,
 } from '../utils/moduleItems';
+import { indexProgress, moduleStatus, requirementLabel } from '../utils/moduleProgress';
+import {
+  launchModuleTool,
+  markModuleItemRead,
+  useMarkModuleItemDone,
+  useModuleProgress,
+} from '../services/api_modules';
 import { useAuth } from '../contexts/AuthContext';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import useScrollToHash from '../hooks/useScrollToHash';
 import ModuleSettingsModal from '../components/ModuleSettingsModal';
+import ModuleExternalToolFields from '../components/lti/ModuleExternalToolFields';
+import { ltiApi } from '../services/api_lti';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -65,9 +77,11 @@ const ITEM_ICONS = {
   Quiz: HelpCircle,
   Discussion: MessageSquare,
   ExternalUrl: ExternalLink,
+  ContextExternalTool: Wrench,
   SubHeader: Minus,
   File: Paperclip,
   Announcement: Megaphone,
+  ExternalTool: Wrench,
 };
 
 const ITEM_TYPE_OPTIONS = [
@@ -77,6 +91,8 @@ const ITEM_TYPE_OPTIONS = [
   { value: 'Page', label: 'Page' },
   { value: 'Discussion', label: 'Discussion' },
   { value: 'ExternalUrl', label: 'External URL' },
+  { value: 'File', label: 'File' },
+  { value: 'ExternalTool', label: 'External Tool' },
 ];
 
 const MAX_INDENT = 5;
@@ -129,7 +145,7 @@ const SortableModule = ({ module, children, isTeacher, disabled }) => {
     zIndex: isDragging ? 50 : 'auto',
   };
   return (
-    <div ref={setNodeRef} style={style}>
+    <div ref={setNodeRef} style={style} id={`module-${module.id}`}>
       {children({ dragHandleProps: isTeacher ? { ...attributes, ...listeners } : {} })}
     </div>
   );
@@ -174,9 +190,18 @@ const ModuleItemRow = memo(function ModuleItemRow({
   canMoveDown,
   itemLink,
   dragHandleProps,
+  itemProgress,
+  isStudent,
+  onMarkDone,
+  onOpenItem,
+  onLaunchTool,
 }) {
   const indent = item.indent || 0;
   const isHeader = item.type === 'SubHeader';
+  const locked = !!(isStudent && itemProgress?.locked);
+  const reqType = item.completion_type || itemProgress?.requirement_type || '';
+  const reqText = requirementLabel(reqType, item.min_score ?? itemProgress?.min_score);
+  const reqDone = !!itemProgress?.completed;
   const isExternal = isExternalItemLink(item);
   const opensNewTab = item.type === 'File' || item.new_tab;
   const padLeft = `${1 + indent * INDENT_REM}rem`;
@@ -218,15 +243,27 @@ const ModuleItemRow = memo(function ModuleItemRow({
       {!item.published && isTeacher && (
         <Badge variant="outline" className="text-xs font-normal">Unpublished</Badge>
       )}
+      {locked && <Lock className="w-3.5 h-3.5 text-text-tertiary flex-shrink-0" aria-label="Locked" />}
     </div>
   );
 
-  const titleWrap = itemLink ? (
+  const titleWrap = locked ? (
+    <div className="flex items-center gap-3 flex-1 min-w-0 opacity-60" aria-disabled="true" title="Locked">{titleNode}</div>
+  ) : item.type === 'ExternalTool' ? (
+    <button
+      type="button"
+      onClick={() => onLaunchTool?.(item)}
+      className="flex items-center gap-3 flex-1 min-w-0 text-left hover:text-brand-600"
+    >
+      {titleNode}
+    </button>
+  ) : itemLink ? (
     isExternal ? (
       <a
         href={itemLink}
         target={opensNewTab ? '_blank' : '_self'}
         rel={opensNewTab ? 'noopener noreferrer' : undefined}
+        onClick={() => onOpenItem?.(item)}
         className="flex items-center gap-3 flex-1 min-w-0 hover:text-brand-600"
       >
         {titleNode}
@@ -273,6 +310,32 @@ const ModuleItemRow = memo(function ModuleItemRow({
       )}
 
       {titleWrap}
+
+      {reqText && !isHeader && (
+        <span
+          className={cn(
+            'ml-2 flex items-center gap-1 text-xs whitespace-nowrap flex-shrink-0',
+            reqDone ? 'text-accent-success' : 'text-text-tertiary'
+          )}
+          data-testid={`requirement-${item.id}`}
+        >
+          {reqDone && <CheckCircle2 className="w-3.5 h-3.5" aria-hidden />}
+          {reqText}
+          {reqDone && <span className="sr-only">(completed)</span>}
+        </span>
+      )}
+
+      {isStudent && reqType === 'must_mark_done' && !locked && (
+        <Button
+          variant={reqDone ? 'secondary' : 'outline'}
+          size="sm"
+          className="ml-2 h-7 text-xs flex-shrink-0"
+          onClick={() => onMarkDone?.(item, !reqDone)}
+          aria-pressed={reqDone}
+        >
+          {reqDone ? 'Done' : 'Mark as done'}
+        </Button>
+      )}
 
       {isTeacher && !isHeader && (
         <IconTooltipButton
@@ -372,8 +435,10 @@ const ModuleRow = memo(function ModuleRow({
   onAddHeader,
   onDelete,
   dragHandleProps,
+  progress,
 }) {
   const itemCount = module.items_count || module.items?.length || 0;
+  const status = moduleStatus(progress);
 
   if (isRenaming) {
     return (
@@ -419,6 +484,20 @@ const ModuleRow = memo(function ModuleRow({
         </span>
         {!module.published && (
           <Badge variant="outline" className="text-xs font-normal ml-2">Unpublished</Badge>
+        )}
+        {status && (
+          <Badge
+            variant="outline"
+            className={cn(
+              'text-xs font-normal ml-2 gap-1',
+              status.tone === 'success' && 'border-accent-success/40 text-accent-success',
+              status.tone === 'info' && 'border-brand-300 text-brand-600'
+            )}
+          >
+            {status.tone === 'success' && <CheckCircle2 className="w-3 h-3" aria-hidden />}
+            {status.tone === 'muted' && <Lock className="w-3 h-3" aria-hidden />}
+            {status.label}
+          </Badge>
         )}
       </button>
 
@@ -492,6 +571,8 @@ const ModulesPage = () => {
   useAuth();
   const [modules, setModules] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Editor links to #module-N land on the module (G011).
+  useScrollToHash(!loading);
   const [error, setError] = useState(null);
   const [expandedModules, setExpandedModules] = useState({});
   const [showCreateModule, setShowCreateModule] = useState(false);
@@ -511,6 +592,13 @@ const ModulesPage = () => {
   const [settingsModuleId, setSettingsModuleId] = useState(null);
 
   const isTeacher = useIsTeacher(courseId);
+  // G061/G062: a student's progression drives lock icons, requirement
+  // check marks and "Mark as done" (staff are never locked).
+  const isStudent = isTeacher === false;
+  const progressQuery = useModuleProgress(courseId, { enabled: isStudent });
+  const refetchProgress = progressQuery.refetch;
+  const progressIndex = useMemo(() => indexProgress(progressQuery.data), [progressQuery.data]);
+  const markDone = useMarkModuleItemDone(courseId);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -634,7 +722,7 @@ const ModulesPage = () => {
   // B042: Assignment/Quiz/Discussion/Page items link to course content.
   // Load the existing content of the selected type for the picker.
   useEffect(() => {
-    if (addingItemTo === null || !itemNeedsContent(newItem.type)) {
+    if (addingItemTo === null || !itemNeedsContent(newItem.type) || newItem.type === 'ExternalTool') {
       setContentOptions([]);
       return undefined;
     }
@@ -647,15 +735,38 @@ const ModulesPage = () => {
     return () => { cancelled = true; };
   }, [addingItemTo, newItem.type, courseId]);
 
-  const canSubmitNewItem = itemNeedsContent(newItem.type)
-    ? (newItem.content_id && newItem.content_id !== NEW_CONTENT) || !!newItem.title.trim()
-    : !!newItem.title.trim();
+  // External Tool items are built by ModuleExternalToolFields (LTI lane,
+  // G131): a tool is required, the title defaults to the tool's name.
+  let canSubmitNewItem;
+  if (newItem.type === 'ExternalTool') {
+    canSubmitNewItem = !!newItem.tool_id;
+  } else if (!canCreateContent(newItem.type) && itemNeedsContent(newItem.type)) {
+    canSubmitNewItem = !!newItem.content_id && newItem.content_id !== NEW_CONTENT;
+  } else if (itemNeedsContent(newItem.type)) {
+    canSubmitNewItem = (newItem.content_id && newItem.content_id !== NEW_CONTENT) || !!newItem.title.trim();
+  } else {
+    canSubmitNewItem = !!newItem.title.trim();
+  }
 
   const handleAddItem = async (e, moduleId) => {
     e.preventDefault();
     if (!canSubmitNewItem) return;
     setCreating(true);
     try {
+      if (newItem.type === 'ExternalTool') {
+        // G131: LTI tool items go through the LTI endpoint (resource link).
+        await ltiApi.createModuleToolItem(courseId, moduleId, {
+          tool_id: Number(newItem.tool_id),
+          title: newItem.title,
+          url: newItem.external_url,
+          new_tab: newItem.new_tab,
+          position: (modules.find(m => m.id === moduleId)?.items?.length || 0) + 1,
+        });
+        setAddingItemTo(null);
+        setNewItem({ title: '', type: 'SubHeader', external_url: '', new_tab: false, content_id: '' });
+        await fetchModules();
+        return;
+      }
       const itemPayload = await buildModuleItemPayload(api, courseId, {
         title: newItem.title,
         type: newItem.type,
@@ -867,6 +978,25 @@ const ModulesPage = () => {
 
   const getItemLink = useCallback((item) => getModuleItemLink(item, courseId), [courseId]);
 
+  const handleMarkDone = useCallback((moduleId, item, done) => {
+    markDone.mutate({ moduleId, itemId: item.id, done }, { onError: (err) => setError(err.message) });
+  }, [markDone]);
+
+  // Opening an item counts as viewing it (must_view). Content pages are
+  // recorded server-side when they load; external links are recorded here.
+  const handleOpenItem = useCallback((moduleId, item) => {
+    if (!isStudent || item.type !== 'ExternalUrl') return;
+    markModuleItemRead(courseId, moduleId, item.id).then(() => refetchProgress()).catch(() => {});
+  }, [courseId, isStudent, refetchProgress]);
+
+  const handleLaunchTool = useCallback(async (moduleId, item) => {
+    try {
+      await launchModuleTool(courseId, moduleId, item);
+    } catch (err) {
+      setError(err.message);
+    }
+  }, [courseId]);
+
   const activeDragItem = useMemo(() => {
     if (!activeId) return null;
     const idStr = String(activeId);
@@ -906,10 +1036,17 @@ const ModulesPage = () => {
         <div className="flex items-center justify-between mt-2">
           <h2 className="text-2xl font-bold text-text-primary">Modules</h2>
           {isTeacher && (
-            <Button onClick={() => setShowCreateModule(v => !v)} size="sm">
-              {showCreateModule ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              {showCreateModule ? 'Cancel' : 'Module'}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button asChild variant="outline" size="sm">
+                <Link to={`/courses/${courseId}/modules/progressions`}>
+                  <BarChart3 className="w-4 h-4" /> Student progress
+                </Link>
+              </Button>
+              <Button onClick={() => setShowCreateModule(v => !v)} size="sm">
+                {showCreateModule ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                {showCreateModule ? 'Cancel' : 'Module'}
+              </Button>
+            </div>
           )}
         </div>
       </div>
@@ -994,7 +1131,14 @@ const ModulesPage = () => {
                           onAddHeader={() => openAddItem(module.id, 'SubHeader')}
                           onDelete={() => handleDeleteModule(module.id)}
                           dragHandleProps={dragHandleProps}
+                          progress={isStudent ? progressIndex.modules.get(module.id) : undefined}
                         />
+                        {isStudent && progressIndex.modules.get(module.id)?.lock_explanation && (
+                          <div className="border-b bg-surface-1 px-4 py-2 flex items-center gap-2 text-xs text-text-tertiary">
+                            <Lock className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span>{progressIndex.modules.get(module.id).lock_explanation}</span>
+                          </div>
+                        )}
 
                         {showPrereqRow && (
                           <div className="border-b bg-surface-1 px-4 py-2 flex items-center gap-3 flex-wrap">
@@ -1067,6 +1211,11 @@ const ModulesPage = () => {
                                           canMoveDown={idx < items.length - 1}
                                           itemLink={getItemLink(item)}
                                           dragHandleProps={itemDragProps}
+                                          isStudent={isStudent}
+                                          itemProgress={progressIndex.items.get(item.id)}
+                                          onMarkDone={(it, done) => handleMarkDone(module.id, it, done)}
+                                          onOpenItem={(it) => handleOpenItem(module.id, it)}
+                                          onLaunchTool={(it) => handleLaunchTool(module.id, it)}
                                         />
                                       )}
                                     </SortableItem>
@@ -1101,7 +1250,7 @@ const ModulesPage = () => {
                                       autoFocus
                                     />
                                   </div>
-                                  {itemNeedsContent(newItem.type) && (
+                                  {itemNeedsContent(newItem.type) && newItem.type !== 'ExternalTool' && (
                                     <select
                                       value={newItem.content_id}
                                       onChange={(e) => setNewItem({ ...newItem, content_id: e.target.value })}
@@ -1110,7 +1259,11 @@ const ModulesPage = () => {
                                       className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                                     >
                                       <option value="">
-                                        {contentOptionsLoading ? 'Loading...' : `[ New ${newItem.type.toLowerCase()} ]`}
+                                        {contentOptionsLoading
+                                          ? 'Loading...'
+                                          : canCreateContent(newItem.type)
+                                            ? `[ New ${newItem.type.toLowerCase()} ]`
+                                            : `Choose ${newItem.type === 'File' ? 'a file' : 'an external tool'}...`}
                                       </option>
                                       {contentOptions.map(opt => (
                                         <option key={opt.id} value={String(opt.id)}>{opt.label}</option>
@@ -1123,7 +1276,8 @@ const ModulesPage = () => {
                                         type="url"
                                         value={newItem.external_url}
                                         onChange={(e) => setNewItem({ ...newItem, external_url: e.target.value })}
-                                        placeholder="https://..."
+                                        aria-label={newItem.type === 'ExternalTool' ? 'Launch URL (optional)' : 'URL'}
+                                        placeholder={newItem.type === 'ExternalTool' ? 'Launch URL (optional, defaults to the tool URL)' : 'https://...'}
                                         className="flex-1 border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                                       />
                                       <label className="flex items-center gap-2 text-sm text-text-secondary whitespace-nowrap">
@@ -1136,6 +1290,18 @@ const ModulesPage = () => {
                                         New tab
                                       </label>
                                     </div>
+                                  )}
+                                  {newItem.type === 'ExternalTool' && (
+                                    <ModuleExternalToolFields
+                                      courseId={courseId}
+                                      moduleId={module.id}
+                                      value={newItem}
+                                      onChange={setNewItem}
+                                      onDeepLinked={() => {
+                                        setAddingItemTo(null);
+                                        fetchModules();
+                                      }}
+                                    />
                                   )}
                                   <div className="flex items-center gap-2 justify-end">
                                     <Button
@@ -1199,13 +1365,15 @@ const ModulesPage = () => {
             modules={modules}
             prerequisites={prerequisites[mod.id] || []}
             onClose={() => setSettingsModuleId(null)}
-            onSave={({ prereqIds, requireSequential, itemRequirements }) => {
+            onSave={({ prereqIds, requireSequential, itemRequirements, unlockAt, requirementCount }) => {
               setPrerequisites(prev => ({ ...prev, [mod.id]: prereqIds }));
               setModules(prev => prev.map(m =>
                 m.id === mod.id
                   ? {
                       ...m,
                       require_sequential_progress: requireSequential,
+                      unlock_at: unlockAt ?? null,
+                      requirement_count: requirementCount ?? 0,
                       items: (m.items || []).map(item => {
                         const req = itemRequirements[item.id];
                         if (!req) return item;

@@ -2,20 +2,25 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import {
   BookOpen, Users, Sliders, FileText, GraduationCap, ClipboardCheck, Upload,
-  KeyRound, Shield, UserCog, RefreshCw, Bell, Code, Flag,
+  KeyRound, Shield, UserCog, RefreshCw, Bell, Code, Flag, BarChart3, Wrench, Palette, Puzzle,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 
 const tiles = [
   { to: '/admin/courses',          icon: BookOpen,        label: 'Courses',         desc: 'Browse all courses, create new' },
   { to: '/admin/people',           icon: Users,           label: 'People',          desc: 'Users, roles, admins' },
-  { to: '/admin/settings',         icon: Sliders,         label: 'Settings',        desc: 'Upload limits and account-wide knobs' },
+  { to: '/admin/settings',         icon: Sliders,         label: 'Settings',        desc: 'Upload limits, storage quotas' },
+  { to: '/admin/reports',          icon: BarChart3,       label: 'Reports',         desc: 'Provisioning, grade export, last access' },
+  { to: '/admin/tools',            icon: Wrench,          label: 'Admin Tools',     desc: 'Restore courses, logs by user, activity' },
+  { to: '/admin/theme',            icon: Palette,         label: 'Theme',           desc: 'Brand colors and logo' },
   { to: '/admin/feature_flags',    icon: Flag,            label: 'Feature Flags',   desc: 'Toggle account features' },
   { to: '/admin/ferpa',            icon: FileText,        label: 'FERPA',           desc: 'Privacy & data requests' },
   { to: '/admin/terms',            icon: GraduationCap,   label: 'Terms',           desc: 'Enrollment terms' },
   { to: '/admin/grading_periods',  icon: ClipboardCheck,  label: 'Grading Periods', desc: 'Term-level grading' },
+  { to: '/admin/grade_statuses',   icon: ClipboardCheck,  label: 'Grade Statuses',  desc: 'Custom submission statuses' },
   { to: '/admin/sis_import',       icon: Upload,          label: 'SIS Import',      desc: 'Roster sync' },
   { to: '/admin/developer_keys',   icon: KeyRound,        label: 'Developer Keys',  desc: 'OAuth & LTI clients' },
+  { to: '/admin/lti',              icon: Puzzle,          label: 'LTI Tools',       desc: 'Register and deploy LTI 1.3 tools' },
   { to: '/admin/auth_providers',   icon: Shield,          label: 'Auth Providers',  desc: 'SSO configuration' },
   { to: '/admin/roles',            icon: UserCog,         label: 'Custom Roles',    desc: 'Permission overrides' },
   { to: '/admin/oneroster',        icon: RefreshCw,       label: 'OneRoster',       desc: 'OneRoster sync' },

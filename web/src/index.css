@@ -345,6 +345,29 @@
   margin: 0;
 }
 
+/* Collapsible sections while editing: always expanded so the body can be
+   edited; the saved <details> keeps its own open/closed state. */
+.rce-v2-content .rce-details {
+  border: 1px dashed hsl(var(--border));
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.75rem 0.5rem;
+  margin: 1em 0;
+}
+.rce-v2-content .rce-details-summary {
+  font-weight: 600;
+  margin: 0.25rem 0;
+}
+.rce-v2-content .rce-details-summary::before {
+  content: '\25B8\00a0';
+}
+.rce-v2-content img {
+  max-width: 100%;
+  height: auto;
+}
+.rce-v2-content img.ProseMirror-selectednode {
+  outline: 2px solid hsl(var(--ring));
+}
+
 /* Horizontal rule: subtle separator only when not custom-styled. */
 .reading-surface .prose :where(hr):not([style]):not(:where([class~="not-prose"] *)) {
   border: 0;

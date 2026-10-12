@@ -85,6 +85,7 @@ func allAutoMigrateModels() []interface{} {
 		&models.ContextModule{},
 		&models.ContentTag{},
 		&models.WikiPage{},
+		&models.WikiPageRevision{},
 		&models.Assignment{},
 		&models.Quiz{},
 		&models.AssignmentGroup{},
@@ -102,14 +103,23 @@ func allAutoMigrateModels() []interface{} {
 		&models.Nonce{},
 		&models.OAuthAuthorizationCode{},
 		&models.LTIPlatformKey{},
+		&models.LoginSessionToken{},
+		&models.AccountReport{},
 		// Discussions, Files, SIS
 		&models.DiscussionTopic{},
 		&models.DiscussionEntry{},
 		&models.DiscussionEntryRating{},
 		&models.Folder{},
 		&models.Attachment{},
+		&models.MediaObject{},
+		&models.MediaTrack{},
+		&models.StudentViewStudent{},
 		&models.SISBatch{},
 		&models.SISBatchError{},
+		&models.SISBatchFile{},
+		&models.UserLogin{},
+		&models.BrandConfig{},
+		&models.StorageQuota{},
 		// Quiz Engine, Rubrics, Grading Periods, Overrides
 		&models.QuizQuestion{},
 		&models.QuizSubmission{},
@@ -122,15 +132,20 @@ func allAutoMigrateModels() []interface{} {
 		&models.AssignmentOverride{},
 		&models.AssignmentOverrideStudent{},
 		&models.LatePolicy{},
+		&models.SubmissionVersion{},
+		&models.CourseScoreOverride{},
 		// Calendar, Messaging, Notifications
 		&models.CalendarEvent{},
 		&models.Conversation{},
 		&models.ConversationParticipant{},
 		&models.ConversationMessage{},
+		&models.ConversationMessageAttachment{},
+		&models.ConversationMessageRecipient{},
 		&models.NotificationPreference{},
 		&models.Notification{},
 		// Content Migration, Learning Outcomes
 		&models.ContentMigration{},
+		&models.ContentExport{},
 		&models.LearningOutcomeGroup{},
 		&models.LearningOutcome{},
 		&models.LearningOutcomeResult{},
@@ -143,6 +158,7 @@ func allAutoMigrateModels() []interface{} {
 		&models.BlueprintSubscription{},
 		&models.BlueprintMigration{},
 		&models.BlueprintContentTag{},
+		&models.BlueprintContentLock{},
 		&models.CoursePace{},
 		&models.CoursePaceModuleItem{},
 		// Collaborations, Conferences, Analytics
@@ -156,13 +172,18 @@ func allAutoMigrateModels() []interface{} {
 		&models.DiscussionEntryParticipant{},
 		&models.DiscussionTopicParticipant{},
 		&models.DiscussionEntryVersion{},
+		&models.DiscussionTopicSectionVisibility{},
+		&models.DiscussionEntryMention{},
 		// Announcements, Enrollment Terms
 		&models.Announcement{},
 		&models.AnnouncementReadReceipt{},
+		&models.AnnouncementReply{},
+		&models.AnnouncementSectionVisibility{},
 		&models.EnrollmentTerm{},
 		// Notification Delivery, Audit Logs
 		&models.CommunicationChannel{},
 		&models.NotificationDelivery{},
+		&models.NotificationPolicy{},
 		&models.AuditLog{},
 		&models.GradeChangeLog{},
 		// Custom Roles, OneRoster, Document Annotations
@@ -197,6 +218,9 @@ func allAutoMigrateModels() []interface{} {
 		&models.QuestionBank{},
 		&models.QuestionBankEntry{},
 		&models.ModulePrerequisite{},
+		&models.ContextModuleProgression{},
+		&models.ModuleItemUserAction{},
+		&models.BlackoutDate{},
 		// Quiz Question Groups (random selection anti-cheating)
 		&models.QuizQuestionGroup{},
 		// P3 Features: Feature Flags
@@ -204,6 +228,13 @@ func allAutoMigrateModels() []interface{} {
 		// P3 Features: Custom Gradebook Columns
 		&models.CustomGradebookColumn{},
 		&models.CustomColumnDatum{},
+		// Grading UI lane (000094-000084): submission attempt history,
+		// moderated grading, custom grade statuses.
+		&models.SubmissionVersion{},
+		&models.ModerationGrader{},
+		&models.ProvisionalGrade{},
+		&models.ModerationSelection{},
+		&models.CustomGradeStatus{},
 		// P3 Features: Mastery Paths (Conditional Release)
 		&models.ConditionalReleaseRule{},
 		&models.ConditionalReleaseScoringRange{},
@@ -214,6 +245,8 @@ func allAutoMigrateModels() []interface{} {
 		&models.AppointmentGroup{},
 		&models.AppointmentSlot{},
 		&models.AppointmentReservation{},
+		&models.AppointmentGroupContext{},
+		&models.CalendarFeedToken{},
 		// P3 Features: Outcome Proficiency
 		&models.OutcomeProficiency{},
 		&models.OutcomeProficiencyRating{},
@@ -230,6 +263,10 @@ func allAutoMigrateModels() []interface{} {
 		&models.QuizItemBankItem{},
 		&models.QuizStimulus{},
 		&models.QuizQuestionOutcomeAlignment{},
+		// Quiz lifecycle: moderation, submission event log, regrades (000087-000089).
+		&models.QuizExtension{},
+		&models.QuizSubmissionEvent{},
+		&models.QuizQuestionRegrade{},
 		// Phase 6 Wave 1: gamification foundations (migrations 000032-000035).
 		// All indexes for these tables live in the SQL chain, not the GORM tags,
 		// because the migrations use DESC ordering and partial WHERE clauses
@@ -256,6 +293,15 @@ func allAutoMigrateModels() []interface{} {
 		// store backing the settings service in internal/service/settings/;
 		// catalog declares the typed vocabulary that maps to these rows.
 		&models.Setting{},
+		// Learner dashboard lane: planner (tables first created in the SQL
+		// chain by 000121), dashboard course preferences, observer alerts
+		// and profile links (000121-000123).
+		&models.PlannerNote{},
+		&models.PlannerOverride{},
+		&models.UserCoursePreference{},
+		&models.ObserverAlertThreshold{},
+		&models.ObserverAlert{},
+		&models.UserProfileLink{},
 	}
 }
 

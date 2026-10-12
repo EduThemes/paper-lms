@@ -8,24 +8,33 @@ const AssignmentsPage = React.lazy(() => import('./pages/AssignmentsPage'));
 const GradebookPage = React.lazy(() => import('./pages/GradebookPage'));
 const StudentGradesPage = React.lazy(() => import('./pages/StudentGradesPage'));
 const ContentImportPage = React.lazy(() => import('./pages/ContentImportPage'));
+const CourseExportPage = React.lazy(() => import('./pages/CourseExportPage'));
 const ModulesPage = React.lazy(() => import('./pages/ModulesPage'));
+const ModuleProgressPage = React.lazy(() => import('./pages/ModuleProgressPage'));
 const PeoplePage = React.lazy(() => import('./pages/PeoplePage'));
+const CourseSectionsPage = React.lazy(() => import('./pages/CourseSectionsPage'));
 const AccessTokensPage = React.lazy(() => import('./pages/AccessTokensPage'));
 const DeveloperKeysPage = React.lazy(() => import('./pages/DeveloperKeysPage'));
 const OAuthConsentPage = React.lazy(() => import('./pages/OAuthConsentPage'));
 const ExternalToolsPage = React.lazy(() => import('./pages/ExternalToolsPage'));
+const ExternalToolLaunchPage = React.lazy(() => import('./pages/ExternalToolLaunchPage'));
+const LtiRegistrationsPage = React.lazy(() => import('./pages/LtiRegistrationsPage'));
 const DiscussionsPage = React.lazy(() => import('./pages/DiscussionsPage'));
 const DiscussionTopicPage = React.lazy(() => import('./pages/DiscussionTopicPageV2'));
 const FilesPage = React.lazy(() => import('./pages/FilesPage'));
 const SISImportPage = React.lazy(() => import('./pages/SISImportPage'));
 const PagesPage = React.lazy(() => import('./pages/PagesPage'));
 const PageDetailPage = React.lazy(() => import('./pages/PageDetailPage'));
+const PageHistoryPage = React.lazy(() => import('./pages/PageHistoryPage'));
 const QuizzesPage = React.lazy(() => import('./pages/QuizzesPage'));
 const QuizTakePage = React.lazy(() => import('./pages/QuizTakePage'));
 const QuizReviewPage = React.lazy(() => import('./pages/QuizReviewPage'));
 const QuizEditorPage = React.lazy(() => import('./pages/QuizEditorPage'));
 const QuizSubmissionsPage = React.lazy(() => import('./pages/QuizSubmissionsPage'));
 const QuizStatisticsPage = React.lazy(() => import('./pages/QuizStatisticsPage'));
+const QuizGradePage = React.lazy(() => import('./pages/QuizGradePage'));
+const QuizModeratePage = React.lazy(() => import('./pages/QuizModeratePage'));
+const QuizRegradePage = React.lazy(() => import('./pages/QuizRegradePage'));
 const RubricsPage = React.lazy(() => import('./pages/RubricsPage'));
 const GradingPeriodsPage = React.lazy(() => import('./pages/GradingPeriodsPage'));
 const AssignmentOverridesPage = React.lazy(() => import('./pages/AssignmentOverridesPage'));
@@ -34,6 +43,9 @@ const InboxPage = React.lazy(() => import('./pages/InboxPage'));
 const NotificationPreferencesPage = React.lazy(() => import('./pages/NotificationPreferencesPage'));
 const NotificationsPage = React.lazy(() => import('./pages/NotificationsPage'));
 const SpeedGraderPage = React.lazy(() => import('./pages/SpeedGraderPage'));
+const ModerationPage = React.lazy(() => import('./pages/ModerationPage'));
+const IndividualGradebookPage = React.lazy(() => import('./pages/IndividualGradebookPage'));
+const CustomGradeStatusesPage = React.lazy(() => import('./pages/CustomGradeStatusesPage'));
 const LearningOutcomesPage = React.lazy(() => import('./pages/LearningOutcomesPage'));
 const GroupsPage = React.lazy(() => import('./pages/GroupsPage'));
 const BlueprintPage = React.lazy(() => import('./pages/BlueprintPage'));
@@ -53,7 +65,6 @@ const OneRosterPage = React.lazy(() => import('./pages/OneRosterPage'));
 const DocViewerPage = React.lazy(() => import('./pages/DocViewerPage'));
 const LoginPageSSO = React.lazy(() => import('./pages/LoginPageSSO'));
 const QuestionBanksPage = React.lazy(() => import('./pages/QuestionBanksPage'));
-const ItemBankManagerPage = React.lazy(() => import('./pages/ItemBankManagerPage'));
 const StimulusEditorPage = React.lazy(() => import('./pages/StimulusEditorPage'));
 const ItemAnalysisPage = React.lazy(() => import('./pages/ItemAnalysisPage'));
 const AccommodationsPage = React.lazy(() => import('./pages/AccommodationsPage'));
@@ -72,7 +83,11 @@ const ObserverDashboardPage = React.lazy(() => import('./pages/ObserverDashboard
 const AdminHomePage = React.lazy(() => import('./pages/AdminHomePage'));
 const AdminCoursesPage = React.lazy(() => import('./pages/AdminCoursesPage'));
 const AdminPeoplePage = React.lazy(() => import('./pages/AdminPeoplePage'));
+const AccountReportsPage = React.lazy(() => import('./pages/AccountReportsPage'));
 const AdminSettingsPage = React.lazy(() => import('./pages/AdminSettingsPage'));
+const AdminUserDetailPage = React.lazy(() => import('./pages/AdminUserDetailPage'));
+const ThemeEditorPage = React.lazy(() => import('./pages/ThemeEditorPage'));
+const AdminToolsPage = React.lazy(() => import('./pages/AdminToolsPage'));
 const SuperAdminSettingsPage = React.lazy(() => import('./pages/SuperAdminSettingsPage'));
 import PublicPageView from './pages/PublicPageView';
 import NotFoundPage from './pages/NotFoundPage';
@@ -81,6 +96,8 @@ import ProtectedRoute from './components/ProtectedRoute';
 import { OAuthConsentGate, ResumePendingOAuthConsent } from './components/OAuthConsentResume';
 import SuperAdminGate from './components/SuperAdminGate';
 import { CourseUIProvider } from './contexts/CourseUIContext';
+import CourseTabGate from './components/CourseTabGate';
+import CoursePageViewTracker from './components/analytics/CoursePageViewTracker';
 import { useAuth } from './contexts/AuthContext';
 import { api } from './services/api';
 const SetupWizardPage = React.lazy(() => import('./pages/SetupWizardPage'));
@@ -89,8 +106,12 @@ const FeatureFlagsPage = React.lazy(() => import('./pages/FeatureFlagsPage'));
 const MasteryPathsEditorPage = React.lazy(() => import('./pages/MasteryPathsEditorPage'));
 const AppointmentGroupsPage = React.lazy(() => import('./pages/AppointmentGroupsPage'));
 const AppointmentGroupEditorPage = React.lazy(() => import('./pages/AppointmentGroupEditorPage'));
+const MyAppointmentsPage = React.lazy(() => import('./pages/MyAppointmentsPage'));
 const OutcomeProficiencyPage = React.lazy(() => import('./pages/OutcomeProficiencyPage'));
 const MasteryGradebookPage = React.lazy(() => import('./pages/MasteryGradebookPage'));
+const StudentAnalyticsPage = React.lazy(() => import('./pages/StudentAnalyticsPage'));
+const StudentMasteryPage = React.lazy(() => import('./pages/StudentMasteryPage'));
+const PortfolioSharedPage = React.lazy(() => import('./pages/PortfolioSharedPage'));
 const ReadingPreferencesPage = React.lazy(() => import('./pages/ReadingPreferencesPage'));
 const GamificationPreferencesPage = React.lazy(() => import('./pages/GamificationPreferencesPage'));
 const LanguagePreferencesPage = React.lazy(() => import('./pages/LanguagePreferencesPage'));
@@ -109,6 +130,11 @@ const AccountSettingsPage = React.lazy(() => import('./pages/AccountSettingsPage
 const SmartSearchPage = React.lazy(() => import('./pages/SmartSearchPage'));
 const CommonsPage = React.lazy(() => import('./pages/CommonsPage'));
 const CommonsPublishPage = React.lazy(() => import('./pages/CommonsPublishPage'));
+// Learner dashboard lane: planner, profile, legal pages, route a11y.
+const PlannerPage = React.lazy(() => import('./pages/PlannerPage'));
+const ProfilePage = React.lazy(() => import('./pages/ProfilePage'));
+const LegalPage = React.lazy(() => import('./pages/LegalPage'));
+import RouteAnnouncer from './components/RouteAnnouncer';
 
 const App = () => {
   const { user, loading } = useAuth();
@@ -145,8 +171,15 @@ const App = () => {
 
   return (
     <BrowserRouter>
+      <RouteAnnouncer />
       <React.Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-gray-600">Loading...</div></div>}>
       <Routes>
+        <Route path="/privacy" element={<LegalPage kind="privacy" />} />
+        <Route path="/terms" element={<LegalPage kind="terms" />} />
+        <Route path="/accessibility" element={<LegalPage kind="accessibility" />} />
+        <Route path="/planner" element={<ProtectedRoute><PlannerPage /></ProtectedRoute>} />
+        <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+        <Route path="/users/:userId/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPageSSO />} />
         {/* Phase 9-B — TOTP MFA. Verify route is unauthenticated
             (pending_token IS the credential); enroll route is gated
@@ -161,6 +194,7 @@ const App = () => {
         <Route path="/users/self/passkeys/enroll" element={<ProtectedRoute><PasskeyEnrollPage /></ProtectedRoute>} />
         <Route path="/consent/verify/:token" element={<ParentalConsentPage />} />
         <Route path="/portfolios/public/:slug" element={<PortfolioPublicPage />} />
+        <Route path="/portfolios/shared/:token" element={<PortfolioSharedPage />} />
         <Route path="/courses/:courseId/p/:slug" element={<PublicPageView />} />
         <Route
           path="/"
@@ -184,7 +218,7 @@ const App = () => {
           path="/courses/:courseId"
           element={
             <ProtectedRoute>
-              <CourseUIProvider><Outlet /></CourseUIProvider>
+              <CourseUIProvider><CoursePageViewTracker /><CourseTabGate><Outlet /></CourseTabGate></CourseUIProvider>
             </ProtectedRoute>
           }
         >
@@ -194,13 +228,18 @@ const App = () => {
           <Route path="assignments/:assignmentId" element={<AssignmentPage />} />
           <Route path="assignments/:assignmentId/overrides" element={<AssignmentOverridesPage />} />
           <Route path="assignments/:assignmentId/speedgrader" element={<SpeedGraderPage />} />
+          <Route path="assignments/:assignmentId/moderate" element={<ModerationPage />} />
+          <Route path="gradebook/individual" element={<IndividualGradebookPage />} />
           <Route path="assignments/:assignmentId/submissions/:userId/docviewer" element={<DocViewerPage />} />
           <Route path="gradebook" element={<GradebookPage />} />
           <Route path="grades" element={<StudentGradesPage />} />
           <Route path="modules" element={<ModulesPage />} />
+          <Route path="modules/progressions" element={<ModuleProgressPage />} />
           <Route path="people" element={<PeoplePage />} />
+          <Route path="sections" element={<CourseSectionsPage />} />
           <Route path="pages" element={<PagesPage />} />
           <Route path="pages/:slug" element={<PageDetailPage />} />
+          <Route path="pages/:slug/revisions" element={<PageHistoryPage />} />
           <Route path="quizzes" element={<QuizzesPage />} />
           <Route path="quizzes/:quizId" element={<Navigate to="take" replace />} />
           <Route path="quizzes/:quizId/take" element={<QuizTakePage />} />
@@ -208,14 +247,19 @@ const App = () => {
           <Route path="quizzes/:quizId/submissions/:submissionId/review" element={<QuizReviewPage />} />
           <Route path="quizzes/:quizId/submissions" element={<QuizSubmissionsPage />} />
           <Route path="quizzes/:quizId/statistics" element={<QuizStatisticsPage />} />
+          <Route path="quizzes/:quizId/submissions/:submissionId/grade" element={<QuizGradePage />} />
+          <Route path="quizzes/:quizId/moderate" element={<QuizModeratePage />} />
+          <Route path="quizzes/:quizId/regrade" element={<QuizRegradePage />} />
           <Route path="quizzes/:quizId/item-analysis" element={<ItemAnalysisPage />} />
-          <Route path="item-banks" element={<ItemBankManagerPage />} />
+          <Route path="item-banks" element={<Navigate to="../question_banks" replace />} />
           <Route path="stimuli" element={<StimulusEditorPage />} />
           <Route path="stimuli/:stimulusId" element={<StimulusEditorPage />} />
           <Route path="discussions" element={<DiscussionsPage />} />
           <Route path="discussions/:topicId" element={<DiscussionTopicPage />} />
           <Route path="files" element={<FilesPage />} />
           <Route path="external_tools" element={<ExternalToolsPage />} />
+          <Route path="external_tools/:toolId" element={<ExternalToolLaunchPage />} />
+          <Route path="external_tools/:toolId/launch/:placement" element={<ExternalToolLaunchPage />} />
           <Route path="rubrics" element={<RubricsPage />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="announcements" element={<AnnouncementsPage />} />
@@ -227,6 +271,8 @@ const App = () => {
           <Route path="collaborations" element={<CollaborationsPage />} />
           <Route path="conferences" element={<ConferencesPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
+          <Route path="analytics/users/:userId" element={<StudentAnalyticsPage />} />
+          <Route path="outcomes/mastery" element={<StudentMasteryPage />} />
           <Route path="audit_log" element={<AuditLogPage />} />
           <Route path="gamification/currencies" element={<GamificationCurrenciesPage />} />
           <Route path="gamification/badges" element={<GamificationBadgesPage />} />
@@ -235,6 +281,7 @@ const App = () => {
           <Route path="attendance" element={<AttendancePage />} />
           <Route path="question_banks" element={<QuestionBanksPage />} />
           <Route path="content_import" element={<ContentImportPage />} />
+          <Route path="content_export" element={<CourseExportPage />} />
           {/* P3 Features */}
           <Route path="assignments/:assignmentId/mastery_paths" element={<MasteryPathsEditorPage />} />
           <Route path="appointment_groups" element={<AppointmentGroupsPage />} />
@@ -271,10 +318,26 @@ const App = () => {
           }
         />
         <Route
+          path="/admin/lti"
+          element={
+            <ProtectedRoute>
+              <LtiRegistrationsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/admin/sis_import"
           element={
             <ProtectedRoute>
               <SISImportPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/grade_statuses"
+          element={
+            <ProtectedRoute>
+              <CustomGradeStatusesPage />
             </ProtectedRoute>
           }
         />
@@ -291,6 +354,14 @@ const App = () => {
           element={
             <ProtectedRoute>
               <CalendarPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/appointments"
+          element={
+            <ProtectedRoute>
+              <MyAppointmentsPage />
             </ProtectedRoute>
           }
         />
@@ -414,6 +485,7 @@ const App = () => {
             </ProtectedRoute>
           }
         />
+        <Route path="/admin/reports" element={<ProtectedRoute><AccountReportsPage /></ProtectedRoute>} />
         <Route
           path="/admin/settings"
           element={
@@ -422,6 +494,9 @@ const App = () => {
             </ProtectedRoute>
           }
         />
+        <Route path="/admin/users/:userId" element={<ProtectedRoute><AdminUserDetailPage /></ProtectedRoute>} />
+        <Route path="/admin/theme" element={<ProtectedRoute><ThemeEditorPage /></ProtectedRoute>} />
+        <Route path="/admin/tools" element={<ProtectedRoute><AdminToolsPage /></ProtectedRoute>} />
         {/*
           Super-Admin Settings Engine. ProtectedRoute (session check)
           + SuperAdminGate (role==='super_admin' check) are layered;

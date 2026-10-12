@@ -28,6 +28,19 @@ func (r *gradingStandardRepo) FindByID(ctx context.Context, id uint) (*models.Gr
 	return &standard, nil
 }
 
+func (r *gradingStandardRepo) FindByIDInAccount(ctx context.Context, id, accountID uint) (*models.GradingStandard, error) {
+	var standard models.GradingStandard
+	err := r.db.WithContext(ctx).
+		Where("id = ?", id).
+		Where(`(context_type = 'Account' AND context_id = ?)
+			OR (context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))`, accountID, accountID).
+		First(&standard).Error
+	if err != nil {
+		return nil, err
+	}
+	return &standard, nil
+}
+
 func (r *gradingStandardRepo) Update(ctx context.Context, standard *models.GradingStandard) error {
 	return r.db.WithContext(ctx).Save(standard).Error
 }
@@ -39,6 +52,14 @@ func (r *gradingStandardRepo) Delete(ctx context.Context, id uint) error {
 func (r *gradingStandardRepo) ListByCourse(ctx context.Context, courseID uint) ([]models.GradingStandard, error) {
 	var standards []models.GradingStandard
 	if err := r.db.WithContext(ctx).Where("context_type = ? AND context_id = ? AND workflow_state = ?", "Course", courseID, "active").Order("id ASC").Find(&standards).Error; err != nil {
+		return nil, err
+	}
+	return standards, nil
+}
+
+func (r *gradingStandardRepo) ListByAccount(ctx context.Context, accountID uint) ([]models.GradingStandard, error) {
+	var standards []models.GradingStandard
+	if err := r.db.WithContext(ctx).Where("context_type = ? AND context_id = ? AND workflow_state = ?", "Account", accountID, "active").Order("id ASC").Find(&standards).Error; err != nil {
 		return nil, err
 	}
 	return standards, nil

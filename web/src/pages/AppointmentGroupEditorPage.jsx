@@ -3,8 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Trash2, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
+import { calendarApi } from '../services/api_calendar';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import { zonedWallClockToISO } from '../lib/userTimeZone';
 
 /**
  * Slot generator helper: given a date, start time, end time, and slot duration
@@ -12,8 +14,10 @@ import CourseNav from '../components/CourseNav';
  */
 const generateSlots = (date, startTime, endTime, durationMin) => {
   if (!date || !startTime || !endTime || !durationMin) return [];
-  const start = new Date(`${date}T${startTime}`);
-  const end = new Date(`${date}T${endTime}`);
+  // The date and times are a wall clock in the profile time zone (G157),
+  // not the browser's.
+  const start = new Date(zonedWallClockToISO(`${date}T${startTime}`) || NaN);
+  const end = new Date(zonedWallClockToISO(`${date}T${endTime}`) || NaN);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
   if (end <= start) return [];
   const out = [];
@@ -49,6 +53,32 @@ const AppointmentGroupEditorPage = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(isEditing);
+  // Scheduler parity (G097): more courses, section limits, a group set
+  // that signs up as groups, and the slots already on the group.
+  const [teachingCourses, setTeachingCourses] = useState([]);
+  const [extraCourses, setExtraCourses] = useState([]);
+  const [sectionIds, setSectionIds] = useState([]);
+  const [groupSets, setGroupSets] = useState([]);
+  const [groupSetId, setGroupSetId] = useState('');
+  const [existingSlots, setExistingSlots] = useState([]);
+
+  useEffect(() => {
+    calendarApi.listContexts()
+      .then((res) => setTeachingCourses((res.data || []).filter((c) => c.type === 'course' && c.is_instructor)))
+      .catch(() => setTeachingCourses([]));
+    api.getGroupCategories(courseId)
+      .then((res) => setGroupSets(res.data || []))
+      .catch(() => setGroupSets([]));
+  }, [courseId]);
+
+  const loadSlots = async () => {
+    try {
+      const res = await api.listAppointmentSlots(groupId, true);
+      setExistingSlots(res.data || []);
+    } catch {
+      setExistingSlots([]);
+    }
+  };
 
   useEffect(() => {
     if (!isEditing) return;
@@ -56,6 +86,15 @@ const AppointmentGroupEditorPage = () => {
       try {
         const result = await api.getAppointmentGroup(groupId);
         const g = result.data;
+        const num = (code, prefix) => Number(code.slice(prefix.length));
+        setExtraCourses((g.context_codes || [])
+          .filter((c) => c !== `course_${g.course_id}`)
+          .map((c) => num(c, 'course_')));
+        setSectionIds((g.sub_context_codes || [])
+          .filter((c) => c.startsWith('course_section_'))
+          .map((c) => num(c, 'course_section_')));
+        setGroupSetId(g.group_category_id ? String(g.group_category_id) : '');
+        loadSlots();
         setForm({
           title: g.title || '',
           description: g.description || '',
@@ -72,7 +111,23 @@ const AppointmentGroupEditorPage = () => {
       }
     };
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId, isEditing]);
+
+  const toggleIn = (setter, id) => setter((list) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]));
+  const selectedCourses = teachingCourses.filter(
+    (c) => String(c.id) === String(courseId) || extraCourses.includes(c.id),
+  );
+
+  const deleteExistingSlot = async (slot) => {
+    if (!window.confirm(t('calendarLane.scheduler.deleteSlotConfirm'))) return;
+    try {
+      await calendarApi.deleteSlot(groupId, slot.id);
+      await loadSlots();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
 
   const generated = useMemo(
     () => generateSlots(genDate, genStart, genEnd, Number(genDuration) || 0),
@@ -95,15 +150,23 @@ const AppointmentGroupEditorPage = () => {
     setSaving(true);
     setError(null);
     try {
+      const subCodes = groupSetId
+        ? [`group_category_${groupSetId}`]
+        : sectionIds
+          .filter((id) => !teachingCourses.length || selectedCourses.some((c) => (c.sections || []).some((s) => s.id === id)))
+          .map((id) => `course_section_${id}`);
       const payload = {
         appointment_group: {
           ...form,
           course_id: Number(courseId),
           participants_per_appointment: Number(form.participants_per_appointment) || 1,
           max_appointments_per_participant: Number(form.max_appointments_per_participant) || 1,
-          new_appointments: isEditing ? undefined : pendingSlots,
+          new_appointments: pendingSlots.length ? pendingSlots : undefined,
+          context_codes: [`course_${courseId}`, ...extraCourses.map((id) => `course_${id}`)],
+          sub_context_codes: subCodes,
         },
       };
+      if (!isEditing && groupSetId) payload.appointment_group.participant_type = 'Group';
       if (isEditing) {
         await api.updateAppointmentGroup(groupId, payload);
       } else {
@@ -212,42 +275,127 @@ const AppointmentGroupEditorPage = () => {
             </div>
           </div>
 
-          {!isEditing && (
+          <fieldset className="rounded-md border border-border-default p-4 space-y-3">
+            <legend className="px-1 text-sm font-semibold text-text-secondary">{t('calendarLane.scheduler.whoCanSignUp')}</legend>
+            {teachingCourses.filter((c) => String(c.id) !== String(courseId)).length > 0 && (
+              <div>
+                <div className="mb-1 text-xs font-medium text-text-secondary">{t('calendarLane.scheduler.alsoCourses')}</div>
+                <div className="flex flex-wrap gap-3">
+                  {teachingCourses.filter((c) => String(c.id) !== String(courseId)).map((c) => (
+                    <label key={c.id} className="flex items-center gap-1 text-sm">
+                      <input type="checkbox" checked={extraCourses.includes(c.id)} onChange={() => toggleIn(setExtraCourses, c.id)} />
+                      {c.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div>
+              <label htmlFor="ag-group-set" className="mb-1 block text-xs font-medium text-text-secondary">{t('calendarLane.scheduler.groupSet')}</label>
+              <select
+                id="ag-group-set"
+                value={groupSetId}
+                disabled={isEditing}
+                onChange={(e) => setGroupSetId(e.target.value)}
+                className="w-full rounded-md border border-border-strong px-3 py-2 text-sm"
+              >
+                <option value="">{t('calendarLane.scheduler.individuals')}</option>
+                {groupSets.map((gs) => <option key={gs.id} value={gs.id}>{gs.name}</option>)}
+              </select>
+            </div>
+            {!groupSetId && selectedCourses.some((c) => (c.sections || []).length > 0) && (
+              <div>
+                <div className="mb-1 text-xs font-medium text-text-secondary">{t('calendarLane.scheduler.limitSections')}</div>
+                {selectedCourses.map((c) => (
+                  <div key={c.id} className="mb-1">
+                    {selectedCourses.length > 1 && <div className="text-xs text-text-tertiary">{c.name}</div>}
+                    <div className="flex flex-wrap gap-3">
+                      {(c.sections || []).map((sec) => (
+                        <label key={sec.id} className="flex items-center gap-1 text-sm">
+                          <input type="checkbox" checked={sectionIds.includes(sec.id)} onChange={() => toggleIn(setSectionIds, sec.id)} />
+                          {sec.name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <p className="text-xs text-text-tertiary">{t('calendarLane.scheduler.limitSectionsHelp')}</p>
+              </div>
+            )}
+          </fieldset>
+
+          {isEditing && (
+            <div className="rounded-md border border-border-default p-4">
+              <h2 className="mb-2 text-sm font-semibold text-text-secondary">{t('calendarLane.scheduler.currentSlots')}</h2>
+              {existingSlots.length === 0 ? (
+                <p className="text-sm text-text-tertiary">{t('calendarLane.scheduler.noSlots')}</p>
+              ) : (
+                <ul className="space-y-1 max-h-60 overflow-auto text-sm">
+                  {existingSlots.map((slot) => (
+                    <li key={slot.id} className="flex items-center justify-between px-2 py-1">
+                      <span>
+                        {new Date(slot.start_at).toLocaleString()} → {new Date(slot.end_at).toLocaleTimeString()}
+                        {slot.reservation_count > 0 && (
+                          <span className="ms-2 text-xs text-text-tertiary">
+                            {t('calendarLane.slotFill', { count: slot.reservation_count, limit: slot.effective_limit })}
+                          </span>
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => deleteExistingSlot(slot)}
+                        aria-label={t('calendarLane.scheduler.deleteSlot')}
+                        className="text-text-disabled hover:text-accent-danger"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {true && (
             <div className="rounded-md border border-border-default bg-surface-1 p-4">
               <h2 className="mb-3 text-sm font-semibold text-text-secondary">{t('appointmentGroupEditor.generateSlots')}</h2>
               <div className="grid gap-3 sm:grid-cols-4">
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-text-secondary">{t('common.date')}</label>
+                  <label htmlFor="ag-gen-date" className="mb-1 block text-xs font-medium text-text-secondary">{t('common.date')}</label>
                   <input
                     type="date"
+                    id="ag-gen-date"
                     value={genDate}
                     onChange={(e) => setGenDate(e.target.value)}
                     className="w-full rounded-md border border-border-strong px-2 py-1.5 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-text-secondary">{t('appointmentGroupEditor.start')}</label>
+                  <label htmlFor="ag-gen-start" className="mb-1 block text-xs font-medium text-text-secondary">{t('appointmentGroupEditor.start')}</label>
                   <input
                     type="time"
+                    id="ag-gen-start"
                     value={genStart}
                     onChange={(e) => setGenStart(e.target.value)}
                     className="w-full rounded-md border border-border-strong px-2 py-1.5 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-text-secondary">{t('appointmentGroupEditor.end')}</label>
+                  <label htmlFor="ag-gen-end" className="mb-1 block text-xs font-medium text-text-secondary">{t('appointmentGroupEditor.end')}</label>
                   <input
                     type="time"
+                    id="ag-gen-end"
                     value={genEnd}
                     onChange={(e) => setGenEnd(e.target.value)}
                     className="w-full rounded-md border border-border-strong px-2 py-1.5 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-text-secondary">{t('appointmentGroupEditor.durationMin')}</label>
+                  <label htmlFor="ag-gen-duration" className="mb-1 block text-xs font-medium text-text-secondary">{t('appointmentGroupEditor.durationMin')}</label>
                   <input
                     type="number"
                     min={1}
+                    id="ag-gen-duration"
                     value={genDuration}
                     onChange={(e) => setGenDuration(e.target.value)}
                     className="w-full rounded-md border border-border-strong px-2 py-1.5 text-sm"

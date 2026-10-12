@@ -29,6 +29,19 @@ type ResourceAuthorizer struct {
 	enrollmentRepo repository.EnrollmentRepository
 	userRepo       repository.UserRepository
 	courseRepo     repository.CourseRepository
+	// studentViewCheck (optional) lets Student View sessions into
+	// unpublished courses (G076); see SetStudentViewCheck.
+	studentViewCheck middleware.StudentViewCheck
+}
+
+// SetStudentViewCheck mirrors PermissionMiddleware.SetStudentViewCheck.
+func (a *ResourceAuthorizer) SetStudentViewCheck(fn middleware.StudentViewCheck) {
+	a.studentViewCheck = fn
+}
+
+func (a *ResourceAuthorizer) inStudentView(c *fiber.Ctx, userID, courseID uint) bool {
+	realID, _ := c.Locals("masquerade_by").(uint)
+	return realID != 0 && a.studentViewCheck != nil && a.studentViewCheck(c, userID, courseID)
 }
 
 func NewResourceAuthorizer(enrollmentRepo repository.EnrollmentRepository, userRepo repository.UserRepository, courseRepo repository.CourseRepository) *ResourceAuthorizer {
@@ -78,6 +91,22 @@ func courseIsUnpublished(course *models.Course) bool {
 // enrollment, of an instructor type when instructorOnly is set. Students and
 // observers are refused while the course is unpublished (Canvas parity).
 func (a *ResourceAuthorizer) requireCourse(c *fiber.Ctx, courseID uint, instructorOnly bool) error {
+	var roleSet map[string]bool
+	if instructorOnly {
+		roleSet = map[string]bool{"TeacherEnrollment": true, "TaEnrollment": true}
+	}
+	return a.requireCourseRoles(c, courseID, roleSet)
+}
+
+// RequireCourseTeacher checks that the authenticated user is a teacher in
+// the given course, or an admin of the course's tenant (section
+// management and cross-listing, which Canvas does not grant TAs).
+func (a *ResourceAuthorizer) RequireCourseTeacher(c *fiber.Ctx, courseID uint) error {
+	return a.requireCourseRoles(c, courseID, map[string]bool{"TeacherEnrollment": true})
+}
+
+// requireCourseRoles: roleSet nil = any enrollment type.
+func (a *ResourceAuthorizer) requireCourseRoles(c *fiber.Ctx, courseID uint, roleSet map[string]bool) error {
 	userID, ok := c.Locals("user_id").(uint)
 	if !ok || userID == 0 {
 		return authzForbidden("authentication required")
@@ -90,15 +119,22 @@ func (a *ResourceAuthorizer) requireCourse(c *fiber.Ctx, courseID uint, instruct
 	if role == middleware.RoleAdmin || role == middleware.RoleSuperAdmin {
 		return nil
 	}
-	enrollment, err := a.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, courseID, callerAccountID(c))
-	if err != nil || enrollment == nil || enrollment.WorkflowState != "active" {
+	// Date-based access, multiple enrollments and read-only concluded
+	// enrollments resolve exactly as in the course gate middleware.
+	dec, denial := middleware.ResolveCourseEnrollment(c, a.enrollmentRepo, userID, courseID, callerAccountID(c), course, roleSet)
+	if denial != "" {
+		if roleSet != nil && dec.RoleMismatch {
+			return authzForbidden("instructor access required")
+		}
 		return authzForbidden("not enrolled in this course")
 	}
-	if instructorOnly && enrollment.Type != "TeacherEnrollment" && enrollment.Type != "TaEnrollment" {
-		return authzForbidden("instructor access required")
-	}
-	if courseIsUnpublished(course) && (enrollment.Type == "StudentEnrollment" || enrollment.Type == "ObserverEnrollment") {
+	enrollment := dec.Enrollment
+	if courseIsUnpublished(course) && (enrollment.Type == "StudentEnrollment" || enrollment.Type == "ObserverEnrollment") &&
+		!a.inStudentView(c, userID, courseID) {
 		return authzForbidden("this course has not been published yet")
+	}
+	if msg := middleware.ReadOnlyDenial(c, dec); msg != "" {
+		return authzForbidden(msg)
 	}
 	return nil
 }

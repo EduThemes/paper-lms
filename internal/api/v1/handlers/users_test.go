@@ -328,6 +328,31 @@ func TestUpdateUser(t *testing.T) {
 	mockRepo.AssertExpectations(t)
 }
 
+// G157: a new time zone must be an IANA name; a legacy free-text value the
+// form sends back unchanged does not block saving the other fields.
+func TestUpdateUser_TimeZoneValidation(t *testing.T) {
+	cases := []struct {
+		name, stored, sent string
+		want               int
+	}{
+		{"valid IANA zone", "America/New_York", "America/Chicago", http.StatusOK},
+		{"unknown zone", "America/New_York", "Mars/Olympus_Mons", http.StatusBadRequest},
+		{"Local is not a zone", "America/New_York", "Local", http.StatusBadRequest},
+		{"legacy value unchanged", "Central Time", "Central Time", http.StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app, mockRepo := setupUserHandler()
+			user := &models.User{ID: 1, Name: "Jane Doe", LoginID: "jane@example.com", Email: "jane@example.com", TimeZone: tc.stored}
+			mockRepo.On("FindByID", mock.Anything, uint(1), uint(1)).Return(user, nil)
+			mockRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.User")).Return(nil).Maybe()
+			body := testutil.JSONBody(map[string]any{"user": map[string]string{"name": "Jane Q Doe", "time_zone": tc.sent}})
+			resp := testutil.MakeRequest(app, http.MethodPut, "/users/1", body)
+			assert.Equal(t, tc.want, resp.StatusCode)
+		})
+	}
+}
+
 func TestUpdateUser_Forbidden(t *testing.T) {
 	app, mockRepo := setupUserHandler()
 

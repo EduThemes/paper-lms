@@ -34,12 +34,15 @@ func (r *calendarEventRepo) FindByID(ctx context.Context, id, accountID uint) (*
 			(context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))
 			OR (context_type = 'Account' AND context_id = ?)
 			OR (context_type = 'User' AND context_id IN (SELECT id FROM users WHERE account_id = ?))
+			OR (context_type = 'CourseSection' AND context_id IN (
+				SELECT id FROM course_sections WHERE course_id IN (SELECT id FROM courses WHERE account_id = ?)
+			))
 			OR (context_type = 'Group' AND context_id IN (
 				SELECT id FROM groups WHERE
 					(context_type = 'Account' AND context_id = ?)
 					OR (context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))
 			))
-		`, accountID, accountID, accountID, accountID, accountID)
+		`, accountID, accountID, accountID, accountID, accountID, accountID)
 	}
 	if err := q.First(&event, id).Error; err != nil {
 		return nil, err
@@ -84,4 +87,65 @@ func (r *calendarEventRepo) ListByContextAndDateRange(ctx context.Context, conte
 		return nil, err
 	}
 	return events, nil
+}
+
+// ListBySeries returns every live occurrence of a recurring series in
+// start order.
+func (r *calendarEventRepo) ListBySeries(ctx context.Context, seriesUUID string) ([]models.CalendarEvent, error) {
+	var events []models.CalendarEvent
+	err := r.db.WithContext(ctx).
+		Where("series_uuid = ? AND workflow_state != ?", seriesUUID, "deleted").
+		Order("start_at ASC, id ASC").
+		Find(&events).Error
+	return events, err
+}
+
+// ListChildren returns the live section-specific child events of a
+// course event.
+func (r *calendarEventRepo) ListChildren(ctx context.Context, parentID uint) ([]models.CalendarEvent, error) {
+	var events []models.CalendarEvent
+	err := r.db.WithContext(ctx).
+		Where("parent_calendar_event_id = ? AND workflow_state != ?", parentID, "deleted").
+		Order("start_at ASC, id ASC").
+		Find(&events).Error
+	return events, err
+}
+
+// CreateMany inserts a batch of events in one transaction (a recurring
+// series, or a parent's section children).
+func (r *calendarEventRepo) CreateMany(ctx context.Context, events []*models.CalendarEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, e := range events {
+			if err := tx.Create(e).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// SaveMany updates a batch of events in one transaction.
+func (r *calendarEventRepo) SaveMany(ctx context.Context, events []*models.CalendarEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, e := range events {
+			if err := tx.Save(e).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// DeleteMany soft-deletes the given events.
+func (r *calendarEventRepo) DeleteMany(ctx context.Context, ids []uint) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&models.CalendarEvent{}).Where("id IN ?", ids).Update("workflow_state", "deleted").Error
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math/rand"
 
@@ -178,6 +179,58 @@ func (s *PeerReviewService) SubmitReview(ctx context.Context, reviewID, callerID
 	}
 
 	return pr, nil
+}
+
+// SubmitRubricReview records a rubric-based peer assessment. rubricData
+// maps criterion ids to {points, comments}; when score is nil the review
+// score is the sum of the criterion points.
+func (s *PeerReviewService) SubmitRubricReview(ctx context.Context, reviewID, callerID uint, score *float64, comments string, rubricData map[string]RubricCriterionScore, accountID uint) (*models.PeerReview, error) {
+	pr, err := s.peerReviewRepo.FindByID(ctx, reviewID, accountID)
+	if err != nil || pr == nil || callerID == 0 || pr.ReviewerID != callerID {
+		return nil, ErrPeerReviewNotFound
+	}
+	total := 0.0
+	for _, c := range rubricData {
+		if c.Points < 0 {
+			return nil, errors.New("rubric points must not be negative")
+		}
+		total += c.Points
+	}
+	if score == nil {
+		if len(rubricData) == 0 {
+			return nil, errors.New("a score or rubric assessment is required")
+		}
+		score = &total
+	}
+	if *score < 0 {
+		return nil, errors.New("score must not be negative")
+	}
+	if len(rubricData) > 0 {
+		clean := make(map[string]RubricCriterionScore, len(rubricData))
+		for k, v := range rubricData {
+			v.Comments = SanitizePlainText(v.Comments)
+			clean[k] = v
+		}
+		raw, err := json.Marshal(clean)
+		if err != nil {
+			return nil, err
+		}
+		str := string(raw)
+		pr.RubricData = &str
+	}
+	pr.Score = score
+	pr.Comments = SanitizePlainText(comments)
+	pr.WorkflowState = "completed"
+	if err := s.peerReviewRepo.Update(ctx, pr); err != nil {
+		return nil, err
+	}
+	return pr, nil
+}
+
+// RubricCriterionScore is one criterion of a rubric-based peer review.
+type RubricCriterionScore struct {
+	Points   float64 `json:"points"`
+	Comments string  `json:"comments,omitempty"`
 }
 
 func (s *PeerReviewService) GetByID(ctx context.Context, id, accountID uint) (*models.PeerReview, error) {

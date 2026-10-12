@@ -4,7 +4,7 @@ import {
   Home, BookOpen, Users, Flag, Sliders, MoreHorizontal,
   FileText, GraduationCap, ClipboardCheck, Upload, KeyRound,
   Shield, UserCog, RefreshCw, Key, Bell, Code, Coins, Award, Sparkles,
-  Trophy,
+  Trophy, FileBarChart,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -47,9 +47,11 @@ const buildSecondaryGroups = (t) => [
     label: t('adminNav.groups.data'),
     items: [
       { to: '/admin/sis_import',      icon: Upload,         label: t('adminNav.sisImport') },
+      { to: '/admin/reports',         icon: FileBarChart,   label: t('adminNav.accountReports') },
       { to: '/admin/oneroster',       icon: RefreshCw,      label: t('adminNav.oneRoster') },
       { to: '/admin/terms',           icon: GraduationCap,  label: t('adminNav.terms') },
       { to: '/admin/grading_periods', icon: ClipboardCheck, label: t('adminNav.gradingPeriods') },
+      { to: '/admin/grade_statuses',  icon: ClipboardCheck, label: t('adminNav.gradeStatuses', 'Grade Statuses') },
     ],
   },
   {

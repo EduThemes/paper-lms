@@ -26,6 +26,15 @@ type EnrollmentService struct {
 	courseRepo  repository.CourseRepository
 	sectionRepo repository.SectionRepository
 
+	// lifecycle, when wired (SetLifecycle), replaces the "one enrollment
+	// per user per course" rule with Canvas's per-(type, section,
+	// observee) uniqueness (G110) and sends invitation notifications
+	// (G122).
+	lifecycle *EnrollmentLifecycleService
+	// roleResolver validates a custom role given to an enrollment (G102,
+	// enrollment_custom_role.go). Wired via SetRoleResolver.
+	roleResolver EnrollmentRoleResolver
+
 	// onCreatedCallbacks fire (in goroutines) after a successful Create.
 	// Registered via OnCreated; never invoked in tests unless explicitly
 	// wired.
@@ -69,6 +78,13 @@ func (s *EnrollmentService) SetTenantRepos(userRepo repository.UserRepository, c
 	return s
 }
 
+// SetLifecycle wires the lifecycle service used by Create. Returns the
+// service for chaining.
+func (s *EnrollmentService) SetLifecycle(l *EnrollmentLifecycleService) *EnrollmentService {
+	s.lifecycle = l
+	return s
+}
+
 // ErrEnrollmentUserNotFound / ErrEnrollmentSectionNotFound are returned
 // when the target user is not in the course's tenant, or the section is
 // not in the course. Both are surfaced as a generic 404/400 so a teacher
@@ -81,49 +97,77 @@ var (
 // validateTarget ties the enrollment's user and section to the course.
 // accountID is the caller's tenant, used to scope the course lookup
 // (0 = already validated upstream, e.g. a super_admin request).
-func (s *EnrollmentService) validateTarget(ctx context.Context, enrollment *models.Enrollment, accountID uint) error {
+func (s *EnrollmentService) validateTarget(ctx context.Context, enrollment *models.Enrollment, accountID uint) (*models.Course, error) {
 	if s.userRepo == nil || s.courseRepo == nil || s.sectionRepo == nil {
-		return errors.New("enrollment tenant guards not configured")
+		return nil, errors.New("enrollment tenant guards not configured")
 	}
 	course, err := s.courseRepo.FindByID(ctx, enrollment.CourseID, accountID)
 	if err != nil || course == nil {
-		return errors.New("course not found")
+		return nil, errors.New("course not found")
 	}
 	user, err := s.userRepo.FindByID(ctx, enrollment.UserID, course.AccountID)
 	if err != nil || user == nil || user.AccountID != course.AccountID {
-		return ErrEnrollmentUserNotFound
+		return nil, ErrEnrollmentUserNotFound
 	}
 	if enrollment.CourseSectionID != nil {
 		section, err := s.sectionRepo.FindByID(ctx, *enrollment.CourseSectionID)
-		if err != nil || section == nil || section.CourseID != enrollment.CourseID {
-			return ErrEnrollmentSectionNotFound
+		if err != nil || section == nil || section.CourseID != enrollment.CourseID || section.WorkflowState == "deleted" {
+			return nil, ErrEnrollmentSectionNotFound
 		}
 	}
-	return nil
+	return course, nil
+}
+
+// creatableEnrollmentStates are the states an enrollment may be created
+// in: active (enrolled directly), invited (must accept, G122) or
+// inactive (added but not yet allowed in).
+var creatableEnrollmentStates = map[models.EnrollmentWorkflow]bool{
+	models.EnrollmentActive:   true,
+	models.EnrollmentInvited:  true,
+	models.EnrollmentInactive: true,
 }
 
 func (s *EnrollmentService) Create(ctx context.Context, enrollment *models.Enrollment, accountID uint) error {
 	if !validEnrollmentTypes[enrollment.Type] {
 		return errors.New("invalid enrollment type")
 	}
-	if err := s.validateTarget(ctx, enrollment, accountID); err != nil {
+	course, err := s.validateTarget(ctx, enrollment, accountID)
+	if err != nil {
 		return err
 	}
-	enrollment.Role = enrollment.Type
+	if err := s.applyCustomRole(ctx, enrollment); err != nil {
+		return err
+	}
 	if enrollment.WorkflowState == "" {
 		enrollment.WorkflowState = "active"
 	}
+	if !creatableEnrollmentStates[enrollment.WorkflowState] {
+		return errors.New("enrollment_state must be active, invited or inactive")
+	}
+	if enrollment.StartAt != nil && enrollment.EndAt != nil && enrollment.EndAt.Before(*enrollment.StartAt) {
+		return ErrEnrollmentDates
+	}
 
-	// Check for existing enrollment
-	existing, _ := s.enrollmentRepo.FindByUserAndCourse(ctx, enrollment.UserID, enrollment.CourseID, accountID)
-	if existing != nil {
-		return errors.New("user is already enrolled in this course")
+	if s.lifecycle != nil {
+		// G110: several enrollments per user per course are fine; only
+		// an exact (type, section, observee) duplicate is refused.
+		if err := s.lifecycle.CheckDuplicate(ctx, enrollment, accountID); err != nil {
+			return err
+		}
+	} else {
+		existing, _ := s.enrollmentRepo.FindByUserAndCourse(ctx, enrollment.UserID, enrollment.CourseID, accountID)
+		if existing != nil {
+			return errors.New("user is already enrolled in this course")
+		}
 	}
 
 	if err := s.enrollmentRepo.Create(ctx, enrollment); err != nil {
 		return err
 	}
 
+	if enrollment.WorkflowState == models.EnrollmentInvited && s.lifecycle != nil {
+		s.lifecycle.NotifyInvited(ctx, enrollment, course.Name)
+	}
 	s.fireOnCreated(enrollment.ID)
 	return nil
 }

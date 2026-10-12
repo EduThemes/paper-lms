@@ -13,6 +13,9 @@ type GroupService struct {
 	groupRepo      repository.GroupRepository
 	membershipRepo repository.GroupMembershipRepository
 	enrollmentRepo repository.EnrollmentRepository
+	// userRepo resolves student names / login ids / SIS ids for the
+	// group-set roster tools (optional; see SetUserRepository).
+	userRepo repository.UserRepository
 }
 
 func NewGroupService(
@@ -194,17 +197,21 @@ func (s *GroupService) AddMember(ctx context.Context, membership *models.GroupMe
 	}
 
 	if !allowsMultipleMemberships(category) {
-		if err := s.leaveOtherGroupsInCategory(ctx, membership.UserID, group); err != nil {
+		if err := s.leaveOtherGroupsInCategory(ctx, membership.UserID, group, category); err != nil {
 			return err
 		}
 	}
 
-	return s.membershipRepo.Create(ctx, membership)
+	if err := s.membershipRepo.Create(ctx, membership); err != nil {
+		return err
+	}
+	s.syncLeadership(ctx, group, category)
+	return nil
 }
 
 // leaveOtherGroupsInCategory removes the user's memberships in the other
-// groups of the target group's set.
-func (s *GroupService) leaveOtherGroupsInCategory(ctx context.Context, userID uint, target *models.Group) error {
+// groups of the target group's set (and their leadership there).
+func (s *GroupService) leaveOtherGroupsInCategory(ctx context.Context, userID uint, target *models.Group, category *models.GroupCategory) error {
 	// Bounded: a user can only be in a handful of groups of one set.
 	for i := 0; i < 100; i++ {
 		other, err := s.membershipRepo.FindUserGroupInCategory(ctx, userID, target.GroupCategoryID)
@@ -218,6 +225,7 @@ func (s *GroupService) leaveOtherGroupsInCategory(ctx context.Context, userID ui
 		if err := s.membershipRepo.Delete(ctx, m.ID); err != nil {
 			return err
 		}
+		s.syncLeadership(ctx, other, category)
 	}
 	return nil
 }
@@ -300,12 +308,25 @@ func (s *GroupService) studentSections(ctx context.Context, userID, courseID uin
 	return out, nil
 }
 
+// RemoveMember deletes a membership; a leader who leaves loses the role
+// and, with auto_leader, someone else takes it.
 func (s *GroupService) RemoveMember(ctx context.Context, id uint) error {
-	return s.membershipRepo.Delete(ctx, id)
+	m, _ := s.membershipRepo.FindByID(ctx, id, 0)
+	if err := s.membershipRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	if m != nil {
+		s.syncLeadershipByID(ctx, m.GroupID)
+	}
+	return nil
 }
 
 func (s *GroupService) UpdateMembership(ctx context.Context, membership *models.GroupMembership) error {
-	return s.membershipRepo.Update(ctx, membership)
+	if err := s.membershipRepo.Update(ctx, membership); err != nil {
+		return err
+	}
+	s.syncLeadershipByID(ctx, membership.GroupID)
+	return nil
 }
 
 func (s *GroupService) ListMembers(ctx context.Context, groupID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.GroupMembership], error) {

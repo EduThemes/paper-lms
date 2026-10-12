@@ -44,11 +44,12 @@ func (s *ConversationService) CreateConversation(ctx context.Context, conv *mode
 		return err
 	}
 
-	// Add the creator as a participant
+	// Add the creator as a participant. Every participant starts "read";
+	// the first message flips the recipients to "unread" (G092).
 	creatorParticipant := &models.ConversationParticipant{
 		ConversationID: conv.ID,
 		UserID:         conv.CreatedByUserID,
-		WorkflowState:  "active",
+		WorkflowState:  models.ConversationParticipantRead,
 	}
 	if err := s.participantRepo.Create(ctx, creatorParticipant); err != nil {
 		return err
@@ -62,7 +63,7 @@ func (s *ConversationService) CreateConversation(ctx context.Context, conv *mode
 		participant := &models.ConversationParticipant{
 			ConversationID: conv.ID,
 			UserID:         recipientID,
-			WorkflowState:  "active",
+			WorkflowState:  models.ConversationParticipantRead,
 		}
 		if err := s.participantRepo.Create(ctx, participant); err != nil {
 			return err
@@ -92,7 +93,7 @@ func (s *ConversationService) AddParticipant(ctx context.Context, conversationID
 	participant := &models.ConversationParticipant{
 		ConversationID: conversationID,
 		UserID:         userID,
-		WorkflowState:  "active",
+		WorkflowState:  models.ConversationParticipantUnread,
 	}
 	return s.participantRepo.Create(ctx, participant)
 }
@@ -158,5 +159,10 @@ func (s *ConversationService) MarkConversationAsRead(ctx context.Context, conver
 	}
 	now := time.Now()
 	participant.LastReadAt = &now
+	// Reading moves an unread conversation to read; an archived one stays
+	// archived (Canvas mark_as_read semantics).
+	if participant.WorkflowState != models.ConversationParticipantArchived {
+		participant.WorkflowState = models.ConversationParticipantRead
+	}
 	return s.participantRepo.Update(ctx, participant)
 }

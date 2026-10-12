@@ -14,8 +14,12 @@ import { ThemeProvider } from './contexts/ThemeContext'
 import { ReadingPrefsProvider } from './contexts/ReadingPrefsContext'
 import { registerServiceWorker } from './service-worker-register'
 import { queryClient } from './lib/queryClient'
+import BrandThemeLoader from './components/brand/BrandThemeLoader'
+import { installTimeZoneDefaults } from './lib/userTimeZone'
 
 registerServiceWorker()
+// G157: dates render in the signed-in user's profile time zone.
+installTimeZoneDefaults()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -28,6 +32,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
                 <TooltipProvider delayDuration={200}>
                   <App />
                   <Toaster />
+                  <BrandThemeLoader />
                 </TooltipProvider>
               </LiveRegionProvider>
             </AuthProvider>

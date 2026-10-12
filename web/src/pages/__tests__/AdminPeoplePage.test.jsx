@@ -34,6 +34,15 @@ vi.mock('../../services/apiQueries', () => ({
   useUpdateUserRole: () => ({ mutate, isPending: false, isError: false }),
 }));
 
+const bulkMutate = vi.fn();
+vi.mock('../../services/adminAccountsQueries', () => ({
+  useBulkSuspend: () => ({ mutate: bulkMutate, isPending: false }),
+}));
+
+vi.mock('../../components/admin/AddUserForm', () => ({
+  default: () => <form aria-label="Add a user" />,
+}));
+
 function renderPage() {
   return render(
     <MemoryRouter>
@@ -60,5 +69,28 @@ describe('AdminPeoplePage super_admin rows', () => {
     currentRole = 'super_admin';
     renderPage();
     expect(screen.getByLabelText('Change role for Sam Super')).not.toBeDisabled();
+  });
+});
+
+describe('AdminPeoplePage user management (G114)', () => {
+  it('links each name to the user detail page and bulk-suspends the selection', async () => {
+    currentRole = 'admin';
+    bulkMutate.mockReset();
+    const { fireEvent } = await import('@testing-library/react');
+    renderPage();
+    expect(screen.getByRole('link', { name: 'Tia Teacher' })).toHaveAttribute('href', '/admin/users/3');
+    // A super_admin row can't be selected by an account admin; self neither.
+    expect(screen.getByLabelText('Select Sam Super')).toBeDisabled();
+    expect(screen.getByLabelText('Select Ada Admin')).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('Select Tia Teacher'));
+    fireEvent.click(screen.getByRole('button', { name: 'Suspend' }));
+    expect(bulkMutate).toHaveBeenCalledWith({ userIds: [3], suspended: true });
+  });
+
+  it('opens the add-user form', async () => {
+    const { fireEvent } = await import('@testing-library/react');
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /Add user/ }));
+    expect(screen.getByRole('form', { name: 'Add a user' })).toBeInTheDocument();
   });
 });

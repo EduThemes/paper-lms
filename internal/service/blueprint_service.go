@@ -40,6 +40,16 @@ type BlueprintService struct {
 	courseRepo     repository.CourseRepository
 	enrollmentRepo repository.EnrollmentRepository
 	tagRepo        repository.BlueprintContentTagRepository
+
+	// Optional (SetLockRepo / SetSyncDeps): per-item lock settings, and
+	// the assignment-group, syllabus and file sync dependencies (G069).
+	lockRepo       repository.BlueprintContentLockRepository
+	groupRepo      repository.AssignmentGroupRepository
+	attachmentRepo repository.AttachmentRepository
+	files          *FileService
+	// Optional (SetRubricDeps): rubric + rubric association sync.
+	rubricRepo      repository.RubricRepository
+	rubricAssocRepo repository.RubricAssociationRepository
 }
 
 // SetDeps wires the optional association-authorization and sync

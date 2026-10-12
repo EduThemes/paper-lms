@@ -52,3 +52,34 @@ func (m *MockCalendarEventRepository) ListByContextAndDateRange(ctx context.Cont
 	}
 	return args.Get(0).([]models.CalendarEvent), args.Error(1)
 }
+
+func (m *MockCalendarEventRepository) ListBySeries(ctx context.Context, seriesUUID string) ([]models.CalendarEvent, error) {
+	args := m.Called(ctx, seriesUUID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.CalendarEvent), args.Error(1)
+}
+
+func (m *MockCalendarEventRepository) ListChildren(ctx context.Context, parentID uint) ([]models.CalendarEvent, error) {
+	args := m.Called(ctx, parentID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.CalendarEvent), args.Error(1)
+}
+
+func (m *MockCalendarEventRepository) CreateMany(ctx context.Context, events []*models.CalendarEvent) error {
+	args := m.Called(ctx, events)
+	return args.Error(0)
+}
+
+func (m *MockCalendarEventRepository) SaveMany(ctx context.Context, events []*models.CalendarEvent) error {
+	args := m.Called(ctx, events)
+	return args.Error(0)
+}
+
+func (m *MockCalendarEventRepository) DeleteMany(ctx context.Context, ids []uint) error {
+	args := m.Called(ctx, ids)
+	return args.Error(0)
+}

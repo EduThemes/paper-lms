@@ -31,7 +31,7 @@ func (r *conferenceRepo) FindByID(ctx context.Context, id, accountID uint) (*mod
 		q = q.Where(`
 			(context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))
 			OR (context_type = 'Account' AND context_id = ?)
-			OR (context_type = 'Group' AND context_id IN (SELECT id FROM groups WHERE course_id IN (SELECT id FROM courses WHERE account_id = ?)))
+			OR (context_type = 'Group' AND context_id IN (SELECT id FROM groups WHERE context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?)))
 		`, accountID, accountID, accountID)
 	}
 	if err := q.First(&conference, id).Error; err != nil {
@@ -62,7 +62,7 @@ func (r *conferenceRepo) ListByContext(ctx context.Context, contextType string, 
 		case "Account":
 			query = query.Where("context_id = ?", accountID)
 		case "Group":
-			query = query.Where("context_id IN (SELECT id FROM groups WHERE course_id IN (SELECT id FROM courses WHERE account_id = ?))", accountID)
+			query = query.Where("context_id IN (SELECT id FROM groups WHERE context_type = 'Course' AND context_id IN (SELECT id FROM courses WHERE account_id = ?))", accountID)
 		default:
 			// Unknown context_type → deny by forcing an empty result.
 			query = query.Where("1 = 0")

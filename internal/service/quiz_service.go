@@ -31,6 +31,11 @@ type QuizService struct {
 	stimulusRepo         repository.QuizStimulusRepository
 	accommodationService *AccommodationService
 
+	// lifecycle wires the gradebook link, extensions, event log and
+	// regrades (quiz_lifecycle_service.go). nil keeps the pre-lifecycle
+	// behavior.
+	lifecycle *QuizLifecycleDeps
+
 	// onCompletedCallbacks fire (in goroutines) after a successful
 	// CompleteSubmission. Registered via OnCompleted; never invoked in
 	// tests unless explicitly wired.

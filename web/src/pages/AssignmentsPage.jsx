@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { FileCheck, ChevronDown, ChevronRight, Plus, Eye, EyeOff, Search, Users } from 'lucide-react';
+import { FileCheck, ChevronDown, ChevronRight, Plus, Eye, EyeOff, Search, Users, Settings2 } from 'lucide-react';
 import { api } from '../services/api';
+import { dateTimeLocalToISO, isoToDateTimeLocal } from '../utils/datetimeLocal';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
@@ -10,6 +11,9 @@ import { clearRceDraft } from '../components/rce/rceDrafts';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import AssignmentGroupRulesDialog from '../components/grading/AssignmentGroupRulesDialog';
+import { describeRules } from '../utils/gradingRules';
+import { GRADING_TYPES } from '../services/api_grading_policy';
 
 const AssignmentsPage = () => {
   const { courseId } = useParams();
@@ -29,12 +33,16 @@ const AssignmentsPage = () => {
     description: '',
     points_possible: 100,
     due_at: '',
+    unlock_at: '',
+    lock_at: '',
     submission_types: ['online_text_entry'],
     anonymous_grading: false,
-    post_policy: 'automatic',
+    post_policy: '',
+    grading_type: 'points',
     is_group_assignment: false,
     group_category_id: '',
   });
+  const [rulesGroup, setRulesGroup] = useState(null);
   const [groupCategories, setGroupCategories] = useState([]);
   const [loadingGroupCategories, setLoadingGroupCategories] = useState(false);
   const { issues: crossCourseIssues, checkAndSave, dismiss: dismissCrossCourse, confirm: confirmCrossCourse } = useCrossCourseCheck(courseId);
@@ -71,6 +79,10 @@ const AssignmentsPage = () => {
   }, [showCreate, courseId]);
 
   const doCreate = async () => {
+    if (newAssignment.unlock_at && newAssignment.lock_at && new Date(newAssignment.unlock_at) >= new Date(newAssignment.lock_at)) {
+      setActionError('"Available from" must be before "Until".');
+      return;
+    }
     setCreating(true);
     setActionError(null);
     try {
@@ -78,19 +90,23 @@ const AssignmentsPage = () => {
         name: newAssignment.name,
         description: newAssignment.description,
         points_possible: Number(newAssignment.points_possible),
-        due_at: newAssignment.due_at ? new Date(newAssignment.due_at).toISOString() : null,
+        due_at: newAssignment.due_at ? dateTimeLocalToISO(newAssignment.due_at) : null,
+        unlock_at: newAssignment.unlock_at ? dateTimeLocalToISO(newAssignment.unlock_at) : null,
+        lock_at: newAssignment.lock_at ? dateTimeLocalToISO(newAssignment.lock_at) : null,
         submission_types: newAssignment.submission_types,
         anonymous_grading: newAssignment.anonymous_grading,
-        post_policy: newAssignment.post_policy,
+        grading_type: newAssignment.grading_type,
         published: true,
       };
+      // Empty = follow the course post policy (G018).
+      if (newAssignment.post_policy) payload.post_policy = newAssignment.post_policy;
       if (newAssignment.is_group_assignment && newAssignment.group_category_id) {
         payload.group_category_id = Number(newAssignment.group_category_id);
       }
       const created = await api.createAssignment(courseId, payload);
       clearRceDraft(`assignment-${courseId}-new-description`);
       setAssignments((prev) => [...prev, created]);
-      setNewAssignment({ name: '', description: '', points_possible: 100, due_at: '', submission_types: ['online_text_entry'], anonymous_grading: false, post_policy: 'automatic', is_group_assignment: false, group_category_id: '' });
+      setNewAssignment({ name: '', description: '', points_possible: 100, due_at: '', unlock_at: '', lock_at: '', submission_types: ['online_text_entry'], anonymous_grading: false, post_policy: '', grading_type: 'points', is_group_assignment: false, group_category_id: '' });
       setShowCreate(false);
     } catch (err) {
       setActionError(err.message || 'Could not create assignment. Please try again.');
@@ -206,6 +222,12 @@ const AssignmentsPage = () => {
           <div className="flex items-center space-x-3 text-xs text-text-disabled mt-0.5">
             {assignment.due_at && (
               <span>Due {formatDate(assignment.due_at)}</span>
+            )}
+            {assignment.unlock_at && new Date(assignment.unlock_at) > new Date() && (
+              <span>Available {formatDate(assignment.unlock_at)}</span>
+            )}
+            {assignment.lock_at && (
+              <span>{new Date(assignment.lock_at) < new Date() ? 'Closed' : 'Until'} {formatDate(assignment.lock_at)}</span>
             )}
             {assignment.points_possible != null && (
               <span>{assignment.points_possible} pts</span>
@@ -354,6 +376,28 @@ const AssignmentsPage = () => {
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="assignment-unlock-at" className="block text-sm font-medium text-text-secondary mb-1">Available from</label>
+              <input
+                id="assignment-unlock-at"
+                type="datetime-local"
+                value={newAssignment.unlock_at}
+                onChange={(e) => setNewAssignment({ ...newAssignment, unlock_at: e.target.value })}
+                className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label htmlFor="assignment-lock-at" className="block text-sm font-medium text-text-secondary mb-1">Until</label>
+              <input
+                id="assignment-lock-at"
+                type="datetime-local"
+                value={newAssignment.lock_at}
+                onChange={(e) => setNewAssignment({ ...newAssignment, lock_at: e.target.value })}
+                className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
             <label className="flex items-center gap-2 text-sm text-text-secondary">
               <input
                 type="checkbox"
@@ -370,10 +414,24 @@ const AssignmentsPage = () => {
                 onChange={(e) => setNewAssignment({ ...newAssignment, post_policy: e.target.value })}
                 className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
               >
+                <option value="">Course default</option>
                 <option value="automatic">Automatic</option>
                 <option value="manual">Manual</option>
               </select>
             </div>
+          </div>
+          <div>
+            <label htmlFor="assignment-grading-type" className="block text-sm font-medium text-text-secondary mb-1">Display grade as</label>
+            <select
+              id="assignment-grading-type"
+              value={newAssignment.grading_type}
+              onChange={(e) => setNewAssignment({ ...newAssignment, grading_type: e.target.value })}
+              className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
+            >
+              {GRADING_TYPES.map((g) => (
+                <option key={g.value} value={g.value}>{g.label}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="flex items-center gap-2 text-sm text-text-secondary">
@@ -455,10 +513,25 @@ const AssignmentsPage = () => {
                       ({groupAssignments.length} assignment{groupAssignments.length !== 1 ? 's' : ''})
                     </span>
                   </div>
-                  {group.group_weight != null && group.group_weight > 0 && (
-                    <span className="text-xs text-text-tertiary">{group.group_weight}% of grade</span>
-                  )}
+                  <span className="flex items-center gap-3 text-xs text-text-tertiary">
+                    {describeRules(group.rules) && <span>{describeRules(group.rules)}</span>}
+                    {group.group_weight != null && group.group_weight > 0 && (
+                      <span>{group.group_weight}% of grade</span>
+                    )}
+                  </span>
                 </button>
+                {isTeacher && (
+                  <div className="flex justify-end px-4 py-1 border-b">
+                    <button
+                      type="button"
+                      onClick={() => setRulesGroup(group)}
+                      className="inline-flex items-center gap-1 text-xs text-brand-600 hover:underline"
+                    >
+                      <Settings2 className="w-3.5 h-3.5" />
+                      Weight and drop rules
+                    </button>
+                  </div>
+                )}
                 {!isCollapsed && (
                   <div className="divide-y">
                     {groupAssignments.map(renderAssignment)}
@@ -482,6 +555,16 @@ const AssignmentsPage = () => {
         </div>
       )}
       <CrossCourseWarningDialog issues={crossCourseIssues} onGoBack={dismissCrossCourse} onSaveAnyway={confirmCrossCourse} />
+      <AssignmentGroupRulesDialog
+        open={!!rulesGroup}
+        onOpenChange={(open) => { if (!open) setRulesGroup(null); }}
+        courseId={courseId}
+        group={rulesGroup}
+        assignments={rulesGroup ? assignments.filter((a) => a.assignment_group_id === rulesGroup.id) : []}
+        onSaved={(saved) => {
+          if (saved?.id) setGroups((prev) => prev.map((g) => (g.id === saved.id ? { ...g, ...saved } : g)));
+        }}
+      />
     </Layout>
   );
 };

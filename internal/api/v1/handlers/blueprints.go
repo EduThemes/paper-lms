@@ -1,13 +1,15 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 
-	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/gofiber/fiber/v2"
 )
 
 type BlueprintHandler struct {
@@ -126,8 +128,10 @@ func (h *BlueprintHandler) UpdateDefaultTemplate(c *fiber.Ctx) error {
 
 	var input struct {
 		BlueprintTemplate struct {
-			DefaultRestrictions    *string `json:"default_restrictions"`
-			UseDefaultRestrictions *bool   `json:"use_default_restrictions"`
+			// An object ({"content": true}, as Canvas sends it) or that
+			// object JSON-encoded as a string (Paper's settings form).
+			DefaultRestrictions    json.RawMessage `json:"default_restrictions"`
+			UseDefaultRestrictions *bool           `json:"use_default_restrictions"`
 		} `json:"blueprint_template"`
 	}
 
@@ -135,8 +139,20 @@ func (h *BlueprintHandler) UpdateDefaultTemplate(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 
-	if input.BlueprintTemplate.DefaultRestrictions != nil {
-		template.DefaultRestrictions = *input.BlueprintTemplate.DefaultRestrictions
+	if raw := input.BlueprintTemplate.DefaultRestrictions; len(raw) > 0 && string(raw) != "null" {
+		var asString string
+		if json.Unmarshal(raw, &asString) == nil {
+			raw = json.RawMessage(strings.TrimSpace(asString))
+			if len(raw) == 0 {
+				raw = json.RawMessage("{}")
+			}
+		}
+		var r service.BlueprintRestrictions
+		var probe map[string]interface{}
+		if json.Unmarshal(raw, &probe) != nil || json.Unmarshal(raw, &r) != nil {
+			return responses.BadRequest(c, "default_restrictions must be an object of content, points, due_dates and availability_dates flags")
+		}
+		template.DefaultRestrictions = r.JSON()
 	}
 	if input.BlueprintTemplate.UseDefaultRestrictions != nil {
 		template.UseDefaultRestrictions = *input.BlueprintTemplate.UseDefaultRestrictions
@@ -264,6 +280,8 @@ func (h *BlueprintHandler) CreateMigration(c *fiber.Ctx) error {
 	var input struct {
 		Comment          string `json:"comment"`
 		SendNotification bool   `json:"send_notification"`
+		// Canvas: "Include Course Settings".
+		CopySettings bool `json:"copy_settings"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
@@ -272,7 +290,8 @@ func (h *BlueprintHandler) CreateMigration(c *fiber.Ctx) error {
 
 	userID, _ := c.Locals("user_id").(uint)
 
-	migration, err := h.blueprintService.TriggerSync(c.Context(), template.ID, userID, input.Comment)
+	migration, err := h.blueprintService.TriggerSyncWithOptions(c.Context(), template.ID, userID, input.Comment,
+		service.BlueprintSyncOptions{CopySettings: input.CopySettings})
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}

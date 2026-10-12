@@ -113,6 +113,22 @@ type ObserverService struct {
 	// assignmentGroupRepo lets the overview apply assignment-group weights
 	// (same grade as the Grades page). Nil: unweighted point totals.
 	assignmentGroupRepo repository.AssignmentGroupRepository
+	// courseGrades is the gradebook's engine; when set the overview's
+	// course grade is exactly what the student's Grades page shows.
+	courseGrades CourseGradeSource
+}
+
+// CourseGradeSource computes course grades (*GradingPolicyService).
+type CourseGradeSource interface {
+	CourseGrades(ctx context.Context, course *models.Course, opts CourseGradesOptions) (*CourseGrades, error)
+}
+
+// SetCourseGradeSource wires the gradebook's course grade engine so the
+// observer overview shows the student's real grade (drop rules, grading
+// periods, assign-to visibility, final grade overrides).
+func (s *ObserverService) SetCourseGradeSource(g CourseGradeSource) *ObserverService {
+	s.courseGrades = g
+	return s
 }
 
 // SetAssignmentGroupRepo wires the assignment groups the overview's course
@@ -593,13 +609,21 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 	for _, courseID := range courseIDs {
 		course := courseByID[courseID]
 
+		// Quizzes are read first: a graded quiz's online_quiz assignment
+		// is listed under upcoming once, as the quiz.
+		quizzes, _ := s.quizRepo.ListByCourseID(ctx, courseID, listParams)
+		var quizAssignments map[uint]bool
+		if quizzes != nil {
+			quizAssignments = QuizLinkedAssignmentIDs(quizzes.Items)
+		}
+
 		// Per-course assignments (used for upcoming + grade calculation).
 		assignments, _ := s.assignmentRepo.ListByCourseID(ctx, courseID, repository.PaginationParams{Page: 1, PerPage: 1000})
 		assignmentByID := map[uint]models.Assignment{}
 		if assignments != nil {
 			for _, a := range assignments.Items {
 				assignmentByID[a.ID] = a
-				if a.WorkflowState == "deleted" || !a.Published {
+				if a.WorkflowState == "deleted" || !a.Published || quizAssignments[a.ID] {
 					continue
 				}
 				if a.DueAt != nil && a.DueAt.After(now) && a.DueAt.Before(weekFromNow) {
@@ -616,7 +640,6 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 		}
 
 		// Quizzes — also count toward "due this week".
-		quizzes, _ := s.quizRepo.ListByCourseID(ctx, courseID, listParams)
 		if quizzes != nil {
 			for _, q := range quizzes.Items {
 				if q.WorkflowState == "deleted" || !q.Published {
@@ -659,9 +682,10 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 				// grades"). Excused work and unpublished assignments never
 				// count.
 				visible := sub.Score != nil && sub.PostedAt != nil && !sub.Excused && assn.IsPublished()
-				// Grade contribution: posted grades (and excusals, which drop
-				// the assignment); a hidden grade counts as not graded yet.
-				if visible || sub.Excused {
+				// Grade contribution: posted grades (and posted excusals,
+				// which drop the assignment); a hidden grade or excusal
+				// counts as not graded yet.
+				if visible || (sub.Excused && sub.PostedAt != nil) {
 					subCopy := sub
 					visibleSubs[sub.AssignmentID] = &subCopy
 				}
@@ -694,8 +718,20 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 		if assignments != nil {
 			assignmentList = assignments.Items
 		}
-		if pct, ok := CurrentCourseScore(course.ApplyGroupWeights, assignmentList, groups, visibleSubs); ok {
-			grade = &pct
+		// A course that hides totals from students (hide_final_grades)
+		// hides them from observers too; the grade summary enforces the
+		// same rule.
+		switch {
+		case course.HideFinalGrades:
+		case s.courseGrades != nil:
+			// The gradebook's engine with the student's (posted) view.
+			if cg, gerr := s.courseGrades.CourseGrades(ctx, course, CourseGradesOptions{UserIDs: []uint{childID}, PostedOnly: true}); gerr == nil && len(cg.Students) == 1 {
+				grade = cg.DisplayedScore(&cg.Students[0], now)
+			}
+		default:
+			if pct, ok := CurrentCourseScore(course.ApplyGroupWeights, assignmentList, groups, visibleSubs); ok {
+				grade = &pct
+			}
 		}
 		courseSummaries = append(courseSummaries, ChildCourseSummary{
 			CourseID:     courseID,

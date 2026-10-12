@@ -1,10 +1,31 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
-import { Settings, Link2, RefreshCw, Clock, CheckCircle, AlertCircle, Plus, Trash2, X, Loader2 } from 'lucide-react';
-import { api, getCSRFToken } from '../services/api';
+import { Settings, Link2, RefreshCw, Clock, CheckCircle, AlertCircle, Plus, Trash2, X, Loader2, Lock } from 'lucide-react';
+import { getCSRFToken } from '../services/api';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import BlueprintLocksPanel from '../components/blueprint/BlueprintLocksPanel';
+import BlueprintChildLocks from '../components/blueprint/BlueprintChildLocks';
+import BlueprintUnsyncedChanges from '../components/blueprint/BlueprintUnsyncedChanges';
+import RestrictionCheckboxes from '../components/blueprint/RestrictionCheckboxes';
+import { restrictionsToString } from '../lib/contentMigration';
+
+// syncSummary reads the created/updated/deleted counts a sync records in
+// its export_settings.
+function syncSummary(migration) {
+  try {
+    const r = JSON.parse(migration.export_settings || '{}').results;
+    if (!r) return '';
+    const parts = [];
+    if (r.created) parts.push(`${r.created} created`);
+    if (r.updated) parts.push(`${r.updated} updated`);
+    if (r.deleted) parts.push(`${r.deleted} deleted`);
+    return parts.join(', ');
+  } catch {
+    return '';
+  }
+}
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -31,6 +52,7 @@ const BlueprintPage = () => {
   // Migrations state
   const [migrations, setMigrations] = useState([]);
   const [syncComment, setSyncComment] = useState('');
+  const [syncSettings, setSyncSettings] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
   // General state
@@ -204,6 +226,7 @@ const BlueprintPage = () => {
           body: JSON.stringify({
             comment: syncComment,
             send_notification: false,
+            copy_settings: syncSettings,
           }),
         }
       );
@@ -320,6 +343,8 @@ const BlueprintPage = () => {
         </div>
       )}
 
+      <BlueprintChildLocks courseId={courseId} />
+
       {/* Tabs */}
       <div className="border-b border-border-default mb-6">
         <nav className="flex space-x-8">
@@ -334,6 +359,19 @@ const BlueprintPage = () => {
             <span className="flex items-center gap-2">
               <Settings className="w-4 h-4" />
               Settings
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab('locks')}
+            className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'locks'
+                ? 'border-brand-500 text-brand-600'
+                : 'border-transparent text-text-tertiary hover:text-text-secondary hover:border-border-strong'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Lock className="w-4 h-4" />
+              Locked Content
             </span>
           </button>
           <button
@@ -406,21 +444,20 @@ const BlueprintPage = () => {
               </label>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">
-                Default Restrictions (JSON)
-              </label>
-              <textarea
+            <fieldset>
+              <legend className="block text-sm font-medium text-text-secondary mb-2">
+                Default Restrictions
+              </legend>
+              <RestrictionCheckboxes
+                idPrefix="default-restr"
                 value={restrictions}
-                onChange={(e) => setRestrictions(e.target.value)}
-                rows={4}
-                className="w-full rounded-md border border-border-strong px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                placeholder='{"content": true, "points": true, "due_dates": false, "availability_dates": false}'
+                onChange={(r) => setRestrictions(restrictionsToString(r))}
               />
-              <p className="mt-1 text-xs text-text-tertiary">
-                Define which content attributes are locked in associated courses. Keys: content, points, due_dates, availability_dates.
+              <p className="mt-2 text-xs text-text-tertiary">
+                Attributes locked in associated courses for every blueprint item that has no lock setting of its own
+                (set per item under Locked Content).
               </p>
-            </div>
+            </fieldset>
 
             <div className="flex items-center gap-3">
               <button
@@ -435,6 +472,9 @@ const BlueprintPage = () => {
           </form>
         </div>
       )}
+
+      {/* Locked Content Tab */}
+      {activeTab === 'locks' && <BlueprintLocksPanel courseId={courseId} />}
 
       {/* Associations Tab */}
       {activeTab === 'associations' && (
@@ -547,6 +587,8 @@ const BlueprintPage = () => {
       {/* Sync History Tab */}
       {activeTab === 'sync' && (
         <div>
+          <BlueprintUnsyncedChanges key={migrations.length} courseId={courseId} />
+
           {/* Sync Now Form */}
           <div className="bg-surface-0 rounded-lg shadow p-6 mb-6">
             <h3 className="text-lg font-semibold text-text-primary mb-4">Sync Now</h3>
@@ -565,6 +607,15 @@ const BlueprintPage = () => {
                   placeholder="Describe the changes being synced..."
                   className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                 />
+                <label className="mt-2 inline-flex items-center gap-2 text-sm text-text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={syncSettings}
+                    onChange={(e) => setSyncSettings(e.target.checked)}
+                    className="h-4 w-4 rounded border-border-strong text-brand-600 focus:ring-brand-500"
+                  />
+                  Include course settings
+                </label>
               </div>
               <button
                 type="submit"
@@ -628,8 +679,11 @@ const BlueprintPage = () => {
                       <td className="px-6 py-4 whitespace-nowrap">
                         {getStateBadge(migration.workflow_state)}
                       </td>
-                      <td className="px-6 py-4 text-sm text-text-secondary max-w-xs truncate">
-                        {migration.comment || '-'}
+                      <td className="px-6 py-4 text-sm text-text-secondary max-w-xs">
+                        <div className="truncate">{migration.comment || '-'}</div>
+                        {syncSummary(migration) && (
+                          <div className="text-xs text-text-tertiary">{syncSummary(migration)}</div>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-text-tertiary">
                         {formatDate(migration.created_at)}

@@ -32,7 +32,9 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { portfolioApi } from '../services/api_learner_outcomes';
 import { normalizePortfolio } from '../utils/portfolio';
+import { withShareToken } from '../utils/portfolioSharing';
 
 /* ═══════════════════════════════════════════════════════
    THEME DEFINITIONS
@@ -217,7 +219,9 @@ const formatFullDate = (dateStr) => {
    Component: PortfolioPublicPage
    ═══════════════════════════════════════════════════════ */
 const PortfolioPublicPage = () => {
-  const { slug } = useParams();
+  // /portfolios/public/:slug, or /portfolios/shared/:token for a private
+  // sharing link (G155).
+  const { slug, token } = useParams();
 
   /* ── State ── */
   const [portfolio, setPortfolio] = useState(null);
@@ -255,7 +259,9 @@ const PortfolioPublicPage = () => {
   useEffect(() => {
     const fetchPortfolio = async () => {
       try {
-        const data = normalizePortfolio(await api.getPublicPortfolio(slug));
+        const data = normalizePortfolio(
+          token ? await portfolioApi.sharedPortfolio(token) : await api.getPublicPortfolio(slug),
+        );
         setPortfolio(data);
         if (data.sections?.length > 0) {
           const visible = data.sections.filter((s) => s.visible !== false).sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -268,18 +274,19 @@ const PortfolioPublicPage = () => {
       }
     };
     fetchPortfolio();
-  }, [slug]);
+  }, [slug, token]);
 
   /* The view counter is incremented server-side by GET /portfolios/public/:slug. */
 
   /* Fetch comments */
   useEffect(() => {
     if (portfolio?.id) {
-      api.getPortfolioComments(portfolio.id)
+      // Through a private link the token proves access (G155).
+      api.request(withShareToken(`/portfolios/${portfolio.id}/comments?page=1&per_page=100`, token))
         .then((data) => setComments(Array.isArray(data) ? data : data.data || []))
         .catch(() => {});
     }
-  }, [portfolio?.id]);
+  }, [portfolio?.id, token]);
 
   /* Scroll spy */
   useEffect(() => {
@@ -351,7 +358,10 @@ const PortfolioPublicPage = () => {
     try {
       // addPortfolioComment wraps the text as {comment: {content}} itself;
       // passing an object nested it twice and the API rejected it (B199).
-      const comment = await api.addPortfolioComment(portfolio.id, commentText.trim());
+      const { data: comment } = await api.request(withShareToken(`/portfolios/${portfolio.id}/comments`, token), {
+        method: 'POST',
+        body: JSON.stringify({ comment: { content: commentText.trim() } }),
+      });
       setComments((prev) => [...prev, comment]);
       setCommentText('');
     } catch (err) {
@@ -831,7 +841,10 @@ const PortfolioPublicPage = () => {
                 <p className={`text-sm ${t.muted}`}>No feedback yet. Be the first to leave a comment.</p>
               )}
 
-              {/* Comment form */}
+              {/* Comment form (hidden when the owner turned feedback off) */}
+              {portfolio.comments_disabled ? (
+                <p className={`text-sm ${t.muted}`}>The owner has turned off feedback for this portfolio.</p>
+              ) : (
               <form onSubmit={handleSubmitComment} className="flex gap-3">
                 <input
                   type="text"
@@ -850,6 +863,7 @@ const PortfolioPublicPage = () => {
                   <Send className="w-4 h-4" aria-hidden="true" />
                 </button>
               </form>
+              )}
             </div>
           )}
         </div>

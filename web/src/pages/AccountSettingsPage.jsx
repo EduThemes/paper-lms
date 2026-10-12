@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
+import TimeZoneSelect from '../components/learner/TimeZoneSelect';
 
 const TABS = [
   { id: 'profile', label: 'Profile', icon: User },
@@ -35,7 +36,9 @@ function Banner({ kind, children }) {
 function ProfileTab({ user, onSaved }) {
   const { t } = useTranslation();
   const [name, setName] = useState(user?.name || '');
-  const [locale, setLocale] = useState(user?.locale || 'en');
+  // '' = no saved language: the account's default applies (G158). Defaulting
+  // the field to 'en' pinned English on every profile save.
+  const [locale, setLocale] = useState(user?.locale || '');
   const [timeZone, setTimeZone] = useState(user?.time_zone || '');
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState('');
@@ -92,19 +95,15 @@ function ProfileTab({ user, onSaved }) {
               onChange={(e) => setLocale(e.target.value)}
               className="w-full rounded-md border border-border-default bg-surface-0 px-3 py-2 text-sm"
             >
+              <option value="">School default</option>
               <option value="en">English</option>
               <option value="es">Español</option>
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Time zone</label>
-            <input
-              type="text"
-              value={timeZone}
-              onChange={(e) => setTimeZone(e.target.value)}
-              placeholder="America/Chicago"
-              className="w-full rounded-md border border-border-default bg-surface-0 px-3 py-2 text-sm"
-            />
+            <label htmlFor="profile-time-zone" className="block text-sm font-medium mb-1">Time zone</label>
+            <TimeZoneSelect id="profile-time-zone" value={timeZone} onChange={setTimeZone} />
+            <p className="mt-1 text-xs text-text-secondary">Due dates are shown and entered in this time zone.</p>
           </div>
         </div>
         <button
@@ -124,6 +123,12 @@ function ProfileTab({ user, onSaved }) {
         <h3 className="text-sm font-semibold uppercase tracking-wider text-text-secondary">
           Preferences
         </h3>
+        <LinkCard
+          to="/profile"
+          icon={User}
+          title="Public profile"
+          description="Pronouns, a short bio, links and your profile picture."
+        />
         <LinkCard
           to="/settings/language"
           icon={Globe}

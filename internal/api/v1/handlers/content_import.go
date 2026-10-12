@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"gorm.io/datatypes"
+
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/service"
@@ -19,6 +22,15 @@ type ContentImportHandler struct {
 	imsccParser             *service.IMSCCParser
 	contentMigrationService *service.ContentMigrationService
 	fileStoragePath         string
+	// post applies the selective-import / date-shift options after a
+	// package is parsed (G067). Optional.
+	post *service.ContentMigrationRunner
+}
+
+// SetPostProcessor wires the import options (type selection, date
+// shifting) applied after a package is parsed.
+func (h *ContentImportHandler) SetPostProcessor(r *service.ContentMigrationRunner) {
+	h.post = r
 }
 
 // NewContentImportHandler creates a new handler for content package imports.
@@ -49,6 +61,18 @@ func (h *ContentImportHandler) ImportPackage(c *fiber.Ctx) error {
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		return responses.BadRequest(c, "File upload is required. Use multipart form field 'file'.")
+	}
+
+	// Optional import options as a JSON form field "settings":
+	// {"include_only_types": [...], "exclude_types": [...],
+	//  "date_shift_options": {...}}.
+	var settings models.MigrationSettings
+	if raw := c.FormValue("settings"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+			return responses.BadRequest(c, "Invalid settings: "+err.Error())
+		}
+		// A package import has no source course.
+		settings.SourceCourseID = nil
 	}
 
 	// Validate file extension
@@ -87,6 +111,7 @@ func (h *ContentImportHandler) ImportPackage(c *fiber.Ctx) error {
 		Progress:      0,
 		Attachment:    zipPath,
 		StartedAt:     &now,
+		MigrationSettings: datatypes.NewJSONType(settings),
 	}
 
 	if err := h.contentMigrationService.CreateMigration(c.Context(), migration); err != nil {
@@ -134,8 +159,12 @@ func (h *ContentImportHandler) ImportPackage(c *fiber.Ctx) error {
 		migration.ErrorMessage = fmt.Sprintf("All imports failed. First error: %s", importResult.Errors[0])
 		migration.Progress = 0
 	} else {
+		if h.post != nil {
+			importResult.Warnings = append(importResult.Warnings, h.post.PostProcessImport(c.Context(), uint(courseID), settings, importResult)...)
+		}
 		migration.WorkflowState = models.ContentMigrationCompleted
 		migration.Progress = 100
+		migration.Results = datatypes.NewJSONType(*service.ImportResultSummary(importResult))
 	}
 
 	if err := h.contentMigrationService.UpdateMigration(c.Context(), migration); err != nil {

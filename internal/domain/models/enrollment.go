@@ -9,11 +9,26 @@ type Enrollment struct {
 	CourseSectionID  *uint              `json:"course_section_id" gorm:"index"`
 	Type             string             `json:"type" gorm:"not null"` // StudentEnrollment, TeacherEnrollment, TaEnrollment, ObserverEnrollment, DesignerEnrollment
 	Role             string             `json:"role" gorm:"not null"`
+	// RoleID names the custom role this enrollment was granted (migration
+	// 000113). Type stays the base role; the custom role's permission set
+	// is what the permission-gated course routes check (G102). nil = the
+	// base role's defaults.
+	RoleID           *uint              `json:"role_id" gorm:"index"`
 	WorkflowState    EnrollmentWorkflow `json:"workflow_state" gorm:"type:text;not null;default:'active';index"`
 	CreatedAt        time.Time          `json:"created_at"`
 	UpdatedAt        time.Time          `json:"updated_at"`
 	LastActivityAt   *time.Time         `json:"last_activity_at"`
 	AssociatedUserID *uint              `json:"associated_user_id" gorm:"index"` // For ObserverEnrollment linking
+
+	// Lifecycle + date-based access (migration 000110). StartAt/EndAt
+	// override section, course and term dates when BOTH are set (see
+	// EnrollmentDateRanges). CompletedAt is stamped on conclude.
+	StartAt     *time.Time `json:"start_at"`
+	EndAt       *time.Time `json:"end_at"`
+	CompletedAt *time.Time `json:"completed_at"`
+	// LimitPrivilegesToCourseSection restricts the enrollment to users in
+	// its own section(s): roster, gradebook and per-user routes.
+	LimitPrivilegesToCourseSection bool `json:"limit_privileges_to_course_section" gorm:"not null;default:false"`
 
 	// W3-B — per-enrollment leaderboard pseudonym.
 	// PseudonymPoolCode chooses the word vocabulary

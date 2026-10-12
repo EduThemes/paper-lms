@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
+import NotificationPolicyGrid from '../components/NotificationPolicyGrid';
 
 const POLICY_VALUES = ['immediately', 'daily', 'weekly', 'never'];
 
@@ -205,6 +206,9 @@ const NotificationPreferencesPage = () => {
                 )}
               </button>
             </div>
+
+            {/* Per-category x per-channel grid (G091); saves per cell. */}
+            <NotificationPolicyGrid />
           </div>
         )}
       </div>

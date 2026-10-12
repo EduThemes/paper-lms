@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, BookOpen, Calendar, Mail, LogOut,
-  Briefcase, Eye, Settings, Home, Inbox, Menu, X, AlertTriangle, Library, Shield
+  Briefcase, Eye, Settings, Home, Inbox, Menu, X, AlertTriangle, Library, Shield, ListTodo
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
@@ -19,11 +19,13 @@ import CurrencyPills from './gamification/CurrencyPills';
 import BrandLogo from './brand/BrandLogo';
 import UserMenu from './UserMenu';
 import useHasObservees from '../hooks/useHasObservees';
+import StudentViewBanner, { useStudentViewStatus } from './StudentViewBanner';
 
 // Nav items are built inside the component so labels translate when the
 // active language changes (useTranslation only runs in the render tree).
 const buildBaseNav = (t) => [
   { to: '/', icon: LayoutDashboard, label: t('nav.dashboard') },
+  { to: '/planner', icon: ListTodo, label: t('nav.todo', 'To do') },
   { to: '/courses', icon: BookOpen, label: t('nav.courses') },
   { to: '/calendar', icon: Calendar, label: t('nav.calendar') },
   { to: '/inbox', icon: Mail, label: t('nav.inbox') },
@@ -86,6 +88,9 @@ const isAdminRoute = (pathname) =>
 // Masquerade banner shown when an admin is acting as another user
 const MasqueradeBanner = ({ userName, onStopMasquerade, stopping }) => {
   const { t } = useTranslation();
+  // G076: a Student View session gets its own banner (reset / leave).
+  const studentViewCourse = useStudentViewStatus(true);
+  if (studentViewCourse) return <StudentViewBanner courseId={studentViewCourse} />;
   return (
     <div
       className="fixed top-0 left-0 right-0 z-[60] bg-accent-warning text-white px-4 py-2 flex items-center justify-center gap-3 shadow-md"
@@ -348,7 +353,7 @@ const Layout = ({ children }) => {
       {/* Mobile sidebar overlay */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
-          <div className="fixed inset-0 bg-black/50" onClick={() => setMobileMenuOpen(false)} />
+          <div aria-hidden="true" className="fixed inset-0 bg-black/50" onClick={() => setMobileMenuOpen(false)} />
           <aside
             className="fixed inset-y-0 left-0 z-50 flex flex-col items-center w-16 bg-chrome-sidebar"
             style={sidebarTopOffset}

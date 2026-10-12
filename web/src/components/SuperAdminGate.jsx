@@ -47,8 +47,8 @@ export default function SuperAdminGate({ children }) {
             This area manages deployment-wide settings (SMTP, file storage,
             authentication, AI). Account administrators can manage their own
             tenant from{' '}
-            <a className="underline" href="/account/settings">
-              Account settings
+            <a className="underline" href="/admin/settings">
+              Admin settings
             </a>
             .
           </p>

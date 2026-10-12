@@ -1,10 +1,13 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { Link, useParams, useLocation } from 'react-router-dom';
-import { ChevronDown, Home, CheckSquare, BarChart2 } from 'lucide-react';
+import { ChevronDown, Home, CheckSquare, BarChart2, EyeOff } from 'lucide-react';
 import { useCourseUI } from '../contexts/CourseUIContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useClickOutside } from '../hooks/useClickOutside';
 import useCourseStaffRole from '../hooks/useCourseStaffRole';
+import useCoursePermissionMap from '../hooks/useCoursePermissionMap';
+import { customRoleTabDecision } from '../utils/adminAccounts';
+import useLtiCourseNavTabs from '../hooks/useLtiCourseNavTabs';
 
 // Complete map of tab id -> path/label for all available tabs
 const TAB_REGISTRY = {
@@ -63,6 +66,15 @@ const DEFAULT_MORE_IDS = [
 
 const PRIMARY_TAB_COUNT = 6;
 
+// Staff see tabs hidden from students, marked as Canvas does (G078).
+const HIDDEN_TAB_TITLE = 'Disabled. Not visible to students';
+const HiddenTabMark = () => (
+  <>
+    <EyeOff className="inline w-3.5 h-3.5 ms-1 align-[-2px]" aria-hidden="true" />
+    <span className="sr-only">. {HIDDEN_TAB_TITLE}</span>
+  </>
+);
+
 const getSimplifiedTabs = (gradesPath) => [
   { path: '', label: 'Home', icon: Home },
   { path: gradesPath, label: 'My Work', icon: CheckSquare },
@@ -80,6 +92,9 @@ const CourseNav = () => {
   // roster rows for the caller, so teacher tabs vanished in any course
   // where the teacher's enrollment was not among the first ten.
   const staffRole = useCourseStaffRole(courseId);
+  const customRole = useCoursePermissionMap(courseId, staffRole?.staff === true && !['admin', 'super_admin'].includes(user?.role));
+  // LTI tools with a course_navigation placement add their own tabs (G131).
+  const ltiTabs = useLtiCourseNavTabs(courseId);
 
   // Close the "More" dropdown on outside click / Escape. Hook must sit above
   // the conditional `return null` paths below to keep hook order stable.
@@ -94,6 +109,9 @@ const CourseNav = () => {
   const isTeacher = Boolean(user) && staffRole?.staff === true;
   const isCourseTeacher = Boolean(user) && staffRole?.teacher === true;
   const tabAllowed = (id) => {
+    // G102: a staff member's custom role decides its permission-gated tabs.
+    const custom = isTeacher ? customRoleTabDecision(id, customRole) : null;
+    if (custom !== null) return custom;
     if (!isTeacher && TEACHER_ONLY_TAB_IDS.has(id)) return false;
     if (!isCourseTeacher && TEACHER_EXCLUSIVE_TAB_IDS.has(id)) return false;
     return true;
@@ -106,18 +124,20 @@ const CourseNav = () => {
   let visibleTabs;
 
   if (Array.isArray(navConfig) && navConfig.length > 0) {
-    // Use the saved custom order, filtering hidden tabs and teacher-only tabs for students
-    visibleTabs = navConfig
+    // Use the saved custom order. Hidden tabs are left out for learners;
+    // staff still see them, marked "Disabled. Not visible to students"
+    // as in Canvas (G078).
+    visibleTabs = [...navConfig]
       .sort((a, b) => a.position - b.position)
       .filter(t => {
-        if (t.hidden) return false;
+        if (t.hidden && !isTeacher) return false;
         if (!tabAllowed(t.id)) return false;
         return TAB_REGISTRY[t.id] != null;
       })
       .map(t => {
         const reg = TAB_REGISTRY[t.id];
         const path = t.id === 'grades' ? gradesPath : reg.path;
-        return { path, label: reg.label };
+        return { path, label: reg.label, hidden: Boolean(t.hidden) };
       });
   } else {
     // Default: use the hardcoded primary + more order
@@ -133,6 +153,8 @@ const CourseNav = () => {
         return { path, label: reg.label };
       });
   }
+
+  visibleTabs = [...visibleTabs, ...ltiTabs];
 
   // Split into primary tabs and "more" tabs
   const primaryTabs = visibleTabs.slice(0, PRIMARY_TAB_COUNT);
@@ -194,9 +216,11 @@ const CourseNav = () => {
             <Link
               key={tab.path}
               to={basePath + tab.path}
-              className={tabClass(isTabActive(tab.path))}
+              className={`${tabClass(isTabActive(tab.path))}${tab.hidden ? ' opacity-60 inline-flex items-center gap-1' : ''}`}
+              title={tab.hidden ? HIDDEN_TAB_TITLE : undefined}
             >
               {tab.label}
+              {tab.hidden && <HiddenTabMark />}
             </Link>
           ))}
 
@@ -222,9 +246,11 @@ const CourseNav = () => {
                         isTabActive(tab.path)
                           ? 'bg-brand-50 text-brand-600 font-medium'
                           : 'text-text-primary hover:bg-surface-1'
-                      }`}
+                      }${tab.hidden ? ' opacity-60' : ''}`}
+                      title={tab.hidden ? HIDDEN_TAB_TITLE : undefined}
                     >
                       {tab.label}
+                      {tab.hidden && <HiddenTabMark />}
                     </Link>
                   ))}
                 </div>

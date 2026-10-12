@@ -136,7 +136,8 @@ func (s *QuizService) ValidateQuestionBankForCourse(ctx context.Context, bankID,
 		return nil
 	}
 	bank, err := s.questionBankRepo.FindByID(ctx, bankID)
-	if err != nil || bank == nil || bank.CourseID != courseID || bank.WorkflowState == "deleted" {
+	// Own banks, or banks shared with the course's account (G060).
+	if err != nil || !bankUsableInCourse(ctx, s.questionBankRepo, bank, courseID) {
 		return ErrQuestionBankNotInCourse
 	}
 	return nil

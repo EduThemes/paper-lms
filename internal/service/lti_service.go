@@ -17,13 +17,25 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 )
 
 // ltiPlatformKeyName is the lti_platform_keys.name of the active signing key.
 const ltiPlatformKeyName = "default"
+
+// ltiNextKeyName / ltiPreviousKeyName name the published upcoming and
+// retired platform keys (G126 rotation).
+const (
+	ltiNextKeyName     = "next"
+	ltiPreviousKeyName = "previous"
+	// ltiStableKeyName names a stored key that is never rotated nor
+	// published: the HMAC root of the LTI 1.1 opaque user_id and the
+	// Basic Outcomes sourcedid, which must stay the same across platform
+	// key rotations (a rotation would otherwise re-identify every LTI 1.1
+	// user and invalidate every outstanding sourcedid).
+	ltiStableKeyName = "lti11"
+)
 
 // LTIPlatformKeyEnvVar optionally carries the platform RSA private key as
 // PEM (PKCS#1 or PKCS#8). When set it wins over the database-held key.
@@ -58,8 +70,35 @@ type LTIService struct {
 	keyMu       sync.RWMutex
 	platformKey *rsa.PrivateKey
 	keyID       string
+	// extraKeys are the published-but-not-signing keys (G126): the
+	// upcoming "next" key (published ahead of a rotation so tools have it
+	// cached) and the retired "previous" key (still verifiable while
+	// tokens signed with it are in flight).
+	extraKeys []ltiSigningKey
+	// stableKey is the never-rotated "lti11" key (nil with an env key).
+	stableKey   *rsa.PrivateKey
+	keyLoadedAt time.Time
+	keyRepo     repository.LTIPlatformKeyRepository
+	keySeal     func([]byte) ([]byte, error)
+	keyOpen     func([]byte) ([]byte, error)
+	envKey      bool
 	// PlatformIssuer is the issuer URL for this LMS platform (e.g. "https://paper-lms.example.com")
 	PlatformIssuer string
+
+	// adv holds the LTI Advantage collaborators (G123-G134), wired with
+	// SetAdvantageDeps. Nil members disable the matching feature.
+	adv LTIAdvantageDeps
+	// devKeyCreator creates the developer key of a tool registration.
+	devKeyCreator DeveloperKeyCreator
+	// launchGate applies module locks and assignment availability to a
+	// learner's launch (SetLaunchGate). Nil = publish checks only.
+	launchGate LTILaunchGate
+}
+
+// ltiSigningKey is one platform RSA key and its kid.
+type ltiSigningKey struct {
+	key *rsa.PrivateKey
+	kid string
 }
 
 // NewLTIService creates a new LTIService with an ephemeral platform key.
@@ -131,58 +170,214 @@ func (s *LTIService) LoadPersistentPlatformKey(
 			return fmt.Errorf("%s: %w", LTIPlatformKeyEnvVar, err)
 		}
 		s.setPlatformKey(key)
+		s.keyMu.Lock()
+		s.envKey = true
+		s.keyMu.Unlock()
 		return nil
 	}
 	if repo == nil {
 		return errors.New("no LTI platform key store configured")
 	}
 
-	if row, err := repo.FindByName(ctx, ltiPlatformKeyName); err == nil {
-		return s.installSealedKey(row, open)
+	if err := s.ensureStoredKey(ctx, repo, ltiPlatformKeyName, seal); err != nil {
+		return err
+	}
+	// G126: publish an upcoming key from the start, so the first rotation
+	// promotes a key tools have already cached from the JWKS.
+	if err := s.ensureStoredKey(ctx, repo, ltiNextKeyName, seal); err != nil {
+		return err
+	}
+	if err := s.ensureStoredKey(ctx, repo, ltiStableKeyName, seal); err != nil {
+		return err
 	}
 
+	s.keyMu.Lock()
+	s.keyRepo = repo
+	s.keySeal = seal
+	s.keyOpen = open
+	s.keyMu.Unlock()
+	return s.reloadPlatformKeys(ctx)
+}
+
+// ensureStoredKey inserts a freshly generated, sealed key under name
+// unless one already exists (another replica may win the insert).
+func (s *LTIService) ensureStoredKey(ctx context.Context, repo repository.LTIPlatformKeyRepository, name string, seal func([]byte) ([]byte, error)) error {
+	if _, err := repo.FindByName(ctx, name); err == nil {
+		return nil
+	}
+	row, err := newSealedPlatformKey(name, seal)
+	if err != nil {
+		return err
+	}
+	if err := repo.CreateIfAbsent(ctx, row); err != nil {
+		return fmt.Errorf("store platform key: %w", err)
+	}
+	return nil
+}
+
+// newSealedPlatformKey generates an RSA-2048 key and seals its PKCS#8 DER.
+func newSealedPlatformKey(name string, seal func([]byte) ([]byte, error)) (*models.LTIPlatformKey, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		return fmt.Errorf("generate platform key: %w", err)
+		return nil, fmt.Errorf("generate platform key: %w", err)
 	}
 	der, err := x509.MarshalPKCS8PrivateKey(key)
 	if err != nil {
-		return fmt.Errorf("marshal platform key: %w", err)
+		return nil, fmt.Errorf("marshal platform key: %w", err)
 	}
 	sealed, err := seal(der)
 	if err != nil {
-		return fmt.Errorf("seal platform key: %w", err)
+		return nil, fmt.Errorf("seal platform key: %w", err)
 	}
-	if err := repo.CreateIfAbsent(ctx, &models.LTIPlatformKey{
-		Name:                ltiPlatformKeyName,
-		KeyID:               JWKThumbprint(&key.PublicKey),
-		PrivateKeyEncrypted: sealed,
-	}); err != nil {
-		return fmt.Errorf("store platform key: %w", err)
-	}
+	return &models.LTIPlatformKey{Name: name, KeyID: JWKThumbprint(&key.PublicKey), PrivateKeyEncrypted: sealed}, nil
+}
 
-	// Re-read: if another replica inserted first, use its key.
+func unsealPlatformKey(row *models.LTIPlatformKey, open func([]byte) ([]byte, error)) (*rsa.PrivateKey, error) {
+	der, err := open(row.PrivateKeyEncrypted)
+	if err != nil {
+		return nil, fmt.Errorf("unseal platform key: %w", err)
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(der)
+	if err != nil {
+		return nil, fmt.Errorf("parse platform key: %w", err)
+	}
+	key, ok := parsed.(*rsa.PrivateKey)
+	if !ok {
+		return nil, errors.New("platform key is not RSA")
+	}
+	return key, nil
+}
+
+// reloadPlatformKeys re-reads the stored keys: "default" signs, "next"
+// and "previous" are published and accepted for verification.
+func (s *LTIService) reloadPlatformKeys(ctx context.Context) error {
+	s.keyMu.RLock()
+	repo, open := s.keyRepo, s.keyOpen
+	s.keyMu.RUnlock()
+	if repo == nil || open == nil {
+		return nil
+	}
 	row, err := repo.FindByName(ctx, ltiPlatformKeyName)
 	if err != nil {
 		return fmt.Errorf("reload platform key: %w", err)
 	}
-	return s.installSealedKey(row, open)
+	current, err := unsealPlatformKey(row, open)
+	if err != nil {
+		return err
+	}
+	var extras []ltiSigningKey
+	for _, name := range []string{ltiNextKeyName, ltiPreviousKeyName} {
+		r, findErr := repo.FindByName(ctx, name)
+		if findErr != nil {
+			continue
+		}
+		k, openErr := unsealPlatformKey(r, open)
+		if openErr != nil {
+			continue
+		}
+		extras = append(extras, ltiSigningKey{key: k, kid: JWKThumbprint(&k.PublicKey)})
+	}
+	var stable *rsa.PrivateKey
+	if r, findErr := repo.FindByName(ctx, ltiStableKeyName); findErr == nil {
+		if k, openErr := unsealPlatformKey(r, open); openErr == nil {
+			stable = k
+		}
+	}
+	s.keyMu.Lock()
+	s.platformKey = current
+	s.keyID = JWKThumbprint(&current.PublicKey)
+	s.extraKeys = extras
+	if stable != nil {
+		s.stableKey = stable
+	}
+	s.keyLoadedAt = time.Now()
+	s.keyMu.Unlock()
+	return nil
 }
 
-func (s *LTIService) installSealedKey(row *models.LTIPlatformKey, open func([]byte) ([]byte, error)) error {
-	der, err := open(row.PrivateKeyEncrypted)
+// ltiKeyRefreshInterval bounds how stale a replica's view of the stored
+// keys may get after another replica rotates them.
+const ltiKeyRefreshInterval = time.Minute
+
+// RefreshPlatformKeys reloads the stored keys when the cached copy is
+// older than ltiKeyRefreshInterval, so a rotation done on one replica
+// reaches every replica within a minute. A no-op for the env-provided
+// key or when no key store is wired.
+func (s *LTIService) RefreshPlatformKeys(ctx context.Context) {
+	s.keyMu.RLock()
+	stale := s.keyRepo != nil && !s.envKey && time.Since(s.keyLoadedAt) > ltiKeyRefreshInterval
+	s.keyMu.RUnlock()
+	if stale {
+		_ = s.reloadPlatformKeys(ctx)
+	}
+}
+
+// ErrLTIKeyRotationUnavailable is returned when the platform key cannot
+// be rotated (operator-managed env key, or no rotating key store).
+var ErrLTIKeyRotationUnavailable = errors.New("platform key rotation is not available")
+
+// RotatePlatformKey performs a key rotation (G126): the current key is
+// retired to "previous" (still published and verifiable), the published
+// "next" key starts signing, and a new "next" key is generated and
+// published. Returns the kid of the new signing key.
+func (s *LTIService) RotatePlatformKey(ctx context.Context) (string, error) {
+	s.keyMu.RLock()
+	repo, seal, envKey := s.keyRepo, s.keySeal, s.envKey
+	s.keyMu.RUnlock()
+	rotator, ok := repo.(repository.LTIPlatformKeyRotator)
+	if envKey || !ok || seal == nil {
+		return "", ErrLTIKeyRotationUnavailable
+	}
+	newNext, err := newSealedPlatformKey(ltiNextKeyName, seal)
 	if err != nil {
-		return fmt.Errorf("unseal platform key: %w", err)
+		return "", err
 	}
-	parsed, err := x509.ParsePKCS8PrivateKey(der)
+	fallback, err := newSealedPlatformKey(ltiPlatformKeyName, seal)
 	if err != nil {
-		return fmt.Errorf("parse platform key: %w", err)
+		return "", err
 	}
-	key, ok := parsed.(*rsa.PrivateKey)
-	if !ok {
-		return errors.New("platform key is not RSA")
+	if err := rotator.Rotate(ctx, newNext, fallback); err != nil {
+		return "", fmt.Errorf("rotate platform key: %w", err)
 	}
-	s.setPlatformKey(key)
+	if err := s.reloadPlatformKeys(ctx); err != nil {
+		return "", err
+	}
+	_, kid := s.currentKey()
+	return kid, nil
+}
+
+// PlatformKeyStatus describes the published keys for the admin UI.
+type PlatformKeyStatus struct {
+	CurrentKID    string   `json:"current_kid"`
+	PublishedKIDs []string `json:"published_kids"`
+	Rotatable     bool     `json:"rotatable"`
+}
+
+// GetPlatformKeyStatus reports the signing kid and every published kid.
+func (s *LTIService) GetPlatformKeyStatus() PlatformKeyStatus {
+	s.keyMu.RLock()
+	defer s.keyMu.RUnlock()
+	st := PlatformKeyStatus{CurrentKID: s.keyID, PublishedKIDs: []string{s.keyID}}
+	for _, k := range s.extraKeys {
+		st.PublishedKIDs = append(st.PublishedKIDs, k.kid)
+	}
+	_, rotatable := s.keyRepo.(repository.LTIPlatformKeyRotator)
+	st.Rotatable = rotatable && !s.envKey && s.keySeal != nil
+	return st
+}
+
+// publicKeyForKID returns the published platform public key with kid.
+func (s *LTIService) publicKeyForKID(kid string) *rsa.PublicKey {
+	s.keyMu.RLock()
+	defer s.keyMu.RUnlock()
+	if s.platformKey != nil && (kid == "" || kid == s.keyID) {
+		return &s.platformKey.PublicKey
+	}
+	for _, k := range s.extraKeys {
+		if k.kid == kid {
+			return &k.key.PublicKey
+		}
+	}
 	return nil
 }
 
@@ -227,15 +422,21 @@ func (s *LTIService) GetPlatformKeyPair() (*rsa.PrivateKey, error) {
 // GetJWKS returns the platform's public key formatted as a JSON Web Key Set.
 // The returned map can be serialized directly to JSON for the JWKS endpoint.
 func (s *LTIService) GetJWKS() (map[string]interface{}, error) {
-	key, kid := s.currentKey()
-	if key == nil {
+	s.keyMu.RLock()
+	defer s.keyMu.RUnlock()
+	if s.platformKey == nil {
 		return nil, errors.New("platform key has not been initialized")
 	}
 
-	jwk := rsaPublicKeyToJWK(&key.PublicKey, kid)
+	// The signing key is always first; the published next/previous keys
+	// follow (G126).
+	keys := []interface{}{rsaPublicKeyToJWK(&s.platformKey.PublicKey, s.keyID)}
+	for _, k := range s.extraKeys {
+		keys = append(keys, rsaPublicKeyToJWK(&k.key.PublicKey, k.kid))
+	}
 
 	return map[string]interface{}{
-		"keys": []interface{}{jwk},
+		"keys": keys,
 	}, nil
 }
 
@@ -364,6 +565,16 @@ func (s *LTIService) AuthorizeLaunch(ctx context.Context, req LTIAuthRequest) (*
 	if req.RedirectURI == "" {
 		return nil, ltiInvalid("redirect_uri is required")
 	}
+	s.RefreshPlatformKeys(ctx)
+
+	// G124/G125: launches started by Paper's own launch endpoint carry a
+	// platform-signed hint with the full launch context.
+	if IsSignedLTIMessageHint(req.LTIMessageHint) {
+		if s.adv.Store == nil {
+			return nil, ltiInvalid("invalid lti_message_hint")
+		}
+		return s.authorizeHintLaunch(ctx, req)
+	}
 
 	courseID, resourceLinkID, hintKeyID, err := ParseLTIMessageHint(req.LTIMessageHint)
 	if err != nil {
@@ -388,12 +599,8 @@ func (s *LTIService) AuthorizeLaunch(ctx context.Context, req LTIAuthRequest) (*
 	}
 
 	// Replay guard: a tool nonce is single-use.
-	nonceKey := "lti:" + req.ClientID + ":" + req.Nonce
-	if used, err := s.nonceRepo.Exists(ctx, nonceKey); err != nil || used {
-		return nil, ltiInvalid("nonce has already been used")
-	}
-	if err := s.nonceRepo.Create(ctx, &models.Nonce{Value: nonceKey, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
-		return nil, ltiInvalid("nonce has already been used")
+	if err := s.consumeToolNonce(ctx, req.ClientID, req.Nonce); err != nil {
+		return nil, err
 	}
 
 	idToken, err := s.BuildLaunchToken(ctx, req.UserID, req.AccountID, courseID, resourceLinkID, req.Nonce, devKey, toolConfig)
@@ -477,112 +684,22 @@ func ParseLTIMessageHint(hint string) (courseID uint, resourceLinkID string, dev
 	return courseID, resourceLinkID, devKeyID, nil
 }
 
-// BuildLaunchToken creates a signed JWT (id_token) containing the LTI 1.3
-// launch claims, signed RS256 with the platform key. nonce is the tool's
-// nonce from the authentication request. The course is resolved under the
-// caller's tenant (accountID).
+// BuildLaunchToken creates a signed JWT (id_token) for a legacy launch
+// (the unsigned "course:link:key" message hint of POST /lti/oidc/login),
+// signed RS256 with the platform key. nonce is the tool's nonce from the
+// authentication request. The claims are the same as a hint launch
+// (G125), with the developer key ID as deployment_id.
 func (s *LTIService) BuildLaunchToken(ctx context.Context, userID, accountID, courseID uint, resourceLinkID, nonce string, devKey *models.DeveloperKey, toolConfig *models.LTIToolConfiguration) (string, error) {
-	key, kid := s.currentKey()
-	if key == nil {
-		return "", errors.New("platform key has not been initialized")
-	}
-
-	course, err := s.courseRepo.FindByID(ctx, courseID, accountID)
-	if err != nil {
-		return "", ErrLTILaunchNotFound
-	}
-
-	roles := s.getLTIRolesForUser(ctx, userID, courseID, accountID)
-
-	now := time.Now()
-
-	claims := jwt.MapClaims{
-		// Standard OIDC claims
-		"iss":   s.PlatformIssuer,
-		"sub":   strconv.FormatUint(uint64(userID), 10),
-		"aud":   devKey.ClientID,
-		"azp":   devKey.ClientID,
-		"exp":   now.Add(1 * time.Hour).Unix(),
-		"iat":   now.Unix(),
-		"nonce": nonce,
-
-		// LTI 1.3 required claims
-		"https://purl.imsglobal.org/spec/lti/claim/message_type": "LtiResourceLinkRequest",
-		"https://purl.imsglobal.org/spec/lti/claim/version":      "1.3.0",
-
-		"https://purl.imsglobal.org/spec/lti/claim/resource_link": map[string]interface{}{
-			"id":    resourceLinkID,
-			"title": toolConfig.Title,
+	return s.buildIDToken(ctx, launchContext{
+		hint: ltiLaunchHint{
+			UserID: userID, AccountID: accountID, CourseID: courseID, DevKeyID: devKey.ID,
+			MessageType: LTIMessageResourceLink, ResourceLinkUUID: resourceLinkID,
+			TargetLinkURI: toolConfig.TargetLinkURI,
 		},
-
-		"https://purl.imsglobal.org/spec/lti/claim/roles": roles,
-
-		"https://purl.imsglobal.org/spec/lti/claim/context": map[string]interface{}{
-			"id":    strconv.FormatUint(uint64(courseID), 10),
-			"label": course.CourseCode,
-			"title": course.Name,
-			"type":  []string{"http://purl.imsglobal.org/vocab/lis/v2/course#CourseOffering"},
-		},
-
-		"https://purl.imsglobal.org/spec/lti/claim/target_link_uri": toolConfig.TargetLinkURI,
-
-		// Deployment ID (the developer key ID is the deployment identifier)
-		"https://purl.imsglobal.org/spec/lti/claim/deployment_id": strconv.FormatUint(uint64(devKey.ID), 10),
-
-		"https://purl.imsglobal.org/spec/lti/claim/tool_platform": map[string]interface{}{
-			"guid":                s.PlatformIssuer,
-			"name":                "Paper LMS",
-			"product_family_code": "paper-lms",
-			"version":             "1.0.0",
-		},
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	token.Header["kid"] = kid
-
-	signedToken, err := token.SignedString(key)
-	if err != nil {
-		return "", fmt.Errorf("failed to sign launch token: %w", err)
-	}
-
-	return signedToken, nil
+		nonce: nonce, devKey: devKey, cfg: toolConfig,
+	})
 }
 
-// getLTIRolesForUser maps a user's enrollment in a course to LTI role URIs.
-func (s *LTIService) getLTIRolesForUser(ctx context.Context, userID, courseID, accountID uint) []string {
-	enrollment, err := s.enrollRepo.FindByUserAndCourse(ctx, userID, courseID, accountID)
-	if err != nil || enrollment == nil {
-		return []string{}
-	}
-
-	return mapEnrollmentTypeToLTIRoles(enrollment.Type)
-}
-
-// mapEnrollmentTypeToLTIRoles converts a Canvas-style enrollment type string
-// to one or more LTI 1.3 role URIs.
-func mapEnrollmentTypeToLTIRoles(enrollmentType string) []string {
-	switch enrollmentType {
-	case "StudentEnrollment":
-		return []string{
-			"http://purl.imsglobal.org/vocab/lis/v2/membership#Learner",
-		}
-	case "TeacherEnrollment":
-		return []string{
-			"http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor",
-		}
-	case "TaEnrollment":
-		return []string{
-			"http://purl.imsglobal.org/vocab/lis/v2/membership/Instructor#TeachingAssistant",
-		}
-	case "ObserverEnrollment":
-		return []string{
-			"http://purl.imsglobal.org/vocab/lis/v2/membership#Mentor",
-		}
-	case "DesignerEnrollment":
-		return []string{
-			"http://purl.imsglobal.org/vocab/lis/v2/membership#ContentDeveloper",
-		}
-	default:
-		return []string{}
-	}
-}
+// IsSignedLTIMessageHint reports whether hint is a platform-signed hint
+// (as opposed to the legacy "course:link:key" format).
+func IsSignedLTIMessageHint(hint string) bool { return looksLikeJWT(hint) }

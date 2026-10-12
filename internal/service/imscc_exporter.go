@@ -310,7 +310,65 @@ type exportQTIItemFeedbackFlow struct {
 
 // ExportCourse generates an IMSCC package for the given course and returns the zip file path.
 func (e *IMSCCExporter) ExportCourse(ctx context.Context, courseID uint, outputDir string) (string, *ExportResult, error) {
-	// Verify the course exists
+	return e.exportCourse(ctx, courseID, outputDir, nil)
+}
+
+// ExportCourseSelected exports only the content the settings select
+// (the same include/select/exclude semantics as course copy; a selected
+// module brings the content its items link to). Nil settings export
+// the whole course.
+func (e *IMSCCExporter) ExportCourseSelected(ctx context.Context, courseID uint, outputDir string, settings *models.MigrationSettings) (string, *ExportResult, error) {
+	if settings == nil {
+		return e.exportCourse(ctx, courseID, outputDir, nil)
+	}
+	f := &exportFilter{sel: resolveCopySelection(*settings)}
+	if f.sel.wantsType(CopyTypeModules) {
+		if mods, err := e.moduleRepo.ListByCourseID(ctx, courseID, repository.PaginationParams{Page: 1, PerPage: 10000}); err == nil {
+			for _, m := range mods.Items {
+				if !f.sel.wants(CopyTypeModules, m.ID) {
+					continue
+				}
+				for _, it := range m.Items {
+					if it.ContentID == nil {
+						continue
+					}
+					if t := copyTypeForModuleContent(it.ContentType); t != "" {
+						f.sel.add(t, *it.ContentID)
+					}
+				}
+			}
+		}
+	}
+	return e.exportCourse(ctx, courseID, outputDir, f)
+}
+
+// exportFilter narrows an export to selected content. A nil filter
+// includes everything.
+type exportFilter struct {
+	sel *copySelection
+}
+
+func (f *exportFilter) want(t string, id uint) bool {
+	return f == nil || f.sel == nil || f.sel.wants(t, id)
+}
+
+func (f *exportFilter) wantType(t string) bool {
+	return f == nil || f.sel == nil || f.sel.wantsType(t)
+}
+
+// wantItem reports whether a module item survives the filter: items that
+// link excluded content are dropped.
+func (f *exportFilter) wantItem(it models.ContentTag) bool {
+	if f == nil || it.ContentID == nil {
+		return true
+	}
+	t := copyTypeForModuleContent(it.ContentType)
+	return t == "" || f.want(t, *it.ContentID)
+}
+
+func (e *IMSCCExporter) exportCourse(ctx context.Context, courseID uint, outputDir string, filter *exportFilter) (string, *ExportResult, error) {
+	// accountID=0: auth-internal — callers (the content export worker)
+	// have already tied courseID to the requesting user's tenant.
 	course, err := e.courseRepo.FindByID(ctx, courseID, 0)
 	if err != nil {
 		return "", nil, fmt.Errorf("course %d not found: %w", courseID, err)
@@ -324,8 +382,7 @@ func (e *IMSCCExporter) ExportCourse(ctx context.Context, courseID uint, outputD
 	}
 
 	// Create zip file
-	courseName := strings.ReplaceAll(course.Name, " ", "_")
-	zipFileName := fmt.Sprintf("course_%d_%s.imscc", courseID, courseName)
+	zipFileName := fmt.Sprintf("course_%d_%s.imscc", courseID, exportFileSlug(course.Name))
 	zipPath := filepath.Join(outputDir, zipFileName)
 
 	zipFile, err := os.Create(zipPath)
@@ -348,7 +405,7 @@ func (e *IMSCCExporter) ExportCourse(ctx context.Context, courseID uint, outputD
 
 	// Export attachments first so the token emitter can build a complete
 	// file-id → web_resources/<path> map before any HTML body is written.
-	filePathByID, _ := e.writeAttachments(ctx, zipWriter, courseID, result)
+	filePathByID, _ := e.writeAttachments(ctx, zipWriter, courseID, result, filter)
 
 	// Pre-list pages to populate the slug set the emitter validates against.
 	// (Listing twice is cheap; the actual write happens below.)
@@ -373,6 +430,9 @@ func (e *IMSCCExporter) ExportCourse(ctx context.Context, courseID uint, outputD
 		result.Errors = append(result.Errors, fmt.Sprintf("failed to list modules: %v", err))
 	} else {
 		for _, mod := range modules.Items {
+			if !filter.want(CopyTypeModules, mod.ID) {
+				continue
+			}
 			moduleItem := exportManifestItem{
 				Identifier: fmt.Sprintf("module_%d", mod.ID),
 				Title:      mod.Name,
@@ -386,6 +446,9 @@ func (e *IMSCCExporter) ExportCourse(ctx context.Context, courseID uint, outputD
 			}
 
 			for _, item := range items.Items {
+				if !filter.wantItem(item) {
+					continue
+				}
 				if item.ContentType == "ContextModuleSubHeader" {
 					// Sub-headers are items with no resource reference
 					subItem := exportManifestItem{
@@ -413,6 +476,9 @@ func (e *IMSCCExporter) ExportCourse(ctx context.Context, courseID uint, outputD
 	// --- Export Wiki Pages (we already pre-listed them above for the emitter ctx) ---
 	if pageList != nil {
 		for _, page := range pageList.Items {
+			if !filter.want(CopyTypePages, page.ID) {
+				continue
+			}
 			resID := fmt.Sprintf("res_page_%d", page.ID)
 			href := fmt.Sprintf("wiki_content/%s.html", page.URL)
 
@@ -450,6 +516,9 @@ func (e *IMSCCExporter) ExportCourse(ctx context.Context, courseID uint, outputD
 		result.Errors = append(result.Errors, fmt.Sprintf("failed to list assignments: %v", err))
 	} else {
 		for _, assignment := range assignments.Items {
+			if !filter.want(CopyTypeAssignments, assignment.ID) {
+				continue
+			}
 			resID := fmt.Sprintf("res_assignment_%d", assignment.ID)
 			href := fmt.Sprintf("assignments/%d.xml", assignment.ID)
 
@@ -501,6 +570,9 @@ func (e *IMSCCExporter) ExportCourse(ctx context.Context, courseID uint, outputD
 		result.Errors = append(result.Errors, fmt.Sprintf("failed to list quizzes: %v", err))
 	} else {
 		for _, quiz := range quizzes.Items {
+			if !filter.want(CopyTypeQuizzes, quiz.ID) {
+				continue
+			}
 			resID := fmt.Sprintf("res_quiz_%d", quiz.ID)
 			folder := fmt.Sprintf("quizzes/%d", quiz.ID)
 			qtiHref := fmt.Sprintf("%s/assessment_qti.xml", folder)
@@ -538,6 +610,9 @@ func (e *IMSCCExporter) ExportCourse(ctx context.Context, courseID uint, outputD
 		result.Errors = append(result.Errors, fmt.Sprintf("failed to list discussions: %v", err))
 	} else {
 		for _, disc := range discussions.Items {
+			if !filter.want(CopyTypeDiscussions, disc.ID) {
+				continue
+			}
 			resID := fmt.Sprintf("res_discussion_%d", disc.ID)
 			href := fmt.Sprintf("discussions/%d.xml", disc.ID)
 
@@ -579,14 +654,20 @@ func (e *IMSCCExporter) ExportCourse(ctx context.Context, courseID uint, outputD
 	// --- Export course-level metadata (mirrors what the importer reads). ---
 	// writeAttachments already ran above so the token emitter could see the
 	// file map; the rest of the metadata is order-independent.
-	_ = e.writeCourseSettingsXML(zipWriter, course)
-	_ = e.writeSyllabusHTML(zipWriter, course)
+	if filter.wantType(CopyTypeCourseSettings) {
+		_ = e.writeCourseSettingsXML(zipWriter, course)
+	}
+	if filter.wantType(CopyTypeSyllabus) {
+		_ = e.writeSyllabusHTML(zipWriter, course)
+	}
 	_ = e.writeCanvasExportTxt(zipWriter)
-	_ = e.writeModuleMetaXML(ctx, zipWriter, courseID, result)
+	_ = e.writeModuleMetaXML(ctx, zipWriter, courseID, result, filter)
 	_ = e.writeAssignmentGroupsXML(ctx, zipWriter, courseID, result)
 	_ = e.writeRubricsXML(ctx, zipWriter, courseID, result)
 	_ = e.writeLearningOutcomesXML(ctx, zipWriter, courseID, result)
-	_ = e.writeEventsXML(ctx, zipWriter, courseID, result)
+	if filter.wantType(CopyTypeEvents) {
+		_ = e.writeEventsXML(ctx, zipWriter, courseID, result)
+	}
 
 	// --- Build and write imsmanifest.xml ---
 	manifest := exportManifest{
@@ -634,6 +715,31 @@ func (e *IMSCCExporter) ExportCourse(ctx context.Context, courseID uint, outputD
 	}
 
 	return zipPath, result, nil
+}
+
+// exportFileSlug turns a course name into a safe file-name fragment:
+// letters, digits, '-' and '_' only, at most 60 characters.
+func exportFileSlug(name string) string {
+	var b strings.Builder
+	n := 0
+	for _, r := range name {
+		if n >= 60 {
+			break
+		}
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		case r == ' ' || r == '.':
+			b.WriteRune('_')
+		default:
+			continue
+		}
+		n++
+	}
+	if b.Len() == 0 {
+		return "export"
+	}
+	return b.String()
 }
 
 // exportResourceID returns the manifest resource identifier for a content tag's content type and ID.

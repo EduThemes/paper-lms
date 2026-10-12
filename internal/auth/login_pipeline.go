@@ -94,6 +94,11 @@ var ErrPrivilegedAutoLink = errors.New("refusing to auto-link a privileged accou
 // is not an active provider of the verified credential's type.
 var ErrProviderMismatch = errors.New("authentication provider does not match the verified credential")
 
+// ProviderTypeSessionToken is the SSOOutcome.ProviderType of a login via a
+// single-use /login/session_token URL (G136). Like "passkey", the
+// credential already names the user (ExternalSubject = user id).
+const ProviderTypeSessionToken = "session_token"
+
 // LoginPipeline orchestrates post-credential-verification work for
 // every login path.
 type LoginPipeline struct {
@@ -103,6 +108,23 @@ type LoginPipeline struct {
 	accounts    repository.AccountRepository
 	audit       *AuthAudit
 	jwtSecret   string
+	// logins resolves an admin-created SSO login (G115, Canvas pseudonym
+	// with an authentication provider). Optional; see SetProviderLogins.
+	logins ProviderLoginLookup
+}
+
+// ProviderLoginLookup finds the additional login an SSO provider's
+// subject names, inside the provider's account (*service.UserLoginService).
+type ProviderLoginLookup interface {
+	FindForProvider(ctx context.Context, providerID, accountID uint, subject string) (*models.UserLogin, error)
+	TouchLastLogin(ctx context.Context, loginID uint)
+}
+
+// SetProviderLogins enables matching SSO subjects against admin-created
+// logins before the email auto-link (G115).
+func (p *LoginPipeline) SetProviderLogins(l ProviderLoginLookup) *LoginPipeline {
+	p.logins = l
+	return p
 }
 
 // AuthProviderRepository is the narrow contract LoginPipeline depends
@@ -206,14 +228,29 @@ func (p *LoginPipeline) Execute(ctx context.Context, outcome SSOOutcome, meta Re
 	// verification (biometric/PIN). That's already two factors by
 	// definition; we skip the per-tenant MFA gate entirely. The TOTP
 	// step would just be friction.
-	if outcome.ProviderType == "passkey" {
+	//
+	// G136 — "session_token" (Canvas GET /login/session_token) is the
+	// same shape: the single-use URL was minted by a caller holding a
+	// full-access API token for this very user, and that token was itself
+	// created inside a session that already passed the MFA gate (a PAT is
+	// created from a signed-in session; an OAuth token after consent in
+	// one). Canvas marks these logins as remember-me logins, which skip
+	// the OTP step. Suspension and parental-consent gates above still
+	// apply.
+	if outcome.ProviderType == "passkey" || outcome.ProviderType == ProviderTypeSessionToken {
+		// A session token skips the OTP step but not the enrollment
+		// requirement: a user the tenant policy obliges to enroll in MFA
+		// (and who has not) is still sent to /mfa/enroll. A passkey is
+		// itself the second factor, so it satisfies the policy.
+		mustEnroll := outcome.ProviderType == ProviderTypeSessionToken &&
+			decideMFAGate(p.lookupTenantPolicy(ctx, user), user) == mfaGateMustEnroll
 		token, err := GenerateToken(user, p.jwtSecret)
 		if err != nil {
 			return nil, err
 		}
 		p.audit.LoginSucceeded(ctx, user.ID, outcome.ProviderType, meta)
 		_ = isNew
-		return &PipelineResult{Token: token, User: user}, nil
+		return &PipelineResult{Token: token, User: user, MustEnroll: mustEnroll}, nil
 	}
 
 	policy := p.lookupTenantPolicy(ctx, user)
@@ -264,7 +301,7 @@ func (p *LoginPipeline) resolveUser(ctx context.Context, outcome SSOOutcome, met
 	// resolved a credential row → user_id; the handler stashes the
 	// id as ExternalSubject. We skip the federated_identities lookup
 	// + JIT entirely (the credential IS the binding).
-	if outcome.ProviderType == "local" || outcome.ProviderType == "passkey" {
+	if outcome.ProviderType == "local" || outcome.ProviderType == "passkey" || outcome.ProviderType == ProviderTypeSessionToken {
 		var userID uint
 		if _, err := fmt.Sscanf(outcome.ExternalSubject, "%d", &userID); err != nil || userID == 0 {
 			return nil, false, errors.New("login outcome missing user id")
@@ -335,6 +372,14 @@ func (p *LoginPipeline) resolveUser(ctx context.Context, outcome SSOOutcome, met
 			_ = p.federations.TouchLastSeen(ctx, fi.ID, marshalAttrsIfRicher(fi.ClaimsSnapshot, outcome.Attributes))
 			return user, false, nil
 		}
+	}
+
+	// (a2) An admin-created login for this provider (G115): the subject
+	// (or the provider's login_id attribute) names the user explicitly.
+	if user, ok, err := p.resolveProviderLogin(ctx, outcome, provider.ID, provider.AccountID, meta); err != nil {
+		return nil, false, err
+	} else if ok {
+		return user, false, nil
 	}
 
 	// (b) Email auto-link to an existing local user. Only when the

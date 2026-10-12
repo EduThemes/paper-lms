@@ -555,6 +555,8 @@ func (s *BatchService) BulkSendMessage(
 			CreatedByUserID: senderID,
 			LastMessageAt:   now,
 			WorkflowState:   "active",
+			ContextType:     "Course",
+			ContextID:       recipientCourseID,
 		}
 
 		if err := s.conversationRepo.Create(ctx, conv); err != nil {
@@ -566,7 +568,8 @@ func (s *BatchService) BulkSendMessage(
 		senderParticipant := &models.ConversationParticipant{
 			ConversationID: conv.ID,
 			UserID:         senderID,
-			WorkflowState:  "active",
+			WorkflowState:  models.ConversationParticipantRead,
+			LastReadAt:     &now,
 		}
 		if err := s.convParticipantRepo.Create(ctx, senderParticipant); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("failed to add sender participant for user %d: %s", recipientID, err.Error()))
@@ -577,7 +580,7 @@ func (s *BatchService) BulkSendMessage(
 		recipientParticipant := &models.ConversationParticipant{
 			ConversationID: conv.ID,
 			UserID:         recipientID,
-			WorkflowState:  "active",
+			WorkflowState:  models.ConversationParticipantUnread,
 		}
 		if err := s.convParticipantRepo.Create(ctx, recipientParticipant); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("failed to add recipient participant for user %d: %s", recipientID, err.Error()))

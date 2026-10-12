@@ -16,6 +16,12 @@ type OAuthAuthorizationCode struct {
 	Scopes         string    `json:"scopes" gorm:"type:text"`
 	ExpiresAt      time.Time `json:"expires_at" gorm:"not null;index"`
 	CreatedAt      time.Time `json:"created_at"`
+	// CodeChallenge / CodeChallengeMethod carry the RFC 7636 (PKCE)
+	// challenge the client sent to /login/oauth2/auth (migration 000119).
+	// NULL for a plain authorization-code request. Only "S256" is
+	// accepted, as in Canvas.
+	CodeChallenge       *string `json:"-" gorm:"column:code_challenge;type:text"`
+	CodeChallengeMethod *string `json:"-" gorm:"column:code_challenge_method;type:text"`
 }
 
 func (OAuthAuthorizationCode) TableName() string { return "oauth_authorization_codes" }

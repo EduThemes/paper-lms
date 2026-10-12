@@ -65,6 +65,31 @@ type qtiItem struct {
 	Presentation     qtiPresentation      `xml:"presentation"`
 	ResponseProcessing qtiResProcessing   `xml:"resprocessing"`
 	Feedbacks        []qtiItemFeedback    `xml:"itemfeedback"`
+	// Canvas calculated_question data (formulas, variables, answer sets).
+	Calculated *qtiCalculated `xml:"itemproc_extension>calculated"`
+}
+
+// qtiCalculated is Canvas's <itemproc_extension><calculated> block.
+type qtiCalculated struct {
+	AnswerTolerance string `xml:"answer_tolerance"`
+	Formulas        struct {
+		DecimalPlaces string   `xml:"decimal_places,attr"`
+		Formula       []string `xml:"formula"`
+	} `xml:"formulas"`
+	Vars []struct {
+		Name  string `xml:"name,attr"`
+		Scale string `xml:"scale,attr"`
+		Min   string `xml:"min"`
+		Max   string `xml:"max"`
+	} `xml:"vars>var"`
+	VarSets []struct {
+		Ident string `xml:"ident,attr"`
+		Vars  []struct {
+			Name  string `xml:"name,attr"`
+			Value string `xml:",chardata"`
+		} `xml:"var"`
+		Answer string `xml:"answer"`
+	} `xml:"var_sets>var_set"`
 }
 
 type qtiItemMetaData struct {
@@ -153,6 +178,8 @@ type qtiCondAnd struct {
 	VarEqual []qtiVarEqual `xml:"varequal"`
 	VarGte   []qtiVarRange `xml:"vargte"`
 	VarLte   []qtiVarRange `xml:"varlte"`
+	// Canvas precision_answer exports a half-open (floor, ceil] window.
+	VarGt []qtiVarRange `xml:"vargt"`
 }
 
 type qtiCondOr struct {
@@ -274,6 +301,11 @@ func parseQTIItem(item qtiItem, position int) models.QuizQuestion {
 	correctComments, incorrectComments := extractFeedback(item)
 
 	answersJSON, _ := json.Marshal(answers)
+	if questionType == "formula" {
+		if cfg := extractCalculatedConfig(item); cfg != nil {
+			answersJSON, _ = json.Marshal([]interface{}{cfg})
+		}
+	}
 
 	q := models.QuizQuestion{
 		Position:          position,
@@ -511,8 +543,9 @@ func extractAnswers(item qtiItem, questionType string) []answerChoice {
 	case "numerical_question":
 		return extractNumericalAnswers(item)
 	case "essay", "file_upload", "text_only", "formula":
-		// Not auto-gradable from QTI (calculated questions need per-student
-		// variable generation) — no answer key is imported.
+		// No choice key: essays/uploads are hand-graded, and calculated
+		// (formula) items are rebuilt from itemproc_extension by
+		// extractCalculatedConfig.
 		return nil
 	default:
 		return extractMultipleChoiceAnswers(item)
@@ -786,9 +819,14 @@ func extractNumericalAnswers(item qtiItem) []answerChoice {
 		if cond.ConditionVar.Or != nil {
 			exacts = append(exacts, cond.ConditionVar.Or.VarEqual...)
 			for _, sub := range cond.ConditionVar.Or.And {
-				if len(sub.VarGte) > 0 && len(sub.VarLte) > 0 {
-					if lo, errLo := strconv.ParseFloat(sub.VarGte[0].Value, 64); errLo == nil {
-						if hi, errHi := strconv.ParseFloat(sub.VarLte[0].Value, 64); errHi == nil {
+				lower := sub.VarGte
+				if len(lower) == 0 {
+					// precision_answer: (floor, ceil] around the approximate value.
+					lower = sub.VarGt
+				}
+				if len(lower) > 0 && len(sub.VarLte) > 0 {
+					if lo, errLo := strconv.ParseFloat(strings.TrimSpace(lower[0].Value), 64); errLo == nil {
+						if hi, errHi := strconv.ParseFloat(strings.TrimSpace(sub.VarLte[0].Value), 64); errHi == nil {
 							m := (hi - lo) / 2
 							orMargin = &m
 						}
@@ -974,4 +1012,66 @@ func parseQTIFallback(data []byte) (*QTIResult, error) {
 	result.PointsPossible = totalPoints
 
 	return result, nil
+}
+
+// calculatedConfig is the formula-item config (see quiz_formula.go) built
+// from a Canvas calculated_question.
+type calculatedConfig struct {
+	ID              string             `json:"id"`
+	Weight          float64            `json:"weight"`
+	Formula         string             `json:"formula"`
+	Variables       []FormulaVariable  `json:"variables"`
+	Tolerance       string             `json:"tolerance,omitempty"`
+	AnswerPrecision *int               `json:"answer_precision,omitempty"`
+	AnswerSets      []FormulaAnswerSet `json:"answer_sets,omitempty"`
+}
+
+// extractCalculatedConfig maps Canvas's calculated block onto Paper's
+// formula config: the last formula is the answer formula, variables keep
+// their ranges and decimal scale, and the exported var_sets become the
+// answer sets each attempt draws from (so grading matches Canvas exactly
+// even when the formula uses syntax Paper's evaluator does not support).
+func extractCalculatedConfig(item qtiItem) *calculatedConfig {
+	calc := item.Calculated
+	if calc == nil {
+		return nil
+	}
+	cfg := &calculatedConfig{ID: item.Ident, Weight: 100, Tolerance: strings.TrimSpace(calc.AnswerTolerance)}
+	if cfg.ID == "" {
+		cfg.ID = "formula"
+	}
+	if n := len(calc.Formulas.Formula); n > 0 {
+		cfg.Formula = strings.TrimSpace(calc.Formulas.Formula[n-1])
+	}
+	if dp, err := strconv.Atoi(strings.TrimSpace(calc.Formulas.DecimalPlaces)); err == nil && dp >= 0 {
+		cfg.AnswerPrecision = &dp
+	}
+	for _, v := range calc.Vars {
+		fv := FormulaVariable{Name: strings.TrimSpace(v.Name)}
+		fv.Min, _ = strconv.ParseFloat(strings.TrimSpace(v.Min), 64)
+		fv.Max, _ = strconv.ParseFloat(strings.TrimSpace(v.Max), 64)
+		fv.Precision, _ = strconv.Atoi(strings.TrimSpace(v.Scale))
+		if fv.Name != "" {
+			cfg.Variables = append(cfg.Variables, fv)
+		}
+	}
+	for _, set := range calc.VarSets {
+		ans, err := strconv.ParseFloat(strings.TrimSpace(set.Answer), 64)
+		if err != nil {
+			continue
+		}
+		fs := FormulaAnswerSet{Answer: ans}
+		for _, v := range set.Vars {
+			val, err := strconv.ParseFloat(strings.TrimSpace(v.Value), 64)
+			if err != nil {
+				continue
+			}
+			fs.Variables = append(fs.Variables, FormulaVarValue{Name: strings.TrimSpace(v.Name), Value: val})
+		}
+		cfg.AnswerSets = append(cfg.AnswerSets, fs)
+	}
+	if cfg.Formula == "" && len(cfg.AnswerSets) == 0 {
+		return nil
+	}
+	return cfg
 }

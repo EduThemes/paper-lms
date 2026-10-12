@@ -9,7 +9,11 @@ import (
 type GradebookHandler struct {
 	gradingService *service.GradingService
 	auditService   *service.AuditService
+	gradingUI      *service.GradingUIService
 }
+
+// SetGradingUIService hides anonymized assignments' grades (nil-safe).
+func (h *GradebookHandler) SetGradingUIService(g *service.GradingUIService) { h.gradingUI = g }
 
 func NewGradebookHandler(gradingService *service.GradingService, auditService *service.AuditService) *GradebookHandler {
 	return &GradebookHandler{gradingService: gradingService, auditService: auditService}
@@ -25,6 +29,7 @@ func (h *GradebookHandler) GetGradebook(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch gradebook")
 	}
+	filterGradebookForSections(c, gradebook) // G107 section-limited graders
 
 	// 13.5 PII audit — bulk-read semantics. A gradebook fetch on a
 	// 200-student section would otherwise emit 200 audit rows per
@@ -35,10 +40,13 @@ func (h *GradebookHandler) GetGradebook(c *fiber.Ctx) error {
 		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_gradebook_read", "gradebook", uint(courseID), c.IP(), c.Get("User-Agent"))
 	}
 
+	anonymized := maskAnonymizedGradebook(c, h.gradingUI, uint(courseID), gradebook)
+
 	return c.JSON(fiber.Map{
-		"students":    gradebook.Students,
-		"assignments": gradebook.Assignments,
-		"submissions": gradebook.Submissions,
+		"students":                  gradebook.Students,
+		"assignments":               gradebook.Assignments,
+		"submissions":               gradebook.Submissions,
+		"anonymized_assignment_ids": anonymized,
 	})
 }
 
@@ -63,5 +71,8 @@ func (h *GradebookHandler) GetStudentGrade(c *fiber.Ctx) error {
 		"current_score": grade.CurrentScore,
 		"final_grade":   grade.FinalGrade,
 		"final_score":   grade.FinalScore,
+		// G029: the instructor's final grade override, when set.
+		"override_score": grade.OverrideScore,
+		"override_grade": grade.OverrideGrade,
 	})
 }

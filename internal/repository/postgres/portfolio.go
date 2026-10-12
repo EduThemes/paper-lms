@@ -45,6 +45,17 @@ func (r *portfolioRepo) FindBySlug(ctx context.Context, slug string) (*models.Po
 	return &portfolio, nil
 }
 
+func (r *portfolioRepo) FindByShareToken(ctx context.Context, token string) (*models.Portfolio, error) {
+	var portfolio models.Portfolio
+	if token == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if err := r.db.WithContext(ctx).Where("share_token = ? AND workflow_state != ?", token, "deleted").First(&portfolio).Error; err != nil {
+		return nil, err
+	}
+	return &portfolio, nil
+}
+
 func (r *portfolioRepo) FindByPublicURL(ctx context.Context, publicURL string) (*models.Portfolio, error) {
 	var portfolio models.Portfolio
 	if err := r.db.WithContext(ctx).Where("public_url = ? AND workflow_state = ?", publicURL, "published").First(&portfolio).Error; err != nil {

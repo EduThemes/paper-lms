@@ -19,6 +19,22 @@ type Attachment struct {
 	UploadStatus  string             `json:"upload_status" gorm:"not null;default:'success'"`
 	CreatedAt     time.Time          `json:"created_at"`
 	UpdatedAt     time.Time          `json:"updated_at"`
+
+	// File visibility (Canvas attachments.locked / hidden / lock_at /
+	// unlock_at; migration 000095). Locked = unpublished: learners can
+	// neither list nor download it. Hidden = "only available with link":
+	// left out of learner listings but downloadable by id. LockAt /
+	// UnlockAt bound the window in which learners may read the file.
+	Locked   bool       `json:"locked" gorm:"not null;default:false"`
+	Hidden   bool       `json:"hidden" gorm:"not null;default:false"`
+	LockAt   *time.Time `json:"lock_at"`
+	UnlockAt *time.Time `json:"unlock_at"`
+
+	// Usage rights (Canvas UsageRights, inlined). Justification is one of
+	// the UsageRights* consts; empty means "not set".
+	UsageRightsJustification  string `json:"usage_rights_justification" gorm:"type:text;not null;default:''"`
+	UsageRightsLegalCopyright string `json:"usage_rights_legal_copyright" gorm:"type:text;not null;default:''"`
+	UsageRightsLicense        string `json:"usage_rights_license" gorm:"type:text;not null;default:''"`
 }
 
 func (Attachment) TableName() string {

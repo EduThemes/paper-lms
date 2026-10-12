@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
+	"sort"
+	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -15,6 +18,9 @@ type MasteryGradebookService struct {
 	resultRepo     repository.LearningOutcomeResultRepository
 	userRepo       repository.UserRepository
 	proficiency    *OutcomeProficiencyService
+	// groupRepo resolves outcome group titles for the student view
+	// (optional; see SetOutcomeGroupRepo).
+	groupRepo repository.LearningOutcomeGroupRepository
 }
 
 func NewMasteryGradebookService(
@@ -171,6 +177,216 @@ func (s *MasteryGradebookService) GetMasteryGradebook(ctx context.Context, cours
 		Outcomes:    outcomes,
 		Cells:       cells,
 	}, nil
+}
+
+// SetOutcomeGroupRepo wires the group lookup the student mastery view uses
+// to show each outcome's group. Optional.
+func (s *MasteryGradebookService) SetOutcomeGroupRepo(repo repository.LearningOutcomeGroupRepository) {
+	s.groupRepo = repo
+}
+
+// ErrMasteryStudentNotFound means the user is not a student of the course
+// (in the caller's tenant); handlers answer 404.
+var ErrMasteryStudentNotFound = errors.New("student not found in course")
+
+// StudentMasteryResult is one aligned result in the student mastery view,
+// with its score re-expressed on the course's proficiency scale.
+type StudentMasteryResult struct {
+	ID          uint                             `json:"id"`
+	Title       string                           `json:"title"`
+	AssetType   string                           `json:"associated_asset_type"`
+	AssetID     uint                             `json:"associated_asset_id"`
+	Score       *float64                         `json:"score"`
+	Possible    *float64                         `json:"possible"`
+	RawScore    *float64                         `json:"raw_score"`
+	RawPossible *float64                         `json:"raw_possible"`
+	Rating      *models.OutcomeProficiencyRating `json:"rating,omitempty"`
+	SubmittedAt *time.Time                       `json:"submitted_at"`
+	AssessedAt  *time.Time                       `json:"assessed_at"`
+}
+
+// StudentMasteryOutcome is one outcome row of the student mastery view: the
+// rollup (by the outcome's calculation method, identical to the Learning
+// Mastery Gradebook cell) and the results behind it, newest first.
+type StudentMasteryOutcome struct {
+	ID                uint                             `json:"id"`
+	Title             string                           `json:"title"`
+	DisplayName       string                           `json:"display_name"`
+	Description       string                           `json:"description"`
+	GroupID           uint                             `json:"outcome_group_id"`
+	GroupTitle        string                           `json:"group_title"`
+	CalculationMethod string                           `json:"calculation_method"`
+	CalculationInt    int                              `json:"calculation_int"`
+	Score             *float64                         `json:"score"`
+	Possible          *float64                         `json:"possible"`
+	Rating            *models.OutcomeProficiencyRating `json:"rating,omitempty"`
+	Mastered          bool                             `json:"mastered"`
+	Results           []StudentMasteryResult           `json:"results"`
+}
+
+// StudentMastery is the student-facing Learning Mastery view (G152).
+type StudentMastery struct {
+	CourseID    uint                       `json:"course_id"`
+	UserID      uint                       `json:"user_id"`
+	UserName    string                     `json:"user_name"`
+	Proficiency *models.OutcomeProficiency `json:"proficiency"`
+	Outcomes    []StudentMasteryOutcome    `json:"outcomes"`
+	Mastered    int                        `json:"mastered_count"`
+	Assessed    int                        `json:"assessed_count"`
+}
+
+// CourseStudentIDs returns the user ids of the course's (non-deleted)
+// student enrollments, in the caller's tenant.
+func (s *MasteryGradebookService) CourseStudentIDs(ctx context.Context, courseID, accountID uint) (map[uint]bool, error) {
+	ids := map[uint]bool{}
+	for page := 1; page <= 200; page++ {
+		res, err := s.enrollmentRepo.ListByCourseID(ctx, courseID, accountID, repository.PaginationParams{Page: page, PerPage: 100})
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range res.Items {
+			if e.Type == "StudentEnrollment" {
+				ids[e.UserID] = true
+			}
+		}
+		if len(res.Items) == 0 || int64(page*100) >= res.TotalCount {
+			break
+		}
+	}
+	return ids, nil
+}
+
+// ObservesStudent reports whether observerID has an active observer
+// enrollment linked to studentID in the course.
+func (s *MasteryGradebookService) ObservesStudent(ctx context.Context, observerID, studentID, courseID, accountID uint) bool {
+	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerID, accountID)
+	if err != nil {
+		return false
+	}
+	for _, e := range enrollments {
+		if e.CourseID == courseID && e.Type == "ObserverEnrollment" && e.WorkflowState == models.EnrollmentActive &&
+			e.AssociatedUserID != nil && *e.AssociatedUserID == studentID {
+			return true
+		}
+	}
+	return false
+}
+
+// GetStudentMastery builds one student's Learning Mastery view for a course:
+// every course outcome with the student's rollup, proficiency rating and the
+// aligned results behind it. Scores are on the course proficiency scale, and
+// the rollup uses each outcome's calculation method — the same computation
+// as the instructor's Learning Mastery Gradebook (G153), so the two views
+// always agree. A user who is not a student of the course is
+// ErrMasteryStudentNotFound.
+func (s *MasteryGradebookService) GetStudentMastery(ctx context.Context, courseID, userID, accountID uint) (*StudentMastery, error) {
+	students, err := s.CourseStudentIDs(ctx, courseID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if !students[userID] {
+		return nil, ErrMasteryStudentNotFound
+	}
+	scale, err := s.proficiency.Get(ctx, "Course", courseID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := &StudentMastery{CourseID: courseID, UserID: userID, Proficiency: scale, Outcomes: []StudentMasteryOutcome{}}
+	if users, err := s.userRepo.FindByIDs(ctx, []uint{userID}, accountID); err == nil && len(users) > 0 {
+		out.UserName = users[0].Name
+	}
+
+	var outcomes []models.LearningOutcome
+	for page := 1; page <= 100; page++ {
+		res, err := s.outcomeRepo.ListByContext(ctx, "Course", courseID, accountID, repository.PaginationParams{Page: page, PerPage: 100})
+		if err != nil {
+			return nil, err
+		}
+		outcomes = append(outcomes, res.Items...)
+		if len(res.Items) == 0 || int64(page*100) >= res.TotalCount {
+			break
+		}
+	}
+
+	results, err := s.resultRepo.ListByUserAndContext(ctx, userID, "Course", courseID)
+	if err != nil {
+		return nil, err
+	}
+	byOutcome := map[uint][]models.LearningOutcomeResult{}
+	for _, r := range results {
+		byOutcome[r.LearningOutcomeID] = append(byOutcome[r.LearningOutcomeID], r)
+	}
+
+	groupTitles := map[uint]string{}
+	for _, o := range outcomes {
+		row := StudentMasteryOutcome{
+			ID:                o.ID,
+			Title:             o.Title,
+			DisplayName:       o.DisplayName,
+			Description:       o.Description,
+			GroupID:           o.OutcomeGroupID,
+			CalculationMethod: o.CalculationMethod,
+			CalculationInt:    o.CalculationInt,
+			Results:           []StudentMasteryResult{},
+		}
+		if s.groupRepo != nil && o.OutcomeGroupID != 0 {
+			title, ok := groupTitles[o.OutcomeGroupID]
+			if !ok {
+				if g, err := s.groupRepo.FindByID(ctx, o.OutcomeGroupID, accountID); err == nil && g != nil {
+					title = g.Title
+				}
+				groupTitles[o.OutcomeGroupID] = title
+			}
+			row.GroupTitle = title
+		}
+		rs := byOutcome[o.ID]
+		if len(rs) > 0 {
+			row.Score, row.Possible, row.Rating = s.masteryCellScore(rs, o, scale)
+			// Ratings above the mastery rating ("Exceeds Mastery") are
+			// mastered too, so compare against the mastery threshold.
+			row.Mastered = row.Score != nil && *row.Score >= masteryThreshold(o, scale)
+			out.Assessed++
+			if row.Mastered {
+				out.Mastered++
+			}
+			sorted := append([]models.LearningOutcomeResult(nil), rs...)
+			sort.SliceStable(sorted, func(i, j int) bool { return resultTime(&sorted[i]).After(resultTime(&sorted[j])) })
+			for i := range sorted {
+				r := sorted[i]
+				item := StudentMasteryResult{
+					ID: r.ID, Title: r.Title, AssetType: r.AssociatedAssetType, AssetID: r.AssociatedAssetID,
+					RawScore: r.Score, RawPossible: r.Possible, SubmittedAt: r.SubmittedAt, AssessedAt: r.AssessedAt,
+				}
+				if score, possible, rating := s.masteryCellScore([]models.LearningOutcomeResult{r}, withLatest(o), scale); score != nil {
+					item.Score, item.Possible, item.Rating = score, possible, rating
+				}
+				row.Results = append(row.Results, item)
+			}
+		}
+		out.Outcomes = append(out.Outcomes, row)
+	}
+	return out, nil
+}
+
+// withLatest is the outcome with the "latest" method, used to put a single
+// result on the proficiency scale.
+func withLatest(o models.LearningOutcome) models.LearningOutcome {
+	o.CalculationMethod = "latest"
+	return o
+}
+
+// masteryThreshold is the mastery cut-off on the scale masteryCellScore
+// reports scores on (the scale's mastery rating, else the outcome's own).
+func masteryThreshold(o models.LearningOutcome, scale *models.OutcomeProficiency) float64 {
+	if scale != nil {
+		for _, r := range scale.Ratings {
+			if r.Mastery {
+				return r.Points
+			}
+		}
+	}
+	return o.MasteryPoints
 }
 
 // masteryCellScore rolls a student's results for one outcome up into a

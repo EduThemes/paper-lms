@@ -4,71 +4,38 @@ import {
   DialogDescription, DialogFooter,
 } from '../ui/dialog';
 import { Button } from '../ui/button';
-import { Input } from '../ui/input';
+import { toEmbedAttrs } from '../../utils/iframePolicy';
 
 /**
  * @typedef {Object} EmbedMediaDialogProps
  * @property {boolean} open
  * @property {() => void} onClose
- * @property {(attrs: {src: string, title: string}) => void} onInsert
+ * @property {(attrs: {src: string, title: string, width?: string, height?: string, allow?: string}) => void} onInsert
  */
 
-const ALLOWED_HOSTS = new Set([
-  'youtube.com', 'www.youtube.com', 'youtu.be',
-  'vimeo.com', 'player.vimeo.com',
-]);
-
 /**
- * Convert a YouTube/Vimeo URL into a safe embed src.
- * Returns null when the host is not allow-listed or the URL is malformed.
- */
-function toEmbedSrc(raw) {
-  let u;
-  try { u = new URL(raw.trim()); } catch { return null; }
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
-  const host = u.hostname.toLowerCase();
-  if (!ALLOWED_HOSTS.has(host)) return null;
-
-  if (host === 'youtu.be') {
-    const id = u.pathname.replace(/^\//, '');
-    if (!/^[\w-]{6,}$/.test(id)) return null;
-    return `https://www.youtube.com/embed/${id}`;
-  }
-  if (host.endsWith('youtube.com')) {
-    if (u.pathname === '/watch') {
-      const id = u.searchParams.get('v');
-      if (!id || !/^[\w-]{6,}$/.test(id)) return null;
-      return `https://www.youtube.com/embed/${id}`;
-    }
-    if (u.pathname.startsWith('/embed/')) return `https://www.youtube.com${u.pathname}`;
-  }
-  if (host === 'vimeo.com') {
-    const id = u.pathname.split('/').filter(Boolean)[0];
-    if (!/^\d+$/.test(id || '')) return null;
-    return `https://player.vimeo.com/video/${id}`;
-  }
-  if (host === 'player.vimeo.com') return u.toString();
-  return null;
-}
-
-/**
- * Paste-a-URL embed dialog. Builds a sanitized iframe and hands it back.
+ * Paste-a-link or paste-embed-code dialog (G001). Accepts share links of the
+ * common providers (YouTube, Vimeo, Loom, Google Docs/Slides/Forms/Drive),
+ * any URL on the education embed allowlist (Panopto, Kaltura, Desmos, PhET,
+ * GeoGebra, Padlet, ...), or a whole <iframe> embed code.
  * @param {EmbedMediaDialogProps} props
  */
 export default function EmbedMediaDialog({ open, onClose, onInsert }) {
-  const [url, setUrl] = useState('');
+  const [input, setInput] = useState('');
+  const [title, setTitle] = useState('');
   const [error, setError] = useState(null);
 
   const submit = () => {
-    const src = toEmbedSrc(url);
-    if (!src) {
-      setError('URL must be a YouTube or Vimeo link.');
+    const attrs = toEmbedAttrs(input);
+    if (!attrs) {
+      setError('That site is not on the embed allowlist. Paste a link or embed code from YouTube, Vimeo, Google Docs/Slides/Forms, Panopto, Kaltura, Desmos, PhET, GeoGebra, Padlet, Quizlet or another supported tool.');
       return;
     }
     // Hand back node attributes; the editor inserts an `iframe` schema node
     // (extensions/Iframe.js), which serializes to a responsive .rce-embed.
-    onInsert({ src, title: 'Embedded media' });
-    setUrl('');
+    onInsert({ ...attrs, title: title.trim() || attrs.title || 'Embedded content' });
+    setInput('');
+    setTitle('');
     setError(null);
   };
 
@@ -76,26 +43,37 @@ export default function EmbedMediaDialog({ open, onClose, onInsert }) {
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Embed media</DialogTitle>
+          <DialogTitle>Embed content</DialogTitle>
           <DialogDescription>
-            Paste a YouTube or Vimeo URL. We&rsquo;ll embed it as a responsive iframe.
+            Paste a link or the embed code from a video, document or classroom tool.
           </DialogDescription>
         </DialogHeader>
 
-        <Input
+        <label className="text-sm font-medium" htmlFor="rce-embed-input">Link or embed code</label>
+        <textarea
+          id="rce-embed-input"
           autoFocus
-          type="url"
-          value={url}
-          onChange={(e) => { setUrl(e.target.value); setError(null); }}
-          placeholder="https://www.youtube.com/watch?v=…"
-          aria-label="Media URL"
-          onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+          rows={3}
+          value={input}
+          onChange={(e) => { setInput(e.target.value); setError(null); }}
+          placeholder="https://www.youtube.com/watch?v=…  or  <iframe src=…></iframe>"
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }}
         />
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        <label className="text-sm font-medium" htmlFor="rce-embed-title">Title (for screen readers)</label>
+        <input
+          id="rce-embed-title"
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="e.g. Photosynthesis explainer video"
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+        />
+        {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
 
         <DialogFooter>
           <Button variant="outline" type="button" onClick={onClose}>Cancel</Button>
-          <Button type="button" onClick={submit} disabled={!url.trim()}>Embed</Button>
+          <Button type="button" onClick={submit} disabled={!input.trim()}>Embed</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

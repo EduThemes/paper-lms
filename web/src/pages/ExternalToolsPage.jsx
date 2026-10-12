@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, Navigate } from 'react-router-dom';
 import { Puzzle, Plus, Trash2, Pencil, AlertTriangle, X, ArrowLeft } from 'lucide-react';
 import { api } from '../services/api';
+import { ltiApi, LTI_PRIVACY_LEVELS } from '../services/api_lti';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
@@ -40,7 +41,13 @@ const ExternalToolsPage = () => {
         api.getExternalTools(courseId, 1, 100),
       ]);
       setCourse(courseData);
-      setTools(Array.isArray(toolsResult.data) ? toolsResult.data : []);
+      const courseTools = Array.isArray(toolsResult.data) ? toolsResult.data : [];
+      // G132: tools deployed for the whole account are inherited here.
+      const inherited = await ltiApi.courseTools(courseId).catch(() => []);
+      const accountTools = (Array.isArray(inherited) ? inherited : [])
+        .filter((t) => t.context_type === 'Account')
+        .map((t) => ({ id: t.id, name: t.name, description: t.description, context_type: 'Account', lti_version: t.lti_version, workflow_state: 'active' }));
+      setTools([...courseTools, ...accountTools]);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -88,8 +95,12 @@ const ExternalToolsPage = () => {
       setSaving(false);
       return;
     }
-    if (!editingTool && developerKeyId === undefined) {
-      setError('Developer Key ID is required.');
+    const consumerKey = String(formData.get('consumer_key') || '').trim();
+    const sharedSecret = String(formData.get('shared_secret') || '');
+    // G133: an LTI 1.1 tool is installed with its consumer key + secret
+    // instead of a developer key.
+    if (!editingTool && developerKeyId === undefined && !(consumerKey && sharedSecret)) {
+      setError('Enter a Developer Key ID (LTI 1.3) or a consumer key and shared secret (LTI 1.1).');
       setSaving(false);
       return;
     }
@@ -100,6 +111,9 @@ const ExternalToolsPage = () => {
       url: formData.get('url') || undefined,
       description: formData.get('description') || undefined,
       custom_fields: customFields,
+      consumer_key: consumerKey || undefined,
+      shared_secret: sharedSecret || undefined,
+      privacy_level: formData.get('privacy_level') || undefined,
     };
 
     // Remove undefined fields
@@ -220,17 +234,32 @@ const ExternalToolsPage = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-text-secondary mb-1">
-                  Developer Key ID <span className="text-accent-danger">*</span>
+                  Developer Key ID (LTI 1.3)
                 </label>
                 <input
                   name="developer_key_id"
                   inputMode="numeric"
-                  required={!editingTool}
                   defaultValue={editingTool?.developer_key_id || ''}
                   className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                   placeholder="e.g., 10000000000001"
                 />
-                <p className="text-xs text-text-tertiary mt-1">The developer key ID for LTI 1.3 tools.</p>
+                <p className="text-xs text-text-tertiary mt-1">The developer key ID for LTI 1.3 tools. Leave empty for an LTI 1.1 tool.</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1" htmlFor="et-consumer-key">Consumer key (LTI 1.1)</label>
+                <input id="et-consumer-key" name="consumer_key" defaultValue={editingTool?.consumer_key || ''} className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1" htmlFor="et-shared-secret">Shared secret (LTI 1.1)</label>
+                <input id="et-shared-secret" name="shared_secret" type="password" autoComplete="new-password" placeholder={editingTool ? 'Leave empty to keep' : ''} className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1" htmlFor="et-privacy">Privacy level (LTI 1.1)</label>
+                <select id="et-privacy" name="privacy_level" defaultValue={editingTool?.privacy_level || 'anonymous'} className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                  {LTI_PRIVACY_LEVELS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                </select>
               </div>
             </div>
             <div>
@@ -371,6 +400,17 @@ const ExternalToolsPage = () => {
                       <span className="text-sm font-medium text-text-primary">
                         {tool.name || 'Unnamed Tool'}
                       </span>
+                      {tool.lti_version && (
+                        <span className="text-xs text-text-tertiary">LTI {tool.lti_version}</span>
+                      )}
+                      {tool.context_type === 'Account' && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-surface-2 text-text-secondary">All courses</span>
+                      )}
+                      {tool.workflow_state === 'active' && (
+                        <Link to={`/courses/${courseId}/external_tools/${tool.id}`} className="text-xs text-brand-600 hover:underline">
+                          Launch
+                        </Link>
+                      )}
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -403,7 +443,8 @@ const ExternalToolsPage = () => {
                   </td>
                   {isTeacher && (
                     <td className="px-6 py-4 whitespace-nowrap text-right">
-                      <div className="flex items-center justify-end gap-2">
+                      {/* Account-wide tools are managed by admins (LTI Tools). */}
+                      <div className={`flex items-center justify-end gap-2 ${tool.context_type === 'Account' ? 'hidden' : ''}`}>
                         <button
                           onClick={() => handleEdit(tool)}
                           className="text-text-tertiary hover:text-brand-600 p-1"

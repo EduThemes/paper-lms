@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const GradeInput = ({ value, pointsPossible, onSave, studentName }) => {
+// Grading types whose grades are typed as text (G023): a letter or GPA
+// grade, "85%", or complete / incomplete. Points take a number (or EX).
+const TEXT_GRADING_TYPES = new Set(['letter_grade', 'gpa_scale', 'pass_fail', 'percent']);
+
+const GradeInput = ({ value, pointsPossible, onSave, studentName, gradingType = 'points' }) => {
+  const textMode = TEXT_GRADING_TYPES.has(gradingType);
   const [editing, setEditing] = useState(false);
   const [inputValue, setInputValue] = useState(value ?? '');
   const [saving, setSaving] = useState(false);
@@ -33,16 +38,20 @@ const GradeInput = ({ value, pointsPossible, onSave, studentName }) => {
 
   const handleSave = async () => {
     setEditing(false);
-    const numericValue = inputValue === '' ? null : parseFloat(inputValue);
+    const raw = String(inputValue ?? '').trim();
+    // Text grades ("B+", "85%", "complete") and "EX" (excuse) go to the
+    // server as typed; plain numbers are points.
+    const isNumber = raw !== '' && !Number.isNaN(Number(raw));
+    const nextValue = raw === '' ? null : textMode || !isNumber ? raw : parseFloat(raw);
 
     // Skip save if value hasn't changed
-    if (numericValue === value || (numericValue === null && (value === null || value === undefined))) {
+    if (nextValue === value || String(nextValue) === String(value ?? '') || (nextValue === null && (value === null || value === undefined))) {
       return;
     }
 
     setSaving(true);
     try {
-      await onSave(numericValue);
+      await onSave(nextValue);
       setFeedback('success');
     } catch (err) {
       setFeedback('error');
@@ -71,17 +80,16 @@ const GradeInput = ({ value, pointsPossible, onSave, studentName }) => {
       <div className="flex items-center space-x-1">
         <input
           ref={inputRef}
-          type="number"
-          step="0.01"
-          min="0"
-          max={pointsPossible}
+          type="text"
+          inputMode={textMode ? 'text' : 'decimal'}
+          aria-label={studentName ? `Grade for ${studentName}` : 'Grade'}
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onBlur={handleSave}
           onKeyDown={handleKeyDown}
           className="w-16 text-sm border border-blue-400 rounded px-1.5 py-0.5 text-center focus:ring-2 focus:ring-brand-500 focus:outline-none"
         />
-        <span className="text-xs text-text-disabled">/{pointsPossible}</span>
+        {!textMode && <span className="text-xs text-text-disabled">/{pointsPossible}</span>}
       </div>
     );
   }
@@ -103,7 +111,7 @@ const GradeInput = ({ value, pointsPossible, onSave, studentName }) => {
       <span className={`text-sm ${value !== null && value !== undefined ? 'font-medium' : 'text-text-disabled'}`}>
         {saving ? '...' : (value !== null && value !== undefined ? value : '-')}
       </span>
-      <span className="text-xs text-text-disabled">/{pointsPossible}</span>
+      {!textMode && <span className="text-xs text-text-disabled">/{pointsPossible}</span>}
     </button>
   );
 };

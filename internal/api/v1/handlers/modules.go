@@ -12,6 +12,33 @@ import (
 
 type ModuleHandler struct {
 	moduleService *service.ModuleService
+	// progression (optional) hides unreleased Mastery Paths items from
+	// students (G080).
+	progression *service.ModuleProgressionService
+}
+
+// SetProgressionService wires student item visibility.
+func (h *ModuleHandler) SetProgressionService(p *service.ModuleProgressionService) {
+	h.progression = p
+}
+
+// studentVisibleItems drops the items the calling student may not see
+// (unreleased Mastery Paths assignments). Staff see everything.
+func studentVisibleItems(c *fiber.Ctx, p *service.ModuleProgressionService, courseID uint, items []models.ContentTag) ([]models.ContentTag, error) {
+	if p == nil || canViewUnpublishedContent(c) || len(items) == 0 {
+		return items, nil
+	}
+	keep, err := p.VisibleItemFilter(c.Context(), courseID, callerUserID(c))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.ContentTag, 0, len(items))
+	for _, it := range items {
+		if keep(it) {
+			out = append(out, it)
+		}
+	}
+	return out, nil
 }
 
 func NewModuleHandler(moduleService *service.ModuleService) *ModuleHandler {
@@ -27,6 +54,7 @@ func moduleToJSON(m *models.ContextModule) fiber.Map {
 		"unlock_at":                   m.UnlockAt,
 		"end_at":                      m.EndAt,
 		"require_sequential_progress": m.RequireSequentialProgress,
+		"requirement_count":           m.RequirementCount,
 		"workflow_state":              m.WorkflowState,
 		"published":                   m.WorkflowState == "active",
 		"items_count":                 len(m.Items),
@@ -114,6 +142,8 @@ func contentTypeToItemType(ct string) string {
 		return "SubHeader"
 	case "Attachment":
 		return "File"
+	case "ContextExternalTool":
+		return "ExternalTool"
 	case "Quiz":
 		// IMSCC imports write "Quiz"; the API type is the same.
 		return "Quiz"
@@ -147,6 +177,9 @@ func (h *ModuleHandler) ListModules(c *fiber.Ctx) error {
 
 	mods := make([]fiber.Map, len(result.Items))
 	for i, m := range result.Items {
+		if m.Items, err = studentVisibleItems(c, h.progression, uint(courseID), m.Items); err != nil {
+			return responses.InternalError(c, "Could not fetch modules")
+		}
 		mj := moduleToJSON(&m)
 		if include != "items" {
 			delete(mj, "items")
@@ -175,6 +208,9 @@ func (h *ModuleHandler) GetModule(c *fiber.Ctx) error {
 		return nil
 	}
 	module.Items = visibleItems(module.Items, canViewUnpublishedContent(c))
+	if module.Items, err = studentVisibleItems(c, h.progression, uint(courseID), module.Items); err != nil {
+		return responses.InternalError(c, "Could not fetch module")
+	}
 
 	return c.JSON(moduleToJSON(module))
 }
@@ -192,11 +228,15 @@ func (h *ModuleHandler) CreateModule(c *fiber.Ctx) error {
 			UnlockAt                  *time.Time `json:"unlock_at"`
 			EndAt                     *time.Time `json:"end_at"`
 			RequireSequentialProgress bool       `json:"require_sequential_progress"`
+			RequirementCount          int        `json:"requirement_count"`
 		} `json:"module"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
+	}
+	if input.Module.RequirementCount != 0 && input.Module.RequirementCount != 1 {
+		return responses.BadRequest(c, "requirement_count must be 0 (complete all) or 1 (complete one)")
 	}
 
 	module := &models.ContextModule{
@@ -206,6 +246,7 @@ func (h *ModuleHandler) CreateModule(c *fiber.Ctx) error {
 		UnlockAt:                 input.Module.UnlockAt,
 		EndAt:                    input.Module.EndAt,
 		RequireSequentialProgress: input.Module.RequireSequentialProgress,
+		RequirementCount:          input.Module.RequirementCount,
 		WorkflowState:            "active",
 	}
 
@@ -246,7 +287,11 @@ func (h *ModuleHandler) UpdateModule(c *fiber.Ctx) error {
 			UnlockAt                  *time.Time `json:"unlock_at"`
 			EndAt                     *time.Time `json:"end_at"`
 			RequireSequentialProgress *bool      `json:"require_sequential_progress"`
+			RequirementCount          *int       `json:"requirement_count"`
 			Published                 *bool      `json:"published"`
+			// ClearUnlockAt removes the unlock date (a null unlock_at is
+			// indistinguishable from an omitted one).
+			ClearUnlockAt bool `json:"clear_unlock_at"`
 		} `json:"module"`
 	}
 
@@ -262,6 +307,14 @@ func (h *ModuleHandler) UpdateModule(c *fiber.Ctx) error {
 	}
 	if input.Module.UnlockAt != nil {
 		module.UnlockAt = input.Module.UnlockAt
+	} else if input.Module.ClearUnlockAt {
+		module.UnlockAt = nil
+	}
+	if input.Module.RequirementCount != nil {
+		if *input.Module.RequirementCount != 0 && *input.Module.RequirementCount != 1 {
+			return responses.BadRequest(c, "requirement_count must be 0 (complete all) or 1 (complete one)")
+		}
+		module.RequirementCount = *input.Module.RequirementCount
 	}
 	if input.Module.EndAt != nil {
 		module.EndAt = input.Module.EndAt

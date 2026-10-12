@@ -19,6 +19,26 @@ type Course struct {
 	IsPublic          bool           `json:"is_public" gorm:"default:false"`
 	ApplyGroupWeights bool           `json:"apply_assignment_group_weights" gorm:"default:false"`
 	NavigationTabs    string         `json:"navigation_tabs" gorm:"type:text"`
-	CreatedAt         time.Time      `json:"created_at"`
-	UpdatedAt         time.Time      `json:"updated_at"`
+	// Date-based access settings (migration 000112; see
+	// EffectiveEnrollmentAccess).
+	RestrictEnrollmentsToCourseDates bool `json:"restrict_enrollments_to_course_dates" gorm:"not null;default:false"`
+	RestrictStudentFutureView        bool `json:"restrict_student_future_view" gorm:"not null;default:false"`
+	RestrictStudentPastView          bool `json:"restrict_student_past_view" gorm:"not null;default:false"`
+	// HideFinalGrades hides the course total from students and observers
+	// on the Grades page (Canvas course setting hide_final_grades).
+	// Migration 000124.
+	HideFinalGrades bool `json:"hide_final_grades" gorm:"not null;default:false"`
+	// PostManually is the course default post policy: new assignments
+	// start with a manual post policy when it is set (Canvas course
+	// post_policy.post_manually).
+	PostManually bool `json:"post_manually" gorm:"default:false"`
+	// GradingStandardID selects the course grading scheme (a course- or
+	// account-owned grading_standards row). Nil falls back to the newest
+	// course scheme, then the default scale.
+	GradingStandardID *uint `json:"grading_standard_id"`
+	// GradingStandardDisabled turns letter grades off for course totals
+	// (Canvas "Enable course grading scheme" unchecked).
+	GradingStandardDisabled bool      `json:"grading_standard_disabled" gorm:"default:false"`
+	CreatedAt               time.Time `json:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at"`
 }

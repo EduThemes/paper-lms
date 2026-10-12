@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { sanitizeHTML, renderMathInElement } from './RichContentViewer';
+import { sanitizeHTML } from './RichContentViewer';
+import { enhanceUserContent } from '../utils/enhanceUserContent';
 import { looksLikeHTML } from '../utils/html';
 
 /**
@@ -17,7 +18,7 @@ export default function SafeHTML({ html, as: Tag = 'div', className, ...rest }) 
   const clean = useMemo(() => sanitizeHTML(html), [html]);
 
   useEffect(() => {
-    if (ref.current && clean) renderMathInElement(ref.current);
+    if (ref.current && clean) enhanceUserContent(ref.current);
   }, [clean]);
 
   return <Tag ref={ref} className={className} dangerouslySetInnerHTML={{ __html: clean }} {...rest} />;

@@ -17,6 +17,7 @@ type SpeedGraderData struct {
 	Assignment  *models.Assignment   `json:"assignment"`
 	Students    []SpeedGraderStudent `json:"students"`
 	UserNameMap map[uint]string      `json:"-"` // all enrolled user names (teachers, TAs, students)
+	Anonymized  bool                 `json:"-"` // student identities hidden from graders
 }
 
 // SpeedGraderStudent represents a single student's submission data in SpeedGrader.
@@ -64,6 +65,14 @@ func NewSpeedGraderService(
 // including the assignment details and all enrolled students with their
 // submissions and comments.
 func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, assignmentID, accountID uint) (*SpeedGraderData, error) {
+	return s.GetSpeedGraderDataAnonymized(ctx, courseID, assignmentID, accountID, nil)
+}
+
+// GetSpeedGraderDataAnonymized is GetSpeedGraderData with the anonymity
+// decision supplied by the caller: anonymize reports, given the course's
+// student ids, whether identities are hidden (Canvas lifts anonymity once
+// grades are posted). nil means "whenever anonymous grading is on".
+func (s *SpeedGraderService) GetSpeedGraderDataAnonymized(ctx context.Context, courseID, assignmentID, accountID uint, anonymize func(*models.Assignment, []uint) bool) (*SpeedGraderData, error) {
 	// Fetch assignment under the caller's tenant and tie it to the course.
 	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, accountID)
 	if err != nil {
@@ -104,13 +113,25 @@ func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, a
 	// For anonymous grading the label order must not follow enrollment
 	// order (that alone can de-anonymize), so students are shuffled
 	// deterministically per assignment before numbering.
+	// A student enrolled in two sections holds two StudentEnrollment
+	// rows; grade them once.
 	studentEnrollments := make([]models.Enrollment, 0, len(enrollments.Items))
+	seenStudent := map[uint]bool{}
 	for _, enrollment := range enrollments.Items {
-		if enrollment.Type == "StudentEnrollment" {
+		if enrollment.Type == "StudentEnrollment" && !seenStudent[enrollment.UserID] {
+			seenStudent[enrollment.UserID] = true
 			studentEnrollments = append(studentEnrollments, enrollment)
 		}
 	}
-	if assignment.AnonymousGrading {
+	hideNames := assignment.AnonymousGrading
+	if anonymize != nil {
+		ids := make([]uint, 0, len(studentEnrollments))
+		for _, e := range studentEnrollments {
+			ids = append(ids, e.UserID)
+		}
+		hideNames = anonymize(assignment, ids)
+	}
+	if hideNames {
 		sort.SliceStable(studentEnrollments, func(i, j int) bool {
 			return anonymousSortKey(assignment.ID, studentEnrollments[i].UserID) < anonymousSortKey(assignment.ID, studentEnrollments[j].UserID)
 		})
@@ -121,7 +142,7 @@ func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, a
 	for _, enrollment := range studentEnrollments {
 		anonymousIndex++
 		userName := ""
-		if assignment.AnonymousGrading {
+		if hideNames {
 			userName = fmt.Sprintf("Student %d", anonymousIndex)
 			// B119: a student's own comments must carry the anonymous
 			// label, never the real name from the course roster.
@@ -159,6 +180,7 @@ func (s *SpeedGraderService) GetSpeedGraderData(ctx context.Context, courseID, a
 		Assignment:  assignment,
 		Students:    students,
 		UserNameMap: userNameMap,
+		Anonymized:  hideNames,
 	}, nil
 }
 

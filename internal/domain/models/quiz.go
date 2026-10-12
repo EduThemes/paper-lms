@@ -24,4 +24,59 @@ type Quiz struct {
 	WorkflowState      string     `json:"workflow_state" gorm:"not null;default:'unpublished'"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
+
+	// AssignmentID links a graded quiz (quiz_type assignment / graded_survey)
+	// to its gradebook assignment (submission_types "online_quiz"), so quiz
+	// scores flow through assignment groups, weights, late and post policy
+	// (migration 000086). Practice quizzes and ungraded surveys have none.
+	AssignmentID *uint `json:"assignment_id" gorm:"index:idx_quizzes_assignment_id"`
+	// Answer-key release window (Canvas show_correct_answers_at /
+	// hide_correct_answers_at) and "only after the last attempt".
+	ShowCorrectAnswersAt          *time.Time `json:"show_correct_answers_at"`
+	HideCorrectAnswersAt          *time.Time `json:"hide_correct_answers_at"`
+	ShowCorrectAnswersLastAttempt bool       `json:"show_correct_answers_last_attempt" gorm:"not null;default:false"`
+	// OneTimeResults: a student sees an attempt's results once, then they
+	// are hidden (Canvas one_time_results).
+	OneTimeResults bool `json:"one_time_results" gorm:"not null;default:false"`
+
+	// Quiz-items lane (migration 000090): Canvas access code (sealed with
+	// secretbox — never serialized), IP filter (comma-separated IPs /
+	// CIDRs) and anonymous survey submissions.
+	AccessCodeEncrypted  []byte `json:"-" gorm:"column:access_code_encrypted"`
+	IPFilter             string `json:"ip_filter" gorm:"column:ip_filter;type:text"`
+	AnonymousSubmissions bool   `json:"anonymous_submissions" gorm:"column:anonymous_submissions;not null;default:false"`
+}
+
+// Quiz types (Canvas quiz_type).
+const (
+	QuizTypeAssignment   = "assignment"
+	QuizTypePractice     = "practice_quiz"
+	QuizTypeGradedSurvey = "graded_survey"
+	QuizTypeSurvey       = "survey"
+)
+
+// Quiz scoring policies for multiple attempts (Canvas scoring_policy).
+const (
+	QuizScoringKeepHighest = "keep_highest"
+	QuizScoringKeepLatest  = "keep_latest"
+	QuizScoringKeepAverage = "keep_average"
+)
+
+// IsGraded reports whether the quiz counts toward the gradebook, i.e.
+// whether it is backed by an online_quiz assignment.
+func (q *Quiz) IsGraded() bool {
+	if q == nil {
+		return false
+	}
+	switch q.QuizType {
+	case QuizTypeAssignment, QuizTypeGradedSurvey, "":
+		return true
+	}
+	return false
+}
+
+// IsSurvey reports whether the quiz is a survey (graded or not): its
+// attempts are never held for manual review.
+func (q *Quiz) IsSurvey() bool {
+	return q != nil && (q.QuizType == QuizTypeSurvey || q.QuizType == QuizTypeGradedSurvey)
 }

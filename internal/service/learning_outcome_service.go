@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -120,8 +122,72 @@ func (s *LearningOutcomeService) CreateOutcome(ctx context.Context, outcome *mod
 	if outcome.CalculationMethod == "" {
 		outcome.CalculationMethod = "decaying_average"
 	}
+	if err := NormalizeOutcomeCalculation(outcome); err != nil {
+		return err
+	}
+	defaultOutcomeRatings(outcome)
 	defaultPointsPossibleFromRatings(outcome)
 	return s.outcomeRepo.Create(ctx, outcome)
+}
+
+// Outcome calculation methods (Canvas LearningOutcome::CALCULATION_METHODS).
+// "decaying_average" is Paper's long-standing default and keeps Canvas's
+// legacy meaning (newest score weighted calculation_int%, the mean of the
+// rest the remainder — Canvas now calls it "weighted_average");
+// "standard_decaying_average" is the true decaying average.
+var OutcomeCalculationMethods = map[string]bool{
+	"decaying_average":          true,
+	"weighted_average":          true,
+	"standard_decaying_average": true,
+	"n_mastery":                 true,
+	"latest":                    true,
+	"highest":                   true,
+	"average":                   true,
+}
+
+// ErrInvalidOutcomeCalculation is returned for an unknown calculation method
+// or an out-of-range calculation_int.
+var ErrInvalidOutcomeCalculation = errors.New("invalid outcome calculation")
+
+// NormalizeOutcomeCalculation validates the calculation method and its
+// parameter the way Canvas does: the decaying/weighted averages take a
+// weight of 1-99 (default 65), n_mastery a count of 1-10 (default 5), and
+// the other methods take none.
+func NormalizeOutcomeCalculation(outcome *models.LearningOutcome) error {
+	method := outcome.CalculationMethod
+	if !OutcomeCalculationMethods[method] {
+		return fmt.Errorf("%w: calculation_method must be one of decaying_average, weighted_average, standard_decaying_average, n_mastery, latest, highest, average", ErrInvalidOutcomeCalculation)
+	}
+	switch method {
+	case "decaying_average", "weighted_average", "standard_decaying_average":
+		if outcome.CalculationInt == 0 {
+			outcome.CalculationInt = 65
+		}
+		if outcome.CalculationInt < 1 || outcome.CalculationInt > 99 {
+			return fmt.Errorf("%w: calculation_int must be between 1 and 99 for %s", ErrInvalidOutcomeCalculation, method)
+		}
+	case "n_mastery":
+		if outcome.CalculationInt == 0 {
+			outcome.CalculationInt = 5
+		}
+		if outcome.CalculationInt < 1 || outcome.CalculationInt > 10 {
+			return fmt.Errorf("%w: calculation_int must be between 1 and 10 for n_mastery", ErrInvalidOutcomeCalculation)
+		}
+	}
+	if outcome.MasteryPoints < 0 || outcome.PointsPossible < 0 {
+		return fmt.Errorf("%w: mastery_points and points_possible must not be negative", ErrInvalidOutcomeCalculation)
+	}
+	return nil
+}
+
+// defaultOutcomeRatings gives an outcome created without a rating scale
+// Canvas's default criterion (5 / 3 / 0). ratings_data is a jsonb column,
+// so an empty string would also fail the insert.
+func defaultOutcomeRatings(outcome *models.LearningOutcome) {
+	if strings.TrimSpace(outcome.RatingsData) != "" {
+		return
+	}
+	outcome.RatingsData = `[{"description":"Exceeds Mastery","points":5},{"description":"Meets Mastery","points":3},{"description":"Does Not Meet Mastery","points":0}]`
 }
 
 // defaultPointsPossibleFromRatings mirrors Canvas, where an outcome's
@@ -150,6 +216,13 @@ func (s *LearningOutcomeService) GetOutcome(ctx context.Context, id, accountID u
 }
 
 func (s *LearningOutcomeService) UpdateOutcome(ctx context.Context, outcome *models.LearningOutcome) error {
+	if outcome.CalculationMethod == "" {
+		outcome.CalculationMethod = "decaying_average"
+	}
+	if err := NormalizeOutcomeCalculation(outcome); err != nil {
+		return err
+	}
+	defaultOutcomeRatings(outcome)
 	defaultPointsPossibleFromRatings(outcome)
 	return s.outcomeRepo.Update(ctx, outcome)
 }
@@ -554,6 +627,11 @@ func RecordAssignmentOutcomeResults(ctx context.Context, alignments repository.O
 			Score:               sub.Score,
 			Possible:            &possible,
 			Attempt:             sub.Attempt,
+			// Canvas orders results by submitted_at (then assessed_at) for
+			// "latest" and the decaying averages, and shows the aligned
+			// item's title in the student's mastery view.
+			SubmittedAt: sub.SubmittedAt,
+			Title:       assignment.Name,
 		}
 		_ = outcomes.CreateResult(ctx, result)
 	}

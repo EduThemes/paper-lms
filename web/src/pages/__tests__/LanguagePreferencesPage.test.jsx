@@ -34,13 +34,26 @@ describe('LanguagePreferencesPage', () => {
     i18n.changeLanguage('en');
   });
 
-  test('renders both locale options as a radio group', () => {
+  test('renders the school default and both locales as a radio group', () => {
     render(<LanguagePreferencesPage />);
     const radios = screen.getAllByRole('radio');
-    expect(radios).toHaveLength(2);
-    // English is the default in tests — first radio is checked.
+    expect(radios).toHaveLength(3);
+    // No saved or device choice: the school default is selected (G158).
     expect(radios[0]).toHaveAttribute('aria-checked', 'true');
     expect(radios[1]).toHaveAttribute('aria-checked', 'false');
+    expect(radios[2]).toHaveAttribute('aria-checked', 'false');
+  });
+
+  test('choosing the school default forgets the device choice', async () => {
+    storage.setItem('paperlms_locale', 'es');
+    i18n.changeLanguage('es');
+    render(<LanguagePreferencesPage />);
+    expect(screen.getByRole('radio', { name: /Español/i })).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(screen.getByRole('radio', { name: /School default/i }));
+    await waitFor(() => expect(i18n.language).toBe('en'));
+    expect(storage.getItem('paperlms_locale')).toBeNull();
+    expect(screen.getByRole('radio', { name: /School default/i })).toHaveAttribute('aria-checked', 'true');
   });
 
   test('clicking a locale switches i18next and shows the saved indicator', async () => {

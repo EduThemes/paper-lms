@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Lock, ListChecks, Settings2, X } from 'lucide-react';
 import { api } from '../services/api';
+import { dateTimeLocalToISO, isoToDateTimeLocal } from '../utils/datetimeLocal';
 import {
   Dialog,
   DialogContent,
@@ -36,8 +37,24 @@ const COMPLETION_TYPES = {
     { value: 'must_view', label: 'Must view' },
     { value: 'must_mark_done', label: 'Must mark as done' },
   ],
+  File: [
+    { value: '', label: 'No requirement' },
+    { value: 'must_view', label: 'Must view' },
+    { value: 'must_mark_done', label: 'Must mark as done' },
+  ],
+  ExternalTool: [
+    { value: '', label: 'No requirement' },
+    { value: 'must_view', label: 'Must view' },
+    { value: 'must_mark_done', label: 'Must mark as done' },
+  ],
   SubHeader: [],
 };
+
+// toLocalInput formats an ISO timestamp for <input type="datetime-local">,
+// in the profile time zone (G157).
+export function toLocalInput(iso) {
+  return isoToDateTimeLocal(iso);
+}
 
 const TABS = [
   { id: 'settings', label: 'Settings', icon: Settings2 },
@@ -48,6 +65,8 @@ const TABS = [
 const ModuleSettingsModal = ({ courseId, module, modules, prerequisites, onClose, onSave }) => {
   const [activeTab, setActiveTab] = useState('settings');
   const [requireSequential, setRequireSequential] = useState(module.require_sequential_progress || false);
+  const [unlockAt, setUnlockAt] = useState(toLocalInput(module.unlock_at));
+  const [requirementCount, setRequirementCount] = useState(module.requirement_count === 1 ? 1 : 0);
   const [prereqIds, setPrereqIds] = useState(prerequisites || []);
   const [itemRequirements, setItemRequirements] = useState({});
   const [saving, setSaving] = useState(false);
@@ -95,9 +114,13 @@ const ModuleSettingsModal = ({ courseId, module, modules, prerequisites, onClose
     setSaving(true);
     setError(null);
     try {
-      // Save module settings (sequential progress)
+      // Save module settings (sequential progress, unlock date, complete
+      // all / one requirement).
+      const unlockISO = unlockAt ? dateTimeLocalToISO(unlockAt) : null;
       await api.updateModule(courseId, module.id, {
         require_sequential_progress: requireSequential,
+        requirement_count: requirementCount,
+        ...(unlockISO ? { unlock_at: unlockISO } : { clear_unlock_at: true }),
       });
 
       // Save prerequisites
@@ -125,6 +148,8 @@ const ModuleSettingsModal = ({ courseId, module, modules, prerequisites, onClose
         prereqIds,
         requireSequential,
         itemRequirements,
+        unlockAt: unlockISO,
+        requirementCount,
       });
     } catch (err) {
       setError(err.message);
@@ -225,6 +250,26 @@ const ModuleSettingsModal = ({ courseId, module, modules, prerequisites, onClose
                   </div>
                 </div>
               </label>
+              <div className="p-4 border rounded-lg space-y-2">
+                <label htmlFor="module-unlock-at" className="font-medium text-text-primary block">Lock until</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="module-unlock-at"
+                    type="datetime-local"
+                    value={unlockAt}
+                    onChange={e => setUnlockAt(e.target.value)}
+                    className="border border-border-strong rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                  {unlockAt && (
+                    <button type="button" onClick={() => setUnlockAt('')} className="text-sm text-brand-600 hover:underline">
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="text-sm text-text-tertiary">
+                  Students cannot open this module until this date.
+                </div>
+              </div>
             </div>
           )}
 
@@ -295,6 +340,27 @@ const ModuleSettingsModal = ({ courseId, module, modules, prerequisites, onClose
               <p className="text-sm text-text-tertiary">
                 Set completion requirements for individual items. Students must fulfill these to complete the module.
               </p>
+              <fieldset className="space-y-1">
+                <legend className="sr-only">How many requirements students must complete</legend>
+                <label className="flex items-center gap-2 text-sm text-text-secondary">
+                  <input
+                    type="radio"
+                    name="module-requirement-count"
+                    checked={requirementCount === 0}
+                    onChange={() => setRequirementCount(0)}
+                  />
+                  Students must complete all of these requirements
+                </label>
+                <label className="flex items-center gap-2 text-sm text-text-secondary">
+                  <input
+                    type="radio"
+                    name="module-requirement-count"
+                    checked={requirementCount === 1}
+                    onChange={() => setRequirementCount(1)}
+                  />
+                  Students must complete one of these requirements
+                </label>
+              </fieldset>
 
               {requireableItems.length === 0 ? (
                 <div className="text-sm text-text-secondary italic py-4 text-center">

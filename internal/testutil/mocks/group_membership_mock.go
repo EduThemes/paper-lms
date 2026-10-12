@@ -52,6 +52,22 @@ func (m *MockGroupMembershipRepository) FindByGroupAndUser(ctx context.Context, 
 	return args.Get(0).(*models.GroupMembership), args.Error(1)
 }
 
+func (m *MockGroupMembershipRepository) ListUserIDsInCategory(ctx context.Context, groupCategoryID uint) ([]uint, error) {
+	args := m.Called(ctx, groupCategoryID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]uint), args.Error(1)
+}
+
+func (m *MockGroupMembershipRepository) CountByGroupIDs(ctx context.Context, groupIDs []uint) (map[uint]int64, error) {
+	args := m.Called(ctx, groupIDs)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[uint]int64), args.Error(1)
+}
+
 func (m *MockGroupMembershipRepository) FindUserGroupInCategory(ctx context.Context, userID, groupCategoryID uint) (*models.Group, error) {
 	args := m.Called(ctx, userID, groupCategoryID)
 	if args.Get(0) == nil {

@@ -26,6 +26,11 @@ import ShortcutsDialog from '../components/quiz/ShortcutsDialog';
 import ItemPlayer from '../components/quiz/itemTypes/ItemPlayer';
 import { normalizeQuestionType } from '../components/quiz/itemTypes/types';
 import { extractBlankIds } from '../components/quiz/itemTypes/MultipleDropdownEditor';
+import useQuizEventLog from '../components/quiz/useQuizEventLog';
+import { quizEngineApi } from '../services/api_quiz_engine';
+import { effectiveAllowedAttempts, studentDateLines } from '../components/quiz/quizLifecycle';
+import { quizItemsApi } from '../services/api_quiz_items';
+import { navigationPolicy, firstUnlockedIndex, isAccessCodeError, replayableAnswers } from '../components/quiz/takeNavigation';
 
 // Question types that are essentially answer-set-driven and use the legacy
 // inline render path. Newer types delegate to ItemPlayer.
@@ -60,6 +65,9 @@ const QuizTakePage = () => {
   const [started, setStarted] = useState(false);
   const [previousAttempts, setPreviousAttempts] = useState(0);
   const [lastSubmission, setLastSubmission] = useState(null);
+  // G046 / G047: the student's own limits and dates (extra attempts,
+  // extra time, section / student overrides).
+  const [attemptStatus, setAttemptStatus] = useState(null);
 
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle');
   const [lastSavedAt, setLastSavedAt] = useState(null);
@@ -68,17 +76,31 @@ const QuizTakePage = () => {
   const [allOnePage, setAllOnePage] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [restorePrompt, setRestorePrompt] = useState(null);
+  const [accessCode, setAccessCode] = useState('');
+  const [accessCodeError, setAccessCodeError] = useState(false);
+  // One-question-at-a-time / can't-go-back (G049).
+  const policy = navigationPolicy(quiz);
 
   const lsDebounceRef = useRef(null);
   const savedTimeoutRef = useRef(null);
   const submissionRef = useRef(null);
   useEffect(() => { submissionRef.current = submission; }, [submission]);
+  // G057: report focus / blur / question views to the attempt log.
+  useQuizEventLog({
+    courseId, quizId, submissionId: submission?.id,
+    active: started && !completed, questionId: questions[currentIdx]?.id,
+  });
 
   useEffect(() => {
     const init = async () => {
       try {
         const quizData = await api.getQuiz(courseId, quizId);
         setQuiz(quizData);
+        let status = null;
+        try {
+          status = await quizEngineApi.getQuizAttemptStatus(courseId, quizId);
+          setAttemptStatus(status);
+        } catch { /* fall back to the quiz settings */ }
         try {
           // Students get their own attempts back from this endpoint.
           const subResult = await api.getQuizSubmissions(courseId, quizId);
@@ -99,10 +121,13 @@ const QuizTakePage = () => {
               }
               const qs = await api.getQuizSubmissionQuestions(courseId, quizId, latest.id);
               setQuestions(qs);
+              setCurrentIdx(firstUnlockedIndex(qs));
               setStarted(true);
               checkLocalBackup(latest);
             } else {
-              const allowed = quizData.allowed_attempts || -1;
+              // G047: the student's limit includes extra attempts granted
+              // through Moderate quiz.
+              const allowed = effectiveAllowedAttempts(quizData, status);
               if (allowed !== -1 && finished >= allowed) {
                 setCompleted(true);
                 setSubmission(latest);
@@ -142,8 +167,10 @@ const QuizTakePage = () => {
   const handleBeginQuiz = async () => {
     setStarting(true);
     setError(null);
+    setAccessCodeError(false);
     try {
-      const sub = await api.startQuizSubmission(courseId, quizId);
+      // The access code (when the quiz has one) is checked server-side.
+      const sub = await quizItemsApi.startSubmission(courseId, quizId, accessCode);
       setSubmission(sub);
       if (sub.workflow_state === 'complete') {
         setCompleted(true);
@@ -158,9 +185,11 @@ const QuizTakePage = () => {
       // answer key redacted server-side.
       const qs = await api.getQuizSubmissionQuestions(courseId, quizId, sub.id);
       setQuestions(qs);
+      setCurrentIdx(firstUnlockedIndex(qs));
       setStarted(true);
       checkLocalBackup(sub);
     } catch (err) {
+      setAccessCodeError(isAccessCodeError(err));
       setError(err.message);
     } finally {
       setStarting(false);
@@ -249,12 +278,24 @@ const QuizTakePage = () => {
     return () => clearInterval(interval);
   }, [timeLeft, completed, handleSubmit]);
 
-  const goNext = useCallback(() => {
+  const goNext = useCallback(async () => {
+    // Can't go back: persist the final answer, then lock the question
+    // server-side before moving on (a lock that raced ahead of the save
+    // would make the server refuse the answer).
+    if (policy.locksOnNext && submissionRef.current) {
+      const leaving = questions[currentIdx];
+      if (leaving && !leaving.locked) {
+        if (answers[leaving.id] !== undefined) await saveAnswerToServer(leaving.id, answers[leaving.id]);
+        quizItemsApi.markQuestionRead(courseId, quizId, submissionRef.current.id, leaving.id).catch(() => {});
+        setQuestions(prev => prev.map(q => (q.id === leaving.id ? { ...q, locked: true } : q)));
+      }
+    }
     setCurrentIdx(i => Math.min(questions.length - 1, i + 1));
-  }, [questions.length]);
+  }, [questions, currentIdx, answers, saveAnswerToServer, policy.locksOnNext, courseId, quizId]);
   const goPrev = useCallback(() => {
+    if (!policy.canGoBack) return;
     setCurrentIdx(i => Math.max(0, i - 1));
-  }, []);
+  }, [policy.canGoBack]);
 
   // Keyboard shortcuts: only when quiz is active and not typing.
   useEffect(() => {
@@ -270,7 +311,7 @@ const QuizTakePage = () => {
       if (e.key === 'j') { e.preventDefault(); goNext(); }
       else if (e.key === 'k') { e.preventDefault(); goPrev(); }
       else if (e.key === '?') { e.preventDefault(); setShortcutsOpen(true); }
-      else if (/^[1-9]$/.test(e.key)) {
+      else if (policy.canGoBack && /^[1-9]$/.test(e.key)) {
         const target = parseInt(e.key, 10) - 1;
         if (target < questions.length) {
           e.preventDefault();
@@ -280,7 +321,7 @@ const QuizTakePage = () => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [started, completed, goNext, goPrev, questions.length]);
+  }, [started, completed, goNext, goPrev, questions.length, policy.canGoBack]);
 
   useEffect(() => () => {
     if (lsDebounceRef.current) clearTimeout(lsDebounceRef.current);
@@ -299,7 +340,8 @@ const QuizTakePage = () => {
     setAnswers(restored);
     setRestorePrompt(null);
     announce(`Restored ${Object.keys(restored).length} answers`);
-    for (const [qid, val] of Object.entries(restored)) {
+    // Can't go back: locked questions are skipped (the server refuses them).
+    for (const [qid, val] of replayableAnswers(restored, questions)) {
       // Replay answers to server (sequential to avoid hammering the API)
       // eslint-disable-next-line no-await-in-loop
       await saveAnswerToServer(qid, val);
@@ -364,8 +406,12 @@ const QuizTakePage = () => {
           />
         )}
 
+        {q.locked && (
+          <p className="text-xs text-text-tertiary italic mb-2">This question is locked — you have moved past it.</p>
+        )}
         <ItemPlayer
           question={q}
+          readOnly={Boolean(q.locked)}
           value={answers[q.id]}
           onChange={(v) => handleAnswer(q.id, v)}
           onFileUpload={(file) => uploadAnswerFile(q.id, file)}
@@ -439,7 +485,7 @@ const QuizTakePage = () => {
   }
 
   if (!started) {
-    const allowedAttempts = quiz?.allowed_attempts || -1;
+    const allowedAttempts = effectiveAllowedAttempts(quiz, attemptStatus);
     const attemptsRemaining = allowedAttempts === -1 ? 'Unlimited' : Math.max(0, allowedAttempts - previousAttempts);
     const canStart = allowedAttempts === -1 || previousAttempts < allowedAttempts;
     return wrap(
@@ -460,6 +506,11 @@ const QuizTakePage = () => {
             {quiz?.description && (
               <RichContentViewer content={quiz.description} className="mb-6" />
             )}
+            {studentDateLines(attemptStatus).length > 0 && (
+              <ul className="mb-4 text-sm text-text-secondary space-y-0.5" data-testid="quiz-student-dates">
+                {studentDateLines(attemptStatus).map((line) => <li key={line}>{line}</li>)}
+              </ul>
+            )}
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div className="bg-surface-1 rounded-lg p-4">
                 <div className="text-xs text-text-tertiary uppercase tracking-wide font-medium">Points</div>
@@ -469,6 +520,7 @@ const QuizTakePage = () => {
                 <div className="text-xs text-text-tertiary uppercase tracking-wide font-medium">Time Limit</div>
                 <div className="text-lg font-semibold text-text-primary mt-1">
                   {quiz?.time_limit ? `${quiz.time_limit} minutes` : 'None'}
+                  {quiz?.time_limit && attemptStatus?.extra_time > 0 ? ` + ${attemptStatus.extra_time} extra` : ''}
                 </div>
               </div>
               <div className="bg-surface-1 rounded-lg p-4">
@@ -511,6 +563,21 @@ const QuizTakePage = () => {
                 {error}
               </div>
             )}
+            {canStart && quiz?.requires_access_code && (
+              <div className="mb-4 max-w-xs mx-auto">
+                <label htmlFor="quiz-access-code" className="block text-sm font-medium text-text-secondary mb-1">Access code</label>
+                <input
+                  id="quiz-access-code"
+                  type="password"
+                  autoComplete="off"
+                  value={accessCode}
+                  onChange={(e) => { setAccessCode(e.target.value); setAccessCodeError(false); }}
+                  aria-invalid={accessCodeError}
+                  className="w-full border border-border-strong rounded px-3 py-2 text-sm bg-surface-0 text-text-primary"
+                  placeholder="Enter the code from your instructor"
+                />
+              </div>
+            )}
             {canStart ? (
               <div className="text-center">
                 {quiz?.time_limit && (
@@ -522,7 +589,7 @@ const QuizTakePage = () => {
                 <div className="flex items-center justify-center gap-3 flex-wrap">
                   <button
                     onClick={handleBeginQuiz}
-                    disabled={starting}
+                    disabled={starting || (quiz?.requires_access_code && !accessCode.trim())}
                     className="inline-flex items-center gap-2 bg-brand-600 text-white px-8 py-3 rounded-lg hover:bg-brand-700 disabled:opacity-50 text-lg font-semibold transition-colors"
                   >
                     {starting ? <>Starting...</> : previousAttempts > 0 ? <><RotateCcw className="w-5 h-5" /> Retake Quiz</> : <><FileText className="w-5 h-5" /> Begin Quiz</>}
@@ -550,6 +617,7 @@ const QuizTakePage = () => {
   }
 
   const currentQuestion = questions[currentIdx];
+  const showAll = allOnePage && !policy.forceSingle;
 
   return wrap(
     <>
@@ -569,7 +637,7 @@ const QuizTakePage = () => {
               onRetry={handleRetrySave}
             />
             <QuizTimer timeLeft={timeLeft} />
-            <button
+            {!policy.forceSingle && <button
               type="button"
               onClick={() => setAllOnePage(v => !v)}
               className="hidden sm:inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-border-strong hover:bg-surface-1"
@@ -578,7 +646,7 @@ const QuizTakePage = () => {
             >
               {allOnePage ? <List className="w-3.5 h-3.5" /> : <LayoutGrid className="w-3.5 h-3.5" />}
               {allOnePage ? 'Single' : 'All'}
-            </button>
+            </button>}
             <button
               type="button"
               onClick={toggleFocusMode}
@@ -604,7 +672,7 @@ const QuizTakePage = () => {
 
       <div className="max-w-5xl mx-auto md:flex md:items-start md:gap-6">
         <div className="flex-1 min-w-0">
-          {allOnePage ? (
+          {showAll ? (
             <div className="space-y-4">
               {questions.map((q, idx) => renderQuestion(q, idx))}
             </div>
@@ -612,11 +680,12 @@ const QuizTakePage = () => {
             currentQuestion && renderQuestion(currentQuestion, currentIdx)
           )}
 
-          {!allOnePage && (
+          {!showAll && (
             <div className="flex items-center justify-between mt-4">
               <button
                 onClick={goPrev}
-                disabled={currentIdx === 0}
+                disabled={currentIdx === 0 || !policy.canGoBack}
+                style={policy.canGoBack ? undefined : { visibility: 'hidden' }}
                 className="flex items-center gap-1 px-4 py-2 bg-surface-2 rounded hover:bg-border-default disabled:opacity-50 text-sm font-medium"
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -642,7 +711,7 @@ const QuizTakePage = () => {
             </div>
           )}
 
-          {allOnePage && (
+          {showAll && (
             <div className="flex justify-end mt-6">
               <button
                 onClick={handleSubmit}
@@ -655,7 +724,7 @@ const QuizTakePage = () => {
           )}
         </div>
 
-        {!allOnePage && (
+        {!showAll && policy.canGoBack && (
           <QuestionPalette
             questions={questions}
             currentIdx={currentIdx}

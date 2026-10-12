@@ -1,12 +1,12 @@
 package v1
 
 import (
-	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/handlers"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/auth"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/gofiber/fiber/v2"
 )
 
 // Router holds every dependency Register needs to wire HTTP routes. All
@@ -15,19 +15,22 @@ import (
 // adding a field here and assigning it at the call site.
 type Router struct {
 	// Core domain
-	UserHandler            *handlers.UserHandler
-	AccountHandler         *handlers.AccountHandler
-	CourseHandler          *handlers.CourseHandler
-	SectionHandler         *handlers.SectionHandler
-	EnrollmentHandler      *handlers.EnrollmentHandler
-	ModuleHandler          *handlers.ModuleHandler
-	ModuleItemHandler      *handlers.ModuleItemHandler
-	PageHandler            *handlers.PageHandler
-	AssignmentHandler      *handlers.AssignmentHandler
-	AssignmentGroupHandler *handlers.AssignmentGroupHandler
-	SubmissionHandler      *handlers.SubmissionHandler
-	GradebookHandler       *handlers.GradebookHandler
-	GradingStandardHandler *handlers.GradingStandardHandler
+	UserHandler       *handlers.UserHandler
+	AccountHandler    *handlers.AccountHandler
+	CourseHandler     *handlers.CourseHandler
+	SectionHandler    *handlers.SectionHandler
+	EnrollmentHandler *handlers.EnrollmentHandler
+	ModuleHandler     *handlers.ModuleHandler
+	ModuleItemHandler *handlers.ModuleItemHandler
+	// ModuleProgressionHandler: module progress + content gate (routes_modules.go).
+	ModuleProgressionHandler *handlers.ModuleProgressionHandler
+	PageHandler              *handlers.PageHandler
+	AssignmentHandler        *handlers.AssignmentHandler
+	AssignmentGroupHandler   *handlers.AssignmentGroupHandler
+	SubmissionHandler        *handlers.SubmissionHandler
+	GradebookHandler         *handlers.GradebookHandler
+	GradingStandardHandler   *handlers.GradingStandardHandler
+	GradingPolicyHandler     *handlers.GradingPolicyHandler
 
 	// Developer keys, tokens, OAuth, external tools, LTI
 	DeveloperKeyHandler *handlers.DeveloperKeyHandler
@@ -55,6 +58,7 @@ type Router struct {
 
 	// Communication
 	CalendarEventHandler *handlers.CalendarEventHandler
+	CalendarHandler      *handlers.CalendarHandler
 	ConversationHandler  *handlers.ConversationHandler
 	NotificationHandler  *handlers.NotificationHandler
 
@@ -111,6 +115,7 @@ type Router struct {
 
 	// Peer reviews, question banks, quiz groups + statistics, setup
 	PeerReviewHandler        *handlers.PeerReviewHandler
+	GradingUIHandler         *handlers.GradingUIHandler // routes_grading_ui.go
 	QuestionBankHandler      *handlers.QuestionBankHandler
 	QuizQuestionGroupHandler *handlers.QuizQuestionGroupHandler
 	QuizStatisticsHandler    *handlers.QuizStatisticsHandler
@@ -128,9 +133,13 @@ type Router struct {
 
 	// Discussion checkpoints, smart search, commons, AI assist
 	DiscussionCheckpointHandler *handlers.DiscussionCheckpointHandler
+	DiscussionParityHandler     *handlers.DiscussionParityHandler
 	SmartSearchHandler          *handlers.SmartSearchHandler
 	CommonsHandler              *handlers.CommonsHandler
 	AIAssistHandler             *handlers.AIAssistHandler
+
+	// Rich-content media: uploads, recordings, captions (rce-media lane).
+	MediaObjectHandler *handlers.MediaObjectHandler
 
 	// Quiz item banks, stimuli, per-question outcome alignments
 	QuizItemBankHandler         *handlers.QuizItemBankHandler
@@ -140,6 +149,13 @@ type Router struct {
 	// QTI / IMSCC import + export
 	QTIImportHandler *handlers.QTIImportHandler
 
+	// Quiz lifecycle: manual grading, event log, moderation, regrade
+	QuizLifecycleHandler *handlers.QuizLifecycleHandler
+	// Content migration lane: course content exports and the blueprint
+	// lock guard (see routes_content_migration.go).
+	ContentExportHandler *handlers.ContentExportHandler
+	BlueprintLockGuard   fiber.Handler
+
 	// Phase 6: gamification
 	GamificationHandler *handlers.GamificationHandler
 
@@ -148,6 +164,21 @@ type Router struct {
 	// which is the only authorized place to attach /superadmin/*
 	// routes; that helper carries the RequireSuperAdmin gate.
 	SuperAdminSettingsHandler *handlers.SuperAdminSettingsHandler
+
+	// Pages, files and course shell (routes_pages_files.go).
+	PagesFiles *PagesFilesRoutes
+	// AdminAccountsHandler — account administration lane (routes_admin_accounts.go).
+	AdminAccountsHandler *handlers.AdminAccountsHandler
+	// Canvas REST API compatibility (api lane: G136/G137/G138/G143).
+	// CanvasIDs is middleware.CanvasIDs(...); nil disables the rewrite.
+	// Account reports (G117/G138) are served by AdminAccountsHandler.
+	CanvasAPIHandler    *handlers.CanvasAPIHandler
+	SessionTokenHandler *handlers.SessionTokenHandler
+	CanvasIDs           fiber.Handler
+	// Learner dashboard lane (routes_learner.go).
+	LearnerHandler *handlers.LearnerHandler
+	// Rich content editor: per-user autosave draft key (routes_rce_editor.go)
+	RCEDraftKeyHandler *handlers.RCEDraftKeyHandler
 
 	// Middleware
 	AuthMiddleware *middleware.AuthMiddleware
@@ -188,6 +219,9 @@ func (r *Router) Register(app *fiber.App) {
 
 	authLimit := middleware.AuthRateLimit()
 	r.registerPublicRoutes(api, authLimit)
+	r.registerLTIToolRoutes(api, enrolled, instructor, authLimit)
+	r.registerLearnerOutcomesPublicRoutes(api)
+	r.registerCalendarPublicRoutes(api)
 
 	// Protected routes (authentication required)
 	protected := api.Group("", r.AuthMiddleware.Protected(), middleware.CSRFProtection())
@@ -198,6 +232,13 @@ func (r *Router) Register(app *fiber.App) {
 	// (~333 of them) without per-route plumbing. MUST sit before any
 	// route declarations on this group.
 	protected.Use(middleware.AuditWrites(r.AuditService, "http.write"))
+	r.useCanvasIDs(protected)
+	protected.Use(r.AnalyticsHandler.ParticipationRecorder()) // course analytics participations (G154)
+	if r.BlueprintLockGuard != nil {
+		protected.Use(r.BlueprintLockGuard) // blueprint locks in associated courses (G069)
+	}
+	r.mountModuleContentGate(protected)
+	r.registerPagesFilesRoutes(protected, enrolled, instructor) // before core routes: owns /files/quota and the nav-tab gate
 
 	// SECURITY (F-055): LTI 1.3 OIDC initiation and Launch endpoints
 	// must verify the caller IS the user being launched. The browser
@@ -324,7 +365,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Get("/courses/:course_id/pages", enrolled, r.PageHandler.ListPages)
 	protected.Post("/courses/:course_id/pages", instructor, r.PageHandler.CreatePage)
 	protected.Get("/courses/:course_id/pages/:url_or_id", enrolled, r.PageHandler.GetPage)
-	protected.Put("/courses/:course_id/pages/:url_or_id", instructor, r.PageHandler.UpdatePage)
+	protected.Put("/courses/:course_id/pages/:url_or_id", enrolled, r.PageHandler.UpdatePage) // G074: handler enforces editing_roles
 	protected.Delete("/courses/:course_id/pages/:url_or_id", instructor, r.PageHandler.DeletePage)
 	protected.Get("/courses/:course_id/front_page", enrolled, r.PageHandler.GetFrontPage)
 
@@ -368,17 +409,8 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Put("/courses/:course_id/grading_standards/:id", instructor, r.GradingStandardHandler.UpdateGradingStandard)
 	protected.Delete("/courses/:course_id/grading_standards/:id", instructor, r.GradingStandardHandler.DeleteGradingStandard)
 
-	// LTI AGS (Assignment and Grade Services) - protected via OAuth2 token + enrollment
-	protected.Get("/lti/courses/:course_id/line_items", enrolled, r.LTIHandler.ListLineItems)
-	protected.Post("/lti/courses/:course_id/line_items", instructor, r.LTIHandler.CreateLineItem)
-	protected.Get("/lti/courses/:course_id/line_items/:id", enrolled, r.LTIHandler.GetLineItem)
-	protected.Put("/lti/courses/:course_id/line_items/:id", instructor, r.LTIHandler.UpdateLineItem)
-	protected.Delete("/lti/courses/:course_id/line_items/:id", instructor, r.LTIHandler.DeleteLineItem)
-	protected.Post("/lti/courses/:course_id/line_items/:id/scores", instructor, r.LTIHandler.PostScore)
-	protected.Get("/lti/courses/:course_id/line_items/:id/results", enrolled, r.LTIHandler.GetResults)
-
-	// LTI NRPS (Names and Role Provisioning Services)
-	protected.Get("/lti/courses/:course_id/memberships", enrolled, r.LTIHandler.GetMemberships)
+	// LTI AGS / NRPS live in routes_lti.go (registerLTIToolRoutes): tools
+	// call them with a service token, so they mount before this group.
 
 	// Discussion Topics (view: enrolled; manage: instructor; post: enrolled)
 	protected.Get("/courses/:course_id/discussion_topics", enrolled, r.DiscussionHandler.ListTopics)
@@ -509,6 +541,8 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Delete("/calendar_events/:id", r.CalendarEventHandler.DeleteEvent)
 	protected.Get("/courses/:course_id/calendar_events", enrolled, r.CalendarEventHandler.ListEvents)
 
+	r.registerNotifyInboxRoutes(protected) // notify-inbox lane; must precede /conversations/:id
+
 	// Conversations (any authenticated user)
 	protected.Get("/conversations", r.ConversationHandler.ListConversations)
 	protected.Post("/conversations", r.ConversationHandler.CreateConversation)
@@ -527,6 +561,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Put("/users/self/notification_preferences", r.NotificationHandler.UpdatePreferences)
 
 	// Content Migrations (instructor only)
+	r.registerContentMigrationRoutes(protected, instructor)
 	protected.Get("/courses/:course_id/content_migrations", instructor, r.ContentMigrationHandler.ListMigrations)
 	protected.Post("/courses/:course_id/content_migrations", middleware.ExpensiveOpRateLimit(), instructor, r.ContentMigrationHandler.CreateMigration)
 	protected.Get("/courses/:course_id/content_migrations/:id", instructor, r.ContentMigrationHandler.GetMigration)
@@ -850,7 +885,23 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Put("/courses/:course_id/modules/:id/prerequisites", instructor, r.ModuleHandler.SetPrerequisites)
 
 	r.registerP3FeatureRoutes(protected, admin, enrolled, instructor)
+	r.registerDiscussionParityRoutes(protected, enrolled, instructor)
+	r.registerGradingUIRoutes(protected, admin, enrolled, instructor)
 	r.registerQuizExtensionRoutes(protected, enrolled, instructor)
+	r.registerQuizEngineRoutes(protected, enrolled, instructor)
+	r.registerQuizItemsRoutes(protected, enrolled, instructor)
+	r.registerGradingPolicyRoutes(protected, admin, enrolled, instructor)
 	r.registerGamificationRoutes(protected, admin, instructor, selfOrAdmin)
 	r.registerSuperAdminRoutes(protected)
+	r.registerRCEMediaRoutes(protected)
+	r.registerModuleRoutes(protected, enrolled, instructor)
+	r.registerGroupsConferencesRoutes(protected, enrolled)
+	r.registerAdminEnrollmentRoutes(protected, instructor)
+	r.registerAdminAccountsRoutes(protected, admin, enrolled, instructor)
+	r.registerLTIRoutes(protected, admin, enrolled, instructor)
+	r.registerAPICompatRoutes(app, protected, authLimit, admin, enrolled, selfOrAdmin)
+	r.registerLearnerRoutes(protected, enrolled)
+	r.registerLearnerOutcomesRoutes(protected, enrolled, instructor)
+	r.registerRCEEditorRoutes(protected)
+	r.registerCalendarRoutes(protected)
 }

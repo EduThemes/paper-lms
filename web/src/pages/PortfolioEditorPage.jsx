@@ -48,8 +48,11 @@ import {
   MoveDown,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { portfolioApi } from '../services/api_learner_outcomes';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
+import CourseWorkPicker from '../components/portfolio/CourseWorkPicker';
+import PortfolioSharingPanel from '../components/portfolio/PortfolioSharingPanel';
 import {
   normalizePortfolio,
   normalizeSection,
@@ -172,7 +175,7 @@ const PortfolioEditorPage = () => {
     type: 'file', // file | link | course_submission
     url: '',
     file: null,
-    course_submission_id: '',
+    course_submission_ids: [],
     featured: false,
     reflection: '',
     section_id: null,
@@ -349,21 +352,22 @@ const PortfolioEditorPage = () => {
         if (artifactData.section_id) formData.append('section_id', String(artifactData.section_id));
         created = [await api.uploadPortfolioArtifact(portfolioId, formData)];
       } else if (artifactData.type === 'course_submission') {
-        const submissionId = parseInt(artifactData.course_submission_id, 10);
-        if (!submissionId) {
-          setError('Enter the submission ID to import.');
+        // G155: picked from the owner's turned-in work (files come along).
+        const ids = artifactData.course_submission_ids || [];
+        if (ids.length === 0) {
+          setError('Choose the course work to add.');
           return;
         }
-        const result = await api.importPortfolioFromCourse(portfolioId, 0, [submissionId]);
-        created = result?.artifacts || [];
-        if (created.length === 0) {
-          setError('That submission could not be imported. Only your own submissions can be added.');
+        const result = await portfolioApi.importSubmissions(portfolioId, ids, artifactData.section_id);
+        created = (result?.artifacts || []).filter((a) => a.source_type === 'course_submission');
+        if ((result?.artifacts || []).length === 0) {
+          setError('That work could not be added. Only your own submissions can be added, once each.');
           return;
         }
-        for (const artifact of created) {
-          const patch = { is_featured: !!artifactData.featured };
-          if (artifactData.section_id) patch.section_id = artifactData.section_id;
-          await api.updatePortfolioArtifact(portfolioId, artifact.id, patch);
+        if (artifactData.featured) {
+          for (const artifact of created) {
+            await api.updatePortfolioArtifact(portfolioId, artifact.id, { is_featured: true });
+          }
         }
       } else {
         created = [await api.addPortfolioArtifact(portfolioId, toArtifactPayload(artifactData))];
@@ -381,7 +385,7 @@ const PortfolioEditorPage = () => {
       setArtifactModal(false);
       setArtifactData({
         title: '', description: '', tags: '', type: 'file', url: '', file: null,
-        course_submission_id: '', featured: false, reflection: '', section_id: null,
+        course_submission_ids: [], featured: false, reflection: '', section_id: null,
       });
       await fetchPortfolio();
     } catch (err) {
@@ -626,6 +630,7 @@ const PortfolioEditorPage = () => {
         {/* ──────── LEFT: Editor Panel ──────── */}
         <div className={`flex-1 overflow-y-auto ${showPreview ? 'lg:w-1/2' : 'w-full'}`}>
           <div className="max-w-2xl mx-auto p-6 space-y-6">
+            <PortfolioSharingPanel portfolio={portfolio} onPortfolioChange={(patch) => setPortfolio((prev) => ({ ...prev, ...patch }))} />
 
             {/* ── Cover Image Area ── */}
             <section aria-labelledby="cover-section-label" className="relative rounded-2xl overflow-hidden group">
@@ -1309,17 +1314,11 @@ const PortfolioEditorPage = () => {
               )}
 
               {artifactData.type === 'course_submission' && (
-                <div>
-                  <label htmlFor="artifact-submission" className="block text-sm font-semibold text-text-secondary mb-1">Submission ID</label>
-                  <input
-                    id="artifact-submission"
-                    type="text"
-                    value={artifactData.course_submission_id}
-                    onChange={(e) => setArtifactData((p) => ({ ...p, course_submission_id: e.target.value }))}
-                    placeholder="Enter course submission ID"
-                    className="w-full px-4 py-2.5 border border-border-default rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                  />
-                </div>
+                <CourseWorkPicker
+                  portfolioId={portfolioId}
+                  selected={artifactData.course_submission_ids}
+                  onChange={(ids) => setArtifactData((p) => ({ ...p, course_submission_ids: ids }))}
+                />
               )}
 
               {/* Tags */}

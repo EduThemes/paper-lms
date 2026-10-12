@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -118,4 +119,122 @@ func (r *pageViewRepo) SumInteractionByUserAndContext(ctx context.Context, userI
 		Where("user_id = ? AND context_type = ? AND context_id = ?", userID, contextType, contextID).
 		Scan(&total).Error
 	return total, err
+}
+
+// courseStudentsFilter limits page views to the course's students: course
+// analytics reports student activity, not the instructors' own browsing.
+const courseStudentsFilter = `page_views.context_type = 'Course' AND page_views.context_id = ?
+	AND page_views.user_id IN (
+		SELECT e.user_id FROM enrollments e
+		WHERE e.course_id = ? AND e.type = 'StudentEnrollment' AND e.workflow_state <> 'deleted'
+	)`
+
+func (r *pageViewRepo) courseStudentViews(ctx context.Context, courseID, userID uint) *gorm.DB {
+	q := r.db.WithContext(ctx).Model(&models.PageView{}).Where(courseStudentsFilter, courseID, courseID)
+	if userID != 0 {
+		q = q.Where("page_views.user_id = ?", userID)
+	}
+	return q
+}
+
+func (r *pageViewRepo) ActivityByDay(ctx context.Context, courseID, userID uint, since *time.Time) ([]repository.PageViewDayCount, error) {
+	q := r.courseStudentViews(ctx, courseID, userID)
+	if since != nil {
+		q = q.Where("page_views.created_at >= ?", *since)
+	}
+	var scanned []struct {
+		Day            string
+		Views          int64
+		Participations int64
+	}
+	err := q.Select(`to_char(page_views.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
+			COUNT(*) FILTER (WHERE NOT COALESCE(page_views.participated, false)) AS views,
+			COUNT(*) FILTER (WHERE COALESCE(page_views.participated, false)) AS participations`).
+		Group("day").Order("day ASC").Scan(&scanned).Error
+	rows := make([]repository.PageViewDayCount, len(scanned))
+	for i, s := range scanned {
+		rows[i] = repository.PageViewDayCount{Date: s.Day, Views: s.Views, Participations: s.Participations}
+	}
+	return rows, err
+}
+
+func (r *pageViewRepo) TotalsByUser(ctx context.Context, courseID uint) (map[uint]repository.PageViewUserTotals, error) {
+	var rows []struct {
+		UserID             uint
+		Views              int64
+		Participations     int64
+		InteractionSeconds float64
+		LastViewedAt       *time.Time
+	}
+	err := r.courseStudentViews(ctx, courseID, 0).
+		Select(`page_views.user_id AS user_id,
+			COUNT(*) FILTER (WHERE NOT COALESCE(page_views.participated, false)) AS views,
+			COUNT(*) FILTER (WHERE COALESCE(page_views.participated, false)) AS participations,
+			COALESCE(SUM(page_views.interaction_seconds), 0) AS interaction_seconds,
+			MAX(page_views.created_at) AS last_viewed_at`).
+		Group("page_views.user_id").Scan(&rows).Error
+	out := make(map[uint]repository.PageViewUserTotals, len(rows))
+	for _, row := range rows {
+		out[row.UserID] = repository.PageViewUserTotals{
+			Views:              row.Views,
+			Participations:     row.Participations,
+			InteractionSeconds: int64(row.InteractionSeconds),
+			LastViewedAt:       row.LastViewedAt,
+		}
+	}
+	return out, err
+}
+
+func (r *pageViewRepo) CategoryCounts(ctx context.Context, courseID, userID uint) ([]repository.PageViewCategoryCount, error) {
+	var rows []repository.PageViewCategoryCount
+	err := r.courseStudentViews(ctx, courseID, userID).
+		Select(`COALESCE(NULLIF(page_views.asset_category, ''), 'other') AS category,
+			COUNT(*) FILTER (WHERE NOT COALESCE(page_views.participated, false)) AS views,
+			COUNT(*) FILTER (WHERE COALESCE(page_views.participated, false)) AS participations`).
+		Group("category").Order("views DESC, category ASC").Scan(&rows).Error
+	if rows == nil {
+		rows = []repository.PageViewCategoryCount{}
+	}
+	return rows, err
+}
+
+func (r *pageViewRepo) ListByUserAndContext(ctx context.Context, userID uint, contextType string, contextID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.PageView], error) {
+	if params.Page < 1 {
+		params.Page = 1
+	}
+	if params.PerPage < 1 {
+		params.PerPage = 50
+	}
+	q := r.db.WithContext(ctx).Model(&models.PageView{}).
+		Where("user_id = ? AND context_type = ? AND context_id = ?", userID, contextType, contextID)
+	var count int64
+	if err := q.Count(&count).Error; err != nil {
+		return nil, err
+	}
+	var items []models.PageView
+	if err := q.Order("created_at DESC, id DESC").Offset((params.Page - 1) * params.PerPage).Limit(params.PerPage).Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return &repository.PaginatedResult[models.PageView]{Items: items, TotalCount: count, Page: params.Page, PerPage: params.PerPage}, nil
+}
+
+func (r *pageViewRepo) UpdateInteraction(ctx context.Context, id, userID uint, seconds int) error {
+	res := r.db.WithContext(ctx).Model(&models.PageView{}).
+		Where("id = ? AND user_id = ?", id, userID).
+		Update("interaction_seconds", gorm.Expr("GREATEST(COALESCE(interaction_seconds, 0), ?)", seconds))
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (r *pageViewRepo) TouchEnrollmentActivity(ctx context.Context, userID, courseID uint) error {
+	return r.db.WithContext(ctx).Exec(
+		`UPDATE enrollments SET last_activity_at = now()
+		 WHERE user_id = ? AND course_id = ? AND workflow_state <> 'deleted'
+		   AND (last_activity_at IS NULL OR last_activity_at < now() - interval '5 minutes')`,
+		userID, courseID).Error
 }

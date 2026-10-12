@@ -3,11 +3,11 @@ package handlers
 import (
 	"errors"
 
-	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/gofiber/fiber/v2"
 )
 
 type DiscussionEntryHandler struct {
@@ -15,12 +15,21 @@ type DiscussionEntryHandler struct {
 	// v2 records edit history (UpdateEntryWithHistory); without it V1
 	// edits overwrite the message with no version kept.
 	v2 *service.DiscussionV2Service
+	// parity adds attachments, anonymous posts, @mentions and graded
+	// discussion submissions. Optional (nil in some tests).
+	parity *service.DiscussionParityService
 }
 
 // SetVersionHistory routes V1 entry edits through the versioned update the
 // /v2 edit route uses, so API edits keep the same history as UI edits.
 func (h *DiscussionEntryHandler) SetVersionHistory(v2 *service.DiscussionV2Service) *DiscussionEntryHandler {
 	h.v2 = v2
+	return h
+}
+
+// SetParity enables the Canvas-parity discussion features on entries.
+func (h *DiscussionEntryHandler) SetParity(p *service.DiscussionParityService) *DiscussionEntryHandler {
+	h.parity = p
 	return h
 }
 
@@ -38,14 +47,30 @@ func entryToJSON(e *models.DiscussionEntry) fiber.Map {
 		"rating_count":        e.RatingCount,
 		"rating_sum":          e.RatingSum,
 		"workflow_state":      e.WorkflowState,
+		"attachment_id":       e.AttachmentID,
+		"is_anonymous_author": e.IsAnonymousAuthor,
 		"created_at":          e.CreatedAt,
 		"updated_at":          e.UpdatedAt,
 	}
 }
 
+// requirePostsVisible writes a 403 and returns wrote=true when the
+// caller must post before seeing other people's posts
+// (require_initial_post, Canvas initial_post_required?).
+func requirePostsVisible(c *fiber.Ctx, svc interface{}, topic *models.DiscussionTopic) bool {
+	if discussionInitialPostRequired(c, svc, topic) {
+		_ = responses.Forbidden(c, "You must post before seeing replies")
+		return true
+	}
+	return false
+}
+
 func (h *DiscussionEntryHandler) ListEntries(c *fiber.Ctx) error {
 	topic, wrote := requireTopicInCourse(c, h.discussionService)
 	if wrote {
+		return nil
+	}
+	if requirePostsVisible(c, h.discussionService, topic) {
 		return nil
 	}
 
@@ -58,29 +83,25 @@ func (h *DiscussionEntryHandler) ListEntries(c *fiber.Ctx) error {
 
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
 
-	entries := make([]fiber.Map, len(result.Items))
-	for i, e := range result.Items {
-		entries[i] = entryToJSON(&e)
-	}
-
-	return c.JSON(entries)
+	return c.JSON(presentEntries(c, h.parity, topic, result.Items))
 }
 
-func (h *DiscussionEntryHandler) CreateEntry(c *fiber.Ctx) error {
-	// The topic must be in this course and tenant, visible to the caller
-	// (not deleted / unpublished / delayed) and not locked for them.
-	topic, wrote := requireTopicInCourse(c, h.discussionService)
-	if wrote {
-		return nil
-	}
-	if requireTopicOpenForCaller(c, topic) {
-		return nil
-	}
+// entryCreateInput is the body of a new post or reply.
+type entryCreateInput struct {
+	Message string `json:"message"`
+	// AttachmentID is a file the poster uploaded through
+	// POST .../discussion_topics/:topic_id/attachments.
+	AttachmentID *uint `json:"attachment_id"`
+	// Anonymous posts under the poster's alias in a partially anonymous
+	// topic (ignored elsewhere).
+	Anonymous bool `json:"anonymous"`
+	// MentionedUserIDs are the people picked in the @mention picker.
+	MentionedUserIDs []uint `json:"mentioned_user_ids"`
+}
 
-	var input struct {
-		Message string `json:"message"`
-	}
-
+// createEntry is the shared body of CreateEntry and CreateReply.
+func (h *DiscussionEntryHandler) createEntry(c *fiber.Ctx, topic *models.DiscussionTopic, parentID *uint) error {
+	var input entryCreateInput
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
@@ -90,14 +111,64 @@ func (h *DiscussionEntryHandler) CreateEntry(c *fiber.Ctx) error {
 	entry := &models.DiscussionEntry{
 		DiscussionTopicID: topic.ID,
 		UserID:            userID,
+		ParentID:          parentID,
 		Message:           service.SanitizeHTML(input.Message),
+	}
+
+	if input.AttachmentID != nil && *input.AttachmentID != 0 {
+		if h.parity == nil {
+			return responses.BadRequest(c, "Attachments are not enabled")
+		}
+		if err := h.parity.ValidatePostAttachment(c.Context(), *input.AttachmentID, userID, callerAccountID(c)); err != nil {
+			return responses.BadRequest(c, err.Error())
+		}
+		id := *input.AttachmentID
+		entry.AttachmentID = &id
+		if entry.Message == "" {
+			// A file-only post still needs a body for the thread view.
+			entry.Message = "<p></p>"
+		}
+	}
+	if input.Anonymous && topic.AnonymousState != nil && *topic.AnonymousState == models.DiscussionPartialAnonymity {
+		entry.IsAnonymousAuthor = true
 	}
 
 	if err := h.discussionService.CreateEntry(c.Context(), entry); err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 
-	return c.Status(fiber.StatusCreated).JSON(entryToJSON(entry))
+	if h.parity != nil {
+		// Canvas subscribe_author: posting subscribes the poster.
+		_ = h.parity.SubscribeAuthor(c.Context(), topic.ID, userID)
+		if len(input.MentionedUserIDs) > 0 {
+			_, _ = h.parity.ProcessMentions(c.Context(), topic, entry, input.MentionedUserIDs)
+		}
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(presentEntry(c, h.parity, topic, entry))
+}
+
+func (h *DiscussionEntryHandler) CreateEntry(c *fiber.Ctx) error {
+	// The topic must be in this course and tenant, visible to the caller
+	// (not deleted / unpublished / delayed / outside their section or
+	// group) and not locked for them.
+	topic, wrote := requireTopicInCourse(c, h.discussionService)
+	if wrote {
+		return nil
+	}
+	if requireTopicOpenForCaller(c, topic) {
+		return nil
+	}
+	if requireTopicAcceptsPosts(c, topic) {
+		return nil
+	}
+	return h.createEntry(c, topic, nil)
+}
+
+// entryUpdateInput is the body of an edit.
+type entryUpdateInput struct {
+	Message          string `json:"message"`
+	MentionedUserIDs []uint `json:"mentioned_user_ids"`
 }
 
 // UpdateEntry — PUT /courses/:course_id/discussion_topics/:topic_id/entries/:id
@@ -114,10 +185,7 @@ func (h *DiscussionEntryHandler) UpdateEntry(c *fiber.Ctx) error {
 		return nil
 	}
 
-	var input struct {
-		Message string `json:"message"`
-	}
-
+	var input entryUpdateInput
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
@@ -129,7 +197,8 @@ func (h *DiscussionEntryHandler) UpdateEntry(c *fiber.Ctx) error {
 			if err := h.v2.UpdateEntryWithHistory(c.Context(), entry, editorID, msg); err != nil {
 				return responses.InternalError(c, "Could not update discussion entry")
 			}
-			return c.JSON(entryToJSON(entry))
+			h.mentionsAfterEdit(c, topic, entry, input.MentionedUserIDs)
+			return c.JSON(presentEntry(c, h.parity, topic, entry))
 		}
 		entry.Message = msg
 	}
@@ -137,8 +206,21 @@ func (h *DiscussionEntryHandler) UpdateEntry(c *fiber.Ctx) error {
 	if err := h.discussionService.UpdateEntry(c.Context(), entry); err != nil {
 		return responses.InternalError(c, "Could not update discussion entry")
 	}
+	h.mentionsAfterEdit(c, topic, entry, input.MentionedUserIDs)
 
-	return c.JSON(entryToJSON(entry))
+	return c.JSON(presentEntry(c, h.parity, topic, entry))
+}
+
+// mentionsAfterEdit notifies people newly @mentioned by an edit. Only
+// the author's own edits mention on their behalf.
+func (h *DiscussionEntryHandler) mentionsAfterEdit(c *fiber.Ctx, topic *models.DiscussionTopic, entry *models.DiscussionEntry, ids []uint) {
+	if h.parity == nil || len(ids) == 0 {
+		return
+	}
+	if editor, _ := c.Locals("user_id").(uint); editor != entry.UserID {
+		return
+	}
+	_, _ = h.parity.ProcessMentions(c.Context(), topic, entry, ids)
 }
 
 // DeleteEntry — DELETE /courses/:course_id/discussion_topics/:topic_id/entries/:id
@@ -160,6 +242,11 @@ func (h *DiscussionEntryHandler) DeleteEntry(c *fiber.Ctx) error {
 	if err := h.discussionService.DeleteEntry(c.Context(), entry.ID); err != nil {
 		return responses.InternalError(c, "Could not delete discussion entry")
 	}
+	if h.parity != nil {
+		// A graded discussion's submission goes back to unsubmitted once
+		// the student's last post is gone.
+		_ = h.parity.SyncSubmissionForUser(c.Context(), topic, entry.UserID)
+	}
 
 	return c.JSON(fiber.Map{"delete": true})
 }
@@ -167,6 +254,9 @@ func (h *DiscussionEntryHandler) DeleteEntry(c *fiber.Ctx) error {
 func (h *DiscussionEntryHandler) ListReplies(c *fiber.Ctx) error {
 	topic, wrote := requireTopicInCourse(c, h.discussionService)
 	if wrote {
+		return nil
+	}
+	if requirePostsVisible(c, h.discussionService, topic) {
 		return nil
 	}
 	parent, wrote := requireEntryInTopic(c, h.discussionService, topic.ID, "entry_id")
@@ -183,12 +273,7 @@ func (h *DiscussionEntryHandler) ListReplies(c *fiber.Ctx) error {
 
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
 
-	entries := make([]fiber.Map, len(result.Items))
-	for i, e := range result.Items {
-		entries[i] = entryToJSON(&e)
-	}
-
-	return c.JSON(entries)
+	return c.JSON(presentEntries(c, h.parity, topic, result.Items))
 }
 
 func (h *DiscussionEntryHandler) CreateReply(c *fiber.Ctx) error {
@@ -199,6 +284,14 @@ func (h *DiscussionEntryHandler) CreateReply(c *fiber.Ctx) error {
 	if requireTopicOpenForCaller(c, topic) {
 		return nil
 	}
+	if requireTopicAcceptsPosts(c, topic) {
+		return nil
+	}
+	// Someone who still has to make their initial post can't see the
+	// entries, so they can't reply to one either.
+	if requirePostsVisible(c, h.discussionService, topic) {
+		return nil
+	}
 	// The parent must be a live entry on this same topic; a parent from
 	// another topic would otherwise be orphaned into a root post.
 	parent, wrote := requireEntryInTopic(c, h.discussionService, topic.ID, "entry_id")
@@ -206,29 +299,8 @@ func (h *DiscussionEntryHandler) CreateReply(c *fiber.Ctx) error {
 		return nil
 	}
 
-	var input struct {
-		Message string `json:"message"`
-	}
-
-	if err := c.BodyParser(&input); err != nil {
-		return responses.BadRequest(c, "Invalid input")
-	}
-
-	userID, _ := c.Locals("user_id").(uint)
 	parentID := parent.ID
-
-	entry := &models.DiscussionEntry{
-		DiscussionTopicID: topic.ID,
-		UserID:            userID,
-		ParentID:          &parentID,
-		Message:           service.SanitizeHTML(input.Message),
-	}
-
-	if err := h.discussionService.CreateEntry(c.Context(), entry); err != nil {
-		return responses.BadRequest(c, err.Error())
-	}
-
-	return c.Status(fiber.StatusCreated).JSON(entryToJSON(entry))
+	return h.createEntry(c, topic, &parentID)
 }
 
 // RateEntry — POST .../entries/:entry_id/rating with {"rating": 0|1}.
@@ -238,6 +310,9 @@ func (h *DiscussionEntryHandler) CreateReply(c *fiber.Ctx) error {
 func (h *DiscussionEntryHandler) RateEntry(c *fiber.Ctx) error {
 	topic, wrote := requireTopicInCourse(c, h.discussionService)
 	if wrote {
+		return nil
+	}
+	if requirePostsVisible(c, h.discussionService, topic) {
 		return nil
 	}
 	entry, wrote := requireEntryInTopic(c, h.discussionService, topic.ID, "entry_id")
@@ -274,7 +349,7 @@ func (h *DiscussionEntryHandler) RateEntry(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not fetch updated entry")
 	}
 
-	out := entryToJSON(updated)
+	out := presentEntry(c, h.parity, topic, updated)
 	out["rating"] = *input.Rating
 	return c.JSON(out)
 }

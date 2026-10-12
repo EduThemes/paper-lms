@@ -158,7 +158,7 @@ func (s *QuizService) generateSelectedQuestions(ctx context.Context, quizID uint
 					quizLoaded = true
 				}
 				bank, bErr := s.questionBankRepo.FindByID(ctx, *group.QuestionBankID)
-				bankOK = bErr == nil && bank != nil && bank.CourseID == quizCourseID && bank.WorkflowState != "deleted"
+				bankOK = bErr == nil && bankUsableInCourse(ctx, s.questionBankRepo, bank, quizCourseID)
 			}
 			if bankOK {
 				if entries, err := s.bankEntryRepo.ListByBankID(ctx, *group.QuestionBankID); err == nil {
@@ -244,6 +244,9 @@ func (s *QuizService) materializeBankEntry(ctx context.Context, quizID uint, gro
 		QuestionText:        entry.QuestionText,
 		PointsPossible:      &pts,
 		Answers:             entry.Answers,
+		CorrectComments:     entry.CorrectComments,
+		IncorrectComments:   entry.IncorrectComments,
+		NeutralComments:     entry.NeutralComments,
 		WorkflowState:       "active",
 	}
 	if q.QuestionText == "" {
@@ -330,12 +333,24 @@ func (s *QuizService) StartSubmission(ctx context.Context, quizID, userID uint, 
 
 	now := time.Now()
 
-	// F-048: unlock_at / lock_at windows.
-	if quiz.UnlockAt != nil && now.Before(*quiz.UnlockAt) {
-		return nil, errors.New("quiz is not yet available")
+	// G046 / G047: the student's own dates (section / student overrides on
+	// the linked assignment, plus accommodations) and moderation settings.
+	ext := models.QuizExtension{QuizID: quizID, UserID: userID}
+	unlockAt, lockAt := quiz.UnlockAt, quiz.LockAt
+	if s.lifecycle != nil {
+		ext = s.quizExtensionFor(ctx, quizID, userID)
+		_, unlockAt, lockAt = s.EffectiveQuizDates(ctx, quiz, userID)
 	}
-	if quiz.LockAt != nil && now.After(*quiz.LockAt) {
-		return nil, errors.New("quiz is locked and no longer accepts submissions")
+
+	// F-048: unlock_at / lock_at windows. A manual unlock (Moderate quiz)
+	// lets the student in outside the window.
+	if !ext.ManuallyUnlocked {
+		if unlockAt != nil && now.Before(*unlockAt) {
+			return nil, errors.New("quiz is not yet available")
+		}
+		if lockAt != nil && now.After(*lockAt) {
+			return nil, errors.New("quiz is locked and no longer accepts submissions")
+		}
 	}
 
 	// Check for an existing in-progress submission
@@ -351,8 +366,9 @@ func (s *QuizService) StartSubmission(ctx context.Context, quizID, userID uint, 
 		attempt = existing.Attempt + 1
 	}
 
-	// Enforce attempt limits
-	if quiz.AllowedAttempts > 0 && attempt > quiz.AllowedAttempts {
+	// Enforce attempt limits (allowed_attempts plus any extra attempts
+	// granted through Moderate quiz).
+	if allowed := AttemptsAllowedFor(quiz, ext); allowed > 0 && attempt > allowed {
 		return nil, errors.New("maximum number of attempts reached")
 	}
 
@@ -387,8 +403,16 @@ func (s *QuizService) StartSubmission(ctx context.Context, quizID, userID uint, 
 	}
 
 	if effectiveTimeLimit != nil && *effectiveTimeLimit > 0 {
-		endAt := now.Add(time.Duration(*effectiveTimeLimit) * time.Minute)
+		endAt := now.Add(time.Duration(*effectiveTimeLimit+ext.ExtraTime) * time.Minute)
 		submission.EndAt = &endAt
+	}
+
+	// G048: an attempt never runs past the student's lock date (Canvas
+	// build_submission_end_at) unless the quiz was manually unlocked for
+	// them; the overdue job submits it at end_at.
+	if lockAt != nil && !ext.ManuallyUnlocked && (submission.EndAt == nil || lockAt.Before(*submission.EndAt)) {
+		capped := *lockAt
+		submission.EndAt = &capped
 	}
 
 	// Generate personalized question set if question groups exist
@@ -415,6 +439,9 @@ func (s *QuizService) StartSubmission(ctx context.Context, quizID, userID uint, 
 		return nil, err
 	}
 
+	s.recordQuizEvent(ctx, submission, models.QuizEventSessionStarted, map[string]interface{}{
+		"end_at": submission.EndAt,
+	})
 	return submission, nil
 }
 
@@ -439,6 +466,10 @@ func (s *QuizService) FileUploadQuestionForSubmission(ctx context.Context, submi
 	if !questionBelongsToSubmission(submission, question, selected, hasSelected) ||
 		NormalizeQuizQuestionType(question.QuestionType) != "file_upload" {
 		return nil, ErrQuestionNotInSubmission
+	}
+	// Can't go back: a question the student moved past takes no new file.
+	if err := s.ensureQuestionNotLocked(ctx, submission, questionID); err != nil {
+		return nil, err
 	}
 	return question, nil
 }
@@ -505,6 +536,9 @@ func (s *QuizService) AnswerQuestion(ctx context.Context, submissionID, question
 	if !questionBelongsToSubmission(submission, question, selected, hasSelected) {
 		return nil, ErrQuestionNotInSubmission
 	}
+	if err := s.ensureQuestionNotLocked(ctx, submission, questionID); err != nil {
+		return nil, err
+	}
 
 	// Attempt to find an existing answer for this question in this submission
 	existing, _ := s.answerRepo.FindBySubmissionAndQuestion(ctx, submissionID, questionID)
@@ -516,6 +550,7 @@ func (s *QuizService) AnswerQuestion(ctx context.Context, submissionID, question
 		if err := s.answerRepo.Update(ctx, existing); err != nil {
 			return nil, err
 		}
+		s.recordAnswerEvent(ctx, submission, questionID, answer)
 		return existing, nil
 	}
 
@@ -530,7 +565,35 @@ func (s *QuizService) AnswerQuestion(ctx context.Context, submissionID, question
 		return nil, err
 	}
 
+	s.recordAnswerEvent(ctx, submission, questionID, answer)
 	return newAnswer, nil
+}
+
+// maxLoggedAnswerBytes bounds the answer text copied into the event log
+// (essays can be long; the stored answer row keeps the full text).
+const maxLoggedAnswerBytes = 1024
+
+// recordAnswerEvent logs a saved answer (G057). The server records it, so
+// the log of answer changes does not depend on the client.
+func (s *QuizService) recordAnswerEvent(ctx context.Context, sub *models.QuizSubmission, questionID uint, answer string) {
+	if s.lifecycle == nil {
+		return
+	}
+	logged := answer
+	truncated := false
+	if len(logged) > maxLoggedAnswerBytes {
+		logged = logged[:maxLoggedAnswerBytes]
+		truncated = true
+	}
+	eventType := models.QuizEventQuestionAnswered
+	if answer == "" {
+		eventType = models.QuizEventQuestionUnanswered
+	}
+	s.recordQuizEvent(ctx, sub, eventType, map[string]interface{}{
+		"question_id": questionID,
+		"answer":      logged,
+		"truncated":   truncated,
+	})
 }
 
 // CompleteSubmission finalizes a quiz submission, triggers auto-grading, and calculates the score.
@@ -546,55 +609,6 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 
 	if submission.WorkflowState != "untaken" {
 		return nil, errors.New("quiz submission is not in progress")
-	}
-
-	// Get all answers for this submission
-	answers, err := s.answerRepo.ListBySubmissionID(ctx, submissionID)
-	if err != nil {
-		return nil, errors.New("could not fetch submission answers")
-	}
-
-	totalScore := 0.0
-	needsReview := false
-
-	selected, hasSelected := selectedQuestionSet(submission)
-	groupCache := map[uint]*models.QuizQuestionGroup{}
-	seenQuestion := map[uint]bool{}
-
-	for i := range answers {
-		question, qErr := s.questionRepo.FindByID(ctx, answers[i].QuestionID)
-		if qErr != nil {
-			continue
-		}
-		// Only questions that belong to this attempt count toward the
-		// score (B025: stray answers to other quizzes' questions are
-		// ignored), and each question is scored at most once.
-		if !questionBelongsToSubmission(submission, question, selected, hasSelected) || seenQuestion[question.ID] {
-			continue
-		}
-		seenQuestion[question.ID] = true
-
-		pointsPossible := s.effectiveQuestionPoints(ctx, question, groupCache)
-		points, correct, gradable := s.autoGradeWithPoints(question, answers[i].Answer, pointsPossible)
-
-		if gradable {
-			answers[i].Correct = &correct
-			answers[i].Points = &points
-			// Wave A1: stamp the audit trail so we can distinguish auto-graded
-			// rows from manual SpeedGrader rows and pre-cutover legacy rows.
-			via := gradedViaAuto
-			answers[i].GradedVia = &via
-			totalScore += points
-		} else {
-			// Essay, file_upload, and other non-auto-gradable types require
-			// manual review. We deliberately do NOT stamp GradedVia here —
-			// it will be set to "manual" when the instructor scores it.
-			needsReview = true
-			zero := 0.0
-			answers[i].Points = &zero
-		}
-
-		_ = s.answerRepo.Update(ctx, &answers[i])
 	}
 
 	// F-050: cap FinishedAt at submission.EndAt + 5-minute grace when
@@ -613,6 +627,90 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 			finishAt = now
 		}
 	}
+	return s.finalizeAttempt(ctx, submission, finishAt, models.QuizEventSubmitted)
+}
+
+// finalizeAttempt grades an in-progress attempt and turns it in, finished
+// at finishAt. Shared by the student's /complete and the overdue
+// auto-submit job (G048), so both grade identically.
+func (s *QuizService) finalizeAttempt(ctx context.Context, submission *models.QuizSubmission, finishAt time.Time, eventType string) (*models.QuizSubmission, error) {
+	submissionID := submission.ID
+
+	// Get all answers for this submission
+	answers, err := s.answerRepo.ListBySubmissionID(ctx, submissionID)
+	if err != nil {
+		return nil, errors.New("could not fetch submission answers")
+	}
+
+	totalScore := 0.0
+	needsReview := false
+
+	selected, hasSelected := selectedQuestionSet(submission)
+	groupCache := map[uint]*models.QuizQuestionGroup{}
+	seenQuestion := map[uint]bool{}
+	scored := make([]int, 0, len(answers))
+
+	for i := range answers {
+		question, qErr := s.questionRepo.FindByID(ctx, answers[i].QuestionID)
+		if qErr != nil {
+			continue
+		}
+		// Only questions that belong to this attempt count toward the
+		// score (B025: stray answers to other quizzes' questions are
+		// ignored), and each question is scored at most once.
+		if !questionBelongsToSubmission(submission, question, selected, hasSelected) || seenQuestion[question.ID] {
+			continue
+		}
+		seenQuestion[question.ID] = true
+
+		pointsPossible := s.effectiveQuestionPoints(ctx, question, groupCache)
+		points, correct, gradable := s.gradeAnswerForSubmission(submission.ID, question, answers[i].Answer, pointsPossible)
+
+		if gradable {
+			answers[i].Correct = &correct
+			answers[i].Points = &points
+			// Wave A1: stamp the audit trail so we can distinguish auto-graded
+			// rows from manual SpeedGrader rows and pre-cutover legacy rows.
+			via := gradedViaAuto
+			answers[i].GradedVia = &via
+			totalScore += points
+		} else {
+			// Essay, file_upload, and other non-auto-gradable types require
+			// manual review. We deliberately do NOT stamp GradedVia here —
+			// it will be set to "manual" when the instructor scores it.
+			needsReview = true
+			zero := 0.0
+			answers[i].Points = &zero
+		}
+		scored = append(scored, i)
+	}
+
+	// The quiz drives survey semantics and, when the lifecycle is wired,
+	// the kept score and gradebook push. accountID 0: the submission's own
+	// quiz (tenant-checked by the handler).
+	var quiz *models.Quiz
+	if q, qErr := s.quizRepo.FindByID(ctx, submission.QuizID, 0); qErr == nil {
+		quiz = q
+	}
+
+	// Surveys have no right answers (G058): no correct/incorrect flags, a
+	// graded survey earns its full points, an ungraded one zero, and Canvas
+	// never holds a survey attempt for review (its essay answers are
+	// responses, not work to grade).
+	if quiz != nil && QuizIsSurvey(quiz) {
+		surveyAnswers := make([]models.QuizSubmissionAnswer, len(scored))
+		for k, i := range scored {
+			surveyAnswers[k] = answers[i]
+		}
+		applySurveySemantics(quiz, surveyAnswers, &totalScore, &needsReview)
+		for k, i := range scored {
+			answers[i] = surveyAnswers[k]
+		}
+	}
+	for _, i := range scored {
+		_ = s.answerRepo.Update(ctx, &answers[i])
+	}
+
 	submission.FinishedAt = &finishAt
 	submission.Score = &totalScore
 	submission.KeptScore = &totalScore
@@ -643,6 +741,16 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 		}
 	} else if err := s.submissionRepo.Update(ctx, submission); err != nil {
 		return nil, err
+	}
+
+	s.recordQuizEvent(ctx, submission, eventType, map[string]interface{}{
+		"score":          totalScore,
+		"workflow_state": submission.WorkflowState,
+	})
+	// G041 / G044: apply the scoring policy across attempts and push the
+	// kept score to the quiz's gradebook assignment.
+	if quiz != nil && s.lifecycle != nil {
+		s.refreshKeptScore(ctx, quiz, submission.UserID, 0)
 	}
 
 	// Fire post-completion callbacks (gamification, notifications, etc.)

@@ -19,6 +19,12 @@ type ModuleService struct {
 	quizRepo       repository.QuizRepository
 	discussionRepo repository.DiscussionTopicRepository
 	pageRepo       repository.PageRepository
+
+	// File and External Tool items (SetLinkRepos, module_item_links.go).
+	attachmentRepo repository.AttachmentRepository
+	toolRepo       repository.ContextExternalToolRepository
+	devKeyRepo     repository.DeveloperKeyRepository
+	courseRepo     repository.CourseRepository
 }
 
 // ErrModuleContentNotInCourse is returned when a module item would link

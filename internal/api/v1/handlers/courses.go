@@ -19,6 +19,15 @@ type CourseHandler struct {
 	// userRepo backs the DB role check (middleware.EffectiveRole) that
 	// gates ?scope=all. Nil means nobody gets the tenant-wide list.
 	userRepo repository.UserRepository
+	// unpublishGuard (optional, G077) refuses unpublishing a course with
+	// graded student work; see SetUnpublishGuard.
+	unpublishGuard UnpublishGuard
+	// quotas (optional, G072/G120) backs storage_quota_mb; see
+	// SetStorageQuotas.
+	quotas CourseStorageQuotas
+	// canvasAPI adds Canvas course fields / include[] (G137); see
+	// canvas_course_includes.go. Nil leaves the JSON as is.
+	canvasAPI *service.CanvasAPIService
 }
 
 // SetUserRepo wires the user repository used for the admin check on
@@ -59,8 +68,13 @@ func courseToJSON(c *models.Course) fiber.Map {
 		"is_public":      c.IsPublic,
 		"ui_mode":                          c.UIMode,
 		"apply_assignment_group_weights":   c.ApplyGroupWeights,
+		"hide_final_grades":                c.HideFinalGrades,
 		"navigation_tabs":                  navTabs,
 		"created_at":                       c.CreatedAt,
+		// Date-based access settings (G106).
+		"restrict_enrollments_to_course_dates": c.RestrictEnrollmentsToCourseDates,
+		"restrict_student_future_view":         c.RestrictStudentFutureView,
+		"restrict_student_past_view":           c.RestrictStudentPastView,
 	}
 }
 
@@ -124,6 +138,7 @@ func (h *CourseHandler) ListCourses(c *fiber.Ctx) error {
 		cj["total_students"] = studentCounts[course.ID]
 		courses[i] = cj
 	}
+	h.applyCourseIncludes(c, items, courses)
 
 	return c.JSON(courses)
 }
@@ -139,7 +154,9 @@ func (h *CourseHandler) GetCourse(c *fiber.Ctx) error {
 		return responses.NotFound(c, "course")
 	}
 
-	return c.JSON(courseToJSON(course))
+	out := h.courseJSONWithQuota(c, course.ID, courseToJSON(course))
+	h.applyCourseIncludes(c, []models.Course{*course}, []fiber.Map{out})
+	return c.JSON(out)
 }
 
 type createCourseRequest struct {
@@ -226,7 +243,13 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 			UIMode            *string          `json:"ui_mode"`
 			WorkflowState     *string          `json:"workflow_state"`
 			ApplyGroupWeights *bool            `json:"apply_assignment_group_weights"`
+			HideFinalGrades   *bool            `json:"hide_final_grades"`
 			NavigationTabs    *json.RawMessage `json:"navigation_tabs"`
+			StorageQuotaMB    json.RawMessage  `json:"storage_quota_mb"` // not a pointer: null must arrive as "null"
+			// Date-based access settings (G106).
+			RestrictEnrollmentsToCourseDates *bool `json:"restrict_enrollments_to_course_dates"`
+			RestrictStudentFutureView        *bool `json:"restrict_student_future_view"`
+			RestrictStudentPastView          *bool `json:"restrict_student_past_view"`
 		} `json:"course"`
 	}
 
@@ -274,20 +297,34 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 		if err := models.TransitionCourseWorkflowState(course.WorkflowState, newState, callerRoleForStateMachine(c)); err != nil {
 			return responses.BadRequest(c, err.Error())
 		}
+		if wrote, gerr := h.checkUnpublishable(c, course, newState); wrote {
+			return gerr
+		}
 		course.WorkflowState = newState
 	}
 	if input.Course.ApplyGroupWeights != nil {
 		course.ApplyGroupWeights = *input.Course.ApplyGroupWeights
 	}
+	if input.Course.HideFinalGrades != nil {
+		course.HideFinalGrades = *input.Course.HideFinalGrades
+	}
 	if input.Course.NavigationTabs != nil {
 		course.NavigationTabs = string(*input.Course.NavigationTabs)
 	}
+	if len(input.Course.StorageQuotaMB) > 0 {
+		// G072: only admins set a course's storage quota (Canvas
+		// manage_storage_quotas); null resets it to the account default.
+		if wrote, qerr := applyStorageQuotaMB(c, h.userRepo, h.quotas, course.ID, input.Course.StorageQuotaMB); wrote {
+			return qerr
+		}
+	}
+	applyCourseDateAccessSettings(course, input.Course.RestrictEnrollmentsToCourseDates, input.Course.RestrictStudentFutureView, input.Course.RestrictStudentPastView)
 
 	if err := h.courseService.Update(c.Context(), course); err != nil {
 		return responses.InternalError(c, "Could not update course")
 	}
 
-	return c.JSON(courseToJSON(course))
+	return c.JSON(h.courseJSONWithQuota(c, course.ID, courseToJSON(course)))
 }
 
 func (h *CourseHandler) DeleteCourse(c *fiber.Ctx) error {

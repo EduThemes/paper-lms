@@ -56,7 +56,12 @@ func (h *QuizSubmissionHandler) UploadAnswerFile(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid question ID")
 	}
-	if _, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID)); wrote {
+	quiz, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID))
+	if wrote {
+		return nil
+	}
+	// An upload is an answer: the IP filter applies as on AnswerQuestion.
+	if enforceQuizTakeRestrictions(c, quiz, false) {
 		return nil
 	}
 	submission, wrote := h.loadSubmission(c, uint(quizID))
@@ -71,6 +76,10 @@ func (h *QuizSubmissionHandler) UploadAnswerFile(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "quiz submission is not in progress")
 	}
 	if _, err := h.quizService.FileUploadQuestionForSubmission(c.Context(), submission, uint(questionID)); err != nil {
+		if errors.Is(err, service.ErrQuestionLocked) {
+			// Refused before the file is stored (no orphaned upload).
+			return responses.Forbidden(c, err.Error())
+		}
 		return responses.NotFound(c, "quiz question")
 	}
 
@@ -116,6 +125,9 @@ func (h *QuizSubmissionHandler) UploadAnswerFile(c *fiber.Ctx) error {
 		if errors.Is(err, service.ErrQuestionNotInSubmission) {
 			return responses.NotFound(c, "quiz question")
 		}
+		if errors.Is(err, service.ErrQuestionLocked) {
+			return responses.Forbidden(c, err.Error())
+		}
 		return responses.BadRequest(c, err.Error())
 	}
 
@@ -144,14 +156,17 @@ func (h *QuizSubmissionHandler) DownloadAnswerFile(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid question ID")
 	}
-	if _, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID)); wrote {
+	quiz, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID))
+	if wrote {
 		return nil
 	}
 	submission, wrote := h.loadSubmission(c, uint(quizID))
 	if wrote {
 		return nil
 	}
-	if !h.callerCanViewAttempt(c, submission.UserID) {
+	// Anonymous survey: only the respondent reaches their own upload, as
+	// with GetSubmissionAnswers.
+	if !h.callerCanViewAttempt(c, submission.UserID) || anonymousSurveyHidden(c, quiz, submission) {
 		return responses.NotFound(c, "quiz submission")
 	}
 

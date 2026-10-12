@@ -59,6 +59,7 @@ func main() {
 		}
 		log.Printf("warning: encryption keys unavailable (%v) — MFA, OIDC client secrets, and passkeys will fail; set MFA_ENCRYPTION_KEY before exercising those flows", err)
 	}
+	service.SetQuizSecretSealer(auth.Encrypt) // imported quiz access codes
 
 	// Configure structured logging
 	logLevel := slog.LevelInfo
@@ -407,6 +408,8 @@ func main() {
 
 	agsService := service.NewLTIAGSService(lineItemRepo, resultRepo, assignmentRepo, enrollmentRepo, submissionService)
 	nrpsService := service.NewLTINRPSService(enrollmentRepo, userRepo)
+	wireLTIAdvantage(database, ltiService, agsService, nrpsService, devKeyService, submissionService,
+		userRepo, courseRepo, assignmentRepo, moduleRepo, moduleItemRepo, lineItemRepo, resultRepo)
 	// services
 	discussionService := service.NewDiscussionService(discussionTopicRepo, discussionEntryRepo, discussionRatingRepo)
 	// Initialize file storage backend
@@ -444,6 +447,14 @@ func main() {
 		service.WithBankEntryRepo(questionBankEntryRepo),
 		service.WithQuestionBankRepo(questionBankRepo),
 		service.WithStimulusRepo(postgres.NewQuizStimulusRepository(database)),
+		// Quiz lifecycle: gradebook assignment, overrides, extensions,
+		// event log, regrades, overdue auto-submit.
+		service.WithQuizLifecycle(service.QuizLifecycleDeps{
+			Assignments: assignmentRepo, AssignmentGroups: assignmentGroupRepo, Gradebook: submissionService,
+			Extensions: postgres.NewQuizExtensionRepository(database), Events: postgres.NewQuizSubmissionEventRepository(database),
+			Regrades: postgres.NewQuizQuestionRegradeRepository(database), Overdue: quizSubmissionRepo, Enrollments: enrollmentRepo,
+			Unlinked: quizRepo,
+		}),
 	)
 	// Phase 6 Wave 1 Sprint D-1: register every gamification emit
 	// callback against the services that own the lifecycle event. The
@@ -495,6 +506,7 @@ func main() {
 	speedGraderService := service.NewSpeedGraderService(submissionRepo, submissionCommentRepo, assignmentRepo, enrollmentRepo, rubricAssessRepo)
 	// services
 	groupService := service.NewGroupService(groupCategoryRepo, groupRepo, groupMembershipRepo, enrollmentRepo)
+	groupService.SetUserRepository(userRepo) // G100: unassigned roster + CSV import/export
 	blueprintService := service.NewBlueprintService(
 		blueprintTemplateRepo, blueprintSubscriptionRepo, blueprintMigrationRepo,
 		moduleRepo, moduleItemRepo, assignmentRepo, pageRepo,
@@ -571,6 +583,11 @@ func main() {
 		notificationDeliveryRepo, communicationChannelRepo, notificationPrefRepo,
 		notificationRepo, userRepo, settingsLookup,
 	)
+	// Machine-written grades (LTI score passback, quiz scores, gradebook
+	// import scores) notify the student like a grader's grade does.
+	submissionService.SetGradeNotifier(func(ctx context.Context, a *models.Assignment, sub *models.Submission) {
+		service.NotifyGradePosted(ctx, notificationDeliveryService, a, sub)
+	})
 	// services
 	customRoleService := service.NewCustomRoleService(customRoleRepo, roleOverrideRepo, enrollmentRepo)
 	onerosterService := service.NewOneRosterService(onerosterConnRepo, onerosterSyncLogRepo, userRepo, courseRepo, sectionRepo, enrollmentRepo, accountRepo, database)
@@ -615,6 +632,17 @@ func main() {
 			slog.Warn("grade change audit failed", "submission_id", ch.SubmissionID, "err", err)
 		}
 	})
+	// Grading policy (grading-policy lane): letter / GPA grade schemes,
+	// attempt history, course grading periods, and the full course grade
+	// calculator (overrides, drop rules, final grade overrides).
+	gradingPolicyRepo := postgres.NewGradingPolicyRepository(database)
+	gradingPolicyService := service.NewGradingPolicyService(gradingPolicyRepo, gradingStandardRepo, submissionService)
+	submissionService.SetGradingStandardRepository(gradingStandardRepo)
+	submissionService.SetGradingPolicyRepository(gradingPolicyRepo)
+	submissionService.SetPeriodResolver(gradingPolicyService)
+	gradingService.SetPolicyService(gradingPolicyService)
+	// The observer overview's course grade comes from the same engine.
+	observerService.SetCourseGradeSource(gradingPolicyService)
 	questionBankService := service.NewQuestionBankService(questionBankRepo, questionBankEntryRepo, quizQuestionRepo, quizRepo)
 	// P3 Feature services
 	featureFlagService := service.NewFeatureFlagService(featureFlagRepo, courseRepo, accountRepo, userRepo)
@@ -623,6 +651,7 @@ func main() {
 	appointmentGroupService := service.NewAppointmentGroupService(appointmentGroupRepo, appointmentSlotRepo, appointmentReservationRepo, database)
 	outcomeProficiencyService := service.NewOutcomeProficiencyService(outcomeProficiencyRepo)
 	masteryGradebookService := service.NewMasteryGradebookService(enrollmentRepo, outcomeRepo, outcomeResultRepo, userRepo, outcomeProficiencyService)
+	masteryGradebookService.SetOutcomeGroupRepo(outcomeGroupRepo) // student mastery view group titles (G152)
 
 	// Outcome results for every visible grade, whichever path wrote it
 	// (bulk grading, curve, CSV import, LTI AGS included).
@@ -837,9 +866,18 @@ func main() {
 	gradebookHandler := handlers.NewGradebookHandler(gradingService, auditService)
 	gradingStandardHandler := handlers.NewGradingStandardHandler(gradingStandardRepo)
 	developerKeyHandler := handlers.NewDeveloperKeyHandler(devKeyService)
-	accessTokenHandler := handlers.NewAccessTokenHandler(accessTokenService)
+	accessTokenHandler := handlers.NewAccessTokenHandler(accessTokenService).SetUserRepo(userRepo)
 	oauth2Handler := handlers.NewOAuth2Handler(oauth2Service, devKeyService, accessTokenService, userService)
+	oauth2Handler.SetLTIService(ltiService)
 	oauth2Handler.SetFrontendURL(cfg.FrontendURL)
+	oauth2Handler.SetTokenBlacklist(tokenBlacklist)
+	// Canvas REST API compatibility (api lane: G136/G137/G138/G143).
+	canvasAPIService := service.NewCanvasAPIService(postgres.NewCanvasAPIRepository(database))
+	canvasAPIHandler := handlers.NewCanvasAPIHandler(canvasAPIService, observerService)
+	courseHandler.SetCanvasAPI(canvasAPIService)
+	sessionTokenHandler := handlers.NewSessionTokenHandler(
+		service.NewLoginSessionTokenService(postgres.NewLoginSessionTokenRepository(database)), loginPipeline, cfg.FrontendURL)
+	sessionTokenHandler.SetSessionSecret(cfg.JWTSecret)
 	externalToolHandler := handlers.NewExternalToolHandler(externalToolService, devKeyService)
 	ltiHandler := handlers.NewLTIHandler(ltiService, agsService, nrpsService, externalToolRepo, ltiConfigRepo, userRepo, accountRepo, parentalConsentRepo)
 	// handlers
@@ -849,10 +887,21 @@ func main() {
 	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo, courseRepo)
 	fileHandler.SetAuthorizer(authz)
 	folderHandler := handlers.NewFolderHandler(fileService, authz)
+	// Rich-content media uploads / recordings / captions (G002).
+	mediaObjectHandler := handlers.NewMediaObjectHandler(service.NewMediaService(fileService, postgres.NewMediaObjectRepository(database), postgres.NewMediaTrackRepository(database)), authz)
 	sectionHandler = handlers.NewSectionHandler(sectionRepo, authz)
+	// admin-enrollments lane: enrollment lifecycle + invitations, multiple
+	// enrollments per course, section management and cross-listing.
+	enrollmentAdminRepo := postgres.NewEnrollmentAdminRepository(database)
+	enrollmentLifecycleService := service.NewEnrollmentLifecycleService(enrollmentAdminRepo, sectionRepo).SetNotifier(notificationService.CreateNotification)
+	enrollmentService.SetLifecycle(enrollmentLifecycleService)
+	enrollmentHandler.SetLifecycle(enrollmentLifecycleService)
+	sectionService := service.NewSectionService(postgres.NewSectionAdminRepository(database), enrollmentAdminRepo, courseRepo)
+	sectionHandler.SetSectionService(sectionService)
+	sisImportService.SetSectionService(sectionService)
 	sisImportHandler := handlers.NewSISImportHandler(sisImportService)
 	// handlers
-	quizHandler := handlers.NewQuizHandler(quizRepo)
+	quizHandler := handlers.NewQuizHandler(quizRepo).SetQuizService(quizService)
 	quizQuestionHandler := handlers.NewQuizQuestionHandler(quizService)
 	quizSubmissionHandler := handlers.NewQuizSubmissionHandler(quizService, observerService, auditService)
 	quizSubmissionHandler.SetFileService(fileService)
@@ -864,6 +913,9 @@ func main() {
 	latePolicyHandler := handlers.NewLatePolicyHandler(latePolicyService)
 	// handlers
 	calendarEventHandler := handlers.NewCalendarEventHandler(calendarService, authz)
+	calendarAggregateService := service.NewCalendarAggregateService(database)
+	calendarEventHandler.SetAggregator(calendarAggregateService)
+	calendarHandler := handlers.NewCalendarHandler(calendarAggregateService, service.NewCalendarFeedService(database, auth.Encrypt, auth.Decrypt), authz)
 	conversationHandler := handlers.NewConversationHandler(conversationService, userService, accountRepo, enrollmentRepo, auditService)
 	notificationHandler := handlers.NewNotificationHandler(notificationService)
 	// handlers
@@ -896,22 +948,50 @@ func main() {
 	// course; conferences resolve the per-tenant BigBlueButton server.
 	announcementService.SetNotifier(notificationDeliveryService)
 	conversationHandler.SetNotifier(notificationDeliveryService)
-	conversationHandler.SetRecipientSearch(postgres.NewRecipientSearchRepository(database))
+	recipientSearchRepo := postgres.NewRecipientSearchRepository(database)
+	conversationHandler.SetRecipientSearch(recipientSearchRepo)
+	// notify-inbox lane: inbox state + attachments, address book,
+	// announcement replies / section targeting, notification policy grid.
+	conversationHandler.SetAddressBook(recipientSearchRepo)
+	conversationHandler.SetInbox(postgres.NewInboxRepository(database))
+	conversationHandler.SetFileService(fileService)
+	announcementService.SetExtras(postgres.NewAnnouncementExtrasRepository(database))
+	notificationDeliveryService.SetPolicyStore(postgres.NewNotificationPolicyRepository(database))
 	conferenceService.SetSettingsLookup(settingsLookup)
-	discussionService.OnEntryCreated(service.DiscussionReplyNotificationCallback(discussionEntryRepo, discussionTopicRepo, notificationDeliveryService))
+	// Discussions parity: section / group visibility, graded submissions,
+	// subscription + @mention notifications (replaces notifying only the
+	// parent post's author).
+	discussionParityService := service.NewDiscussionParityService(discussionTopicRepo, discussionEntryRepo,
+		postgres.NewDiscussionParityRepository(database), discussionTopicParticipantRepo,
+		assignmentRepo, submissionRepo, notificationDeliveryService)
+	discussionParityService.SetAttachmentRepo(attachmentRepo)
+	discussionService.SetAudience(discussionParityService)
+	discussionV2Service.SetAudience(discussionParityService)
+	discussionCheckpointService.SetAudience(discussionParityService)
+	discussionService.OnEntryCreated(discussionParityService.EntryNotificationCallback())
+	discussionService.OnEntryCreated(discussionParityService.SubmissionCallback())
+	discussionHandler.SetParity(discussionParityService)
+	discussionEntryHandler.SetParity(discussionParityService)
+	discussionParityHandler := handlers.NewDiscussionParityHandler(discussionService, discussionParityService, fileService)
 	auditHandler := handlers.NewAuditHandler(auditService)
 	// handlers
 	customRoleHandler := handlers.NewCustomRoleHandler(customRoleService)
 	onerosterHandler := handlers.NewOneRosterHandler(onerosterService)
 	documentAnnotationHandler := handlers.NewDocumentAnnotationHandler(documentAnnotationService, submissionService, assignmentRepo, submissionRepo, authz).SetObserverService(observerService)
 	// handlers
-	discussionV2Handler := handlers.NewDiscussionV2Handler(discussionV2Service)
+	discussionV2Handler := handlers.NewDiscussionV2Handler(discussionV2Service).SetParity(discussionParityService)
 	contentImportHandler := handlers.NewContentImportHandler(imsccParser, contentMigrationService, cfg.FileStoragePath)
+	contentLane := wireContentMigrationLane(database, fileService, cfg.FileStoragePath, imsccParser, blueprintService, commonsService, contentMigrationHandler, contentImportHandler)
 	batchHandler := handlers.NewBatchHandler(batchService, authz)
 	// handlers
 	coppaHandler := handlers.NewCOPPAHandler(coppaService).SetAuthorizer(authz)
 	ferpaHandler := handlers.NewFERPAHandler(ferpaService).SetAuthorizer(authz)
 	accommodationHandler := handlers.NewAccommodationHandler(accommodationService, assignmentService, authz, auditService)
+	gradingPolicyHandler := handlers.NewGradingPolicyHandler(gradingPolicyService, courseRepo, assignmentRepo, submissionRepo, gradingStandardRepo, observerService)
+	submissionHandler.SetGradingPolicyService(gradingPolicyService)
+	assignmentHandler.SetGradingPolicyService(gradingPolicyService)
+	assignmentOverrideHandler.SetGradingPolicyService(gradingPolicyService)
+	accommodationHandler.SetGradingPolicyService(gradingPolicyService)
 	attendanceHandler := handlers.NewAttendanceHandler(attendanceService, auditService)
 	portfolioHandler := handlers.NewPortfolioHandler(portfolioService, authz)
 	portfolioHandler.SetFileService(fileService)
@@ -919,9 +999,13 @@ func main() {
 	courseHomeHandler := handlers.NewCourseHomeHandler(courseHomeService)
 	peerReviewHandler := handlers.NewPeerReviewHandler(peerReviewService, auditService)
 	peerReviewHandler.SetAssignmentService(assignmentService)
+	gradingUIHandler := wireGradingUI(database, gradingUIDeps{submissionRepo: submissionRepo, assignmentRepo: assignmentRepo, courseRepo: courseRepo, groupMembershipRepo: groupMembershipRepo, peerReviewRepo: peerReviewRepo, enrollmentRepo: enrollmentRepo, attachmentRepo: attachmentRepo, userRepo: userRepo, submissionService: submissionService, peerReviewService: peerReviewService, fileService: fileService, rubricService: rubricService, submissionHandler: submissionHandler, speedGraderHandler: speedGraderHandler, gradebookHandler: gradebookHandler, assignmentHandler: assignmentHandler, peerReviewHandler: peerReviewHandler, rubricAssessmentHandler: rubricAssessmentHandler, gradingPolicyHandler: gradingPolicyHandler})
+	gradingUIHandler.SetAuthorizer(authz)
 	questionBankHandler := handlers.NewQuestionBankHandler(questionBankService)
 	quizQuestionGroupHandler := handlers.NewQuizQuestionGroupHandler(quizService)
 	quizStatisticsHandler := handlers.NewQuizStatisticsHandler(quizService)
+	quizStatisticsHandler.SetUserRepo(userRepo)
+	quizStatisticsHandler.SetAuditService(auditService)
 	setupHandler := handlers.NewSetupHandler(userService, accountRepo, userRepo, database, cfg.JWTSecret, cfg.Environment, cfg.SetupBootstrapToken)
 
 	// Super-Admin Settings Engine handler. settingsService is
@@ -936,7 +1020,9 @@ func main() {
 	customGradebookColumnHandler := handlers.NewCustomGradebookColumnHandler(customGradebookColumnService, auditService)
 	masteryPathHandler := handlers.NewMasteryPathHandler(masteryPathService)
 	appointmentGroupHandler := handlers.NewAppointmentGroupHandler(appointmentGroupService, authz, auditService)
+	appointmentGroupHandler.SetMessenger(conversationService)
 	outcomeProficiencyHandler := handlers.NewOutcomeProficiencyHandler(outcomeProficiencyService, masteryGradebookService)
+	outcomeProficiencyHandler.SetAuditService(auditService) // FERPA audit of the student mastery view (G152)
 	pairingCodeHandler := handlers.NewPairingCodeHandler(pairingCodeService)
 	// Wave 1 handlers
 	discussionCheckpointHandler := handlers.NewDiscussionCheckpointHandler(discussionCheckpointService)
@@ -970,8 +1056,25 @@ func main() {
 	qtiImportService := service.NewQTIImportService(quizRepo, quizQuestionRepo, quizItemBankService, quizStimulusService, cfg.FileStoragePath)
 	qtiImportHandler := handlers.NewQTIImportHandler(qtiImportService)
 
+	// Learner dashboard lane: planner, dashboard customization, activity
+	// stream, missing work, grade summary, observer alerts, profile.
+	learnerRepo := postgres.NewLearnerRepository(database)
+	// Due dates, missing status and course totals all come from the
+	// gradebook's engine (gradingPolicyService).
+	plannerService := service.NewPlannerService(postgres.NewPlannerNoteRepository(database), postgres.NewPlannerOverrideRepository(database), enrollmentRepo, assignmentRepo, quizRepo, calendarEventRepo).
+		SetLearnerRepository(learnerRepo).SetAnnouncementVisibility(announcementService).SetDueDateResolver(gradingPolicyService)
+	learnerDashboardService := service.NewLearnerDashboardService(learnerRepo, enrollmentRepo).SetAnnouncementVisibility(announcementService).
+		SetDueDateResolver(gradingPolicyService)
+	gradeSummaryService := service.NewGradeSummaryService(learnerRepo, enrollmentRepo, gradingPolicyService)
+	observerAlertService := service.NewObserverAlertService(learnerRepo, observerService, learnerDashboardService, gradeSummaryService).SetAnnouncementVisibility(announcementService)
+	learnerHandler := handlers.NewLearnerHandler(plannerService, learnerDashboardService, gradeSummaryService, observerAlertService,
+		service.NewUserProfileService(userRepo, learnerRepo, storageBackend), observerService, userRepo)
+
 	authMiddleware := middleware.NewAuthMiddleware(cfg.JWTSecret, accessTokenService, userRepo, tokenBlacklist)
 	permMiddleware := middleware.NewPermissionMiddleware(enrollmentRepo, userRepo, courseRepo)
+	pagesFilesRoutes := wirePagesFiles(pagesFilesDeps{database: database, pageRepo: pageRepo, courseRepo: courseRepo, pageHandler: pageHandler,
+		fileService: fileService, fileHandler: fileHandler, settingsLookup: settingsLookup,
+		userHandler: userHandler, authz: authz, permMiddleware: permMiddleware, courseHandler: courseHandler, folderRepo: folderRepo})
 
 	// Create router
 	router := &v1.Router{
@@ -988,10 +1091,15 @@ func main() {
 		SubmissionHandler:      submissionHandler,
 		GradebookHandler:       gradebookHandler,
 		GradingStandardHandler: gradingStandardHandler,
+		GradingPolicyHandler:   gradingPolicyHandler,
 
 		DeveloperKeyHandler: developerKeyHandler,
 		AccessTokenHandler:  accessTokenHandler,
 		OAuth2Handler:       oauth2Handler,
+
+		CanvasAPIHandler:    canvasAPIHandler,
+		SessionTokenHandler: sessionTokenHandler,
+		CanvasIDs:           middleware.CanvasIDs(canvasAPIService, userRepo),
 		ExternalToolHandler: externalToolHandler,
 		LTIHandler:          ltiHandler,
 
@@ -1011,6 +1119,7 @@ func main() {
 		LatePolicyHandler:         latePolicyHandler,
 
 		CalendarEventHandler: calendarEventHandler,
+		CalendarHandler:      calendarHandler,
 		ConversationHandler:  conversationHandler,
 		NotificationHandler:  notificationHandler,
 
@@ -1057,11 +1166,16 @@ func main() {
 		CourseHomeHandler: courseHomeHandler,
 
 		PeerReviewHandler:         peerReviewHandler,
+		GradingUIHandler:          gradingUIHandler,
 		QuestionBankHandler:       questionBankHandler,
 		QuizQuestionGroupHandler:  quizQuestionGroupHandler,
 		QuizStatisticsHandler:     quizStatisticsHandler,
 		SetupHandler:              setupHandler,
 		SuperAdminSettingsHandler: superAdminSettingsHandler,
+		PagesFiles:                pagesFilesRoutes,
+		LearnerHandler:            learnerHandler,
+
+		RCEDraftKeyHandler: handlers.NewRCEDraftKeyHandler(cfg.JWTSecret),
 
 		FeatureFlagHandler:           featureFlagHandler,
 		CustomGradebookColumnHandler: customGradebookColumnHandler,
@@ -1072,15 +1186,21 @@ func main() {
 		PairingCodeHandler: pairingCodeHandler,
 
 		DiscussionCheckpointHandler: discussionCheckpointHandler,
+		DiscussionParityHandler:     discussionParityHandler,
 		SmartSearchHandler:          smartSearchHandler,
 		CommonsHandler:              commonsHandler,
 		AIAssistHandler:             aiAssistHandler,
+		MediaObjectHandler:          mediaObjectHandler,
 
 		QuizItemBankHandler:         quizItemBankHandler,
 		QuizStimulusHandler:         quizStimulusHandler,
 		QuizOutcomeAlignmentHandler: quizOutcomeAlignmentHandler,
 
 		QTIImportHandler: qtiImportHandler,
+
+		QuizLifecycleHandler: handlers.NewQuizLifecycleHandler(quizService),
+		ContentExportHandler: contentLane.exportHandler,
+		BlueprintLockGuard:   contentLane.lockGuard,
 
 		GamificationHandler: gamificationHandler,
 
@@ -1096,6 +1216,16 @@ func main() {
 		// the same settingsLookup closure as SMTP / AI Assist / OIDC.
 		SettingsLookup: settingsLookup,
 	}
+	router.AdminAccountsHandler = wireAdminAccounts(adminAccountsWiring{DB: database, PermMiddleware: permMiddleware, CustomRoleService: customRoleService, EnrollmentService: enrollmentService, UserService: userService, LoginPipeline: loginPipeline, ObserverService: observerService, GradingService: gradingService, FileService: fileService, SISImportService: sisImportService, AuditService: auditService, CourseRepo: courseRepo})
+
+	// Modules lane: progression engine + content gate (wire_modules.go).
+	router.ModuleProgressionHandler = wireModulesLane(database, modulesLaneDeps{
+		ModuleService: moduleService, ModuleHandler: moduleHandler, ModuleItemHandler: moduleItemHandler,
+		AssignmentService: assignmentService, MasteryPaths: masteryPathService, CoursePaces: coursePaceService,
+		QuizRepo: quizRepo, TopicRepo: discussionTopicRepo, AttachmentRepo: attachmentRepo,
+		ToolRepo: externalToolRepo, DevKeyRepo: devKeyRepo, CourseRepo: courseRepo, IMSCCParser: imsccParser,
+		LTIService: ltiService, GradingPolicy: gradingPolicyService,
+	})
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
@@ -1218,6 +1348,9 @@ func main() {
 		sched.Register("weeklyDigest", scheduler.WeeklyAt(time.Monday, 7), weeklyJob)
 		sched.Register("dailyDigest", scheduler.DailyAt(7), dailyJob)
 		sched.Register("onerosterAutoSync", scheduler.EveryTick(), scheduler.NewOneRosterAutoSyncJob(onerosterService))
+		sched.Register("linkGradedQuizzes", scheduler.EveryTick(), scheduler.NewQuizAssignmentLinkJob(quizService))
+		sched.Register("observerAlerts", scheduler.EveryTick(), observerAlertService.EvaluateAll)
+		sched.Register("missingSubmissionPolicy", scheduler.EveryTick(), scheduler.NewMissingPolicyJob(gradingPolicyService))
 
 		schedCtx, schedCancel := context.WithCancel(context.Background())
 		defer schedCancel()
@@ -1231,6 +1364,11 @@ func main() {
 		publishJob, deliverJob := scheduler.NewMinuteJobs(announcementService, notificationDeliveryService)
 		minuteSched.Register("publishScheduledAnnouncements", scheduler.EveryTick(), publishJob)
 		minuteSched.Register("deliverImmediateNotifications", scheduler.EveryTick(), deliverJob)
+		minuteSched.Register("autoSubmitOverdueQuizzes", scheduler.EveryTick(), scheduler.NewQuizAutoSubmitJob(quizService))
+		minuteSched.Register("processContentMigrations", scheduler.EveryTick(), contentLane.migrationSweep)
+		minuteSched.Register("processContentExports", scheduler.EveryTick(), contentLane.exportSweep)
+		minuteSched.Register("releaseDelayedDiscussions", scheduler.EveryTick(), discussionParityService.ReleaseDelayedTopicsJob)
+		minuteSched.Register("sisResumePending", scheduler.EveryTick(), sisResumeJob(sisImportService))
 		minuteSched.Start(schedCtx)
 	}
 

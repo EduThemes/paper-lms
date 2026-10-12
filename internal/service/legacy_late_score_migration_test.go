@@ -59,8 +59,8 @@ func TestMigration000077_RecoversEnteredScoreOfLegacyLateGrades(t *testing.T) {
 	letterSub := legacyNonPoints("letter_grade", "B-")
 	percentSub := legacyNonPoints("percent", "80%")
 
-	// Re-apply 000077 on top of the row.
-	require.NoError(t, db.MigrateDown(g, 1))
+	// Re-apply 000077 on top of the row (whatever migrations follow it).
+	require.NoError(t, db.MigrateTo(g, 76))
 	require.NoError(t, db.MigrateUp(g))
 
 	for _, tc := range []struct {

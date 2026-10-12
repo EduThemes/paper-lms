@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Users, FolderOpen, Plus, X, Edit2, Trash2, UserPlus, UserMinus, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Users, FolderOpen, Plus, X, Edit2, Trash2, UserPlus, UserMinus, ToggleLeft, ToggleRight, Crown } from 'lucide-react';
 import { api } from '../services/api';
+import { setGroupLeader, isLeader } from '../services/api_groups_conferences';
+import GroupSetTools from '../components/groups/GroupSetTools';
 import { useAuth } from '../contexts/AuthContext';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
@@ -21,7 +23,7 @@ const GroupsPage = () => {
   // Category modal
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [editingCategory, setEditingCategory] = useState(null);
-  const [categoryForm, setCategoryForm] = useState({ name: '', self_signup: '', group_limit: '', auto_leader: '' });
+  const [categoryForm, setCategoryForm] = useState({ name: '', self_signup: '', group_limit: '', auto_leader: '', create_group_count: '', assign_unassigned_members: false });
 
   // Group modal
   const [showGroupModal, setShowGroupModal] = useState(false);
@@ -76,7 +78,7 @@ const GroupsPage = () => {
 
   const openCreateCategory = () => {
     setEditingCategory(null);
-    setCategoryForm({ name: '', self_signup: '', group_limit: '', auto_leader: '' });
+    setCategoryForm({ name: '', self_signup: '', group_limit: '', auto_leader: '', create_group_count: '', assign_unassigned_members: false });
     setShowCategoryModal(true);
   };
 
@@ -102,6 +104,12 @@ const GroupsPage = () => {
       };
       if (categoryForm.group_limit !== '') {
         payload.group_limit = parseInt(categoryForm.group_limit, 10);
+      }
+      // G100: create the set's groups (and fill them) in the same call.
+      const createCount = parseInt(categoryForm.create_group_count, 10);
+      if (!editingCategory && createCount > 0) {
+        payload.create_group_count = createCount;
+        payload.assign_unassigned_members = !!categoryForm.assign_unassigned_members;
       }
       if (editingCategory) {
         await api.updateGroupCategory(editingCategory.id, payload);
@@ -220,6 +228,20 @@ const GroupsPage = () => {
     }
   };
 
+  // G100: make a member the group leader, or clear the leader.
+  const handleToggleLeader = async (group, member) => {
+    setSaving(true);
+    try {
+      await setGroupLeader(group.id, isLeader(group, member) ? null : member.user_id);
+      setLoading(true);
+      await fetchData();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const getMembersInGroup = (groupId) => {
     return membersByGroup[groupId] || [];
   };
@@ -332,7 +354,7 @@ const GroupsPage = () => {
                           ) : (
                             <ToggleLeft className="w-3.5 h-3.5 text-accent-warning" />
                           )}
-                          <span>Self-signup: {cat.self_signup}</span>
+                          <span>Self-signup: {cat.self_signup === 'restricted' ? 'same section only' : 'on'}</span>
                         </span>
                       )}
                       {cat.group_limit != null && <span>Limit: {cat.group_limit}</span>}
@@ -367,6 +389,13 @@ const GroupsPage = () => {
                   </div>
                 )}
               </div>
+
+              {isTeacher && cat.course_id != null && (
+                <GroupSetTools
+                  category={cat}
+                  onChanged={() => { setLoading(true); fetchData(); }}
+                />
+              )}
 
               {/* Groups within category */}
               <div className="divide-y">
@@ -482,9 +511,23 @@ const GroupsPage = () => {
                               key={member.id}
                               className="inline-flex items-center space-x-1 bg-surface-2 text-text-secondary text-xs px-2 py-1 rounded-full"
                             >
+                              {isLeader(group, member) && (
+                                <Crown className="w-3 h-3 text-accent-warning" aria-label="Group leader" />
+                              )}
                               <span>{member.user ? member.user.name : `User ${member.user_id}`}</span>
+                              {isLeader(group, member) && <span className="sr-only">(leader)</span>}
                               {member.moderator && (
                                 <span className="text-brand-600 font-semibold">(mod)</span>
+                              )}
+                              {isTeacher && (
+                                <button
+                                  onClick={() => handleToggleLeader(group, member)}
+                                  disabled={saving}
+                                  className="text-text-disabled hover:text-accent-warning ml-1 disabled:opacity-50"
+                                  title={isLeader(group, member) ? 'Remove as leader' : 'Make leader'}
+                                >
+                                  <Crown className="w-3 h-3" />
+                                </button>
                               )}
                               {isTeacher && (
                                 <button
@@ -536,9 +579,9 @@ const GroupsPage = () => {
                   onChange={(e) => setCategoryForm({ ...categoryForm, self_signup: e.target.value })}
                   className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                 >
-                  <option value="">Disabled</option>
-                  <option value="enabled">Enabled</option>
-                  <option value="restricted">Restricted</option>
+                  <option value="">Disabled (instructor assigns groups)</option>
+                  <option value="enabled">Students may join a group</option>
+                  <option value="restricted">Students may join a group in their own section</option>
                 </select>
               </div>
               <div>
@@ -564,6 +607,31 @@ const GroupsPage = () => {
                   <option value="random">Random</option>
                 </select>
               </div>
+              {!editingCategory && (
+                <div className="space-y-2">
+                  <div>
+                    <label htmlFor="create-group-count" className="block text-sm font-medium text-text-secondary mb-1">Create groups now</label>
+                    <input
+                      id="create-group-count"
+                      type="number"
+                      min="0"
+                      max="200"
+                      value={categoryForm.create_group_count}
+                      onChange={(e) => setCategoryForm({ ...categoryForm, create_group_count: e.target.value })}
+                      className="w-full border border-border-strong rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      placeholder="0"
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={categoryForm.assign_unassigned_members}
+                      onChange={(e) => setCategoryForm({ ...categoryForm, assign_unassigned_members: e.target.checked })}
+                    />
+                    Assign students to the new groups automatically
+                  </label>
+                </div>
+              )}
               <div className="flex justify-end space-x-2 pt-2">
                 <button
                   type="button"

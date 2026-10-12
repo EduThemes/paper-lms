@@ -9,10 +9,16 @@ import (
 type GradingStandardRepository interface {
 	Create(ctx context.Context, standard *models.GradingStandard) error
 	FindByID(ctx context.Context, id uint) (*models.GradingStandard, error)
+	// FindByIDInAccount is FindByID scoped to a tenant: an Account-level
+	// scheme of accountID or a scheme of one of its courses. Anything
+	// else (another tenant's scheme) is not found.
+	FindByIDInAccount(ctx context.Context, id, accountID uint) (*models.GradingStandard, error)
 	Update(ctx context.Context, standard *models.GradingStandard) error
 	Delete(ctx context.Context, id uint) error
 	ListByCourse(ctx context.Context, courseID uint) ([]models.GradingStandard, error)
 	FindActiveByCourse(ctx context.Context, courseID uint) (*models.GradingStandard, error)
+	// ListByAccount returns the account-level (shared) schemes.
+	ListByAccount(ctx context.Context, accountID uint) ([]models.GradingStandard, error)
 }
 
 type GradingPeriodGroupRepository interface {

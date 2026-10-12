@@ -91,6 +91,11 @@ type PermissionMiddleware struct {
 	enrollmentRepo repository.EnrollmentRepository
 	userRepo       repository.UserRepository
 	courseRepo     repository.CourseRepository
+	// studentViewCheck (optional) identifies Student View sessions.
+	studentViewCheck StudentViewCheck
+	// permResolver enforces custom-role permission sets (G102); see
+	// course_permissions.go. nil = enrollment-type gating only.
+	permResolver CoursePermissionResolver
 }
 
 // NewPermissionMiddleware creates a new permission middleware. courseRepo is
@@ -239,6 +244,23 @@ func (pm *PermissionMiddleware) RequireEnrolled() fiber.Handler {
 	}
 }
 
+// StudentViewCheck reports whether userID is courseID's Student View
+// test student (G076).
+type StudentViewCheck func(c *fiber.Ctx, userID, courseID uint) bool
+
+// SetStudentViewCheck lets Student View sessions into unpublished
+// courses (Canvas lets teachers preview a course before publishing it).
+func (pm *PermissionMiddleware) SetStudentViewCheck(fn StudentViewCheck) {
+	pm.studentViewCheck = fn
+}
+
+// inStudentView: a masquerade session whose user is the course's test
+// student. Real students never match.
+func (pm *PermissionMiddleware) inStudentView(c *fiber.Ctx, userID, courseID uint) bool {
+	realID, _ := c.Locals("masquerade_by").(uint)
+	return realID != 0 && pm.studentViewCheck != nil && pm.studentViewCheck(c, userID, courseID)
+}
+
 // courseUnpublished reports whether a course is still being built. Canvas
 // denies student and observer reads until the course is published
 // (available); a concluded (completed) course stays readable.
@@ -317,25 +339,45 @@ func (pm *PermissionMiddleware) courseGate(c *fiber.Ctx, roleSet map[string]bool
 		return c.Next()
 	}
 
-	enrollment, err := pm.enrollmentRepo.FindByUserAndCourse(c.Context(), userID, courseID, callerAccount)
-	if err != nil || enrollment == nil {
-		return forbidden(c, "user is not enrolled in this course")
+	dec, denial := ResolveCourseEnrollment(c, pm.enrollmentRepo, userID, courseID, callerAccount, course, roleSet)
+	if denial != "" && dec.RoleMismatch && pm.permResolver != nil {
+		// A staff-based custom role may be granted a route its base type
+		// would not pass (G102): resolve the usable enrollment without the
+		// type filter and let the role's permission set decide.
+		if alt, altDenial := ResolveCourseEnrollment(c, pm.enrollmentRepo, userID, courseID, callerAccount, course, nil); altDenial == "" {
+			if allowed, decided := pm.customRoleDecision(c, alt.Enrollment, course, roleSet); decided && allowed {
+				dec, denial = alt, ""
+			}
+		}
 	}
-
-	if enrollment.WorkflowState != "active" {
-		return forbidden(c, "enrollment is not active")
+	if denial != "" {
+		return forbidden(c, denial)
 	}
+	enrollment := dec.Enrollment
 
-	if roleSet != nil && !roleSet[enrollment.Type] {
+	if allowed, decided := pm.customRoleDecision(c, enrollment, course, roleSet); decided && !allowed {
+		// The enrollment carries a custom role and the route maps onto a
+		// permission: the role's permission set decides (G102).
 		return forbidden(c, "insufficient permissions for this action")
 	}
 
-	if course != nil && courseUnpublished(course) && learnerEnrollment(enrollment.Type) {
+	if course != nil && courseUnpublished(course) && learnerEnrollment(enrollment.Type) && !pm.inStudentView(c, userID, courseID) {
 		return forbidden(c, "this course has not been published yet")
 	}
 
-	c.Locals("enrollment_type", enrollment.Type)
-	c.Locals("enrollment_id", enrollment.ID)
+	if msg := readOnlyDenial(c, dec); msg != "" {
+		return forbidden(c, msg)
+	}
+
+	StoreCourseAccess(c, dec)
+	if dec.SectionLimited {
+		if denied, err := pm.sectionLimitedTargetDenied(c, dec, userID, courseID); err != nil || denied {
+			return notFound(c, "user")
+		}
+		if err := pm.storeVisibleUsers(c, dec, courseID); err != nil {
+			return forbidden(c, "could not resolve your section access")
+		}
+	}
 	return c.Next()
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/service"
 	"github.com/EduThemes/paper-lms/internal/settingsctx"
 	"github.com/EduThemes/paper-lms/internal/storage"
 	"github.com/gofiber/fiber/v2"
@@ -49,13 +51,40 @@ func (h *SubmissionHandler) UploadSubmissionFile(c *fiber.Ctx) error {
 	if wrote {
 		return nil
 	}
-	if !strings.Contains(","+strings.ReplaceAll(assignment.SubmissionTypes, " ", "")+",", ",online_upload,") {
+	types := "," + strings.ReplaceAll(assignment.SubmissionTypes, " ", "") + ","
+	acceptsUpload := strings.Contains(types, ",online_upload,")
+	acceptsMedia := strings.Contains(types, ",media_recording,")
+	if !acceptsUpload && !acceptsMedia {
 		return responses.BadRequest(c, "This assignment does not accept file uploads")
 	}
 
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		return responses.BadRequest(c, "File is required")
+	}
+	// A media recording is checked by type below; any other file must
+	// have one of the assignment's allowed extensions.
+	claimedMedia := service.IsMediaContentType(fileHeader.Header.Get("Content-Type"))
+	if !acceptsMedia || !claimedMedia {
+		if !acceptsUpload {
+			return responses.BadRequest(c, "This assignment accepts audio or video recordings only")
+		}
+		if !service.FileExtensionAllowed(assignment, fileHeader.Filename) {
+			return responses.BadRequest(c, "This file type is not allowed for this assignment (allowed: "+assignment.AllowedExtensions+")")
+		}
+	}
+	return h.storeOwnFile(c, fileHeader, func(att *models.Attachment) string {
+		return submissionFileDownloadURL(uint(courseID), uint(assignmentID), userID, att.ID)
+	})
+}
+
+// storeOwnFile stores an uploaded file in the caller's personal (User)
+// context and answers 201 with its JSON (url from urlFor). Used for
+// submission files and for comment attachments / recordings.
+func (h *SubmissionHandler) storeOwnFile(c *fiber.Ctx, fileHeader *multipart.FileHeader, urlFor func(*models.Attachment) string) error {
+	userID, _ := c.Locals("user_id").(uint)
+	if userID == 0 {
+		return responses.Unauthorized(c)
 	}
 	file, err := fileHeader.Open()
 	if err != nil {
@@ -94,7 +123,7 @@ func (h *SubmissionHandler) UploadSubmissionFile(c *fiber.Ctx) error {
 	}
 
 	j := attachmentToJSON(attachment)
-	j["url"] = submissionFileDownloadURL(uint(courseID), uint(assignmentID), userID, attachment.ID)
+	j["url"] = urlFor(attachment)
 	return c.Status(fiber.StatusCreated).JSON(j)
 }
 
@@ -126,11 +155,16 @@ func (h *SubmissionHandler) DownloadSubmissionFile(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid file ID")
 	}
 
-	if _, wrote := h.requireAssignmentInCourse(c, uint(assignmentID), uint(courseID)); wrote {
+	assignment, wrote := h.requireAssignmentInCourse(c, uint(assignmentID), uint(courseID))
+	if wrote {
 		return nil
 	}
 	submission, err := h.submissionService.GetByAssignmentAndUser(c.Context(), uint(assignmentID), uint(userID), callerAccountID(c))
 	if err != nil || submission == nil {
+		return responses.NotFound(c, "file")
+	}
+	// Anonymous grading: graders download through the anonymous route.
+	if callerID, _ := c.Locals("user_id").(uint); callerID != submission.UserID && h.staffAnonymized(c, uint(courseID), assignment) {
 		return responses.NotFound(c, "file")
 	}
 	if !submissionHasAttachment(submission, uint(fileID)) {
@@ -142,13 +176,19 @@ func (h *SubmissionHandler) DownloadSubmissionFile(c *fiber.Ctx) error {
 		return responses.NotFound(c, "file")
 	}
 
-	attachment, err := h.fileService.GetAttachment(c.Context(), uint(fileID), callerAccountID(c))
+	return h.streamSubmissionAttachment(c, uint(fileID), submission.UserID)
+}
+
+// streamSubmissionAttachment streams attachment fileID (already
+// authorized by the caller) and audits a download of a student's file.
+func (h *SubmissionHandler) streamSubmissionAttachment(c *fiber.Ctx, fileID, studentID uint) error {
+	attachment, err := h.fileService.GetAttachment(c.Context(), fileID, callerAccountID(c))
 	if err != nil {
 		return responses.NotFound(c, "file")
 	}
 
-	if callerID, _ := c.Locals("user_id").(uint); callerID != 0 && h.auditService != nil && attachment.UserID != callerID {
-		_ = h.auditService.LogPIIAccess(c.Context(), callerID, submission.UserID, "download", "submission_file_download", "attachments", attachment.ID, c.IP(), c.Get("User-Agent"))
+	if callerID, _ := c.Locals("user_id").(uint); callerID != 0 && studentID != 0 && h.auditService != nil && attachment.UserID != callerID {
+		_ = h.auditService.LogPIIAccess(c.Context(), callerID, studentID, "download", "submission_file_download", "attachments", attachment.ID, c.IP(), c.Get("User-Agent"))
 	}
 
 	safeName := filepath.Base(attachment.Filename)

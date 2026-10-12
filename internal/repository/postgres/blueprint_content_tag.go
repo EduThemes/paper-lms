@@ -44,3 +44,31 @@ func (r *blueprintContentTagRepo) Upsert(ctx context.Context, tag *models.Bluepr
 		}).
 		Create(tag).Error
 }
+
+func (r *blueprintContentTagRepo) ListByChildCourse(ctx context.Context, templateID, childCourseID uint) ([]models.BlueprintContentTag, error) {
+	var tags []models.BlueprintContentTag
+	err := r.db.WithContext(ctx).
+		Where("blueprint_template_id = ? AND child_course_id = ?", templateID, childCourseID).
+		Order("id").
+		Find(&tags).Error
+	return tags, err
+}
+
+func (r *blueprintContentTagRepo) FindByChildItem(ctx context.Context, childCourseID uint, contentType string, childID uint) (*models.BlueprintContentTag, error) {
+	var tag models.BlueprintContentTag
+	err := r.db.WithContext(ctx).
+		Where("child_course_id = ? AND content_type = ? AND child_id = ?", childCourseID, contentType, childID).
+		Order("id DESC").
+		First(&tag).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &tag, nil
+}
+
+func (r *blueprintContentTagRepo) Delete(ctx context.Context, id uint) error {
+	return r.db.WithContext(ctx).Delete(&models.BlueprintContentTag{}, id).Error
+}

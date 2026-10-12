@@ -19,4 +19,32 @@ type QuizSubmission struct {
 	WorkflowState     string     `json:"workflow_state" gorm:"not null;default:'untaken';index"` // untaken, pending_review, complete, settings_only
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
+
+	// FudgePoints is the instructor's whole-attempt adjustment added to
+	// the question total (Canvas fudge_points, migration 000086).
+	FudgePoints *float64 `json:"fudge_points"`
+	// ScoreBeforeRegrade keeps the attempt's score from before the first
+	// regrade that changed it, so the change stays visible.
+	ScoreBeforeRegrade *float64 `json:"score_before_regrade"`
+	// ResultsSeenAt is when the student first viewed this attempt's
+	// results; with one_time_results the results close a short while
+	// after that first view.
+	ResultsSeenAt *time.Time `json:"results_seen_at"`
+
+	// ReadQuestions is a JSON array of question ids the student has moved
+	// past on a one-question-at-a-time + can't-go-back quiz (migration
+	// 000090). Answers to these questions are refused.
+	ReadQuestions string `json:"-" gorm:"column:read_questions;type:text"`
+}
+
+// Quiz submission workflow states.
+const (
+	QuizSubmissionUntaken       = "untaken"
+	QuizSubmissionPendingReview = "pending_review"
+	QuizSubmissionComplete      = "complete"
+)
+
+// IsCompleted reports whether the attempt has been turned in.
+func (qs *QuizSubmission) IsCompleted() bool {
+	return qs != nil && (qs.WorkflowState == QuizSubmissionComplete || qs.WorkflowState == QuizSubmissionPendingReview)
 }

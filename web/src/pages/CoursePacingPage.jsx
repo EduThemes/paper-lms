@@ -5,6 +5,9 @@ import { api } from '../services/api';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
+import BlackoutDatesPanel from '../components/BlackoutDatesPanel';
+import { getCoursePaceTimeline } from '../services/api_modules';
+import { buildPaceRows } from '../utils/moduleProgress';
 
 const CoursePacingPage = () => {
   const { courseId } = useParams();
@@ -43,12 +46,15 @@ const CoursePacingPage = () => {
 
   const fetchPaceDetails = async (paceId) => {
     try {
-      const [itemsResult, timelineResult] = await Promise.all([
+      // G079: every pace-able module item of the course is listed (saved
+      // durations merged in), so a new pace can be planned at all.
+      const [paceItems, timelineResult, modulesResult] = await Promise.all([
         api.getCoursePaceModuleItems(courseId, paceId),
-        api.getCoursePaceTimeline(courseId, paceId),
+        getCoursePaceTimeline(courseId, paceId),
+        api.getModules(courseId, 1, 100, true),
       ]);
-      setModuleItems(itemsResult.data || []);
-      setTimeline(timelineResult.data || []);
+      setModuleItems(buildPaceRows(modulesResult?.data || [], Array.isArray(paceItems) ? paceItems : paceItems?.data || []));
+      setTimeline(timelineResult || []);
     } catch (err) {
       setError(err.message);
     }
@@ -60,7 +66,7 @@ const CoursePacingPage = () => {
 
   const handleDurationChange = (index, value) => {
     const newItems = [...moduleItems];
-    newItems[index] = { ...newItems[index], duration: Math.max(1, parseInt(value) || 1) };
+    newItems[index] = { ...newItems[index], duration: Math.max(0, parseInt(value, 10) || 0) };
     setModuleItems(newItems);
   };
 
@@ -73,8 +79,7 @@ const CoursePacingPage = () => {
         duration: item.duration,
       }));
       await api.updateCoursePaceModuleItems(courseId, pace.id, items);
-      const timelineResult = await api.getCoursePaceTimeline(courseId, pace.id);
-      setTimeline(timelineResult.data || []);
+      setTimeline(await getCoursePaceTimeline(courseId, pace.id));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -92,8 +97,7 @@ const CoursePacingPage = () => {
         end_date: pace.end_date,
       });
       setPace(updated.data || updated);
-      const timelineResult = await api.getCoursePaceTimeline(courseId, pace.id);
-      setTimeline(timelineResult.data || []);
+      setTimeline(await getCoursePaceTimeline(courseId, pace.id));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -402,6 +406,13 @@ const CoursePacingPage = () => {
         </div>
       )}
 
+      {pace && (
+        <BlackoutDatesPanel
+          courseId={courseId}
+          onChange={async () => setTimeline(await getCoursePaceTimeline(courseId, pace.id))}
+        />
+      )}
+
       {/* Timeline / Module Items */}
       {pace && (
         <div className="bg-surface-0 rounded-lg shadow">
@@ -439,8 +450,11 @@ const CoursePacingPage = () => {
                       </div>
                       <div>
                         <p className="text-sm font-medium text-text-primary">
-                          Module Item #{item.module_item_id}
+                          {item.title || `Module Item #${item.module_item_id}`}
                         </p>
+                        {item.module_name && (
+                          <p className="text-xs text-text-disabled">{item.module_name}</p>
+                        )}
                         {timelineEntry && (
                           <p className="text-xs text-text-tertiary">
                             Due: {formatDate(timelineEntry.projected_date)}
@@ -452,7 +466,8 @@ const CoursePacingPage = () => {
                       <label className="text-xs text-text-tertiary">Days:</label>
                       <input
                         type="number"
-                        min="1"
+                        min="0"
+                        aria-label={`Days for ${item.title || `module item ${item.module_item_id}`}`}
                         value={item.duration}
                         onChange={(e) => handleDurationChange(index, e.target.value)}
                         className="w-16 border border-border-strong rounded px-2 py-1 text-sm text-center"
@@ -463,7 +478,7 @@ const CoursePacingPage = () => {
                         <div
                           className="bg-indigo-500 h-2 rounded-full"
                           style={{
-                            width: `${Math.min(100, (item.duration / Math.max(...moduleItems.map((i) => i.duration))) * 100)}%`,
+                            width: `${Math.min(100, (item.duration / Math.max(1, ...moduleItems.map((i) => i.duration))) * 100)}%`,
                           }}
                         />
                       </div>

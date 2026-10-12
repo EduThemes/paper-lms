@@ -241,6 +241,7 @@ func TestPortfolio_ImportFromCourse(t *testing.T) {
 	}, nil)
 	f.assignmentRepo.On("FindByID", mock.Anything, uint(40), uint(1)).Return(&models.Assignment{ID: 40, CourseID: 300, Name: "Lab report"}, nil)
 	f.artifactRepo.On("Create", mock.Anything, mock.Anything).Return(nil)
+	f.artifactRepo.On("ListByPortfolioID", mock.Anything, uint(10), mock.Anything).Return(&repository.PaginatedResult[models.PortfolioArtifact]{}, nil)
 
 	resp := testutil.MakeRequest(f.app, http.MethodPost, "/portfolios/10/import", body(`{"course_id":300}`))
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -250,6 +251,7 @@ func TestPortfolio_ImportFromCourse(t *testing.T) {
 
 	// Explicit submission ids: a classmate's submission is skipped.
 	f2 := newPortfolioFixture(t, 5)
+	f2.artifactRepo.On("ListByPortfolioID", mock.Anything, uint(10), mock.Anything).Return(&repository.PaginatedResult[models.PortfolioArtifact]{}, nil)
 	f2.submissionRepo.On("FindByID", mock.Anything, uint(9), uint(1)).Return(&models.Submission{ID: 9, UserID: 6, AssignmentID: 40, SubmittedAt: &now}, nil)
 	resp = testutil.MakeRequest(f2.app, http.MethodPost, "/portfolios/10/import", body(`{"course_id":300,"submission_ids":[9]}`))
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -368,6 +370,7 @@ func TestPortfolio_ImportFromCourse_DescriptionIsPlainText(t *testing.T) {
 	f.artifactRepo.On("Create", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		saved = args.Get(1).(*models.PortfolioArtifact)
 	}).Return(nil)
+	f.artifactRepo.On("ListByPortfolioID", mock.Anything, uint(10), mock.Anything).Return(&repository.PaginatedResult[models.PortfolioArtifact]{}, nil)
 
 	resp := testutil.MakeRequest(f.app, http.MethodPost, "/portfolios/10/import", body(`{"course_id":300}`))
 	require.Equal(t, http.StatusCreated, resp.StatusCode)

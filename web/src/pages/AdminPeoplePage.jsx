@@ -13,11 +13,14 @@
 // stays exactly where it was.
 
 import React, { useState, useEffect } from 'react';
-import { Search } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Search, UserPlus } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
 import Page from '../components/Page';
 import { useUsersList, useUpdateUserRole } from '../services/apiQueries';
+import { useBulkSuspend } from '../services/adminAccountsQueries';
+import AddUserForm from '../components/admin/AddUserForm';
 
 // Roles an admin can assign from this page. super_admin is never
 // assignable here, but a super_admin row must still render as such (it
@@ -64,6 +67,25 @@ const AdminPeoplePage = () => {
     updateRole.mutate({ userId, role });
   };
 
+  // G114: add users, open a user's detail page, bulk suspend.
+  const [showAdd, setShowAdd] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
+  const bulk = useBulkSuspend({
+    onSuccess: (res) => {
+      setSelected(new Set());
+      setStatusMsg(`${res?.count ?? 0} user(s) updated`);
+      setTimeout(() => setStatusMsg(''), 2000);
+    },
+  });
+  const toggleSelected = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   return (
     <Page
       query={query}
@@ -83,10 +105,43 @@ const AdminPeoplePage = () => {
                     {users.length} user{users.length === 1 ? '' : 's'}
                   </p>
                 </div>
-                {statusMsg && (
-                  <span className="text-xs text-accent-success" role="status">{statusMsg}</span>
-                )}
+                <div className="flex items-center gap-3">
+                  {statusMsg && (
+                    <span className="text-xs text-accent-success" role="status">{statusMsg}</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowAdd((v) => !v)}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
+                  >
+                    <UserPlus className="w-4 h-4" /> Add user
+                  </button>
+                </div>
               </div>
+
+              {showAdd && <AddUserForm onClose={() => setShowAdd(false)} />}
+
+              {selected.size > 0 && (
+                <div className="mb-4 flex items-center gap-2 rounded-md border border-border-default bg-surface-1 px-3 py-2 text-sm">
+                  <span>{selected.size} selected</span>
+                  <button
+                    type="button"
+                    disabled={bulk.isPending}
+                    onClick={() => bulk.mutate({ userIds: [...selected], suspended: true })}
+                    className="rounded-md border border-accent-danger/40 px-2 py-1 text-xs text-accent-danger"
+                  >
+                    Suspend
+                  </button>
+                  <button
+                    type="button"
+                    disabled={bulk.isPending}
+                    onClick={() => bulk.mutate({ userIds: [...selected], suspended: false })}
+                    className="rounded-md border border-border-strong px-2 py-1 text-xs"
+                  >
+                    Unsuspend
+                  </button>
+                </div>
+              )}
 
               <div className="mb-4 relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" />
@@ -112,6 +167,7 @@ const AdminPeoplePage = () => {
                 <table className="w-full text-sm">
                   <thead className="bg-surface-1 text-text-secondary">
                     <tr>
+                      <th className="px-4 py-2 text-left font-medium"><span className="sr-only">Select</span></th>
                       <th className="px-4 py-2 text-left font-medium">Name</th>
                       <th className="px-4 py-2 text-left font-medium">Email</th>
                       <th className="px-4 py-2 text-left font-medium">Role</th>
@@ -129,7 +185,21 @@ const AdminPeoplePage = () => {
                       const options = role === 'super_admin' ? ['super_admin', ...ROLES] : ROLES;
                       return (
                         <tr key={u.id} className="border-t border-border-default hover:bg-surface-1">
-                          <td className="px-4 py-2 font-medium text-text-primary">{u.name || '(unnamed)'}</td>
+                          <td className="px-4 py-2">
+                            <input
+                              type="checkbox"
+                              checked={selected.has(u.id)}
+                              disabled={isSelf || isProtected}
+                              onChange={() => toggleSelected(u.id)}
+                              aria-label={`Select ${u.name || 'user'}`}
+                            />
+                          </td>
+                          <td className="px-4 py-2 font-medium text-text-primary">
+                            <Link to={`/admin/users/${u.id}`} className="text-brand-600 hover:underline">{u.name || '(unnamed)'}</Link>
+                            {u.suspended && (
+                              <span className="ml-2 rounded-full border border-accent-danger/30 bg-accent-danger/10 px-2 py-0.5 text-xs text-accent-danger">suspended</span>
+                            )}
+                          </td>
                           <td className="px-4 py-2 text-text-secondary">{u.email || '—'}</td>
                           <td className="px-4 py-2">
                             <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${ROLE_BADGE[role] || ROLE_BADGE.user}`}>

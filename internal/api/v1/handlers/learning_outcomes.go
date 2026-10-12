@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
@@ -461,6 +463,19 @@ func (h *LearningOutcomeHandler) UpdateOutcome(c *fiber.Ctx) error {
 	if input.CalculationInt != nil {
 		outcome.CalculationInt = *input.CalculationInt
 	}
+	if input.CalculationMethod == nil && input.CalculationInt == nil {
+		// G150: rows written before validation may hold an impossible
+		// parameter (e.g. n_mastery with the column default 65). An edit
+		// that doesn't touch the calculation repairs it to the method's
+		// default instead of failing validation.
+		probe := *outcome
+		if service.NormalizeOutcomeCalculation(&probe) != nil {
+			if !service.OutcomeCalculationMethods[outcome.CalculationMethod] {
+				outcome.CalculationMethod = "decaying_average"
+			}
+			outcome.CalculationInt = 0
+		}
+	}
 	if input.MasteryPoints != nil {
 		outcome.MasteryPoints = *input.MasteryPoints
 	}
@@ -478,6 +493,9 @@ func (h *LearningOutcomeHandler) UpdateOutcome(c *fiber.Ctx) error {
 	}
 
 	if err := h.outcomeService.UpdateOutcome(c.Context(), outcome); err != nil {
+		if errors.Is(err, service.ErrInvalidOutcomeCalculation) {
+			return responses.BadRequest(c, err.Error())
+		}
 		return responses.InternalError(c, "Could not update outcome")
 	}
 
@@ -832,6 +850,16 @@ func (h *LearningOutcomeHandler) ListAlignments(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch alignments")
 	}
+
+	// F-013 parent tie: an assignment_id filter must not list another
+	// course's alignments.
+	kept := alignments[:0]
+	for _, a := range alignments {
+		if a.CourseID == uint(courseID) {
+			kept = append(kept, a)
+		}
+	}
+	alignments = kept
 
 	result := make([]fiber.Map, len(alignments))
 	for i, a := range alignments {

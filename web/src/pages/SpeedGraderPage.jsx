@@ -9,13 +9,15 @@ import {
   Clock,
   AlertCircle,
   MinusCircle,
-  Send,
   Award,
-  MessageSquare,
   FileText,
   Grid,
+  History,
+  Users,
+  Scale,
 } from 'lucide-react';
 import { api } from '../services/api';
+import gradingApi from '../services/api_grading_ui';
 import { useAuth } from '../contexts/AuthContext';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
@@ -34,6 +36,21 @@ import {
   TooltipTrigger,
 } from '../components/ui/tooltip';
 import { normalizeRubricScores } from '../utils/grading';
+import DiscussionSubmissionPosts from '../components/discussions/DiscussionSubmissionPosts';
+import CommentThread from '../components/grading/CommentThread';
+import AttachmentPreview from '../components/grading/AttachmentPreview';
+import DocumentViewer from '../components/DocumentViewer';
+import { DocumentImage } from '../components/grading/AnnotatableDocument';
+import {
+  studentKey,
+  submissionKeyOf,
+  filterStudents,
+  sortStudents,
+  studentStatus,
+  STATUS_FILTERS,
+  SORT_OPTIONS,
+  mergeGradedSubmission,
+} from '../utils/speedGrader';
 
 const STATUS_CONFIG = {
   submitted: { label: 'Submitted', color: 'bg-brand-100 text-brand-800', icon: CheckCircle, dot: 'bg-brand-500' },
@@ -61,126 +78,172 @@ const initialsOf = (name, fallbackId) => {
     .toUpperCase();
 };
 
-const StudentListItem = React.memo(
-  function StudentListItem({ student, isSelected, pointsPossible, onSelect, onKeyDown, itemRef }) {
-    const config = getStatusConfig(student);
-    const score = student.submission?.score;
-    const hasScore = score !== null && score !== undefined;
-    return (
-      <button
-        ref={itemRef}
-        onClick={() => onSelect(student.user_id)}
-        onKeyDown={onKeyDown}
-        role="option"
-        aria-selected={isSelected}
-        className={`w-full text-left px-3 py-2.5 border-b border-border-subtle flex items-center space-x-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
-          isSelected
-            ? 'bg-brand-50 border-l-4 border-l-blue-500'
-            : 'hover:bg-surface-1 border-l-4 border-l-transparent'
-        }`}
-      >
-        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${config.dot}`} aria-hidden="true" />
-        <Avatar className="h-7 w-7 flex-shrink-0">
-          <AvatarFallback className="text-xs">
-            {initialsOf(student.user_name, student.user_id)}
-          </AvatarFallback>
-        </Avatar>
-        <div className="flex-1 min-w-0">
-          <p className={`text-sm truncate ${isSelected ? 'font-semibold text-blue-900' : 'text-text-secondary'}`}>
-            {student.user_name || `User ${student.user_id}`}
-          </p>
-          <p className="text-xs text-text-secondary">
-            {hasScore ? `${score}/${pointsPossible ?? 0}` : config.label}
-          </p>
-        </div>
-      </button>
-    );
-  },
-  (prev, next) =>
-    prev.student.user_id === next.student.user_id &&
-    prev.student.submission?.workflow_state === next.student.submission?.workflow_state &&
-    prev.student.submission?.score === next.student.submission?.score &&
-    prev.isSelected === next.isSelected &&
-    prev.pointsPossible === next.pointsPossible &&
-    prev.onSelect === next.onSelect &&
-    prev.onKeyDown === next.onKeyDown
-);
+const displayName = (student) => student?.user_name || (student?.user_id ? `User ${student.user_id}` : 'Student');
 
-const RubricCriterionRow = React.memo(
-  function RubricCriterionRow({ criterion, score, comment, disabled, onScoreChange, onCommentChange }) {
-    const cId = criterion.id || criterion.description;
-    const ratings = criterion.ratings || [];
-    return (
-      <div className="border-b border-border-subtle pb-3 last:border-0 last:pb-0">
-        <div className="flex items-center justify-between mb-1">
-          <p className="text-xs font-semibold text-text-secondary">{criterion.description}</p>
-          <Badge variant="outline" className="text-xs">{criterion.points} pts</Badge>
-        </div>
-        {criterion.long_description && (
-          <p className="text-xs text-text-secondary mb-2">{criterion.long_description}</p>
-        )}
-        {ratings.length > 0 && (
-          <div className="flex flex-wrap gap-1 mb-2">
-            {ratings.map((rating) => {
-              const isSelected = parseFloat(score) === rating.points;
-              return (
-                <button
-                  key={rating.id || rating.description}
-                  type="button"
-                  onClick={() => onScoreChange(cId, rating.points)}
-                  className={`text-xs px-2 py-1 rounded border transition-colors ${
-                    isSelected
-                      ? 'bg-brand-100 border-blue-400 text-brand-800 font-medium'
-                      : 'bg-surface-0 border-border-default text-text-secondary hover:border-blue-300 hover:bg-brand-50'
-                  }`}
-                  title={rating.description}
-                  disabled={disabled}
-                >
-                  {rating.points} - {rating.description}
-                </button>
-              );
-            })}
-          </div>
-        )}
-        <div className="flex items-center gap-2">
-          <input
-            type="number"
-            step="any"
-            min="0"
-            max={criterion.points}
-            value={score ?? ''}
-            onChange={(e) => onScoreChange(cId, e.target.value)}
-            placeholder="Pts"
-            className="w-16 border border-border-strong rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500"
-            disabled={disabled}
-          />
-          <input
-            type="text"
-            value={comment || ''}
-            onChange={(e) => onCommentChange(cId, e.target.value)}
-            placeholder="Comment..."
-            className="flex-1 border border-border-strong rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500"
-            disabled={disabled}
-          />
-        </div>
+const StudentListItem = React.memo(function StudentListItem({ student, statuses, isSelected, pointsPossible, onSelect, onKeyDown, itemRef }) {
+  const config = getStatusConfig(student);
+  const score = student.submission?.score;
+  const hasScore = score !== null && score !== undefined;
+  const key = studentKey(student);
+  const status = studentStatus(student.submission);
+  const custom = statuses.find((s) => s.id === student.submission?.custom_grade_status_id);
+  return (
+    <button
+      ref={itemRef}
+      onClick={() => onSelect(key)}
+      onKeyDown={onKeyDown}
+      role="option"
+      aria-selected={isSelected}
+      className={`w-full text-left px-3 py-2.5 border-b border-border-subtle flex items-center space-x-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+        isSelected ? 'bg-brand-50 border-l-4 border-l-blue-500' : 'hover:bg-surface-1 border-l-4 border-l-transparent'
+      }`}
+    >
+      <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${config.dot}`} aria-hidden="true" />
+      <Avatar className="h-7 w-7 flex-shrink-0">
+        <AvatarFallback className="text-xs">{initialsOf(student.user_name, key)}</AvatarFallback>
+      </Avatar>
+      <div className="flex-1 min-w-0">
+        <p className={`text-sm truncate ${isSelected ? 'font-semibold text-blue-900' : 'text-text-secondary'}`}>{displayName(student)}</p>
+        <p className="text-xs text-text-secondary flex items-center gap-1">
+          <span>{student.submission?.excused ? 'Excused' : hasScore ? `${score}/${pointsPossible ?? 0}` : config.label}</span>
+          {status === 'late' && <span className="text-accent-danger">· Late</span>}
+          {status === 'missing' && <span className="text-accent-danger">· Missing</span>}
+          {status === 'extended' && <span className="text-text-tertiary">· Extended</span>}
+          {custom && (
+            <span className="inline-flex items-center gap-1">
+              · <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: custom.color }} aria-hidden="true" />
+              {custom.name}
+            </span>
+          )}
+        </p>
+        {student.group_name && <p className="text-[11px] text-text-tertiary truncate">{student.group_name}</p>}
       </div>
-    );
-  },
-  (prev, next) => {
-    const prevId = prev.criterion.id || prev.criterion.description;
-    const nextId = next.criterion.id || next.criterion.description;
-    return (
-      prevId === nextId &&
-      prev.score === next.score &&
-      prev.comment === next.comment &&
-      prev.disabled === next.disabled &&
-      prev.onScoreChange === next.onScoreChange &&
-      prev.onCommentChange === next.onCommentChange
-    );
-  }
-);
+    </button>
+  );
+});
 
-const SubmissionPreview = React.memo(function SubmissionPreview({ student }) {
+const RubricCriterionRow = React.memo(function RubricCriterionRow({ criterion, score, comment, disabled, onScoreChange, onCommentChange }) {
+  const cId = criterion.id || criterion.description;
+  const ratings = criterion.ratings || [];
+  return (
+    <div className="border-b border-border-subtle pb-3 last:border-0 last:pb-0">
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-xs font-semibold text-text-secondary">{criterion.description}</p>
+        <Badge variant="outline" className="text-xs">{criterion.points} pts</Badge>
+      </div>
+      {criterion.long_description && <p className="text-xs text-text-secondary mb-2">{criterion.long_description}</p>}
+      {ratings.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {ratings.map((rating) => {
+            const isSelected = parseFloat(score) === rating.points;
+            return (
+              <button
+                key={rating.id || rating.description}
+                type="button"
+                onClick={() => onScoreChange(cId, rating.points)}
+                className={`text-xs px-2 py-1 rounded border transition-colors ${
+                  isSelected
+                    ? 'bg-brand-100 border-blue-400 text-brand-800 font-medium'
+                    : 'bg-surface-0 border-border-default text-text-secondary hover:border-blue-300 hover:bg-brand-50'
+                }`}
+                title={rating.description}
+                disabled={disabled}
+              >
+                {rating.points} - {rating.description}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          step="any"
+          min="0"
+          max={criterion.points}
+          value={score ?? ''}
+          onChange={(e) => onScoreChange(cId, e.target.value)}
+          placeholder="Pts"
+          aria-label={`Points for ${criterion.description}`}
+          className="w-16 border border-border-strong rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500"
+          disabled={disabled}
+        />
+        <input
+          type="text"
+          value={comment || ''}
+          onChange={(e) => onCommentChange(cId, e.target.value)}
+          placeholder="Comment..."
+          aria-label={`Comment for ${criterion.description}`}
+          className="flex-1 border border-border-strong rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500"
+          disabled={disabled}
+        />
+      </div>
+    </div>
+  );
+});
+
+// SubmissionContent renders one attempt (the current submission or an
+// entry of submission_history).
+const SubmissionContent = ({ sub, assignment, student, courseId }) => {
+  if (!sub) return null;
+  const isAnnotation = sub.submission_type === 'student_annotation';
+  return (
+    <div className="space-y-4">
+      {sub.body && <SubmissionBody className="prose max-w-none text-text-secondary" body={sub.body} />}
+      {sub.url && (
+        <a href={sub.url} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline break-all block">
+          {sub.url}
+        </a>
+      )}
+      {sub.attachments?.length > 0 && (
+        <div className="space-y-4">
+          {sub.attachments.map((file, idx) => (
+            <AttachmentPreview key={file.id || idx} file={file} height={640} />
+          ))}
+        </div>
+      )}
+      {isAnnotation && assignment.annotatable_attachment_id && (
+        student.user_id ? (
+          <div className="h-[720px]">
+            <DocumentViewer
+              courseId={courseId}
+              assignmentId={assignment.id}
+              userId={student.user_id}
+              submissionId={sub.id}
+              documentNode={<DocumentImage doc={{ url: `/api/v1/courses/${courseId}/assignments/${assignment.id}/annotatable_document`, content_type: 'application/pdf' }} />}
+            />
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <DocumentImage doc={{ url: `/api/v1/courses/${courseId}/assignments/${assignment.id}/annotatable_document`, content_type: 'application/pdf' }} height={560} />
+            <p className="text-xs text-text-tertiary">
+              The student&apos;s annotations open in DocViewer once anonymity is lifted (after grades are posted).
+            </p>
+          </div>
+        )
+      )}
+      {sub.submission_type === 'discussion_topic' && student.user_id && (
+        <DiscussionSubmissionPosts courseId={courseId} assignmentId={assignment.id} userId={student.user_id} />
+      )}
+      {sub.submission_type === 'basic_lti_launch' && !sub.url && (
+        <p className="text-sm text-text-secondary">Submitted through an external tool.</p>
+      )}
+      {!sub.body && !sub.url && !sub.attachments?.length && !isAnnotation && sub.submission_type !== 'basic_lti_launch' && sub.submission_type !== 'discussion_topic' && (
+        <p className="text-text-secondary italic">No content available for this submission type.</p>
+      )}
+      {sub.submission_type === 'online_text_entry' && student.user_id && (
+        <Link
+          to={`/courses/${courseId}/assignments/${assignment.id}/submissions/${student.user_id}/docviewer`}
+          className="inline-block text-xs text-brand-600 hover:underline"
+        >
+          Annotate in DocViewer
+        </Link>
+      )}
+    </div>
+  );
+};
+
+const SubmissionPreview = ({ student, assignment, courseId, viewAttempt, onViewAttempt }) => {
   if (!student) {
     return (
       <Card className="flex-1 flex items-center justify-center text-text-secondary p-6">
@@ -188,35 +251,65 @@ const SubmissionPreview = React.memo(function SubmissionPreview({ student }) {
       </Card>
     );
   }
-
   const config = getStatusConfig(student);
   const sub = student.submission;
-  const isUnsubmitted = !sub || sub.workflow_state === 'unsubmitted';
+  const history = Array.isArray(student.submission_history) ? student.submission_history : [];
+  const isUnsubmitted = !sub || sub.workflow_state === 'unsubmitted' || (!sub.submitted_at && !sub.submission_type);
+  const shown = viewAttempt != null ? history.find((h) => h.attempt === viewAttempt) : null;
+  const current = shown ? { ...shown } : sub;
 
   return (
     <Card className="flex-1 overflow-hidden flex flex-col">
-      <div className="p-4 border-b bg-surface-1 flex items-center justify-between">
+      <div className="p-4 border-b bg-surface-1 flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center space-x-3">
           <Avatar className="h-9 w-9">
-            <AvatarFallback>{initialsOf(student.user_name, student.user_id)}</AvatarFallback>
+            <AvatarFallback>{initialsOf(student.user_name, studentKey(student))}</AvatarFallback>
           </Avatar>
           <div>
-            <p className="font-semibold text-text-primary">
-              {student.user_name || `User ${student.user_id}`}
-            </p>
-            {sub?.submitted_at && (
+            <p className="font-semibold text-text-primary">{displayName(student)}</p>
+            {current?.submitted_at && (
               <p className="text-xs text-text-tertiary">
-                Submitted {formatDate(sub.submitted_at)}
-                {sub.late && <span className="ml-2 text-accent-danger font-medium">LATE</span>}
+                Submitted {formatDate(current.submitted_at)}
+                {current.late && <span className="ml-2 text-accent-danger font-medium">LATE</span>}
               </p>
+            )}
+            {student.group_name && (
+              <p className="text-xs text-text-tertiary flex items-center gap-1"><Users className="w-3 h-3" /> {student.group_name}</p>
             )}
           </div>
         </div>
-        <Badge className={config.color} variant="outline">{config.label}</Badge>
+        <div className="flex items-center gap-2">
+          {history.length > 1 && (
+            <label className="flex items-center gap-1 text-xs text-text-secondary">
+              <History className="w-3.5 h-3.5" />
+              <span className="sr-only">Attempt</span>
+              <select
+                aria-label="Submission attempt"
+                value={viewAttempt ?? ''}
+                onChange={(e) => onViewAttempt(e.target.value === '' ? null : Number(e.target.value))}
+                className="border border-border-strong rounded px-1.5 py-1 text-xs"
+              >
+                <option value="">Current attempt{sub?.attempt ? ` (${sub.attempt})` : ''}</option>
+                {history
+                  .filter((h) => h.attempt !== sub?.attempt)
+                  .map((h) => (
+                    <option key={h.attempt} value={h.attempt}>
+                      Attempt {h.attempt} — {formatDate(h.submitted_at)}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          )}
+          {sub?.excused ? (
+            <Badge variant="outline" className="bg-surface-2">Excused</Badge>
+          ) : (
+            <Badge className={config.color} variant="outline">{config.label}</Badge>
+          )}
+        </div>
       </div>
 
       <div className="p-6 flex-1 overflow-y-auto">
-        {isUnsubmitted ? (
+        {isUnsubmitted && !shown ? (
           <div className="flex flex-col items-center justify-center h-full text-text-secondary">
             <AlertCircle className="w-12 h-12 mb-3" />
             <p className="text-lg font-medium">No Submission</p>
@@ -224,69 +317,22 @@ const SubmissionPreview = React.memo(function SubmissionPreview({ student }) {
           </div>
         ) : (
           <div>
-            {sub.submission_type && (
+            {current?.submission_type && (
               <div className="flex items-center space-x-2 mb-4 text-sm text-text-tertiary">
                 <FileText className="w-4 h-4" />
                 <span>
-                  Type: {sub.submission_type}
-                  {sub.attempt > 0 && ` (Attempt ${sub.attempt})`}
+                  Type: {current.submission_type}
+                  {current.attempt > 0 && ` (Attempt ${current.attempt})`}
                 </span>
               </div>
             )}
-
-            {sub.body && (
-              <SubmissionBody className="prose max-w-none text-text-secondary" body={sub.body} />
-            )}
-
-            {sub.url && (
-              <div className="mt-4">
-                <a
-                  href={sub.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-brand-600 hover:underline break-all"
-                >
-                  {sub.url}
-                </a>
-              </div>
-            )}
-
-            {sub.attachments?.length > 0 && (
-              <div className="mt-4">
-                <h4 className="text-sm font-medium text-text-secondary mb-2">Attachments</h4>
-                <div className="space-y-2">
-                  {sub.attachments.map((file, idx) => (
-                    <a
-                      key={file.id || idx}
-                      href={file.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 p-2 border border-border-default rounded hover:bg-surface-1 text-sm"
-                    >
-                      <FileText className="w-4 h-4 text-text-disabled flex-shrink-0" />
-                      <span className="text-brand-600 truncate">{file.display_name || file.filename}</span>
-                      {file.size && (
-                        <span className="text-xs text-text-secondary ml-auto flex-shrink-0">
-                          {file.size > 1048576
-                            ? `${(file.size / 1048576).toFixed(1)} MB`
-                            : `${Math.round(file.size / 1024)} KB`}
-                        </span>
-                      )}
-                    </a>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {!sub.body && !sub.url && !sub.attachments?.length && (
-              <p className="text-text-secondary italic">No content available for this submission type.</p>
-            )}
+            <SubmissionContent sub={{ ...current, id: sub?.id }} assignment={assignment} student={student} courseId={courseId} />
           </div>
         )}
       </div>
     </Card>
   );
-});
+};
 
 const SpeedGraderSkeleton = () => (
   <Layout>
@@ -321,16 +367,20 @@ const SpeedGraderPage = () => {
   const { announce } = useLiveRegion();
   const [assignment, setAssignment] = useState(null);
   const [students, setStudents] = useState([]);
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [statuses, setStatuses] = useState([]);
+  const [selectedKey, setSelectedKey] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [actionError, setActionError] = useState(null);
+
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('name');
+  const [groupBy, setGroupBy] = useState(false);
+  const [viewAttempt, setViewAttempt] = useState(null);
 
   const [gradeInput, setGradeInput] = useState('');
   const [grading, setGrading] = useState(false);
   const [gradeSuccess, setGradeSuccess] = useState(false);
-
-  const [commentText, setCommentText] = useState('');
-  const [submittingComment, setSubmittingComment] = useState(false);
 
   const [rubric, setRubric] = useState(null);
   const [rubricCriteria, setRubricCriteria] = useState([]);
@@ -347,6 +397,7 @@ const SpeedGraderPage = () => {
       const result = await api.getSpeedGraderData(courseId, assignmentId);
       setAssignment(result.assignment);
       setStudents(result.students || []);
+      setStatuses(Array.isArray(result.custom_grade_statuses) ? result.custom_grade_statuses : []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -356,8 +407,29 @@ const SpeedGraderPage = () => {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const selectedStudent = students[selectedIndex] || null;
+  const anonymous = !!assignment?.anonymize_students;
+  const moderatedPending = !!assignment?.moderated_grading && !assignment?.grades_published;
 
+  const visibleStudents = useMemo(() => {
+    const filtered = filterStudents(students, statusFilter);
+    return sortStudents(filtered, sortBy, { groupBy: groupBy && !!assignment?.is_group_assignment, anonymous });
+  }, [students, statusFilter, sortBy, groupBy, assignment, anonymous]);
+
+  useEffect(() => {
+    if (visibleStudents.length === 0) return;
+    if (!selectedKey || !visibleStudents.some((s) => studentKey(s) === selectedKey)) {
+      setSelectedKey(studentKey(visibleStudents[0]));
+    }
+  }, [visibleStudents, selectedKey]);
+
+  const selectedIndex = visibleStudents.findIndex((s) => studentKey(s) === selectedKey);
+  const selectedStudent = selectedIndex >= 0 ? visibleStudents[selectedIndex] : null;
+
+  const updateStudent = useCallback((key, fn) => {
+    setStudents((prev) => prev.map((s) => (studentKey(s) === key ? fn(s) : s)));
+  }, []);
+
+  // Rubric
   useEffect(() => {
     if (!courseId || !assignmentId) return;
     api.getAssignmentRubric(courseId, assignmentId)
@@ -375,219 +447,222 @@ const SpeedGraderPage = () => {
   }, [courseId, assignmentId]);
 
   useEffect(() => {
-    if (!rubric || !selectedStudent) {
-      setRubricScores({});
-      setExistingAssessmentId(null);
-      return;
-    }
+    setRubricScores({});
+    setExistingAssessmentId(null);
+    if (!rubric || !selectedStudent) return;
     const assocId = rubric.rubric_association?.id;
     if (!assocId) return;
-
+    const parse = (raw) => {
+      try { return (typeof raw === 'string' ? JSON.parse(raw) : raw) || {}; } catch { return {}; }
+    };
+    if (selectedStudent.anonymous_id) {
+      gradingApi.getAnonymousRubricAssessment(courseId, assignmentId, selectedStudent.anonymous_id)
+        .then((a) => {
+          if (a) { setExistingAssessmentId(a.id); setRubricScores(parse(a.data)); }
+        })
+        .catch(() => {});
+      return;
+    }
     api.getRubricAssessments(courseId, assocId, 1, 200)
       .then((result) => {
-        const assessments = result.data || [];
-        const existing = assessments.find((a) => a.user_id === selectedStudent.user_id);
+        const existing = (result.data || []).find((a) => a.user_id === selectedStudent.user_id);
         if (existing) {
           setExistingAssessmentId(existing.id);
-          try {
-            const data = typeof existing.data === 'string' ? JSON.parse(existing.data) : existing.data;
-            setRubricScores(data || {});
-          } catch {
-            setRubricScores({});
-          }
-        } else {
-          setExistingAssessmentId(null);
-          setRubricScores({});
+          setRubricScores(parse(existing.data));
         }
       })
-      .catch(() => { setExistingAssessmentId(null); setRubricScores({}); });
-  }, [courseId, rubric, selectedStudent?.user_id]);
+      .catch(() => {});
+  }, [courseId, assignmentId, rubric, selectedStudent?.user_id, selectedStudent?.anonymous_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The grade box shows the ENTERED score (B021) — or, while a moderated
+  // assignment is unpublished, the caller's own provisional grade.
   useEffect(() => {
-    if (students.length > 0 && students[selectedIndex]) {
-      const student = students[selectedIndex];
-      // B021: edit the ENTERED score; the final score may carry a late
-      // deduction, and re-posting it would deduct again.
-      const sub = student.submission;
-      const score = sub?.entered_score ?? sub?.score;
-      setGradeInput(score !== null && score !== undefined ? String(score) : '');
-      setGradeSuccess(false);
+    if (!selectedStudent) return;
+    const sub = selectedStudent.submission;
+    let score = sub?.entered_score ?? sub?.score;
+    if (moderatedPending) {
+      const mine = (selectedStudent.provisional_grades || []).find((p) => p.mine && !p.final);
+      score = mine ? mine.score : null;
     }
-  }, [selectedIndex, students]);
-
-  const sortedStudents = useMemo(() => {
-    return [...students].sort((a, b) => {
-      const an = (a.user_name || `User ${a.user_id}`).toLowerCase();
-      const bn = (b.user_name || `User ${b.user_id}`).toLowerCase();
-      return an.localeCompare(bn);
-    });
-  }, [students]);
+    setGradeInput(score !== null && score !== undefined ? String(score) : '');
+    setGradeSuccess(false);
+    setViewAttempt(null);
+    setActionError(null);
+  }, [selectedKey, selectedStudent?.submission?.score, moderatedPending]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submittedCount = useMemo(
-    () => students.filter((s) => s.submission && s.submission.workflow_state !== 'unsubmitted').length,
+    () => students.filter((s) => s.submission && s.submission.submitted_at).length,
     [students]
   );
   const gradedCount = useMemo(
-    () => students.filter((s) => s.submission && s.submission.workflow_state === 'graded').length,
+    () => students.filter((s) => s.submission && (s.submission.workflow_state === 'graded' || s.submission.excused)).length,
     [students]
   );
 
   const rubricTotal = useMemo(
-    () => Object.values(rubricScores).reduce((sum, c) => sum + (parseFloat(c.points) || 0), 0),
+    () => Object.values(rubricScores).reduce((sum, c) => sum + (parseFloat(c?.points) || 0), 0),
     [rubricScores]
   );
-
   const rubricMax = useMemo(
     () => rubric?.rubric?.points_possible ?? rubricCriteria.reduce((s, c) => s + (c.points || 0), 0),
     [rubric, rubricCriteria]
   );
 
-  const isStudentSubmitted = useMemo(
-    () => !!selectedStudent?.submission && selectedStudent.submission.workflow_state !== 'unsubmitted',
-    [selectedStudent]
-  );
+  const hasExistingGrade = selectedStudent?.submission?.score !== null && selectedStudent?.submission?.score !== undefined;
+  const canPost = !!selectedStudent && (gradeInput !== '' || (hasExistingGrade && !moderatedPending)) && !grading;
 
-  // B113: an empty input clears an existing grade (posted_grade "").
-  const hasExistingGrade =
-    selectedStudent?.submission?.score !== null && selectedStudent?.submission?.score !== undefined;
-  const canPost = useMemo(
-    () => !!selectedStudent && (gradeInput !== '' || hasExistingGrade) && !grading,
-    [selectedStudent, gradeInput, grading, hasExistingGrade]
-  );
-
-  const handleSelectStudent = useCallback((userId) => {
-    const idx = students.findIndex((s) => s.user_id === userId);
-    if (idx >= 0) setSelectedIndex(idx);
-  }, [students]);
+  const handleSelectStudent = useCallback((key) => setSelectedKey(key), []);
 
   const handleStudentKeyDown = useCallback((e) => {
     const focusByIndex = (i) => {
-      const target = students[i];
+      const target = visibleStudents[i];
       if (!target) return;
-      setSelectedIndex(i);
-      const node = studentRefs.current[target.user_id];
-      if (node) node.focus();
-      announce(`${target.user_name || `User ${target.user_id}`} selected.`);
+      const key = studentKey(target);
+      setSelectedKey(key);
+      studentRefs.current[key]?.focus();
+      announce(`${displayName(target)} selected.`);
     };
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      focusByIndex(Math.min(selectedIndex + 1, students.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      focusByIndex(Math.max(selectedIndex - 1, 0));
-    } else if (e.key === 'Home') {
-      e.preventDefault();
-      focusByIndex(0);
-    } else if (e.key === 'End') {
-      e.preventDefault();
-      focusByIndex(students.length - 1);
+    if (e.key === 'ArrowDown') { e.preventDefault(); focusByIndex(Math.min(selectedIndex + 1, visibleStudents.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); focusByIndex(Math.max(selectedIndex - 1, 0)); }
+    else if (e.key === 'Home') { e.preventDefault(); focusByIndex(0); }
+    else if (e.key === 'End') { e.preventDefault(); focusByIndex(visibleStudents.length - 1); }
+  }, [visibleStudents, selectedIndex, announce]);
+
+  // applyUpdate sends a submission update (grade, excuse, status, extra
+  // attempts) for the selected student and merges the server's answer.
+  const applyUpdate = useCallback(async (student, update, message) => {
+    const key = studentKey(student);
+    const saved = await gradingApi.updateSubmission(courseId, assignmentId, submissionKeyOf(student), update);
+    updateStudent(key, (s) => ({ ...s, submission: mergeGradedSubmission(s.submission, saved) }));
+    // A group graded together: every member got the same grade.
+    if (assignment?.is_group_assignment && !assignment?.grade_group_students_individually && student.group_id && ('posted_grade' in update || 'excused' in update)) {
+      setStudents((prev) => prev.map((s) => (
+        s.group_id === student.group_id && studentKey(s) !== key
+          ? { ...s, submission: mergeGradedSubmission(s.submission, { ...saved, attachments: undefined, body: undefined, url: undefined }) }
+          : s
+      )));
     }
-  }, [students, selectedIndex, announce]);
+    if (message) announce(message);
+    return saved;
+  }, [courseId, assignmentId, assignment, updateStudent, announce]);
 
-  const handleScoreChange = useCallback((e) => setGradeInput(e.target.value), []);
-  const handleCommentChange = useCallback((e) => setCommentText(e.target.value), []);
-
-  const handlePost = useCallback(async (e) => {
-    e.preventDefault();
+  const postScore = useCallback(async (value) => {
     if (!selectedStudent) return;
-    const clearing = gradeInput.trim() === '';
-    if (clearing && !hasExistingGrade) return;
-
+    const clearing = String(value).trim() === '';
     setGrading(true);
     setGradeSuccess(false);
+    setActionError(null);
     try {
-      const saved = await api.gradeSubmission(courseId, assignmentId, selectedStudent.user_id, {
-        posted_grade: clearing ? '' : gradeInput,
-      });
-
-      setStudents((prev) => {
-        const updated = [...prev];
-        const student = { ...updated[selectedIndex] };
-        const base = student.submission || { user_id: student.user_id };
-        student.submission =
-          saved && typeof saved === 'object' && 'score' in saved
-            ? { ...base, ...saved }
-            : {
-                ...base,
-                score: clearing ? null : parseFloat(gradeInput),
-                grade: clearing ? null : gradeInput,
-                entered_score: clearing ? null : parseFloat(gradeInput),
-                workflow_state: clearing ? (base.submitted_at ? 'submitted' : 'unsubmitted') : 'graded',
-              };
-        updated[selectedIndex] = student;
-        return updated;
-      });
+      if (moderatedPending) {
+        const key = studentKey(selectedStudent);
+        const pg = await gradingApi.saveProvisionalGrade(courseId, assignmentId, {
+          userId: selectedStudent.user_id,
+          anonymousId: selectedStudent.anonymous_id,
+          postedGrade: String(value),
+        });
+        updateStudent(key, (s) => {
+          const others = (s.provisional_grades || []).filter((p) => !(p.mine && !p.final));
+          return { ...s, provisional_grades: [...others, { ...pg, mine: true, scorer_name: 'You' }] };
+        });
+        announce(`Provisional grade ${value} saved for ${displayName(selectedStudent)}.`);
+      } else {
+        await applyUpdate(selectedStudent, { posted_grade: clearing ? '' : String(value) },
+          clearing ? `Grade cleared for ${displayName(selectedStudent)}.` : `Grade ${value} saved for ${displayName(selectedStudent)}.`);
+      }
       setGradeSuccess(true);
-      announce(
-        clearing
-          ? `Grade cleared for ${selectedStudent.user_name || 'student'}.`
-          : `Grade ${gradeInput} saved for ${selectedStudent.user_name || 'student'}.`
-      );
       setTimeout(() => setGradeSuccess(false), 2000);
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
       announce(`Error saving grade: ${err.message}`, 'assertive');
     } finally {
       setGrading(false);
     }
-  }, [courseId, assignmentId, selectedStudent, selectedIndex, gradeInput, hasExistingGrade, announce]);
+  }, [selectedStudent, moderatedPending, courseId, assignmentId, updateStudent, applyUpdate, announce]);
 
-  const handleAddComment = useCallback(async (e) => {
+  const handlePost = useCallback((e) => {
     e.preventDefault();
-    if (!selectedStudent || !commentText.trim()) return;
+    if (gradeInput.trim() === '' && (!hasExistingGrade || moderatedPending)) return;
+    postScore(gradeInput);
+  }, [gradeInput, hasExistingGrade, moderatedPending, postScore]);
 
-    setSubmittingComment(true);
+  const toggleExcused = useCallback(async () => {
+    if (!selectedStudent) return;
+    const next = !selectedStudent.submission?.excused;
+    setActionError(null);
     try {
-      const newComment = await api.createSubmissionComment(
-        courseId,
-        assignmentId,
-        selectedStudent.user_id,
-        { text_comment: commentText }
-      );
-
-      setStudents((prev) => {
-        const updated = [...prev];
-        const student = { ...updated[selectedIndex] };
-        student.comments = [...(student.comments || []), newComment];
-        updated[selectedIndex] = student;
-        return updated;
-      });
-      setCommentText('');
-      announce('Comment added.');
+      await applyUpdate(selectedStudent, { excused: next }, next ? 'Student excused.' : 'Excuse removed.');
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setSubmittingComment(false);
+      setActionError(err.message);
     }
-  }, [courseId, assignmentId, selectedStudent, selectedIndex, commentText, announce]);
+  }, [selectedStudent, applyUpdate]);
+
+  const setStatus = useCallback(async (value) => {
+    if (!selectedStudent) return;
+    setActionError(null);
+    try {
+      if (value.startsWith('custom:')) {
+        await applyUpdate(selectedStudent, { custom_grade_status_id: Number(value.slice(7)) }, 'Status updated.');
+      } else {
+        const update = { late_policy_status: value };
+        if (selectedStudent.submission?.custom_grade_status_id) update.custom_grade_status_id = 0;
+        await applyUpdate(selectedStudent, update, 'Status updated.');
+      }
+    } catch (err) {
+      setActionError(err.message);
+    }
+  }, [selectedStudent, applyUpdate]);
+
+  const setExtraAttempts = useCallback(async (n) => {
+    if (!selectedStudent) return;
+    setActionError(null);
+    try {
+      await applyUpdate(selectedStudent, { extra_attempts: Math.max(0, parseInt(n, 10) || 0) }, 'Extra attempts updated.');
+    } catch (err) {
+      setActionError(err.message);
+    }
+  }, [selectedStudent, applyUpdate]);
+
+  const selectProvisional = useCallback(async (pg) => {
+    if (!selectedStudent) return;
+    setActionError(null);
+    try {
+      await gradingApi.selectProvisionalGrade(courseId, assignmentId, {
+        userId: selectedStudent.user_id,
+        anonymousId: selectedStudent.anonymous_id,
+        provisionalGradeId: pg.id,
+      });
+      updateStudent(studentKey(selectedStudent), (s) => ({
+        ...s,
+        provisional_grades: (s.provisional_grades || []).map((p) => ({ ...p, selected: p.id === pg.id })),
+      }));
+      announce('Provisional grade selected.');
+    } catch (err) {
+      setActionError(err.message);
+    }
+  }, [selectedStudent, courseId, assignmentId, updateStudent, announce]);
 
   const handleCriterionScoreChange = useCallback((criterionId, value) => {
-    setRubricScores((prev) => ({
-      ...prev,
-      [criterionId]: { ...prev[criterionId], points: value },
-    }));
+    setRubricScores((prev) => ({ ...prev, [criterionId]: { ...prev[criterionId], points: value } }));
   }, []);
-
   const handleCriterionCommentChange = useCallback((criterionId, value) => {
-    setRubricScores((prev) => ({
-      ...prev,
-      [criterionId]: { ...prev[criterionId], comments: value },
-    }));
+    setRubricScores((prev) => ({ ...prev, [criterionId]: { ...prev[criterionId], comments: value } }));
   }, []);
 
+  // Saving the rubric also posts its total as the grade (Canvas "use
+  // this rubric for grading").
   const handleSaveRubric = useCallback(async () => {
     if (!rubric || !selectedStudent || !rubric.rubric_association?.id) return;
     const assocId = rubric.rubric_association.id;
     setRubricSaving(true);
+    setActionError(null);
     try {
-      // B120: a typed criterion box holds a string ("4"); save numbers so
-      // the server can total the assessment.
+      // B120: a typed criterion box holds a string ("4"); save numbers.
       const dataStr = JSON.stringify(normalizeRubricScores(rubricScores));
-      if (existingAssessmentId) {
-        await api.updateRubricAssessment(courseId, assocId, existingAssessmentId, {
-          data: dataStr,
-          assessment_type: 'grading',
-        });
+      if (selectedStudent.anonymous_id) {
+        const saved = await gradingApi.saveAnonymousRubricAssessment(courseId, assignmentId, selectedStudent.anonymous_id, dataStr);
+        if (saved?.id) setExistingAssessmentId(saved.id);
+      } else if (existingAssessmentId) {
+        await api.updateRubricAssessment(courseId, assocId, existingAssessmentId, { data: dataStr, assessment_type: 'grading' });
       } else {
         const created = await api.createRubricAssessment(courseId, assocId, {
           user_id: selectedStudent.user_id,
@@ -597,29 +672,33 @@ const SpeedGraderPage = () => {
         setExistingAssessmentId(created.id);
       }
       setGradeInput(String(rubricTotal));
+      await postScore(String(rubricTotal));
       announce(`Rubric saved. Total ${rubricTotal} of ${rubricMax}.`);
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
       announce(`Error saving rubric: ${err.message}`, 'assertive');
     } finally {
       setRubricSaving(false);
     }
-  }, [rubric, selectedStudent, rubricScores, existingAssessmentId, courseId, rubricTotal, rubricMax, announce]);
+  }, [rubric, selectedStudent, rubricScores, existingAssessmentId, courseId, assignmentId, rubricTotal, rubricMax, postScore, announce]);
 
   const navigateStudent = useCallback((direction) => {
-    setSelectedIndex((prev) => {
-      const next = prev + direction;
-      if (next < 0 || next >= students.length) return prev;
-      const target = students[next];
-      announce(`${target?.user_name || `User ${target?.user_id}`} selected. ${next + 1} of ${students.length}.`);
-      return next;
-    });
-  }, [students, announce]);
+    const next = selectedIndex + direction;
+    if (next < 0 || next >= visibleStudents.length) return;
+    const target = visibleStudents[next];
+    setSelectedKey(studentKey(target));
+    announce(`${displayName(target)} selected. ${next + 1} of ${visibleStudents.length}.`);
+  }, [selectedIndex, visibleStudents, announce]);
 
-  const setStudentRef = useCallback((id) => (node) => {
-    if (node) studentRefs.current[id] = node;
-    else delete studentRefs.current[id];
+  const setStudentRef = useCallback((key) => (node) => {
+    if (node) studentRefs.current[key] = node;
+    else delete studentRefs.current[key];
   }, []);
+
+  const onCommentsChange = useCallback((next) => {
+    if (!selectedStudent) return;
+    updateStudent(studentKey(selectedStudent), (s) => ({ ...s, comments: next }));
+  }, [selectedStudent, updateStudent]);
 
   if (isTeacher === false) return <Navigate to={`/courses/${courseId}`} replace />;
   if (isTeacher === null || loading) return <SpeedGraderSkeleton />;
@@ -629,11 +708,7 @@ const SpeedGraderPage = () => {
       <Layout>
         <div className="text-center py-12">
           <p className="text-accent-danger mb-3">{error}</p>
-          <Button
-            variant="link"
-            onClick={() => { setError(null); window.location.reload(); }}
-            className="text-brand-600"
-          >
+          <Button variant="link" onClick={() => { setError(null); window.location.reload(); }} className="text-brand-600">
             Try Again
           </Button>
         </div>
@@ -645,23 +720,36 @@ const SpeedGraderPage = () => {
     return <Layout><div className="text-center py-12">Assignment not found</div></Layout>;
   }
 
+  const sub = selectedStudent?.submission;
+  const currentStatus = sub?.custom_grade_status_id
+    ? `custom:${sub.custom_grade_status_id}`
+    : studentStatus(sub) === 'none' ? 'none' : studentStatus(sub);
+  const groupTogether = assignment.is_group_assignment && !assignment.grade_group_students_individually;
+
   return (
     <TooltipProvider delayDuration={200}>
       <Layout>
         <div className="mb-4">
-          <Link
-            to={`/courses/${courseId}/assignments/${assignmentId}`}
-            className="text-brand-600 hover:underline text-sm"
-          >
+          <Link to={`/courses/${courseId}/assignments/${assignmentId}`} className="text-brand-600 hover:underline text-sm">
             &larr; Back to Assignment
           </Link>
-          <div className="flex items-center justify-between mt-2">
+          <div className="flex items-center justify-between mt-2 flex-wrap gap-2">
             <h2 className="text-2xl font-bold text-text-primary">SpeedGrader</h2>
-            <div className="flex items-center gap-3 text-sm text-text-tertiary">
+            <div className="flex items-center gap-3 text-sm text-text-tertiary flex-wrap">
               {assignment.anonymous_grading && (
                 <Badge variant="secondary" className="bg-purple-100 text-purple-700 hover:bg-purple-100">
-                  Anonymous Grading
+                  {anonymous ? 'Students anonymized' : 'Anonymous grading (lifted)'}
                 </Badge>
+              )}
+              {assignment.moderated_grading && (
+                <Badge variant="secondary" className="bg-sky-100 text-sky-700 hover:bg-sky-100">
+                  {moderatedPending ? 'Moderated: provisional grades' : 'Moderated: published'}
+                </Badge>
+              )}
+              {assignment.moderated_grading && assignment.is_moderator && (
+                <Link to={`/courses/${courseId}/assignments/${assignmentId}/moderate`} className="inline-flex items-center gap-1 text-brand-600 hover:underline">
+                  <Scale className="w-4 h-4" /> Moderate
+                </Link>
               )}
               <span>{submittedCount}/{students.length} submitted</span>
               <Separator orientation="vertical" className="h-4" />
@@ -673,48 +761,74 @@ const SpeedGraderPage = () => {
           </p>
         </div>
 
+        {actionError && (
+          <div className="mb-3 p-2 rounded border border-accent-danger/30 bg-accent-danger/10 text-sm text-accent-danger" role="alert">
+            {actionError}
+          </div>
+        )}
+
         <div className="flex gap-4 items-start">
-          {/* Left rail: sticky student list */}
-          <Card
-            className="w-64 flex-shrink-0 sticky top-0 self-start max-h-screen overflow-y-auto flex flex-col"
-            role="listbox"
-            aria-label="Students"
-          >
-            <div className="p-3 border-b bg-surface-1">
+          {/* Left rail: student list with sort / filter */}
+          <Card className="w-64 flex-shrink-0 sticky top-0 self-start max-h-screen overflow-y-auto flex flex-col">
+            <div className="p-3 border-b bg-surface-1 space-y-2">
               <h3 className="font-semibold text-sm text-text-secondary">
-                Students ({sortedStudents.length})
+                Students ({visibleStudents.length}{visibleStudents.length !== students.length ? ` of ${students.length}` : ''})
               </h3>
+              <label className="block text-xs text-text-tertiary">
+                Show
+                <select
+                  aria-label="Filter students"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="mt-0.5 w-full border border-border-strong rounded px-1.5 py-1 text-xs"
+                >
+                  {STATUS_FILTERS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                </select>
+              </label>
+              <label className="block text-xs text-text-tertiary">
+                Sort by
+                <select
+                  aria-label="Sort students"
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="mt-0.5 w-full border border-border-strong rounded px-1.5 py-1 text-xs"
+                >
+                  {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </label>
+              {assignment.is_group_assignment && !anonymous && (
+                <label className="flex items-center gap-1 text-xs text-text-tertiary">
+                  <input type="checkbox" checked={groupBy} onChange={(e) => setGroupBy(e.target.checked)} />
+                  Group students by group
+                </label>
+              )}
             </div>
-            <div className="overflow-y-auto flex-1">
-              {sortedStudents.length === 0 ? (
-                <div className="p-4 text-center text-text-tertiary text-sm">No students enrolled</div>
+            <div className="overflow-y-auto flex-1" role="listbox" aria-label="Students">
+              {visibleStudents.length === 0 ? (
+                <div className="p-4 text-center text-text-tertiary text-sm">No students match</div>
               ) : (
-                sortedStudents.map((student) => (
+                visibleStudents.map((student) => (
                   <StudentListItem
-                    key={student.user_id}
+                    key={studentKey(student)}
                     student={student}
-                    isSelected={selectedStudent?.user_id === student.user_id}
+                    statuses={statuses}
+                    isSelected={studentKey(student) === selectedKey}
                     pointsPossible={assignment.points_possible}
                     onSelect={handleSelectStudent}
                     onKeyDown={handleStudentKeyDown}
-                    itemRef={setStudentRef(student.user_id)}
+                    itemRef={setStudentRef(studentKey(student))}
                   />
                 ))
               )}
             </div>
           </Card>
 
-          {/* Center: scrolling submission preview */}
+          {/* Center: submission preview */}
           <div className="flex-1 flex flex-col gap-4 min-w-0">
             <Card className="px-4 py-3 flex items-center justify-between">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => navigateStudent(-1)}
-                    disabled={selectedIndex <= 0}
-                  >
+                  <Button variant="ghost" size="sm" onClick={() => navigateStudent(-1)} disabled={selectedIndex <= 0}>
                     <ChevronLeft className="w-4 h-4" />
                     Previous
                   </Button>
@@ -722,21 +836,12 @@ const SpeedGraderPage = () => {
                 <TooltipContent>Previous student</TooltipContent>
               </Tooltip>
               <span className="text-sm font-medium text-text-secondary">
-                {students.length > 0 ? `${selectedIndex + 1} of ${students.length}` : 'No students'}
-                {selectedStudent && (
-                  <span className="text-text-tertiary">
-                    {' '}&mdash; {selectedStudent.user_name || `User ${selectedStudent.user_id}`}
-                  </span>
-                )}
+                {visibleStudents.length > 0 ? `${selectedIndex + 1} of ${visibleStudents.length}` : 'No students'}
+                {selectedStudent && <span className="text-text-tertiary"> &mdash; {displayName(selectedStudent)}</span>}
               </span>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => navigateStudent(1)}
-                    disabled={selectedIndex >= students.length - 1}
-                  >
+                  <Button variant="ghost" size="sm" onClick={() => navigateStudent(1)} disabled={selectedIndex >= visibleStudents.length - 1}>
                     Next
                     <ChevronRight className="w-4 h-4" />
                   </Button>
@@ -745,54 +850,57 @@ const SpeedGraderPage = () => {
               </Tooltip>
             </Card>
 
-            <SubmissionPreview student={selectedStudent} />
+            <SubmissionPreview
+              student={selectedStudent}
+              assignment={assignment}
+              courseId={courseId}
+              viewAttempt={viewAttempt}
+              onViewAttempt={setViewAttempt}
+            />
           </div>
 
-          {/* Right rail: sticky grade entry & rubric */}
+          {/* Right rail: grade, status, rubric, comments */}
           <div className="w-80 flex-shrink-0 sticky top-0 self-start max-h-screen overflow-y-auto flex flex-col gap-4">
-            <Card className="p-4">
-              <h3 className="font-semibold text-sm text-text-secondary mb-3 flex items-center space-x-2">
+            <Card className="p-4 space-y-3">
+              <h3 className="font-semibold text-sm text-text-secondary flex items-center space-x-2">
                 <Award className="w-4 h-4" />
-                <span>Grade</span>
-                {isStudentSubmitted && (
-                  <Badge variant="outline" className="ml-auto text-[10px]">Submitted</Badge>
-                )}
+                <span>{moderatedPending ? 'Provisional grade' : 'Grade'}</span>
               </h3>
+              {groupTogether && selectedStudent?.group_name && (
+                <p className="text-xs text-text-tertiary">This grade applies to everyone in {selectedStudent.group_name}.</p>
+              )}
               <form onSubmit={handlePost} className="space-y-3">
                 <div className="flex items-center space-x-2">
                   <input
-                    type="number"
-                    step="any"
-                    min="0"
-                    max={assignment.points_possible ?? undefined}
+                    type="text"
+                    inputMode={['letter_grade', 'gpa_scale', 'pass_fail', 'percent'].includes(assignment.grading_type) ? 'text' : 'decimal'}
                     value={gradeInput}
-                    onChange={handleScoreChange}
+                    onChange={(e) => setGradeInput(e.target.value)}
                     placeholder="Score"
                     className="flex-1 border border-border-strong rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                    disabled={!selectedStudent}
+                    disabled={!selectedStudent || !!sub?.excused}
                     aria-label="Grade score"
                   />
-                  <span className="text-sm text-text-tertiary whitespace-nowrap">
-                    / {assignment.points_possible ?? 0}
-                  </span>
+                  <span className="text-sm text-text-tertiary whitespace-nowrap">/ {assignment.points_possible ?? 0}</span>
                 </div>
 
-                {assignment.points_possible > 0 && gradeInput !== '' && (
+                {assignment.points_possible > 0 && gradeInput !== '' && !Number.isNaN(Number(gradeInput)) && (!assignment.grading_type || assignment.grading_type === 'points') && (
                   <div className="text-xs text-text-tertiary">
                     {((parseFloat(gradeInput) / assignment.points_possible) * 100).toFixed(1)}%
                   </div>
                 )}
-                {selectedStudent?.submission?.points_deducted > 0 && (
+                {sub?.points_deducted > 0 && (
                   <div className="text-xs text-accent-danger">
-                    Late penalty -{selectedStudent.submission.points_deducted} pts (final score{' '}
-                    {selectedStudent.submission.score})
+                    Late penalty -{sub.points_deducted} pts (final score {sub.score})
                   </div>
                 )}
-
-                <Button type="submit" disabled={!canPost} className="w-full">
-                  {grading ? 'Saving...' : gradeInput.trim() === '' && hasExistingGrade ? 'Clear Grade' : 'Update Grade'}
+                <Button type="submit" disabled={!canPost || !!sub?.excused} className="w-full">
+                  {grading
+                    ? 'Saving...'
+                    : moderatedPending
+                    ? 'Save provisional grade'
+                    : gradeInput.trim() === '' && hasExistingGrade ? 'Clear Grade' : 'Update Grade'}
                 </Button>
-
                 {gradeSuccess && (
                   <div className="flex items-center space-x-1 text-accent-success text-xs">
                     <CheckCircle className="w-3 h-3" />
@@ -800,6 +908,75 @@ const SpeedGraderPage = () => {
                   </div>
                 )}
               </form>
+
+              {!moderatedPending && (
+                <label className="flex items-center gap-2 text-sm text-text-secondary">
+                  <input type="checkbox" checked={!!sub?.excused} onChange={toggleExcused} disabled={!selectedStudent} />
+                  Excuse this student
+                </label>
+              )}
+
+              <label className="block text-xs text-text-tertiary">
+                Status
+                <select
+                  aria-label="Submission status"
+                  value={currentStatus}
+                  onChange={(e) => setStatus(e.target.value)}
+                  disabled={!selectedStudent}
+                  className="mt-0.5 w-full border border-border-strong rounded px-2 py-1 text-sm"
+                >
+                  <option value="none">None</option>
+                  <option value="late">Late</option>
+                  <option value="missing">Missing</option>
+                  <option value="extended">Extended</option>
+                  {statuses.map((st) => <option key={st.id} value={`custom:${st.id}`}>{st.name}</option>)}
+                </select>
+              </label>
+
+              {assignment.allowed_attempts > 0 && selectedStudent && (
+                <div className="text-xs text-text-tertiary space-y-1">
+                  <p>
+                    {selectedStudent.attempts_remaining != null
+                      ? `${selectedStudent.attempts_remaining} attempt${selectedStudent.attempts_remaining === 1 ? '' : 's'} remaining`
+                      : ''}
+                    {' '}of {assignment.allowed_attempts} allowed
+                  </p>
+                  <label className="flex items-center gap-2">
+                    Extra attempts
+                    <input
+                      key={studentKey(selectedStudent)}
+                      type="number"
+                      min="0"
+                      defaultValue={sub?.extra_attempts ?? 0}
+                      onBlur={(e) => { if (String(e.target.value) !== String(sub?.extra_attempts ?? 0)) setExtraAttempts(e.target.value); }}
+                      className="w-16 border border-border-strong rounded px-2 py-0.5 text-xs"
+                      aria-label="Extra attempts"
+                    />
+                  </label>
+                </div>
+              )}
+
+              {assignment.moderated_grading && Array.isArray(selectedStudent?.provisional_grades) && selectedStudent.provisional_grades.length > 0 && (
+                <div className="border-t pt-2">
+                  <p className="text-xs font-medium text-text-secondary mb-1">Provisional grades</p>
+                  <ul className="space-y-1">
+                    {selectedStudent.provisional_grades.map((pg) => (
+                      <li key={pg.id} className="flex items-center justify-between text-xs">
+                        <span>
+                          {pg.mine ? 'You' : pg.scorer_name}{pg.final ? ' (final)' : ''}: <strong>{pg.score ?? pg.grade ?? '—'}</strong>
+                        </span>
+                        {assignment.is_moderator && moderatedPending && (
+                          pg.selected ? (
+                            <span className="text-accent-success">Selected</span>
+                          ) : (
+                            <button type="button" onClick={() => selectProvisional(pg)} className="text-brand-600 hover:underline">Select</button>
+                          )
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </Card>
 
             {rubricCriteria.length > 0 && (
@@ -813,9 +990,7 @@ const SpeedGraderPage = () => {
                     <Grid className="w-4 h-4" />
                     <span>Rubric ({rubricCriteria.length} criteria)</span>
                   </h3>
-                  {rubricExpanded
-                    ? <ChevronUp className="w-4 h-4 text-text-disabled" />
-                    : <ChevronDown className="w-4 h-4 text-text-disabled" />}
+                  {rubricExpanded ? <ChevronUp className="w-4 h-4 text-text-disabled" /> : <ChevronDown className="w-4 h-4 text-text-disabled" />}
                 </button>
                 {rubricExpanded && (
                   <div className="p-3 space-y-4">
@@ -836,15 +1011,9 @@ const SpeedGraderPage = () => {
                     })}
                     <Separator />
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-semibold text-text-secondary">
-                        Total: {rubricTotal} / {rubricMax}
-                      </span>
-                      <Button
-                        size="sm"
-                        onClick={handleSaveRubric}
-                        disabled={!selectedStudent || rubricSaving}
-                      >
-                        {rubricSaving ? 'Saving...' : 'Apply Rubric'}
+                      <span className="text-sm font-semibold text-text-secondary">Total: {rubricTotal} / {rubricMax}</span>
+                      <Button size="sm" onClick={handleSaveRubric} disabled={!selectedStudent || rubricSaving || !!sub?.excused}>
+                        {rubricSaving ? 'Saving...' : 'Save rubric & grade'}
                       </Button>
                     </div>
                   </div>
@@ -852,64 +1021,23 @@ const SpeedGraderPage = () => {
               </Card>
             )}
 
-            <Card className="flex-1 flex flex-col overflow-hidden">
-              <div className="p-4 border-b bg-surface-1">
-                <h3 className="font-semibold text-sm text-text-secondary flex items-center space-x-2">
-                  <MessageSquare className="w-4 h-4" />
-                  <span>
-                    Comments
-                    {selectedStudent?.comments?.length > 0 && ` (${selectedStudent.comments.length})`}
-                  </span>
-                </h3>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ maxHeight: '300px' }}>
-                {!selectedStudent?.comments?.length ? (
-                  <p className="text-sm text-text-secondary text-center py-4">No comments yet</p>
-                ) : (
-                  selectedStudent.comments.map((comment) => (
-                    <div key={comment.id} className="border-b border-border-subtle pb-3 last:border-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium text-text-secondary">
-                          {comment.author_id === user?.id
-                            ? 'You'
-                            : comment.author_name || comment.author?.display_name || comment.author?.name
-                              || students.find((s) => s.user_id === comment.author_id)?.user_name
-                              || `User ${comment.author_id}`}
-                        </span>
-                        <span className="text-xs text-text-secondary">{formatDate(comment.created_at)}</span>
-                      </div>
-                      <p className="text-sm text-text-secondary">{comment.comment}</p>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <div className="p-3 border-t bg-surface-1">
-                <form onSubmit={handleAddComment} className="flex space-x-2">
-                  <input
-                    type="text"
-                    value={commentText}
-                    onChange={handleCommentChange}
-                    placeholder="Add a comment..."
-                    className="flex-1 border border-border-strong rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                    disabled={!selectedStudent || submittingComment}
-                    aria-label="Comment text"
-                  />
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="submit"
-                        size="icon"
-                        disabled={!selectedStudent || !commentText.trim() || submittingComment}
-                      >
-                        <Send className="w-4 h-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Send comment</TooltipContent>
-                  </Tooltip>
-                </form>
-              </div>
+            <Card className="p-4">
+              {selectedStudent ? (
+                <CommentThread
+                  key={studentKey(selectedStudent)}
+                  courseId={courseId}
+                  assignmentId={assignmentId}
+                  submissionKey={submissionKeyOf(selectedStudent)}
+                  isTeacher
+                  currentUserId={user?.id ?? null}
+                  isGroupAssignment={!!assignment.is_group_assignment && !anonymous}
+                  initialComments={selectedStudent.comments || []}
+                  onCommentsChange={onCommentsChange}
+                  compact
+                />
+              ) : (
+                <p className="text-sm text-text-secondary text-center py-4">No student selected</p>
+              )}
             </Card>
           </div>
         </div>

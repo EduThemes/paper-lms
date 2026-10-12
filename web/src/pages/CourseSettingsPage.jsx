@@ -9,6 +9,7 @@ import CourseNav from '../components/CourseNav';
 import { useLiveRegion } from '../components/LiveRegion';
 import ButtonEditor from '../components/settings/ButtonEditor';
 import OverrideEditor from '../components/settings/OverrideEditor';
+import CourseGradingPolicyPanel from '../components/grading/CourseGradingPolicyPanel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -22,6 +23,9 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import CourseStorageCard from '../components/files/CourseStorageCard';
+import CourseDateAccessCard from '../components/enrollments/CourseDateAccessCard';
+import { dateInputToStartISO, dateInputToEndISO, isoToDateInput } from '../utils/datetimeLocal';
 
 // All available CourseNav tabs in default order
 const DEFAULT_NAV_TABS = [
@@ -84,11 +88,11 @@ const DEFAULT_GRADING_SCALE = [
   ['D-', 0.60], ['F', 0.0],
 ];
 
-const fmtDate = (d) => {
-  if (!d) return '';
-  const dt = new Date(d);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-};
+// Course dates are calendar days in the profile time zone (G157): shown
+// as that zone's day and saved as the start (start_at) or the last second
+// (end_at) of that day there. new Date('YYYY-MM-DD') is UTC midnight, the
+// evening before in US zones, so every save used to move them back a day.
+const fmtDate = (d) => isoToDateInput(d);
 
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -212,6 +216,7 @@ const CourseSettingsPage = () => {
     name: '', course_code: '', default_view: 'modules', ui_mode: 'standard',
     license: 'private', is_public: false, start_at: '', end_at: '',
     apply_assignment_group_weights: false,
+    hide_final_grades: false,
   });
   const [navTabs, setNavTabs] = useState(null);
   const [buttons, setButtons] = useState([]);
@@ -254,6 +259,7 @@ const CourseSettingsPage = () => {
       start_at: fmtDate(course.start_at),
       end_at: fmtDate(course.end_at),
       apply_assignment_group_weights: course.apply_assignment_group_weights || false,
+      hide_final_grades: course.hide_final_grades || false,
     };
     setForm(nextForm);
 
@@ -321,7 +327,8 @@ const CourseSettingsPage = () => {
     const gradingChanged =
       (base.gradingScale ? !eq(gradingScale, base.gradingScale) : false) ||
       (base.latePolicy ? !eq(latePolicy, base.latePolicy) : false) ||
-      (base.form ? form.apply_assignment_group_weights !== base.form.apply_assignment_group_weights : false);
+      (base.form ? form.apply_assignment_group_weights !== base.form.apply_assignment_group_weights : false) ||
+      (base.form ? form.hide_final_grades !== base.form.hide_final_grades : false);
     return {
       general: generalChanged,
       navigation: navigationChanged,
@@ -354,8 +361,13 @@ const CourseSettingsPage = () => {
     setMessage('');
     try {
       const payload = { ...form };
-      payload.start_at = payload.start_at ? new Date(payload.start_at).toISOString() : null;
-      payload.end_at = payload.end_at ? new Date(payload.end_at).toISOString() : null;
+      // Only send a date the user changed, so re-saving the tab can't
+      // move a stored time (e.g. one set through the API).
+      const baseForm = baselineRef.current.form || {};
+      if (payload.start_at === baseForm.start_at) delete payload.start_at;
+      else payload.start_at = dateInputToStartISO(payload.start_at) || null;
+      if (payload.end_at === baseForm.end_at) delete payload.end_at;
+      else payload.end_at = dateInputToEndISO(payload.end_at) || null;
       if (navTabs) payload.navigation_tabs = navTabs.map((t, i) => ({ ...t, position: i }));
       const updated = await api.updateCourse(courseId, payload);
       setCourse(updated);
@@ -567,6 +579,9 @@ const CourseSettingsPage = () => {
                       </Tooltip>
                     </div>
                   </div>
+                  <div className="mt-4">
+                    <CourseDateAccessCard courseId={courseId} course={course} />
+                  </div>
                 </CardContent>
               </Card>
 
@@ -636,6 +651,9 @@ const CourseSettingsPage = () => {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* G072: storage use; admins set the course quota. */}
+              <CourseStorageCard courseId={courseId} course={course} onSaved={setCourse} />
             </div>
           )}
 
@@ -747,6 +765,7 @@ const CourseSettingsPage = () => {
               aria-labelledby="settings-tab-grading"
               className="space-y-6"
             >
+              <CourseGradingPolicyPanel courseId={courseId} />
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">Grading Scale</CardTitle>
@@ -825,6 +844,17 @@ const CourseSettingsPage = () => {
                     />
                     <Label htmlFor="weight-groups" className="cursor-pointer">
                       Weight final grade based on assignment groups
+                    </Label>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <input
+                      id="hide-final-grades"
+                      type="checkbox"
+                      checked={form.hide_final_grades}
+                      onChange={(e) => updateForm({ hide_final_grades: e.target.checked })}
+                    />
+                    <Label htmlFor="hide-final-grades" className="cursor-pointer">
+                      Hide totals in student grades summary
                     </Label>
                   </div>
                 </CardContent>

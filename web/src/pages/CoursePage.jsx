@@ -36,6 +36,7 @@ import HomeEngine from '../components/home/HomeEngine';
 import K2Layout from '../components/home/K2Layout';
 import SafeHTML from '../components/SafeHTML';
 import { CourseFrontPageView, CourseAnnouncementsView } from '../components/home/CourseHomeViews';
+import CourseStaffBar from '../components/CourseStaffBar';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -43,6 +44,7 @@ import { Skeleton } from '../components/ui/skeleton';
 import { Avatar, AvatarFallback, AvatarImage } from '../components/ui/avatar';
 import { Separator } from '../components/ui/separator';
 import { cn } from '@/lib/utils';
+import { withoutQuizAssignments } from '../components/quiz/quizLifecycle';
 
 const ITEM_ICONS = {
   Page: FileText,
@@ -718,7 +720,9 @@ const CoursePage = () => {
     if (landingLoading) return [];
     const horizon = 30 * 86_400_000;
     const now = Date.now();
-    const fromAssignments = (landing.assignments || [])
+    // A graded quiz is listed once, as the quiz (not also as its
+    // online_quiz assignment).
+    const fromAssignments = withoutQuizAssignments(landing.assignments || [], landing.quizzes || [])
       .filter((a) => a.due_at)
       .map((a) => ({
         kind: 'assignment',
@@ -930,6 +934,7 @@ const CoursePage = () => {
         />
 
         <QuickActionRow courseId={courseId} isTeacher={isTeacher} />
+        {isTeacher && <CourseStaffBar course={course} onCourseChange={(updated) => setCourse((prev) => ({ ...prev, ...updated }))} />}
 
         <CourseNav />
 

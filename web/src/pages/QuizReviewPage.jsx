@@ -5,6 +5,9 @@ import { api } from '../services/api';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import SafeHTML from '../components/SafeHTML';
+import ItemPlayer from '../components/quiz/itemTypes/ItemPlayer';
+import { normalizeQuestionType } from '../components/quiz/itemTypes/types';
+import { REVIEW_INLINE_TYPES, parseStoredAnswer } from '../components/quiz/reviewAnswers';
 
 const QuizReviewPage = () => {
   const { courseId, quizId, submissionId } = useParams();
@@ -120,6 +123,15 @@ const QuizReviewPage = () => {
             {submission?.workflow_state === 'pending_review' && (
               <span className="text-accent-warning font-medium">Some questions pending review</span>
             )}
+            {submission?.fudge_points ? (
+              <span>Adjustment: {submission.fudge_points > 0 ? '+' : ''}{submission.fudge_points}</span>
+            ) : null}
+            {submission?.score_before_regrade != null && submission.score_before_regrade !== submission.score && (
+              <span>Regraded (was {submission.score_before_regrade})</span>
+            )}
+            {submission?.score_hidden && (
+              <span className="text-text-tertiary">Your instructor has not released this grade yet.</span>
+            )}
           </div>
         </div>
 
@@ -215,6 +227,25 @@ const QuizReviewPage = () => {
                   );
                 })()}
 
+                {/* Every other item type: the read-only player shows the response */}
+                {!REVIEW_INLINE_TYPES.has(normalizeQuestionType(question.question_type)) && (
+                  <div className="mb-3">
+                    <p className="text-sm font-medium text-text-tertiary mb-1">Your answer:</p>
+                    <ItemPlayer
+                      question={question}
+                      value={parseStoredAnswer(question.question_type, answer?.answer)}
+                      onChange={() => {}}
+                      readOnly
+                    />
+                    {question.formula_answer != null && (
+                      <p className="text-xs text-text-tertiary mt-2">
+                        Correct answer: <span className="font-mono">{question.formula_answer}</span>
+                        {question.formula_margin ? ` (margin ${question.formula_margin})` : ''}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {/* Show text answers for short answer / essay / numerical */}
                 {(question.question_type === 'short_answer' || question.question_type === 'essay' || question.question_type === 'numerical_question') && (
                   <div className="mb-3">
@@ -226,6 +257,14 @@ const QuizReviewPage = () => {
                     }`}>
                       {formatStudentAnswer(question, answer)}
                     </div>
+                  </div>
+                )}
+
+                {/* Grader's comment (G042) — plain text */}
+                {answer?.comment && (
+                  <div className="mt-2 p-3 rounded border border-brand-200 bg-brand-50/50 text-sm">
+                    <p className="text-xs font-medium text-text-tertiary mb-1">Instructor comment</p>
+                    <p className="whitespace-pre-wrap">{answer.comment}</p>
                   </div>
                 )}
               </div>

@@ -94,10 +94,10 @@ func TransitionCourseWorkflowState(from, to CourseWorkflow, role string) error {
 // --- DiscussionTopic state machine ---
 
 var discussionTopicTransitions = transitionMap[DiscussionTopicWorkflow]{
-	DiscussionTopicUnpublished: {DiscussionTopicActive: {RoleTeacher, RoleAdmin, RoleSuperUser}, DiscussionTopicDeleted: {RoleTeacher, RoleAdmin, RoleSuperUser}},
+	DiscussionTopicUnpublished: {DiscussionTopicActive: {RoleTeacher, RoleAdmin, RoleSuperUser}, DiscussionTopicPostDelayed: {RoleTeacher, RoleAdmin, RoleSuperUser}, DiscussionTopicDeleted: {RoleTeacher, RoleAdmin, RoleSuperUser}},
 	DiscussionTopicActive:      {DiscussionTopicUnpublished: {RoleTeacher, RoleAdmin, RoleSuperUser}, DiscussionTopicLocked: {RoleTeacher, RoleAdmin, RoleSuperUser}, DiscussionTopicPostDelayed: {RoleTeacher, RoleAdmin, RoleSuperUser}, DiscussionTopicDeleted: {RoleTeacher, RoleAdmin, RoleSuperUser}},
 	DiscussionTopicLocked:      {DiscussionTopicActive: {RoleTeacher, RoleAdmin, RoleSuperUser}, DiscussionTopicDeleted: {RoleTeacher, RoleAdmin, RoleSuperUser}},
-	DiscussionTopicPostDelayed: {DiscussionTopicActive: {RoleTeacher, RoleAdmin, RoleSuperUser}, DiscussionTopicDeleted: {RoleTeacher, RoleAdmin, RoleSuperUser}},
+	DiscussionTopicPostDelayed: {DiscussionTopicActive: {RoleTeacher, RoleAdmin, RoleSuperUser}, DiscussionTopicUnpublished: {RoleTeacher, RoleAdmin, RoleSuperUser}, DiscussionTopicDeleted: {RoleTeacher, RoleAdmin, RoleSuperUser}},
 	DiscussionTopicDeleted:     {},
 }
 

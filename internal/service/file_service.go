@@ -40,11 +40,18 @@ var allowedMIMETypes = map[string][]string{
 	".gif":  {"image/gif"},
 	".svg":  {"image/svg+xml"},
 	".webp": {"image/webp"},
-	".mp4":  {"video/mp4"},
-	".webm": {"video/webm"},
+	".mp4":  {"video/mp4", "audio/mp4"},
+	".webm": {"video/webm", "audio/webm"},
 	".mp3":  {"audio/mpeg"},
 	".wav":  {"audio/wav", "audio/x-wav"},
 	".ogg":  {"audio/ogg", "video/ogg"},
+	// Media recorded or uploaded through the rich content editor (G002).
+	".m4a": {"audio/mp4", "audio/x-m4a", "audio/m4a"},
+	".m4v": {"video/mp4", "video/x-m4v"},
+	".mov": {"video/quicktime"},
+	".ogv": {"video/ogg"},
+	".oga": {"audio/ogg"},
+	".aac": {"audio/aac", "audio/x-aac"},
 	".zip":  {"application/zip", "application/x-zip"},
 	".json": {"application/json", "text/plain"},
 	".xml":  {"application/xml", "text/xml"},
@@ -66,6 +73,23 @@ type FileService struct {
 	storageBackend storage.Backend
 	storagePath    string // kept for backward compat (local path prefix)
 	maxUploadSize  int64
+	// tree backs file management, visibility and usage (G070-G071);
+	// set with SetTreeRepository. Nil keeps the older flat behaviour.
+	tree repository.CourseFilesRepository
+	// quota enforces storage quotas on user uploads (G120). Optional.
+	quota UploadQuotaChecker
+}
+
+// UploadQuotaChecker refuses uploads that would exceed a context's storage
+// quota (*StorageQuotaService).
+type UploadQuotaChecker interface {
+	CheckQuota(ctx context.Context, contextType string, contextID uint, addBytes int64) error
+}
+
+// SetQuotaChecker enables storage-quota enforcement on user uploads.
+func (s *FileService) SetQuotaChecker(q UploadQuotaChecker) *FileService {
+	s.quota = q
+	return s
 }
 
 func NewFileService(folderRepo repository.FolderRepository, attachmentRepo repository.AttachmentRepository, storagePath string) *FileService {
@@ -247,6 +271,13 @@ func (s *FileService) uploadFile(ctx context.Context, attachment *models.Attachm
 		}
 	} else if err := s.ValidateUploadWithMIME(attachment.Filename, attachment.Size, attachment.ContentType); err != nil {
 		return err
+	}
+	// Storage quota (G120): user uploads only; trusted course imports are
+	// an instructor's own content migration and are not refused midway.
+	if !trusted && s.quota != nil {
+		if err := s.quota.CheckQuota(ctx, attachment.ContextType, attachment.ContextID, attachment.Size); err != nil {
+			return err
+		}
 	}
 
 	// Build storage key: ContextType/ContextID/UUID/filename

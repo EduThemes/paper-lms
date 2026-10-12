@@ -24,29 +24,8 @@ import (
 	"github.com/microcosm-cc/bluemonday"
 )
 
-// TrustedIframeSrc matches src URLs of iframes we permit for embedded media.
-// Hosts are matched as the full host portion of an https URL.
-//
-// Allowed:
-//   - YouTube: youtube.com, www.youtube.com, youtube-nocookie.com, youtu.be
-//   - Vimeo:   player.vimeo.com, vimeo.com
-//   - Khan Academy, Edpuzzle, H5P, Loom (common K-12 embeds)
-//
-// Anything not matching this regex is stripped from <iframe src="...">,
-// effectively blocking the iframe. The web client mirrors this list in
-// web/src/components/RichContentViewer.jsx (TRUSTED_IFRAME_SRC).
-var TrustedIframeSrc = regexp.MustCompile(
-	`^https://(` +
-		`(www\.)?youtube(-nocookie)?\.com/embed/|` +
-		`youtu\.be/|` +
-		`player\.vimeo\.com/video/|` +
-		`(www\.)?vimeo\.com/|` +
-		`(www\.)?khanacademy\.org/embed/|` +
-		`(www\.)?edpuzzle\.com/embed/|` +
-		`h5p\.org/h5p/embed/|` +
-		`(www\.)?loom\.com/embed/` +
-		`)`,
-)
+// The iframe allowlist (TrustedIframeSrc, TrustedIframeHosts) lives in
+// iframe_policy.go.
 
 // allowedStyleProperties is the inline-CSS allowlist. It is a deliberately
 // conservative subset of Canvas's list: typography, colour, box model and
@@ -68,6 +47,32 @@ var allowedStyleProperties = []string{
 	"float", "clear", "white-space", "list-style-type", "table-layout",
 	"direction",
 }
+
+// ariaAttributes are the WAI-ARIA states and properties allowed on every
+// element (the set Canvas's canvas_sanitize allows).
+var ariaAttributes = []string{
+	"aria-atomic", "aria-autocomplete", "aria-busy", "aria-checked",
+	"aria-colcount", "aria-colindex", "aria-colspan", "aria-controls",
+	"aria-current", "aria-describedby", "aria-description", "aria-details",
+	"aria-disabled", "aria-expanded", "aria-flowto", "aria-haspopup",
+	"aria-hidden", "aria-invalid", "aria-label", "aria-labelledby",
+	"aria-level", "aria-live", "aria-multiline", "aria-multiselectable",
+	"aria-orientation", "aria-owns", "aria-posinset", "aria-pressed",
+	"aria-readonly", "aria-relevant", "aria-required", "aria-roledescription",
+	"aria-rowcount", "aria-rowindex", "aria-rowspan", "aria-selected",
+	"aria-setsize", "aria-sort", "aria-valuemax", "aria-valuemin",
+	"aria-valuenow", "aria-valuetext",
+}
+
+// MediaURL matches the media URLs kept where bluemonday does no scheme
+// check (<video poster>, <source src>): an http(s) URL, a root-relative
+// path (not protocol-relative "//host"), or a relative path. Any other
+// scheme (javascript:, data:, vbscript:, ...) fails, as does whitespace or
+// markup.
+var MediaURL = regexp.MustCompile(`(?i)^(https?://[^\s"'<>]+|/([^/\s"'<>][^\s"'<>]*)?|\.{1,2}/[^\s"'<>]*|[a-z0-9_-][a-z0-9_.-]*([/?#][^\s"'<>]*)?)$`)
+
+// ariaRoleValue matches one or more space-separated ARIA role tokens.
+var ariaRoleValue = regexp.MustCompile(`^[a-z]+( [a-z]+)*$`)
 
 var (
 	policy     *bluemonday.Policy
@@ -100,10 +105,39 @@ func buildPolicy() *bluemonday.Policy {
 	// target="_blank" is present.
 	p.AllowAttrs("target").Matching(regexp.MustCompile(`^_blank$`)).OnElements("a")
 
-	// HTML5 media (Canvas media embeds, uploaded video/audio files). src values
-	// go through the policy's URL-scheme check (http/https/mailto + relative).
+	// tel: links (phone numbers in contact/syllabus pages). Canvas allows
+	// them; UGCPolicy's standard URL set is only http/https/mailto (G014).
+	p.AllowURLSchemes("tel")
+
+	// Accessibility markup (G013). Canvas allows role plus the aria-* state
+	// and property attributes on every element; without them imported and
+	// editor-authored content lost aria-label / aria-hidden / role
+	// (including role="presentation" on decorative images) on save. Values
+	// are attribute-escaped by bluemonday; role is limited to ARIA role
+	// tokens.
+	p.AllowAttrs("role").Matching(ariaRoleValue).Globally()
+	p.AllowAttrs(ariaAttributes...).Globally()
+
+	// Legacy and editor table/list markup: resized column widths (colwidth
+	// on cells, width on col), ordered-list start numbers, and the <font>
+	// element old Canvas/TinyMCE content still carries (G000, G015).
+	p.AllowAttrs("colwidth").Matching(regexp.MustCompile(`^[0-9]{1,4}(,[0-9]{1,4})*$`)).OnElements("td", "th")
+	p.AllowAttrs("width").Matching(regexp.MustCompile(`^[0-9]{1,4}(px|%)?$`)).OnElements("col", "colgroup")
+	p.AllowAttrs("start").Matching(regexp.MustCompile(`^-?[0-9]{1,6}$`)).OnElements("ol")
+	p.AllowAttrs("reversed").Matching(regexp.MustCompile(`^(|reversed)$`)).OnElements("ol")
+	p.AllowElements("font")
+	p.AllowAttrs("color").Matching(regexp.MustCompile(`^#?[a-zA-Z0-9]{1,20}$`)).OnElements("font")
+	p.AllowAttrs("size").Matching(regexp.MustCompile(`^[+-]?[1-7]$`)).OnElements("font")
+	p.AllowAttrs("face").Matching(regexp.MustCompile(`^[a-zA-Z0-9 ,'"-]{1,100}$`)).OnElements("font")
+
+	// HTML5 media (Canvas media embeds, uploaded video/audio files). video /
+	// audio src values go through the policy's URL-scheme check
+	// (http/https/mailto + relative). bluemonday does not URL-check
+	// <video poster> or <source src>, so those must match MediaURL.
 	p.AllowElements("video", "audio", "source", "track")
-	p.AllowAttrs("src", "poster").OnElements("video", "audio", "source")
+	p.AllowAttrs("src").OnElements("video", "audio")
+	p.AllowAttrs("poster").Matching(MediaURL).OnElements("video")
+	p.AllowAttrs("src").Matching(MediaURL).OnElements("source")
 	p.AllowAttrs("controls", "loop", "muted", "playsinline").OnElements("video", "audio")
 	p.AllowAttrs("preload").Matching(regexp.MustCompile(`^(none|metadata|auto)$`)).OnElements("video", "audio")
 	p.AllowAttrs("width", "height").Matching(regexp.MustCompile(`^[0-9]+%?$`)).OnElements("video")
@@ -117,6 +151,9 @@ func buildPolicy() *bluemonday.Policy {
 	p.AllowAttrs("allowfullscreen").OnElements("iframe")
 	p.AllowAttrs("frameborder").Matching(regexp.MustCompile(`^[0-9]+$`)).OnElements("iframe")
 	p.AllowAttrs("title").OnElements("iframe")
+	p.AllowAttrs("allow").Matching(IframeAllowAttr).OnElements("iframe")
+	p.AllowAttrs("referrerpolicy").Matching(iframeReferrerPolicy).OnElements("iframe")
+	p.AllowAttrs("loading").Matching(regexp.MustCompile(`^(lazy|eager)$`)).OnElements("iframe")
 
 	return p
 }

@@ -69,8 +69,8 @@ const MasteryGradebookPage = () => {
             <div>
               <h1 className="text-2xl font-bold text-text-primary">Learning Mastery Gradebook</h1>
               <p className="text-sm text-text-secondary">
-                Each cell shows the student's current proficiency level for an outcome, computed from
-                their most recent aligned submission.
+                Each cell shows the student's current proficiency level for an outcome, rolled up from
+                their aligned results with that outcome's calculation method.
               </p>
             </div>
           </div>
@@ -157,7 +157,7 @@ const MasteryGradebookPage = () => {
                         className="sticky left-0 bg-surface-0 px-4 py-2 text-sm font-medium text-text-primary z-10"
                         style={{ minWidth: STUDENT_COL_WIDTH }}
                       >
-                        <div>{s.name}</div>
+                        <Link to={`/courses/${courseId}/outcomes/mastery?user_id=${s.id}`} className="text-brand-600 hover:underline">{s.name}</Link>
                         <div className="text-xs text-text-tertiary">{s.email}</div>
                       </td>
                       {data.outcomes.map((o) => {

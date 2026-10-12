@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -38,6 +40,27 @@ type AnnouncementService struct {
 	receiptRepo      repoPostgres.AnnouncementReadReceiptRepository
 	enrollmentRepo   repository.EnrollmentRepository
 	notifier         Notifier
+	// extras stores replies and section targeting (G090). Nil disables
+	// both (unit tests).
+	extras AnnouncementExtrasStore
+}
+
+// AnnouncementExtrasStore is the persistence for announcement replies and
+// section targeting (postgres.AnnouncementExtrasRepository).
+type AnnouncementExtrasStore interface {
+	CreateReply(ctx context.Context, reply *models.AnnouncementReply) error
+	FindReply(ctx context.Context, announcementID, replyID uint) (*models.AnnouncementReply, error)
+	UpdateReply(ctx context.Context, reply *models.AnnouncementReply) error
+	ListReplies(ctx context.Context, announcementID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.AnnouncementReply], error)
+	ReplyCounts(ctx context.Context, announcementIDs []uint) (map[uint]int64, error)
+	SetSections(ctx context.Context, announcementID uint, sectionIDs []uint) error
+	SectionsFor(ctx context.Context, announcementIDs []uint) (map[uint][]uint, error)
+	SectionsInCourse(ctx context.Context, courseID uint, sectionIDs []uint) ([]uint, error)
+}
+
+// SetExtras wires replies and section targeting.
+func (s *AnnouncementService) SetExtras(e AnnouncementExtrasStore) {
+	s.extras = e
 }
 
 // NewAnnouncementService creates a new AnnouncementService.
@@ -87,6 +110,13 @@ func resolveWorkflowState(a *models.Announcement, now time.Time) error {
 
 // CreateAnnouncement validates and creates an announcement.
 func (s *AnnouncementService) CreateAnnouncement(ctx context.Context, announcement *models.Announcement) error {
+	return s.CreateAnnouncementWithSections(ctx, announcement, nil)
+}
+
+// CreateAnnouncementWithSections creates an announcement; with
+// target_audience "sections" it is visible only to sectionIDs (sections of
+// the announcement's course).
+func (s *AnnouncementService) CreateAnnouncementWithSections(ctx context.Context, announcement *models.Announcement, sectionIDs []uint) error {
 	if announcement.Title == "" {
 		return errors.New("announcement title is required")
 	}
@@ -106,6 +136,10 @@ func (s *AnnouncementService) CreateAnnouncement(ctx context.Context, announceme
 	if announcement.TargetAudience == "" {
 		announcement.TargetAudience = "all"
 	}
+	sections, err := s.validateTarget(ctx, announcement, sectionIDs, true)
+	if err != nil {
+		return err
+	}
 
 	if err := resolveWorkflowState(announcement, time.Now()); err != nil {
 		return err
@@ -113,6 +147,11 @@ func (s *AnnouncementService) CreateAnnouncement(ctx context.Context, announceme
 
 	if err := s.announcementRepo.Create(ctx, announcement); err != nil {
 		return err
+	}
+	if sections != nil && s.extras != nil {
+		if err := s.extras.SetSections(ctx, announcement.ID, sections); err != nil {
+			return err
+		}
 	}
 	if announcement.WorkflowState == AnnouncementStatePublished {
 		s.notifyPublishedAsync(announcement)
@@ -124,8 +163,19 @@ func (s *AnnouncementService) CreateAnnouncement(ctx context.Context, announceme
 // the stored state before the caller applied its changes; a transition
 // into "published" fans out notifications.
 func (s *AnnouncementService) UpdateAnnouncement(ctx context.Context, announcement *models.Announcement, previousState string) error {
+	return s.UpdateAnnouncementWithSections(ctx, announcement, previousState, nil)
+}
+
+// UpdateAnnouncementWithSections updates an announcement. sectionIDs nil
+// keeps the stored section list; non-nil replaces it (target_audience
+// "sections" requires at least one).
+func (s *AnnouncementService) UpdateAnnouncementWithSections(ctx context.Context, announcement *models.Announcement, previousState string, sectionIDs []uint) error {
 	if announcement.Title == "" {
 		return errors.New("announcement title is required")
+	}
+	sections, err := s.validateTarget(ctx, announcement, sectionIDs, false)
+	if err != nil {
+		return err
 	}
 
 	if err := resolveWorkflowState(announcement, time.Now()); err != nil {
@@ -134,6 +184,11 @@ func (s *AnnouncementService) UpdateAnnouncement(ctx context.Context, announceme
 
 	if err := s.announcementRepo.Update(ctx, announcement); err != nil {
 		return err
+	}
+	if sections != nil && s.extras != nil {
+		if err := s.extras.SetSections(ctx, announcement.ID, sections); err != nil {
+			return err
+		}
 	}
 	if announcement.WorkflowState == AnnouncementStatePublished && previousState != AnnouncementStatePublished {
 		s.notifyPublishedAsync(announcement)
@@ -244,7 +299,96 @@ func (s *AnnouncementService) CanView(ctx context.Context, a *models.Announcemen
 	if v.Instructor {
 		return true
 	}
-	return isPosted(a) && viewerMatchesAudience(v, a.TargetAudience)
+	return isPosted(a) && viewerMatchesAudience(v, a.TargetAudience, s.targetSections(ctx, a))
+}
+
+// targetSections is the section list of a "sections"-targeted
+// announcement (nil for any other audience).
+func (s *AnnouncementService) targetSections(ctx context.Context, a *models.Announcement) []uint {
+	if a.TargetAudience != AnnouncementTargetSections || s.extras == nil {
+		return nil
+	}
+	m, err := s.extras.SectionsFor(ctx, []uint{a.ID})
+	if err != nil {
+		return nil
+	}
+	return m[a.ID]
+}
+
+// AnnouncementTargetSections is the target_audience of an announcement
+// restricted to the sections in announcement_section_visibilities.
+const AnnouncementTargetSections = "sections"
+
+// validateTarget checks target_audience and, for "sections", that every
+// section belongs to the announcement's course. It returns the section
+// list to store (nil = leave the stored list alone).
+func (s *AnnouncementService) validateTarget(ctx context.Context, a *models.Announcement, sectionIDs []uint, creating bool) ([]uint, error) {
+	switch {
+	case a.TargetAudience == "all", a.TargetAudience == "students", a.TargetAudience == "teachers", a.TargetAudience == "observers":
+		if sectionIDs != nil || !creating {
+			// Leaving section targeting clears the stored list.
+			if s.extras != nil && a.ID != 0 {
+				return []uint{}, nil
+			}
+		}
+		return nil, nil
+	case strings.HasPrefix(a.TargetAudience, "section:"):
+		if a.CourseID == nil {
+			return nil, errors.New("section targeting is only available for course announcements")
+		}
+		id, err := strconv.ParseUint(strings.TrimPrefix(a.TargetAudience, "section:"), 10, 64)
+		if err != nil || id == 0 {
+			return nil, errors.New("invalid section target")
+		}
+		if s.extras != nil {
+			ok, err := s.extras.SectionsInCourse(ctx, *a.CourseID, []uint{uint(id)})
+			if err != nil {
+				return nil, err
+			}
+			if len(ok) != 1 {
+				return nil, errors.New("section not found in this course")
+			}
+		}
+		return nil, nil
+	case a.TargetAudience == AnnouncementTargetSections:
+		if a.CourseID == nil {
+			return nil, errors.New("section targeting is only available for course announcements")
+		}
+		if s.extras == nil {
+			return nil, errors.New("section targeting is not available")
+		}
+		if sectionIDs == nil {
+			if creating {
+				return nil, errors.New("section_ids is required when targeting sections")
+			}
+			existing := s.targetSections(ctx, a)
+			if len(existing) == 0 {
+				return nil, errors.New("section_ids is required when targeting sections")
+			}
+			return nil, nil
+		}
+		uniq := map[uint]bool{}
+		var ids []uint
+		for _, id := range sectionIDs {
+			if id != 0 && !uniq[id] {
+				uniq[id] = true
+				ids = append(ids, id)
+			}
+		}
+		if len(ids) == 0 {
+			return nil, errors.New("section_ids is required when targeting sections")
+		}
+		ok, err := s.extras.SectionsInCourse(ctx, *a.CourseID, ids)
+		if err != nil {
+			return nil, err
+		}
+		if len(ok) != len(ids) {
+			return nil, errors.New("section not found in this course")
+		}
+		return ids, nil
+	default:
+		return nil, errors.New("target_audience must be all, students, teachers, observers or sections")
+	}
 }
 
 func isPosted(a *models.Announcement) bool {
@@ -266,9 +410,19 @@ func audienceForEnrollmentType(t string) string {
 	return ""
 }
 
-func viewerMatchesAudience(v repoPostgres.AnnouncementViewer, target string) bool {
+func viewerMatchesAudience(v repoPostgres.AnnouncementViewer, target string, targetSections []uint) bool {
 	if v.Instructor || target == "" || target == "all" {
 		return true
+	}
+	if target == AnnouncementTargetSections {
+		for _, mine := range v.SectionIDs {
+			for _, t := range targetSections {
+				if mine == t {
+					return true
+				}
+			}
+		}
+		return false
 	}
 	for _, a := range v.Audiences {
 		if a == target {
@@ -286,7 +440,7 @@ func viewerMatchesAudience(v repoPostgres.AnnouncementViewer, target string) boo
 // matchesAudience checks whether a member with the given enrollment type
 // (and section) is targeted by the announcement. Instructors are always
 // in the audience of their own course's announcements.
-func matchesAudience(target, enrollmentType string, sectionID *uint) bool {
+func matchesAudience(target, enrollmentType string, sectionID *uint, targetSections []uint) bool {
 	v := repoPostgres.AnnouncementViewer{Instructor: isInstructorEnrollmentType(enrollmentType)}
 	if aud := audienceForEnrollmentType(enrollmentType); aud != "" {
 		v.Audiences = []string{aud}
@@ -299,7 +453,12 @@ func matchesAudience(target, enrollmentType string, sectionID *uint) bool {
 		// see everything when listing.
 		return v.Instructor
 	}
-	return viewerMatchesAudience(v, target)
+	if target == AnnouncementTargetSections && v.Instructor {
+		// Instructors always see their course's announcements, but a
+		// section-targeted post only notifies the sections' members.
+		v.Instructor = false
+	}
+	return viewerMatchesAudience(v, target, targetSections)
 }
 
 // notifyPublished fans a "new_announcement" notification out to the
@@ -312,6 +471,7 @@ func (s *AnnouncementService) notifyPublished(ctx context.Context, a *models.Ann
 	const perPage = 200
 	subject := "New announcement: " + a.Title
 	seen := map[uint]bool{a.UserID: true}
+	targeted := s.targetSections(ctx, a)
 	for page := 1; ; page++ {
 		// accountID=0: background fan-out; the course id comes from a
 		// stored announcement row, not from caller input.
@@ -323,7 +483,7 @@ func (s *AnnouncementService) notifyPublished(ctx context.Context, a *models.Ann
 			if seen[e.UserID] || e.WorkflowState != "active" {
 				continue
 			}
-			if !matchesAudience(a.TargetAudience, e.Type, e.CourseSectionID) {
+			if !matchesAudience(a.TargetAudience, e.Type, e.CourseSectionID, targeted) {
 				continue
 			}
 			seen[e.UserID] = true

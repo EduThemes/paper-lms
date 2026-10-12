@@ -89,6 +89,12 @@ export default defineConfig({
         changeOrigin: true,
         cookieDomainRewrite: 'localhost',
       },
+      // Canvas-compatible OAuth2 / session-login endpoints live at the
+      // site root (G136); /login/oauth2/confirm stays an SPA route.
+      '^/login/(oauth2/(auth|token|jwks)|session_token)(\\?|$)': {
+        target: 'http://localhost:3000',
+        cookieDomainRewrite: 'localhost',
+      },
     },
   },
   test: {
