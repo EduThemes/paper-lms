@@ -135,9 +135,10 @@ func TestGradingUI_OmitFromFinalGrade(t *testing.T) {
 }
 
 // G035: the gradebook's grading-period filter lists the periods of the
-// course's account; other tenants get 404.
+// course term's grading period group; other tenants get 404.
 func TestGradingUI_CourseGradingPeriods(t *testing.T) {
 	e := newGUEnv(t)
+	e.subSvc.SetPeriodResolver(service.NewGradingPolicyService(postgres.NewGradingPolicyRepository(e.g), postgres.NewGradingStandardRepository(e.g), e.subSvc))
 	ctx := context.Background()
 	group := &models.GradingPeriodGroup{AccountID: 1, Title: "2026-27", WorkflowState: "active"}
 	require.NoError(t, e.g.WithContext(ctx).Create(group).Error)
@@ -147,6 +148,9 @@ func TestGradingUI_CourseGradingPeriods(t *testing.T) {
 			StartDate: start.AddDate(0, 5*i, 0), EndDate: start.AddDate(0, 5*i+4, 0)}
 		require.NoError(t, e.g.WithContext(ctx).Create(p).Error)
 	}
+	term := &models.EnrollmentTerm{AccountID: 1, Name: "2026-27", GradingPeriodGroupID: &group.ID, WorkflowState: "active"}
+	require.NoError(t, e.g.WithContext(ctx).Create(term).Error)
+	require.NoError(t, e.g.WithContext(ctx).Model(&models.Course{}).Where("id = ?", guCourse).Update("enrollment_term_id", term.ID).Error)
 	code, body := guDo(t, e.teacher(), http.MethodGet, fmt.Sprintf("/courses/%d/grading_periods", guCourse), nil)
 	require.Equal(t, http.StatusOK, code, body)
 	var periods []struct {
