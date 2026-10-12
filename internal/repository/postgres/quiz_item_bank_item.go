@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/security/htmlsanitize"
 	"gorm.io/gorm"
 )
 
@@ -85,17 +86,19 @@ func (r *quizItemBankItemRepo) FindByID(ctx context.Context, id uint) (*models.Q
 
 func (r *quizItemBankItemRepo) Update(ctx context.Context, item *models.QuizItemBankItem) error {
 	e := entryFromItem(item)
+	// Updates(map) skips the model's BeforeSave hook, so the rich-content
+	// columns are sanitized here.
 	res := r.db.WithContext(ctx).Model(&models.QuestionBankEntry{}).Where("id = ?", item.ID).
 		Updates(map[string]interface{}{
 			"question_bank_id":   e.QuestionBankID,
 			"question_type":      e.QuestionType,
-			"question_text":      e.QuestionText,
+			"question_text":      htmlsanitize.Sanitize(e.QuestionText),
 			"points_possible":    e.PointsPossible,
 			"answers":            e.Answers,
 			"position":           e.Position,
-			"correct_comments":   e.CorrectComments,
-			"incorrect_comments": e.IncorrectComments,
-			"neutral_comments":   e.NeutralComments,
+			"correct_comments":   htmlsanitize.Sanitize(e.CorrectComments),
+			"incorrect_comments": htmlsanitize.Sanitize(e.IncorrectComments),
+			"neutral_comments":   htmlsanitize.Sanitize(e.NeutralComments),
 		})
 	if res.Error != nil {
 		return res.Error

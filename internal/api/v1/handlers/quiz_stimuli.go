@@ -79,7 +79,7 @@ func (h *QuizStimulusHandler) CreateStimulus(c *fiber.Ctx) error {
 	stim := &models.QuizStimulus{
 		CourseID: uint(courseID),
 		Title:    input.Stimulus.Title,
-		Content:  input.Stimulus.Content,
+		Content:  models.SanitizeStimulusContent(input.Stimulus.Content), // shown as HTML to quiz takers
 	}
 	if err := h.svc.CreateStimulus(c.Context(), stim); err != nil {
 		return responses.BadRequest(c, err.Error())
@@ -113,7 +113,7 @@ func (h *QuizStimulusHandler) UpdateStimulus(c *fiber.Ctx) error {
 		stim.Title = *input.Stimulus.Title
 	}
 	if input.Stimulus.Content != nil {
-		stim.Content = *input.Stimulus.Content
+		stim.Content = models.SanitizeStimulusContent(*input.Stimulus.Content)
 	}
 	if err := h.svc.UpdateStimulus(c.Context(), uint(courseID), stim); err != nil {
 		return responses.InternalError(c, "Could not update stimulus")

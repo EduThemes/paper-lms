@@ -254,9 +254,9 @@ func (h *QuizItemBankHandler) CreateBankItem(c *fiber.Ctx) error {
 		QuestionText:      service.SanitizeHTML(input.Item.QuestionText),
 		PointsPossible:    input.Item.PointsPossible,
 		Answers:           input.Item.Answers,
-		CorrectComments:   input.Item.CorrectComments,
-		IncorrectComments: input.Item.IncorrectComments,
-		NeutralComments:   input.Item.NeutralComments,
+		CorrectComments:   service.SanitizeHTML(input.Item.CorrectComments),
+		IncorrectComments: service.SanitizeHTML(input.Item.IncorrectComments),
+		NeutralComments:   service.SanitizeHTML(input.Item.NeutralComments),
 	}
 	if err := h.svc.CreateBankItem(c.Context(), item); err != nil {
 		return responses.BadRequest(c, err.Error())
@@ -308,13 +308,13 @@ func (h *QuizItemBankHandler) UpdateBankItem(c *fiber.Ctx) error {
 		item.Answers = *input.Item.Answers
 	}
 	if input.Item.CorrectComments != nil {
-		item.CorrectComments = *input.Item.CorrectComments
+		item.CorrectComments = service.SanitizeHTML(*input.Item.CorrectComments)
 	}
 	if input.Item.IncorrectComments != nil {
-		item.IncorrectComments = *input.Item.IncorrectComments
+		item.IncorrectComments = service.SanitizeHTML(*input.Item.IncorrectComments)
 	}
 	if input.Item.NeutralComments != nil {
-		item.NeutralComments = *input.Item.NeutralComments
+		item.NeutralComments = service.SanitizeHTML(*input.Item.NeutralComments)
 	}
 	if err := h.svc.UpdateBankItem(c.Context(), item); err != nil {
 		return responses.InternalError(c, "Could not update bank item")

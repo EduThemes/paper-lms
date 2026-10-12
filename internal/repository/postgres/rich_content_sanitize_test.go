@@ -105,4 +105,66 @@ func TestRichContentHooks_SanitizeNonHandlerWrites(t *testing.T) {
 		}
 		assertSanitized(t, "page body (save)", again.Body)
 	})
+
+	t.Run("item bank item comments on create and update", func(t *testing.T) {
+		bank := &models.QuestionBank{CourseID: course.ID, Title: "Item bank", WorkflowState: "active"}
+		if err := postgres.NewQuestionBankRepository(g).Create(ctx, bank); err != nil {
+			t.Fatalf("create bank: %v", err)
+		}
+		itemRepo := postgres.NewQuizItemBankItemRepository(g)
+		item := &models.QuizItemBankItem{
+			BankID: bank.ID, QuestionType: "essay_question", QuestionText: xssPayload,
+			CorrectComments: xssPayload, IncorrectComments: xssPayload, NeutralComments: xssPayload,
+		}
+		if err := itemRepo.Create(ctx, item); err != nil {
+			t.Fatalf("create item: %v", err)
+		}
+		got, err := itemRepo.FindByID(ctx, item.ID)
+		if err != nil {
+			t.Fatalf("reload item: %v", err)
+		}
+		assertSanitized(t, "item correct comments (create)", got.CorrectComments)
+		assertSanitized(t, "item neutral comments (create)", got.NeutralComments)
+
+		// Update writes through Updates(map), which skips the hook.
+		got.QuestionText, got.CorrectComments, got.IncorrectComments, got.NeutralComments = xssPayload, xssPayload, xssPayload, xssPayload
+		if err := itemRepo.Update(ctx, got); err != nil {
+			t.Fatalf("update item: %v", err)
+		}
+		again, err := itemRepo.FindByID(ctx, item.ID)
+		if err != nil {
+			t.Fatalf("reload item: %v", err)
+		}
+		assertSanitized(t, "item question text (update)", again.QuestionText)
+		assertSanitized(t, "item correct comments (update)", again.CorrectComments)
+		assertSanitized(t, "item incorrect comments (update)", again.IncorrectComments)
+		assertSanitized(t, "item neutral comments (update)", again.NeutralComments)
+	})
+
+	t.Run("calendar event description from an import", func(t *testing.T) {
+		ev := &models.CalendarEvent{
+			ContextType: "Course", ContextID: course.ID, Title: "Imported", Description: xssPayload,
+			StartAt: course.CreatedAt, CreatedByUserID: 1, WorkflowState: "active",
+		}
+		if err := g.WithContext(ctx).Create(ev).Error; err != nil {
+			t.Fatalf("create event: %v", err)
+		}
+		var stored models.CalendarEvent
+		if err := g.First(&stored, ev.ID).Error; err != nil {
+			t.Fatalf("reload event: %v", err)
+		}
+		assertSanitized(t, "calendar event description", stored.Description)
+	})
+
+	t.Run("stimulus content", func(t *testing.T) {
+		stim := &models.QuizStimulus{CourseID: course.ID, Title: "Passage", Content: `"` + strings.ReplaceAll(xssPayload, `"`, `\"`) + `"`}
+		if err := postgres.NewQuizStimulusRepository(g).Create(ctx, stim); err != nil {
+			t.Fatalf("create stimulus: %v", err)
+		}
+		var stored models.QuizStimulus
+		if err := g.First(&stored, stim.ID).Error; err != nil {
+			t.Fatalf("reload stimulus: %v", err)
+		}
+		assertSanitized(t, "stimulus content", stored.Content)
+	})
 }

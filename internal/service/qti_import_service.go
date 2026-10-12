@@ -138,7 +138,7 @@ func (s *QTIImportService) persist(ctx context.Context, result *qti.ImportResult
 		row := &models.QuizStimulus{
 			CourseID: courseID,
 			Title:    stim.Title,
-			Content:  stim.Content,
+			Content:  models.SanitizeStimulusContent(stim.Content),
 		}
 		if row.Title == "" {
 			row.Title = "Imported Passage " + stim.Identifier
