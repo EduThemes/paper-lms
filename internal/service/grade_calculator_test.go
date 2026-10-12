@@ -155,3 +155,47 @@ func TestCalculate_GradingPeriods(t *testing.T) {
 	assert.Equal(t, 80.0, pct(t, res.CurrentScore))
 	assert.Equal(t, 32.0, pct(t, res.FinalScore)) // 80*.4 + 0*.6
 }
+
+// The What-If calculator (web/src/utils/gradeSummary.js computeTotals) is
+// a port of this engine; gradeSummary.test.js pins the same fixtures to
+// the same numbers, so What-If with unchanged scores reproduces the
+// server total.
+func TestCalculate_WhatIfTwinFixtures(t *testing.T) {
+	// Weighted, weights 70 + 50 = 120 used as is; never_drop in the drop
+	// decision; a pending_review partial score is not graded yet.
+	groups := []models.AssignmentGroup{
+		{ID: 1, Name: "Homework", GroupWeight: 70, Rules: `{"drop_lowest":1,"never_drop":[1]}`},
+		{ID: 2, Name: "Tests", GroupWeight: 50},
+	}
+	asgs := []models.Assignment{calcAsg(1, 1, 10), calcAsg(2, 1, 10), calcAsg(3, 1, 10), calcAsg(4, 2, 10), calcAsg(5, 2, 10)}
+	pending := graded(5, 4)
+	pending.WorkflowState = models.SubmissionPendingReview
+	subs := map[uint]*models.Submission{1: graded(1, 2), 2: graded(2, 3), 3: graded(3, 9), 4: graded(4, 8), 5: pending}
+	res := CalculateCourseGrade(CourseGradeInput{Assignments: asgs, Groups: groups, Submissions: subs, ApplyGroupWeights: true})
+	assert.Equal(t, 78.5, pct(t, res.CurrentScore))
+	assert.Equal(t, 58.5, pct(t, res.FinalScore))
+	assert.Equal(t, []uint{2}, res.Groups[0].Dropped)
+
+	// Weights over 100 are not normalised (Canvas): 0.9*80 + 0.6*40 = 96.
+	groups = []models.AssignmentGroup{{ID: 1, Name: "A", GroupWeight: 80}, {ID: 2, Name: "B", GroupWeight: 40}}
+	asgs = []models.Assignment{calcAsg(1, 1, 10), calcAsg(2, 2, 10)}
+	subs = map[uint]*models.Submission{1: graded(1, 9), 2: graded(2, 6)}
+	res = CalculateCourseGrade(CourseGradeInput{Assignments: asgs, Groups: groups, Submissions: subs, ApplyGroupWeights: true})
+	assert.Equal(t, 96.0, pct(t, res.CurrentScore))
+
+	// The never-drop 0/100 counts in the ratio, so the 10/10 is dropped:
+	// (0+50)/200 = 25%.
+	groups = []models.AssignmentGroup{{ID: 1, Name: "A", Rules: `{"drop_lowest":1,"never_drop":[1]}`}}
+	asgs = []models.Assignment{calcAsg(1, 1, 100), calcAsg(2, 1, 10), calcAsg(3, 1, 100)}
+	subs = map[uint]*models.Submission{1: graded(1, 0), 2: graded(2, 10), 3: graded(3, 50)}
+	res = CalculateCourseGrade(CourseGradeInput{Assignments: asgs, Groups: groups, Submissions: subs})
+	assert.Equal(t, 25.0, pct(t, res.CurrentScore))
+
+	// drop_lowest 1 + drop_highest 2 on three items: drop_highest is
+	// ignored, so the best two are kept: (10+8)/20 = 90%.
+	groups = []models.AssignmentGroup{{ID: 1, Name: "A", Rules: `{"drop_lowest":1,"drop_highest":2}`}}
+	asgs = []models.Assignment{calcAsg(1, 1, 10), calcAsg(2, 1, 10), calcAsg(3, 1, 10)}
+	subs = map[uint]*models.Submission{1: graded(1, 10), 2: graded(2, 8), 3: graded(3, 2)}
+	res = CalculateCourseGrade(CourseGradeInput{Assignments: asgs, Groups: groups, Submissions: subs})
+	assert.Equal(t, 90.0, pct(t, res.CurrentScore))
+}

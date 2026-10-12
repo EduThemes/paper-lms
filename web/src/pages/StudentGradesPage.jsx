@@ -9,17 +9,20 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import Page from '../components/Page';
 import useDocumentTitle from '../hooks/useDocumentTitle';
-import { computeTotals, letterFor, STATUS_LABELS } from '../utils/gradeSummary';
+import { computeTotals, letterFor, GRADE_DISPLAY_TYPES, STATUS_LABELS } from '../utils/gradeSummary';
 import { gradeColor } from '../utils/grading';
 
 // Student Grades page (G147). Everything comes from the server's grade
-// summary: posted scores only, drop rules, grading periods, hidden totals,
-// feedback comments and rubric assessments. What-If mode recomputes the
-// totals in the browser with the same rules (utils/gradeSummary).
+// summary, which is the gradebook's engine: posted scores only, drop
+// rules, grading periods, assign-to visibility, hidden totals, the
+// instructor's final grade override, feedback comments and rubric
+// assessments. What-If mode recomputes the totals in the browser with a
+// port of the same engine (utils/gradeSummary).
 
 const STATUS_STYLES = {
   graded: 'bg-accent-success/15 text-accent-success',
   submitted: 'bg-brand-100 text-brand-800',
+  pending_review: 'bg-accent-warning/20 text-accent-warning',
   missing: 'bg-accent-danger/15 text-accent-danger',
   late: 'bg-accent-warning/20 text-accent-warning',
   excused: 'bg-surface-2 text-text-secondary',
@@ -140,6 +143,10 @@ function AssignmentRow({ a, courseId, whatIf, whatIfValue, onWhatIf, scale, drop
             </span>
           ) : a.excused ? (
             <span className="text-xs italic text-text-secondary">Excused</span>
+          ) : score != null && a.grade && GRADE_DISPLAY_TYPES.has(a.grading_type) ? (
+            // Letter / GPA / complete-incomplete / percentage assignments
+            // show the grade as entered.
+            <span className="text-sm font-semibold text-text-primary">{a.grade}</span>
           ) : score != null ? (
             <span>
               <span className="text-sm font-semibold text-text-primary">{score}/{pts}</span>
@@ -294,6 +301,8 @@ const StudentGradesPage = () => {
         final: summary.totals?.final_score ?? null,
         earned: summary.totals?.earned ?? 0,
         possible: summary.totals?.possible ?? 0,
+        override: summary.totals?.override_score ?? null,
+        overrideGrade: summary.totals?.override_grade || '',
         dropped: new Set(summary.assignments.filter((a) => a.dropped).map((a) => a.id)),
       };
     }
@@ -307,7 +316,8 @@ const StudentGradesPage = () => {
   const enterWhatIf = () => {
     const initial = {};
     summary.assignments.forEach((a) => {
-      if (a.score != null) initial[a.id] = String(a.score);
+      // A pending-review partial score is not a grade yet.
+      if (a.score != null && !a.pending_review) initial[a.id] = String(a.score);
     });
     setWhatIfScores(initial);
     setWhatIf(true);
@@ -333,7 +343,12 @@ const StudentGradesPage = () => {
         const other = s.assignments.filter((a) => !groupsById.has(a.assignment_group_id));
         if (other.length) sections.push({ group: { id: 0, name: sections.length ? 'Other' : 'Assignments', rules: {} }, items: other });
         const showTotals = !s.hide_totals && (s.totals || whatIf);
-        const letter = totals?.current != null ? letterFor(totals.current, s.grading_scale) : '';
+        // An instructor's final grade override replaces the computed grade.
+        const overridden = !whatIf && totals?.override != null;
+        const shownPct = overridden ? totals.override : totals?.current;
+        const letter = overridden
+          ? totals.overrideGrade || letterFor(totals.override, s.grading_scale)
+          : totals?.current != null ? letterFor(totals.current, s.grading_scale) : '';
         return (
           <Layout>
             <CourseNav />
@@ -405,8 +420,13 @@ const StudentGradesPage = () => {
                 </div>
                 <div className="mt-1 flex items-baseline gap-3">
                   {letter && <span className={`text-4xl font-bold ${gradeColor(letter)}`}>{letter}</span>}
-                  <span className="text-2xl text-text-secondary">{totals?.current != null ? `${totals.current}%` : '—'}</span>
+                  <span className="text-2xl text-text-secondary">{shownPct != null ? `${shownPct}%` : '—'}</span>
                 </div>
+                {overridden && (
+                  <div className="mt-1 text-xs text-text-secondary">
+                    Final grade set by your instructor (calculated: {totals.current != null ? `${totals.current}%` : '—'})
+                  </div>
+                )}
                 <div className="mt-1 text-sm text-text-secondary">
                   {totals?.earned ?? 0} / {totals?.possible ?? 0} points on graded work
                   {totals?.final != null && <> · {totals.final}% counting ungraded work as zero</>}
