@@ -868,15 +868,24 @@ func (s *AccountReportService) gradeExport(ctx context.Context, accountID uint, 
 	if err := s.db.WithContext(ctx).Raw(q+" ORDER BY c.id, u.sortable_name, e.id", append([]interface{}{accountID}, args...)...).Scan(&rs).Error; err != nil {
 		return reportFile{}, err
 	}
-	rows := [][]string{{"student name", "student id", "student sis", "course", "course id", "course sis", "section", "section id", "section sis", "term", "term id", "term sis", "current score", "final score", "current grade", "final grade", "enrollment state"}}
+	rows := [][]string{{"student name", "student id", "student sis", "course", "course id", "course sis", "section", "section id", "section sis", "term", "term id", "term sis", "current score", "final score", "current grade", "final grade", "enrollment state", "override score", "override grade"}}
 	for _, r := range rs {
-		var cur, fin *float64
-		var curGrade, finGrade string
+		var cur, fin, override *float64
+		var curGrade, finGrade, overrideGrade string
 		if s.grades != nil {
 			if g, err := s.grades.GetStudentGrade(ctx, r.CourseID, r.UserID); err == nil && g != nil {
-				c, f := g.CurrentScore, g.FinalScore
-				cur, fin = &c, &f
-				curGrade, finGrade = g.CurrentGrade, g.FinalGrade
+				// Nothing graded yet: blank, not 0.
+				if !g.NoCurrentScore {
+					c := g.CurrentScore
+					cur = &c
+					curGrade = g.CurrentGrade
+				}
+				if !g.NoFinalScore {
+					f := g.FinalScore
+					fin = &f
+					finGrade = g.FinalGrade
+				}
+				override, overrideGrade = g.OverrideScore, g.OverrideGrade
 			}
 		}
 		rows = append(rows, []string{
@@ -885,6 +894,7 @@ func (s *AccountReportService) gradeExport(ctx context.Context, accountID uint, 
 			strOrEmpty(r.SectionName), uintPtrStr(r.SectionID), strOrEmpty(r.SectionSIS),
 			strOrEmpty(r.TermName), uintPtrStr(r.TermID), strOrEmpty(r.TermSIS),
 			scoreStr(cur), scoreStr(fin), curGrade, finGrade, sisEnrollmentStatus(r.WorkflowState),
+			scoreStr(override), overrideGrade,
 		})
 	}
 	return reportFile{name: "grade_export.csv", rows: rows}, nil

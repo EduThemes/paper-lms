@@ -67,6 +67,10 @@ type StudentGrade struct {
 	// override, when set (G029).
 	OverrideScore *float64 `json:"override_score,omitempty"`
 	OverrideGrade string   `json:"override_grade,omitempty"`
+	// NoCurrentScore / NoFinalScore: nothing counts yet, so the score
+	// fields' zero means "no grade" (exports leave them blank).
+	NoCurrentScore bool `json:"-"`
+	NoFinalScore   bool `json:"-"`
 }
 
 func (s *GradingService) GetGradebook(ctx context.Context, courseID uint) (*GradebookEntry, error) {
@@ -160,6 +164,7 @@ func (s *GradingService) GetStudentGrade(ctx context.Context, courseID, studentI
 		if g.FinalScore != nil {
 			out.FinalScore = *g.FinalScore
 		}
+		out.NoCurrentScore, out.NoFinalScore = g.CurrentScore == nil, g.FinalScore == nil
 		out.CurrentGrade, out.FinalGrade = g.CurrentGrade, g.FinalGrade
 		if g.OverrideScore != nil {
 			out.OverrideScore = g.OverrideScore
