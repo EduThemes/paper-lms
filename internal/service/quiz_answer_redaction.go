@@ -10,11 +10,15 @@ package service
 // type; unknown types are redacted to "[]" (default-deny).
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
-	"hash/fnv"
 	mathrand "math/rand"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type safeChoice struct {
@@ -57,15 +61,55 @@ type rawOption struct {
 	ImageURL string `json:"image_url"`
 }
 
-// QuizShuffleSeed derives a stable shuffle seed from the given ids so the
-// redacted order is stable across reloads of the same attempt.
-func QuizShuffleSeed(ids ...uint) int64 {
-	h := fnv.New64a()
-	for _, id := range ids {
-		_, _ = h.Write([]byte(strconv.FormatUint(uint64(id), 10)))
-		_, _ = h.Write([]byte{':'})
+var (
+	quizShuffleKeyMu sync.RWMutex
+	quizShuffleKey   []byte
+)
+
+// SetQuizShuffleKey keys QuizShuffleSeed with a server secret. Without a
+// secret the seed is a function of ids the student can see, and the code is
+// public: a student could recompute the presentation order and undo it to
+// read the authored (= correct) order of an ordering or matching item.
+// Production sets it at startup from a secret every instance shares, so the
+// order is the same whichever server answers.
+func SetQuizShuffleKey(secret []byte) {
+	quizShuffleKeyMu.Lock()
+	defer quizShuffleKeyMu.Unlock()
+	quizShuffleKey = append([]byte(nil), secret...)
+}
+
+func currentQuizShuffleKey() []byte {
+	quizShuffleKeyMu.RLock()
+	key := quizShuffleKey
+	quizShuffleKeyMu.RUnlock()
+	if len(key) > 0 {
+		return key
 	}
-	return int64(h.Sum64() & 0x7fffffffffffffff)
+	// Not configured (tests, tools): a random per-process key is still
+	// unpredictable; only cross-restart stability is lost.
+	quizShuffleKeyMu.Lock()
+	defer quizShuffleKeyMu.Unlock()
+	if len(quizShuffleKey) == 0 {
+		k := make([]byte, 32)
+		if _, err := rand.Read(k); err != nil {
+			panic("quiz shuffle key: " + err.Error())
+		}
+		quizShuffleKey = k
+	}
+	return quizShuffleKey
+}
+
+// QuizShuffleSeed derives a stable shuffle seed from the given ids so the
+// redacted order is stable across reloads of the same attempt. The seed is
+// an HMAC under the server's shuffle key, so it can't be recomputed from
+// the ids alone.
+func QuizShuffleSeed(ids ...uint) int64 {
+	mac := hmac.New(sha256.New, currentQuizShuffleKey())
+	for _, id := range ids {
+		_, _ = mac.Write([]byte(strconv.FormatUint(uint64(id), 10)))
+		_, _ = mac.Write([]byte{':'})
+	}
+	return int64(binary.BigEndian.Uint64(mac.Sum(nil)[:8]) & 0x7fffffffffffffff)
 }
 
 // seededShuffle returns a uniformly shuffled copy of s for the given seed.
@@ -82,7 +126,9 @@ func seededShuffle[T any](s []T, seed int64) []T {
 	if len(out) < 2 {
 		return out
 	}
-	r := mathrand.New(mathrand.NewSource(seed))
+	// A seeded PRNG is intended: the order must be reproducible for the
+	// same attempt. The seed itself is keyed (QuizShuffleSeed).
+	r := mathrand.New(mathrand.NewSource(seed)) // #nosec G404 -- reproducible shuffle; the seed is HMAC-keyed
 	r.Shuffle(len(out), func(i, j int) { out[i], out[j] = out[j], out[i] })
 	return out
 }

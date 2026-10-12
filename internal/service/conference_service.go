@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"crypto/hmac"
-	"crypto/sha1" //nolint:gosec // the BigBlueButton API checksum is specified as SHA-1
+	"crypto/sha1" // #nosec G505 -- the BigBlueButton API checksum is specified as SHA-1
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/xml"
@@ -207,7 +207,7 @@ func bbbPassword(cfg bbbConfig, meetingID, role string) string {
 // secret), per the BigBlueButton API spec.
 func bbbURL(cfg bbbConfig, call string, params url.Values) string {
 	query := params.Encode()
-	sum := sha1.Sum([]byte(call + query + cfg.Secret))
+	sum := sha1.Sum([]byte(call + query + cfg.Secret)) // #nosec G401 -- BigBlueButton API checksum is specified as SHA-1
 	if query != "" {
 		query += "&"
 	}
