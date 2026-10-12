@@ -87,6 +87,11 @@ func (s *LTIService) PrepareLaunch(ctx context.Context, req LTILaunchRequest) (*
 	if deepLinking && req.DeepLink.Kind == DeepLinkTargetSubmission && req.DeepLink.AssignmentID == 0 {
 		return nil, ltiInvalid("assignment_id is required to submit from a tool")
 	}
+	// Submitting from a tool is opening the assignment: a locked or
+	// unavailable one cannot be reached this way either.
+	if deepLinking && req.DeepLink.Kind == DeepLinkTargetSubmission && !s.learnerMayLaunch(ctx, req, 0, req.DeepLink.AssignmentID) {
+		return nil, ErrLTILaunchNotFound
+	}
 
 	var link *models.LTIResourceLink
 	placement := req.Placement
@@ -192,17 +197,24 @@ func (s *LTIService) resolveResourceLink(ctx context.Context, req LTILaunchReque
 		// a student only when that item is (the UUID must not be a way
 		// around the module_item_id / assignment_id checks below).
 		if !req.IsStaff {
+			var tagID, assignmentID uint
 			if link.ContentTagID != nil {
 				tag, tErr := store.FindContentTagInCourse(ctx, *link.ContentTagID, req.CourseID, req.AccountID)
 				if tErr != nil || tag == nil || !s.studentSeesModuleItem(ctx, tag, req) {
 					return nil, ErrLTILaunchNotFound
 				}
+				tagID = tag.ID
 			}
 			if link.AssignmentID != nil && s.adv.AssignmentRepo != nil {
 				a, aErr := s.adv.AssignmentRepo.FindByID(ctx, *link.AssignmentID, req.AccountID)
 				if aErr != nil || a == nil || a.CourseID != req.CourseID || !a.IsPublished() {
 					return nil, ErrLTILaunchNotFound
 				}
+				assignmentID = a.ID
+			}
+			// Module locks and the assignment's availability apply too.
+			if !s.learnerMayLaunch(ctx, req, tagID, assignmentID) {
+				return nil, ErrLTILaunchNotFound
 			}
 		}
 		return link, nil
@@ -211,7 +223,7 @@ func (s *LTIService) resolveResourceLink(ctx context.Context, req LTILaunchReque
 		if err != nil || tag == nil || tag.ContentType != ContentTypeExternalTool || tag.ContentID == nil || *tag.ContentID != tool.ID {
 			return nil, ErrLTILaunchNotFound
 		}
-		if !req.IsStaff && !s.studentSeesModuleItem(ctx, tag, req) {
+		if !req.IsStaff && (!s.studentSeesModuleItem(ctx, tag, req) || !s.learnerMayLaunch(ctx, req, tag.ID, 0)) {
 			return nil, ErrLTILaunchNotFound
 		}
 		if link, err := store.FindResourceLinkByContentTag(ctx, tag.ID, req.AccountID); err == nil && link != nil {
@@ -235,7 +247,7 @@ func (s *LTIService) resolveResourceLink(ctx context.Context, req LTILaunchReque
 		if err != nil || a == nil || a.CourseID != req.CourseID || a.WorkflowState == models.AssignmentDeleted {
 			return nil, ErrLTILaunchNotFound
 		}
-		if !req.IsStaff && !a.IsPublished() {
+		if !req.IsStaff && (!a.IsPublished() || !s.learnerMayLaunch(ctx, req, 0, a.ID)) {
 			return nil, ErrLTILaunchNotFound
 		}
 		link, err := store.FindResourceLinkByAssignment(ctx, a.ID, req.AccountID)

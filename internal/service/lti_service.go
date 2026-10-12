@@ -90,6 +90,9 @@ type LTIService struct {
 	adv LTIAdvantageDeps
 	// devKeyCreator creates the developer key of a tool registration.
 	devKeyCreator DeveloperKeyCreator
+	// launchGate applies module locks and assignment availability to a
+	// learner's launch (SetLaunchGate). Nil = publish checks only.
+	launchGate LTILaunchGate
 }
 
 // ltiSigningKey is one platform RSA key and its kid.

@@ -891,6 +891,67 @@ func TestLTIAdvantage_EndToEnd(t *testing.T) {
 		assert.Equal(t, http.StatusFound, launch(l.student, "StudentEnrollment", byLink))
 	})
 
+	t.Run("course tool launches honour module locks and assignment availability", func(t *testing.T) {
+		courses := postgres.NewCourseRepository(l.g)
+		policy := service.NewGradingPolicyService(postgres.NewGradingPolicyRepository(l.g), postgres.NewGradingStandardRepository(l.g), nil)
+		dates := func(ctx context.Context, courseID, userID, accountID, assignmentID uint) (*service.EffectiveDueDate, bool, error) {
+			course, err := courses.FindByID(ctx, courseID, accountID)
+			if err != nil {
+				return nil, false, err
+			}
+			all, err := policy.StudentAssignmentDates(ctx, course, userID)
+			if err != nil {
+				return nil, false, err
+			}
+			d, ok := all[assignmentID]
+			return &d, ok, nil
+		}
+		l.svc.SetLaunchGate(service.NewModuleLaunchGate(service.NewModuleProgressionService(postgres.NewModuleProgressionRepository(l.g)), dates))
+		defer l.svc.SetLaunchGate(nil)
+
+		launch := func(u *models.User, enrollment, query string) int {
+			resp, _ := l.do(ltiReq{method: "GET", path: fmt.Sprintf("/courses/%d/external_tools/%s/launch?%s", l.course.ID, toolID, query), user: u.ID, account: 1, enrollment: enrollment})
+			return resp.StatusCode
+		}
+
+		// A module that unlocks tomorrow.
+		future := time.Now().Add(24 * time.Hour)
+		locked := &models.ContextModule{CourseID: l.course.ID, Name: "Next week", WorkflowState: "active", UnlockAt: &future}
+		require.NoError(t, postgres.NewModuleRepository(l.g).Create(ctx, locked))
+		resp, body := l.do(ltiReq{method: "POST", path: fmt.Sprintf("/courses/%d/modules/%d/external_tool_items", l.course.ID, locked.ID), user: l.teacher.ID, account: 1, enrollment: "TeacherEnrollment",
+			body: jsonReader(map[string]interface{}{"tool_id": toolID, "title": "Locked tool"})})
+		require.Equal(t, http.StatusCreated, resp.StatusCode, body)
+		var item map[string]interface{}
+		require.NoError(t, json.Unmarshal([]byte(body), &item))
+		tagID := uint(item["id"].(float64))
+		var link models.LTIResourceLink
+		require.NoError(t, l.g.Where("content_tag_id = ?", tagID).First(&link).Error)
+		byItem := fmt.Sprintf("module_item_id=%d", tagID)
+		byLink := "resource_link_id=" + link.ResourceLinkID
+		assert.Equal(t, http.StatusNotFound, launch(l.student, "StudentEnrollment", byItem), "locked module item")
+		assert.Equal(t, http.StatusNotFound, launch(l.student, "StudentEnrollment", byLink), "locked module item by resource link")
+		assert.Equal(t, http.StatusFound, launch(l.teacher, "TeacherEnrollment", byItem), "staff are not module-locked")
+		require.NoError(t, l.g.Model(&models.ContextModule{}).Where("id = ?", locked.ID).Update("unlock_at", nil).Error)
+		assert.Equal(t, http.StatusFound, launch(l.student, "StudentEnrollment", byItem))
+
+		// An assignment tool before its unlock date, then visible only to
+		// an override the student is not in.
+		a := &models.Assignment{CourseID: l.course.ID, Name: "Future lab", WorkflowState: models.AssignmentPublished, Published: true, UnlockAt: &future}
+		pts := 10.0
+		a.PointsPossible = &pts
+		require.NoError(t, postgres.NewAssignmentRepository(l.g).Create(ctx, a))
+		resp, body = l.do(ltiReq{method: "PUT", path: fmt.Sprintf("/courses/%d/assignments/%d/external_tool", l.course.ID, a.ID), user: l.teacher.ID, account: 1, enrollment: "TeacherEnrollment",
+			body: jsonReader(map[string]interface{}{"tool_id": toolID})})
+		require.Equal(t, http.StatusOK, resp.StatusCode, body)
+		byAssignment := fmt.Sprintf("assignment_id=%d", a.ID)
+		assert.Equal(t, http.StatusNotFound, launch(l.student, "StudentEnrollment", byAssignment), "before unlock_at")
+		assert.Equal(t, http.StatusFound, launch(l.teacher, "TeacherEnrollment", byAssignment))
+		require.NoError(t, l.g.Model(&models.Assignment{}).Where("id = ?", a.ID).Update("unlock_at", nil).Error)
+		assert.Equal(t, http.StatusFound, launch(l.student, "StudentEnrollment", byAssignment))
+		require.NoError(t, l.g.Model(&models.Assignment{}).Where("id = ?", a.ID).Update("only_visible_to_overrides", true).Error)
+		assert.Equal(t, http.StatusNotFound, launch(l.student, "StudentEnrollment", byAssignment), "not assigned to the student")
+	})
+
 	t.Run("deep linking drops a non-https resource link url", func(t *testing.T) {
 		claims := l.launch(l.teacher, "TeacherEnrollment", clientID, fmt.Sprintf("%s/launch?placement=link_selection&deep_link=module&module_id=%d", toolID, l.module.ID))
 		settings := claims["https://purl.imsglobal.org/spec/lti-dl/claim/deep_linking_settings"].(map[string]interface{})

@@ -1215,6 +1215,7 @@ func main() {
 		AssignmentService: assignmentService, MasteryPaths: masteryPathService, CoursePaces: coursePaceService,
 		QuizRepo: quizRepo, TopicRepo: discussionTopicRepo, AttachmentRepo: attachmentRepo,
 		ToolRepo: externalToolRepo, DevKeyRepo: devKeyRepo, CourseRepo: courseRepo, IMSCCParser: imsccParser,
+		LTIService: ltiService, GradingPolicy: gradingPolicyService,
 	})
 
 	// Create Fiber app
