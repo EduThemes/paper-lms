@@ -78,7 +78,7 @@ func TestRedisBlacklistStore_RevokeAndCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRedisBlacklistStore: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bl := NewTokenBlacklistWithStore(store)
 	tok := "eyJhbGciOiJIUzI1NiJ9.miniredis.signature"
@@ -100,7 +100,7 @@ func TestRedisBlacklistStore_TokenHashedInRedis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRedisBlacklistStore: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	tok := "eyJSENSITIVE.payload"
 	store.Revoke(tok, time.Now().Add(1*time.Hour))
@@ -120,7 +120,7 @@ func TestRedisBlacklistStore_AlreadyExpiredNotWritten(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRedisBlacklistStore: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Revoking with an already-past expiry is a no-op — the JWT is
 	// already invalid, no point in storing a tombstone that would

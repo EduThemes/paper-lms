@@ -63,22 +63,22 @@ func (s *CalendarService) ExportAsICalendar(ctx context.Context, contextType str
 
 	for _, e := range events {
 		buf.WriteString("BEGIN:VEVENT\r\n")
-		buf.WriteString(fmt.Sprintf("UID:event-%d@paper-lms\r\n", e.ID))
-		buf.WriteString(fmt.Sprintf("SUMMARY:%s\r\n", escapeICalText(e.Title)))
+		fmt.Fprintf(&buf, "UID:event-%d@paper-lms\r\n", e.ID)
+		fmt.Fprintf(&buf, "SUMMARY:%s\r\n", escapeICalText(e.Title))
 
 		if e.Description != "" {
-			buf.WriteString(fmt.Sprintf("DESCRIPTION:%s\r\n", escapeICalText(e.Description)))
+			fmt.Fprintf(&buf, "DESCRIPTION:%s\r\n", escapeICalText(e.Description))
 		}
 
 		if e.AllDay {
-			buf.WriteString(fmt.Sprintf("DTSTART;VALUE=DATE:%s\r\n", e.StartAt.UTC().Format("20060102")))
+			fmt.Fprintf(&buf, "DTSTART;VALUE=DATE:%s\r\n", e.StartAt.UTC().Format("20060102"))
 			if e.EndAt != nil {
-				buf.WriteString(fmt.Sprintf("DTEND;VALUE=DATE:%s\r\n", e.EndAt.UTC().Format("20060102")))
+				fmt.Fprintf(&buf, "DTEND;VALUE=DATE:%s\r\n", e.EndAt.UTC().Format("20060102"))
 			}
 		} else {
-			buf.WriteString(fmt.Sprintf("DTSTART:%s\r\n", e.StartAt.UTC().Format("20060102T150405Z")))
+			fmt.Fprintf(&buf, "DTSTART:%s\r\n", e.StartAt.UTC().Format("20060102T150405Z"))
 			if e.EndAt != nil {
-				buf.WriteString(fmt.Sprintf("DTEND:%s\r\n", e.EndAt.UTC().Format("20060102T150405Z")))
+				fmt.Fprintf(&buf, "DTEND:%s\r\n", e.EndAt.UTC().Format("20060102T150405Z"))
 			}
 		}
 
@@ -90,10 +90,10 @@ func (s *CalendarService) ExportAsICalendar(ctx context.Context, contextType str
 			location += e.LocationAddress
 		}
 		if location != "" {
-			buf.WriteString(fmt.Sprintf("LOCATION:%s\r\n", escapeICalText(location)))
+			fmt.Fprintf(&buf, "LOCATION:%s\r\n", escapeICalText(location))
 		}
 
-		buf.WriteString(fmt.Sprintf("DTSTAMP:%s\r\n", e.CreatedAt.UTC().Format("20060102T150405Z")))
+		fmt.Fprintf(&buf, "DTSTAMP:%s\r\n", e.CreatedAt.UTC().Format("20060102T150405Z"))
 		buf.WriteString("END:VEVENT\r\n")
 	}
 

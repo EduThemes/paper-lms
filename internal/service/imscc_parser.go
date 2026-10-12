@@ -344,7 +344,7 @@ func (p *IMSCCParser) ParsePackage(ctx context.Context, courseID uint, userID ui
 	if err != nil {
 		return nil, fmt.Errorf("failed to open zip file: %w", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// Build a lookup map of zip file entries by name
 	zipFiles := make(map[string]*zip.File)
@@ -430,7 +430,7 @@ func parseManifest(f *zip.File) (*Manifest, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
@@ -670,16 +670,13 @@ func (p *IMSCCParser) importResource(
 	}
 }
 
-// normalizeResourceType maps IMSCC resource type strings to simplified categories.
+// normalizeResourceTypeWithHref maps IMSCC resource type strings to
+// simplified categories.
 //
 // Some categories also depend on the resource's href: a
 // "learning-application-resource" whose href ends in "assessment_meta.xml"
 // is a sidecar for the quiz next door, not its own importable item, so we
 // classify it specially so importResource can drop it cleanly.
-func normalizeResourceType(t string) string {
-	return normalizeResourceTypeWithHref(t, "")
-}
-
 func normalizeResourceTypeWithHref(t, href string) string {
 	t = strings.ToLower(t)
 	href = strings.ToLower(href)
@@ -1252,7 +1249,7 @@ func readZipFile(zipFiles map[string]*zip.File, filePath string) ([]byte, error)
 	if err != nil {
 		return nil, fmt.Errorf("could not open %q: %w", filePath, err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	return io.ReadAll(rc)
 }
@@ -1335,7 +1332,7 @@ func parseModuleMeta(zipFiles map[string]*zip.File, result *ImportResult) (
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not open module_meta.xml: %v", err))
 		return moduleMeta, itemMeta
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
@@ -1390,24 +1387,6 @@ func parseBoolFlag(s string) bool {
 }
 
 // --- file extraction ---
-
-// collectReferencedHrefs returns the set of hrefs the manifest's resources
-// already point at. extractFiles uses this to skip XML/HTML payloads that
-// other importers will consume.
-func collectReferencedHrefs(manifest *Manifest) map[string]bool {
-	hrefs := map[string]bool{}
-	for _, res := range manifest.Resources.Resources {
-		if res.Href != "" {
-			hrefs[res.Href] = true
-		}
-		for _, fr := range res.Files {
-			if fr.Href != "" {
-				hrefs[fr.Href] = true
-			}
-		}
-	}
-	return hrefs
-}
 
 // extractFiles walks the zip and uploads every binary/asset entry into
 // Attachment rows, populating result.fileURLByPath. HTML/XML files are

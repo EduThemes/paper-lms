@@ -49,7 +49,7 @@ func (h *ContentExportHandler) ExportCourse(c *fiber.Ctx) error {
 	zipPath, exportResult, exportErr := h.exporter.ExportCourse(c.Context(), uint(courseID), outputDir)
 	if exportErr != nil {
 		// Clean up on total failure
-		os.RemoveAll(outputDir)
+		_ = os.RemoveAll(outputDir)
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"errors": []fiber.Map{
 				{"message": fmt.Sprintf("Export failed: %s", exportErr.Error())},
@@ -62,7 +62,7 @@ func (h *ContentExportHandler) ExportCourse(c *fiber.Ctx) error {
 		exportResult.AssignmentsExported + exportResult.QuizzesExported +
 		exportResult.DiscussionsExported
 	if totalExported == 0 && len(exportResult.Errors) > 0 {
-		os.RemoveAll(outputDir)
+		_ = os.RemoveAll(outputDir)
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"errors": []fiber.Map{
 				{"message": fmt.Sprintf("Export produced no content. First error: %s", exportResult.Errors[0])},

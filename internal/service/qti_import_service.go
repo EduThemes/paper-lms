@@ -107,7 +107,7 @@ func (s *QTIImportService) ImportMultipart(ctx context.Context, fh *multipart.Fi
 	if err := saveMultipart(fh, zipPath); err != nil {
 		return nil, fmt.Errorf("save upload: %w", err)
 	}
-	defer os.Remove(zipPath)
+	defer func() { _ = os.Remove(zipPath) }()
 
 	return s.ImportFromPath(ctx, zipPath, courseID, userID)
 }
@@ -378,13 +378,15 @@ func saveMultipart(fh *multipart.FileHeader, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
-	_, err = io.Copy(out, src)
-	return err
+	if _, err := io.Copy(out, src); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }

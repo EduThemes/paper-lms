@@ -340,9 +340,10 @@ func (p *parser) skipParenthesized() {
 	}
 	depth := 0
 	for p.pos < len(p.input) {
-		if p.input[p.pos] == '(' {
+		switch p.input[p.pos] {
+		case '(':
 			depth++
-		} else if p.input[p.pos] == ')' {
+		case ')':
 			depth--
 			if depth == 0 {
 				p.pos++

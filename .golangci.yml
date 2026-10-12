@@ -15,3 +15,7 @@ linters:
   # staticcheck, unused. These catch unchecked errors, dead code, and
   # real correctness smells without the noise of style-only linters.
   default: standard
+  exclusions:
+    paths:
+      # Vendored npm packages (e.g. flatted ships a Go port) are not ours.
+      - web/node_modules

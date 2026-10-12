@@ -243,7 +243,7 @@ func (s *AIAssistService) doOnce(ctx context.Context, apiKey string, payload []b
 		// Transport errors (incl. context deadline) — retry once.
 		return "", true, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {

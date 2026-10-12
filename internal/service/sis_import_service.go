@@ -130,7 +130,7 @@ func (s *SISImportService) ProcessImport(ctx context.Context, batchID uint, csvT
 	if processErr != nil {
 		batch.WorkflowState = "failed"
 		batch.Progress = 100
-		s.batchRepo.Update(ctx, batch)
+		_ = s.batchRepo.Update(ctx, batch)
 		return processErr
 	}
 
@@ -142,7 +142,7 @@ func (s *SISImportService) ProcessImport(ctx context.Context, batchID uint, csvT
 		batch.WorkflowState = "imported"
 	}
 	batch.Progress = 100
-	s.batchRepo.Update(ctx, batch)
+	_ = s.batchRepo.Update(ctx, batch)
 
 	return nil
 }
@@ -285,11 +285,11 @@ func (s *SISImportService) processUsersCSV(ctx context.Context, batchID, account
 		if batch.TotalRows > 0 {
 			batch.Progress = (batch.ProcessedRows * 100) / batch.TotalRows
 		}
-		s.batchRepo.Update(ctx, batch)
+		_ = s.batchRepo.Update(ctx, batch)
 	}
 
 	batch.TotalRows = rowNum - 1
-	s.batchRepo.Update(ctx, batch)
+	_ = s.batchRepo.Update(ctx, batch)
 	return nil
 }
 
@@ -331,9 +331,10 @@ func (s *SISImportService) processCoursesCSV(ctx context.Context, batchID, accou
 
 		// Map status to workflow state
 		workflowState := models.CourseAvailable
-		if status == "active" {
+		switch status {
+		case "active":
 			workflowState = models.CourseAvailable
-		} else if status == "deleted" {
+		case "deleted":
 			workflowState = models.CourseDeleted
 		}
 
@@ -390,11 +391,11 @@ func (s *SISImportService) processCoursesCSV(ctx context.Context, batchID, accou
 		if batch.TotalRows > 0 {
 			batch.Progress = (batch.ProcessedRows * 100) / batch.TotalRows
 		}
-		s.batchRepo.Update(ctx, batch)
+		_ = s.batchRepo.Update(ctx, batch)
 	}
 
 	batch.TotalRows = rowNum - 1
-	s.batchRepo.Update(ctx, batch)
+	_ = s.batchRepo.Update(ctx, batch)
 	return nil
 }
 
@@ -489,11 +490,11 @@ func (s *SISImportService) processSectionsCSV(ctx context.Context, batchID, acco
 		if batch.TotalRows > 0 {
 			batch.Progress = (batch.ProcessedRows * 100) / batch.TotalRows
 		}
-		s.batchRepo.Update(ctx, batch)
+		_ = s.batchRepo.Update(ctx, batch)
 	}
 
 	batch.TotalRows = rowNum - 1
-	s.batchRepo.Update(ctx, batch)
+	_ = s.batchRepo.Update(ctx, batch)
 	return nil
 }
 
@@ -637,11 +638,11 @@ func (s *SISImportService) processEnrollmentsCSV(ctx context.Context, batchID, a
 		if batch.TotalRows > 0 {
 			batch.Progress = (batch.ProcessedRows * 100) / batch.TotalRows
 		}
-		s.batchRepo.Update(ctx, batch)
+		_ = s.batchRepo.Update(ctx, batch)
 	}
 
 	batch.TotalRows = rowNum - 1
-	s.batchRepo.Update(ctx, batch)
+	_ = s.batchRepo.Update(ctx, batch)
 	return nil
 }
 
@@ -720,7 +721,7 @@ func (s *SISImportService) ExportUsersCSV(ctx context.Context, accountID uint) (
 	writer := csv.NewWriter(&buf)
 
 	// Write header
-	writer.Write([]string{"user_id", "login_id", "first_name", "last_name", "email", "status"})
+	_ = writer.Write([]string{"user_id", "login_id", "first_name", "last_name", "email", "status"})
 
 	for _, u := range users {
 		sisID := ""
@@ -757,7 +758,7 @@ func (s *SISImportService) ExportCoursesCSV(ctx context.Context, accountID uint)
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 
-	writer.Write([]string{"course_id", "short_name", "long_name", "account_id", "status"})
+	_ = writer.Write([]string{"course_id", "short_name", "long_name", "account_id", "status"})
 
 	for _, c := range courses {
 		sisID := ""
@@ -808,7 +809,7 @@ func (s *SISImportService) ExportSectionsCSV(ctx context.Context, accountID uint
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 
-	writer.Write([]string{"section_id", "course_id", "name", "status"})
+	_ = writer.Write([]string{"section_id", "course_id", "name", "status"})
 
 	for _, sec := range sections {
 		sisSectionID := ""
@@ -880,7 +881,7 @@ func (s *SISImportService) ExportEnrollmentsCSV(ctx context.Context, accountID u
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 
-	writer.Write([]string{"course_id", "user_id", "role", "section_id", "status"})
+	_ = writer.Write([]string{"course_id", "user_id", "role", "section_id", "status"})
 
 	for _, e := range enrollments {
 		sisCourseID := courseMap[e.CourseID]
@@ -976,7 +977,7 @@ func (s *SISImportService) recordError(ctx context.Context, batchID uint, row in
 		Message:    message,
 		File:       file,
 	}
-	s.errorRepo.Create(ctx, batchError)
+	_ = s.errorRepo.Create(ctx, batchError)
 }
 
 // Utility functions

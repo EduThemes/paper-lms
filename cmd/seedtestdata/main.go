@@ -57,7 +57,7 @@ func run() int {
 		return 2
 	}
 	sqlDB, _ := db.DB()
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 
 	ctx := context.Background()
 
@@ -129,7 +129,7 @@ func run() int {
 
 	// 4. One opted-out student so we can verify FilterPublicLeaderboard
 	//    drops them from peer views.
-	if studentRows[3].LeaderboardOptOut != true {
+	if !studentRows[3].LeaderboardOptOut {
 		studentRows[3].LeaderboardOptOut = true
 		if err := db.Save(studentRows[3]).Error; err != nil {
 			log.Printf("opt-out student %d: %v", studentRows[3].ID, err)

@@ -97,7 +97,7 @@ func run() int {
 	if err != nil {
 		return fatal("open admin: %v", err)
 	}
-	defer admin.Close()
+	defer func() { _ = admin.Close() }()
 
 	if err := createDB(ctx, admin, amName); err != nil {
 		return fatal("create %s: %v", amName, err)
@@ -467,7 +467,7 @@ func scanFileForReferences(path, root string, re *regexp.Regexp, idx map[string]
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	rel, _ := filepath.Rel(root, path)
 	rel = filepath.ToSlash(rel)
@@ -541,11 +541,11 @@ func renderMarkdown(cs []classification, tableCount int) string {
 	b.WriteString("## Summary by category\n\n")
 	b.WriteString("| Category | Count | Meaning |\n")
 	b.WriteString("|---|---:|---|\n")
-	b.WriteString(fmt.Sprintf("| `SOFT_DELETE_LEFTOVER` | %d | `deleted_at` column whose model dropped the `gorm.DeletedAt` field. Safe to drop if no soft-deleted rows. |\n", counts[catSoftDelete]))
-	b.WriteString(fmt.Sprintf("| `RENAME_CANDIDATE` | %d | AM has a near-identical name on the same table — copy data forward, then drop. |\n", counts[catRename]))
-	b.WriteString(fmt.Sprintf("| `POLYMORPHIC_REFACTOR` | %d | AM table has a `(*_type, *_id)` polymorphic pair; this is the old typed FK. Needs semantic data migration. |\n", counts[catPolymorphic]))
-	b.WriteString(fmt.Sprintf("| `BOOL_TO_TIMESTAMP_REFACTOR` | %d | Bool flag replaced by `<name>_at` timestamp. Data migration must choose a seed timestamp for true rows. |\n", counts[catBoolTimestamp]))
-	b.WriteString(fmt.Sprintf("| `UNKNOWN` | %d | No matching AM column. See **References** for Go-source occurrences before dropping. |\n", counts[catUnknown]))
+	fmt.Fprintf(&b, "| `SOFT_DELETE_LEFTOVER` | %d | `deleted_at` column whose model dropped the `gorm.DeletedAt` field. Safe to drop if no soft-deleted rows. |\n", counts[catSoftDelete])
+	fmt.Fprintf(&b, "| `RENAME_CANDIDATE` | %d | AM has a near-identical name on the same table — copy data forward, then drop. |\n", counts[catRename])
+	fmt.Fprintf(&b, "| `POLYMORPHIC_REFACTOR` | %d | AM table has a `(*_type, *_id)` polymorphic pair; this is the old typed FK. Needs semantic data migration. |\n", counts[catPolymorphic])
+	fmt.Fprintf(&b, "| `BOOL_TO_TIMESTAMP_REFACTOR` | %d | Bool flag replaced by `<name>_at` timestamp. Data migration must choose a seed timestamp for true rows. |\n", counts[catBoolTimestamp])
+	fmt.Fprintf(&b, "| `UNKNOWN` | %d | No matching AM column. See **References** for Go-source occurrences before dropping. |\n", counts[catUnknown])
 	b.WriteString("\n")
 
 	// Reference counts feed Wave 2c safety. A non-empty References list on an
@@ -712,7 +712,7 @@ func bootstrapExtensions(dbURL string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_, err = conn.Exec(`CREATE EXTENSION IF NOT EXISTS vector`)
 	return err
 }

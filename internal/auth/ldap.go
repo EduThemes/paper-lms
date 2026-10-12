@@ -134,7 +134,7 @@ func (a *LDAPAuthenticator) BuildOutcome(ctx context.Context, provider *models.A
 	if err != nil {
 		return SSOOutcome{}, fmt.Errorf("failed to connect to LDAP server: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Step 1: Bind with service account (if configured) to search for the user.
 	// Read the bind password through resolveLDAPBindPassword: prefer the
@@ -178,7 +178,7 @@ func (a *LDAPAuthenticator) BuildOutcome(ctx context.Context, provider *models.A
 	if err != nil {
 		return SSOOutcome{}, fmt.Errorf("failed to connect for user bind: %w", err)
 	}
-	defer userConn.Close()
+	defer func() { _ = userConn.Close() }()
 
 	if err := ldapBind(userConn, userDN, password); err != nil {
 		return SSOOutcome{}, fmt.Errorf("invalid credentials")
@@ -255,7 +255,7 @@ func (a *LDAPAuthenticator) TestConnection(ctx context.Context, provider *models
 	if err != nil {
 		return fmt.Errorf("LDAP connection failed: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// If a bind DN is configured, test the service account bind.
 	// Same encrypted-first / plaintext-fallback resolution as BuildOutcome
@@ -330,11 +330,8 @@ func ldapBind(conn net.Conn, dn, password string) error {
 	// Simple authentication: context-specific [0]
 	simpleBind := berEncodeContextSpecific(0, []byte(password))
 
-	bindRequest := berEncodeSequence(append(version, append(nameBER, simpleBind...)...))
-	// Wrap as APPLICATION 0 (BindRequest)
-	bindRequestApp := berEncodeApplication(0, bindRequest[2:]) // strip outer SEQUENCE tag/length
-	// Wait, we need the whole thing as APPLICATION 0 containing version, name, auth
-	bindRequestApp = berEncodeApplication(0, append(version, append(nameBER, simpleBind...)...))
+	// BindRequest is APPLICATION 0 wrapping version, name and auth directly.
+	bindRequestApp := berEncodeApplication(0, append(version, append(nameBER, simpleBind...)...))
 
 	messageID := berEncodeInteger(1)
 	ldapMessage := berEncodeSequence(append(messageID, bindRequestApp...))
@@ -437,11 +434,7 @@ func ldapSearch(conn net.Conn, baseDN, filter string, attributes []string) ([]ld
 		buf = append(buf, readBuf[:n]...)
 
 		// Try to parse complete LDAP messages from the buffer
-		for {
-			if len(buf) < 2 {
-				break
-			}
-
+		for len(buf) >= 2 {
 			// Parse the outer SEQUENCE length to determine message boundaries
 			msgLen, headerLen, err := berDecodeLength(buf[1:])
 			if err != nil || len(buf) < headerLen+1+msgLen {

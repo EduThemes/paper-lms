@@ -306,12 +306,10 @@ func (e *IMSCCExporter) writeRubricsXML(
 			})
 		}
 
-		// Pull associations (Assignment) the import wrote.
+		// Associations (Assignment) the import wrote are not exported:
+		// there is no list-by-rubric API on the association repo, so the
+		// round-trip skips them.
 		var assocs []expAssoc
-		if e.rubricAssocRepo != nil {
-			// We don't have a list-by-rubric API, so peek by association
-			// (best-effort). Skipped in the round-trip when not available.
-		}
 
 		doc.Rubrics = append(doc.Rubrics, expRubric{
 			Identifier:     fmt.Sprintf("rubric_%d", r.ID),
@@ -542,12 +540,12 @@ func (e *IMSCCExporter) writeAttachments(
 		}
 		entry, createErr := w.Create(zipPath)
 		if createErr != nil {
-			rc.Close()
+			_ = rc.Close()
 			result.Errors = append(result.Errors, fmt.Sprintf("could not create zip entry %q: %v", zipPath, createErr))
 			continue
 		}
 		if _, copyErr := io.Copy(entry, rc); copyErr != nil {
-			rc.Close()
+			_ = rc.Close()
 			result.Errors = append(result.Errors, fmt.Sprintf("could not copy attachment %d into zip: %v", a.ID, copyErr))
 			continue
 		}

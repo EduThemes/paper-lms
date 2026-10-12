@@ -95,7 +95,7 @@ func (r *AuditLogRepo) CountByEventType(ctx context.Context, accountID *uint, da
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []EventTypeCount
 	for rows.Next() {

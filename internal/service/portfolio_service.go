@@ -748,19 +748,24 @@ func (s *PortfolioService) ExportAsStaticSite(ctx context.Context, portfolioID, 
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 
-	// index.html
-	indexFile, _ := zw.Create("index.html")
-	indexFile.Write([]byte(html))
+	// index.html, css/style.css, README.md
+	for _, entry := range []struct{ name, body string }{
+		{"index.html", html},
+		{"css/style.css", css},
+		{"README.md", readme},
+	} {
+		w, err := zw.Create(entry.name)
+		if err != nil {
+			return nil, fmt.Errorf("create %s in export zip: %w", entry.name, err)
+		}
+		if _, err := w.Write([]byte(entry.body)); err != nil {
+			return nil, fmt.Errorf("write %s in export zip: %w", entry.name, err)
+		}
+	}
 
-	// style.css
-	cssFile, _ := zw.Create("css/style.css")
-	cssFile.Write([]byte(css))
-
-	// README.md
-	readmeFile, _ := zw.Create("README.md")
-	readmeFile.Write([]byte(readme))
-
-	zw.Close()
+	if err := zw.Close(); err != nil {
+		return nil, fmt.Errorf("finalize export zip: %w", err)
+	}
 
 	// Update last exported time
 	now := time.Now()
@@ -830,10 +835,10 @@ func (s *PortfolioService) generateStaticHTML(portfolio *models.Portfolio, secti
 		if !sec.IsVisible {
 			continue
 		}
-		sectionsHTML.WriteString(fmt.Sprintf(`    <section class="portfolio-section section-%s layout-%s" id="section-%d">
+		fmt.Fprintf(&sectionsHTML, `    <section class="portfolio-section section-%s layout-%s" id="section-%d">
       <h2>%s</h2>
       <div class="section-content">%s</div>
-`, sec.SectionType, sec.Layout, sec.ID, escapeHTML(sec.Title), sec.Content))
+`, sec.SectionType, sec.Layout, sec.ID, escapeHTML(sec.Title), sec.Content)
 
 		// Render artifacts that belong to this section
 		for _, art := range artifacts {
@@ -853,11 +858,11 @@ func (s *PortfolioService) generateStaticHTML(portfolio *models.Portfolio, secti
 		}
 	}
 	if unsectionedHTML.Len() > 0 {
-		sectionsHTML.WriteString(fmt.Sprintf(`    <section class="portfolio-section section-artifacts">
+		fmt.Fprintf(&sectionsHTML, `    <section class="portfolio-section section-artifacts">
       <h2>Portfolio Artifacts</h2>
       <div class="section-content">%s</div>
     </section>
-`, unsectionedHTML.String()))
+`, unsectionedHTML.String())
 	}
 
 	// Avatar / header
@@ -926,23 +931,23 @@ func (s *PortfolioService) renderArtifactHTML(art *models.PortfolioArtifact) str
 		featuredClass = " featured"
 	}
 
-	b.WriteString(fmt.Sprintf(`      <article class="artifact artifact-%s%s">
+	fmt.Fprintf(&b, `      <article class="artifact artifact-%s%s">
         <h3>%s</h3>
-`, escapeHTML(art.ArtifactType), featuredClass, escapeHTML(art.Title)))
+`, escapeHTML(art.ArtifactType), featuredClass, escapeHTML(art.Title))
 
 	if art.ThumbnailURL != "" {
-		b.WriteString(fmt.Sprintf(`        <img src="%s" alt="%s" class="artifact-thumbnail" />
-`, escapeHTML(art.ThumbnailURL), escapeHTML(art.Title)))
+		fmt.Fprintf(&b, `        <img src="%s" alt="%s" class="artifact-thumbnail" />
+`, escapeHTML(art.ThumbnailURL), escapeHTML(art.Title))
 	}
 
 	if art.Description != "" {
-		b.WriteString(fmt.Sprintf(`        <p class="artifact-description">%s</p>
-`, escapeHTML(art.Description)))
+		fmt.Fprintf(&b, `        <p class="artifact-description">%s</p>
+`, escapeHTML(art.Description))
 	}
 
 	if art.ContentURL != "" {
-		b.WriteString(fmt.Sprintf(`        <a href="%s" class="artifact-link" target="_blank" rel="noopener noreferrer">View</a>
-`, escapeHTML(art.ContentURL)))
+		fmt.Fprintf(&b, `        <a href="%s" class="artifact-link" target="_blank" rel="noopener noreferrer">View</a>
+`, escapeHTML(art.ContentURL))
 	}
 
 	// Render tags
@@ -951,7 +956,7 @@ func (s *PortfolioService) renderArtifactHTML(art *models.PortfolioArtifact) str
 		if json.Unmarshal([]byte(art.Tags), &tags) == nil && len(tags) > 0 {
 			b.WriteString(`        <div class="artifact-tags">`)
 			for _, tag := range tags {
-				b.WriteString(fmt.Sprintf(`<span class="tag">%s</span>`, escapeHTML(tag)))
+				fmt.Fprintf(&b, `<span class="tag">%s</span>`, escapeHTML(tag))
 			}
 			b.WriteString("</div>\n")
 		}

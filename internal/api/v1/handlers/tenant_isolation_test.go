@@ -1186,7 +1186,7 @@ func TestTenantIsolation_AwardBadge_CrossTenant_Returns404(t *testing.T) {
 		app.Post("/api/v1/users/:user_id/badges", h.AwardBadgeToUser)
 
 		resp := testutil.MakeRequest(app, "POST",
-			fmt.Sprintf("/api/v1/users/42/badges"),
+			"/api/v1/users/42/badges",
 			stringsReader(fmt.Sprintf(`{"badge_id":%d}`, resourceID)))
 		return resp.StatusCode
 	}

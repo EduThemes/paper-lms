@@ -57,7 +57,7 @@ func listTables(db *sql.DB) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []string
 	for rows.Next() {
@@ -82,7 +82,7 @@ func listColumns(db *sql.DB, table string) ([]*Column, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var cols []*Column
 	for rows.Next() {
@@ -134,7 +134,7 @@ func listPrimaryKey(db *sql.DB, table string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var cols []string
 	for rows.Next() {
@@ -162,7 +162,7 @@ func listUniqueConstraints(db *sql.DB, table string) ([]*UniqueConstraint, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	byName := map[string]*UniqueConstraint{}
 	var order []string
@@ -204,7 +204,7 @@ func listForeignKeys(db *sql.DB, table string) ([]*ForeignKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []*ForeignKey
 	for rows.Next() {
@@ -229,7 +229,7 @@ func loadIndexes(db *sql.DB, s *Schema) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		idx := &Index{}

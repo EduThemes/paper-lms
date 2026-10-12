@@ -22,7 +22,9 @@ import (
 // secret-typed case.
 func TestMain(m *testing.M) {
 	key := make([]byte, 32)
-	os.Setenv("MFA_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key))
+	if err := os.Setenv("MFA_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key)); err != nil {
+		panic("settings test setup: " + err.Error())
+	}
 	if err := auth.EnsureKeysLoaded(); err != nil {
 		panic("settings test setup: " + err.Error())
 	}
