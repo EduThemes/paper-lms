@@ -94,8 +94,14 @@ if [ ! -f "$DEPLOY_DIR/previous_deploy" ]; then
   fail "No rollback metadata found at $DEPLOY_DIR/previous_deploy"
 fi
 
-# shellcheck source=/dev/null
-source "$DEPLOY_DIR/previous_deploy"
+# Parse key=value lines (not `source`: values such as the migration
+# version contain spaces and parentheses).
+meta() { sed -n "s/^$1=//p" "$DEPLOY_DIR/previous_deploy" | head -1; }
+previous_version=$(meta previous_version)
+migration_version=$(meta migration_version)
+backup_filename=$(meta backup_filename)
+deploy_timestamp=$(meta deploy_timestamp)
+rolled_back=$(meta rolled_back)
 
 log "Previous deployment info:"
 log "  Previous version:    ${previous_version:-unknown}"

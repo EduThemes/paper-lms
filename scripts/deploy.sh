@@ -305,13 +305,16 @@ fi
 if [ "$DRY_RUN" = true ]; then
   log "[DRY RUN] Would save rollback metadata"
 else
-  cat > "$DEPLOY_DIR/previous_deploy" <<EOF
-previous_version=$PREVIOUS_VERSION
-migration_version=$CURRENT_MIGRATE_VERSION
-backup_filename=${BACKUP_FILENAME:-none}
-deploy_timestamp=$TIMESTAMP
-rolled_back=false
-EOF
+  # key=value lines, one per line, read by deploy-rollback.sh. Values can
+  # contain spaces (e.g. "Version: 64 (dirty: false)"), so they are never
+  # sourced as shell.
+  {
+    printf 'previous_version=%s\n' "$PREVIOUS_VERSION"
+    printf 'migration_version=%s\n' "$CURRENT_MIGRATE_VERSION"
+    printf 'backup_filename=%s\n' "${BACKUP_FILENAME:-none}"
+    printf 'deploy_timestamp=%s\n' "$TIMESTAMP"
+    printf 'rolled_back=false\n'
+  } > "$DEPLOY_DIR/previous_deploy"
 
   echo "$VERSION" > "$DEPLOY_DIR/current_version"
   ok "Rollback metadata saved to $DEPLOY_DIR/previous_deploy"
