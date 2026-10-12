@@ -80,6 +80,18 @@ func (r *gradingPolicyRepo) ListCourseStudents(ctx context.Context, courseID uin
 	return out, err
 }
 
+func (r *gradingPolicyRepo) ListCourseStudentsIn(ctx context.Context, courseID uint, userIDs []uint) ([]models.Enrollment, error) {
+	var out []models.Enrollment
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	err := r.db.WithContext(ctx).Preload("User").
+		Where("course_id = ? AND type = ? AND user_id IN ? AND workflow_state NOT IN ?", courseID, "StudentEnrollment", userIDs,
+			[]string{string(models.EnrollmentDeleted), string(models.EnrollmentRejected)}).
+		Order("id ASC").Find(&out).Error
+	return out, err
+}
+
 func (r *gradingPolicyRepo) ListCourseAccommodations(ctx context.Context, courseID uint, userIDs []uint) ([]models.StudentAccommodation, error) {
 	var out []models.StudentAccommodation
 	if len(userIDs) == 0 {

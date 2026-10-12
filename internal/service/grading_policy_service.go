@@ -66,10 +66,18 @@ func (s *GradingPolicyService) load(ctx context.Context, course *models.Course, 
 	if d.assignments, err = s.repo.ListCourseAssignments(ctx, course.ID); err != nil {
 		return nil, err
 	}
-	if d.groups, err = s.repo.ListCourseGroups(ctx, course.ID); err != nil {
-		return nil, err
+	if withSubmissions {
+		// Only the grade calculator needs the groups.
+		if d.groups, err = s.repo.ListCourseGroups(ctx, course.ID); err != nil {
+			return nil, err
+		}
 	}
-	enrollments, err := s.repo.ListCourseStudents(ctx, course.ID)
+	var enrollments []models.Enrollment
+	if len(onlyUsers) > 0 {
+		enrollments, err = s.repo.ListCourseStudentsIn(ctx, course.ID, onlyUsers)
+	} else {
+		enrollments, err = s.repo.ListCourseStudents(ctx, course.ID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +185,10 @@ type StudentCourseGrade struct {
 	PeriodOverrides map[uint]float64 `json:"period_overrides,omitempty"`
 	// Unassigned lists assignments not assigned to this student.
 	Unassigned []uint `json:"unassigned_assignment_ids"`
+	// DueDates are the student's effective dates per assigned assignment
+	// (overrides and accommodations applied; unassigned ones are absent).
+	// Server-side consumers (the grade summary) read them; not serialised.
+	DueDates map[uint]EffectiveDueDate `json:"-"`
 }
 
 // CourseGrades is the course grade summary.
@@ -193,7 +205,11 @@ type CourseGrades struct {
 // CourseGradesOptions narrows the summary.
 type CourseGradesOptions struct {
 	UserIDs []uint
-	// PostedOnly hides unposted grades (the student / observer view).
+	// PostedOnly hides unposted grades (the student / observer view). It
+	// also applies the course's student-facing total rules: with
+	// hide_final_grades no total, grade or override is returned, and with
+	// "Display totals for All Grading Periods" off the course-level total
+	// and override are withheld (per-period ones stay).
 	PostedOnly bool
 }
 
@@ -236,6 +252,10 @@ func (s *GradingPolicyService) CourseGrades(ctx context.Context, course *models.
 		overrideBy[o.UserID][o.GradingPeriodID] = o.OverrideScore
 	}
 
+	// Student-facing total rules (the gradebook's staff view sees all).
+	hideTotals := opts.PostedOnly && course.HideFinalGrades
+	hideCourseTotal := hideTotals || (opts.PostedOnly && len(d.periods) > 0 && !out.DisplayTotalsAllPeriods)
+
 	for _, e := range d.students {
 		uid := e.UserID
 		subs := d.submissions[uid]
@@ -244,6 +264,7 @@ func (s *GradingPolicyService) CourseGrades(ctx context.Context, course *models.
 		}
 		unassigned := map[uint]bool{}
 		periodOf := map[uint]uint{}
+		dates := map[uint]EffectiveDueDate{}
 		var unassignedList []uint
 		for _, a := range d.assignments {
 			dd, ok := d.dueDates[a.ID][uid]
@@ -253,18 +274,26 @@ func (s *GradingPolicyService) CourseGrades(ctx context.Context, course *models.
 				continue
 			}
 			periodOf[a.ID] = dd.GradingPeriodID
+			dates[a.ID] = dd
 		}
 		res := CalculateCourseGrade(CourseGradeInput{
 			Assignments: d.assignments, Groups: d.groups, Submissions: subs,
 			ApplyGroupWeights: course.ApplyGroupWeights, Unassigned: unassigned,
 			PeriodOf: periodOf, Periods: d.periods, WeightedPeriods: out.WeightedGradingPeriods,
 		})
-		if opts.PostedOnly && len(d.periods) > 0 && !out.DisplayTotalsAllPeriods {
+		if hideCourseTotal {
 			// G025: with "Display totals for All Grading Periods" off,
-			// students see per-period grades only (Canvas).
+			// students see per-period grades only (Canvas); with
+			// hide_final_grades they see no totals at all. Group rows
+			// (and their drop flags) stay.
 			res.ScoreSet = ScoreSet{Groups: res.Groups}
 		}
-		sg := StudentCourseGrade{UserID: uid, CourseGradeResult: res, Unassigned: unassignedList}
+		if hideTotals {
+			for i := range res.Periods {
+				res.Periods[i].ScoreSet = ScoreSet{Groups: res.Periods[i].Groups}
+			}
+		}
+		sg := StudentCourseGrade{UserID: uid, CourseGradeResult: res, Unassigned: unassignedList, DueDates: dates}
 		if sg.Unassigned == nil {
 			sg.Unassigned = []uint{}
 		}
@@ -280,8 +309,8 @@ func (s *GradingPolicyService) CourseGrades(ctx context.Context, course *models.
 				sg.FinalGrade = scheme.ScoreToGrade(*res.FinalScore)
 			}
 		}
-		if ov, ok := overrideBy[uid]; ok {
-			if v, ok := ov[0]; ok {
+		if ov, ok := overrideBy[uid]; ok && !hideTotals {
+			if v, ok := ov[0]; ok && !hideCourseTotal {
 				vv := v
 				sg.OverrideScore = &vv
 				if scheme != nil {
@@ -302,6 +331,65 @@ func (s *GradingPolicyService) CourseGrades(ctx context.Context, course *models.
 	}
 	sort.SliceStable(out.Students, func(i, j int) bool { return out.Students[i].SortableName < out.Students[j].SortableName })
 	return out, nil
+}
+
+// StudentDueDates resolves one student's effective dates (assignment
+// overrides, accommodations, assign-to visibility) in each of the given
+// courses: assignment id -> dates. Assignments not assigned to the
+// student (or in a course they are not a student of) are absent. The
+// planner, missing-work list and observer alerts use it so they agree
+// with the gradebook.
+func (s *GradingPolicyService) StudentDueDates(ctx context.Context, userID uint, courses []models.Course) (map[uint]EffectiveDueDate, error) {
+	out := map[uint]EffectiveDueDate{}
+	for i := range courses {
+		d, err := s.load(ctx, &courses[i], []uint{userID}, false)
+		if err != nil {
+			return nil, err
+		}
+		for aid, per := range d.dueDates {
+			if dd, ok := per[userID]; ok {
+				out[aid] = dd
+			}
+		}
+	}
+	return out, nil
+}
+
+// CurrentPeriodID returns the grading period that contains now (0 when
+// none does).
+func (g *CourseGrades) CurrentPeriodID(now time.Time) uint {
+	for _, p := range g.GradingPeriods {
+		if now.After(p.StartDate) && !now.After(p.EndDate) {
+			return p.ID
+		}
+	}
+	return 0
+}
+
+// DisplayedScore is the course grade a student (or their observer) sees
+// by default, as the Grades page shows it: the current grading period's
+// grade when the course has periods and one is current, otherwise the
+// course total; an instructor's final grade override replaces the
+// computed score. Nil when there is nothing to show.
+func (g *CourseGrades) DisplayedScore(st *StudentCourseGrade, now time.Time) *float64 {
+	if st == nil {
+		return nil
+	}
+	if pid := g.CurrentPeriodID(now); pid != 0 {
+		if v, ok := st.PeriodOverrides[pid]; ok {
+			return &v
+		}
+		for _, pg := range st.Periods {
+			if pg.GradingPeriodID == pid {
+				return pg.CurrentScore
+			}
+		}
+		return nil
+	}
+	if st.OverrideScore != nil {
+		return st.OverrideScore
+	}
+	return st.CurrentScore
 }
 
 // postedView is the student's view of their submissions: an unposted

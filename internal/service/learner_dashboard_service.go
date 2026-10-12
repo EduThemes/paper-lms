@@ -20,6 +20,7 @@ type LearnerDashboardService struct {
 	learner       repository.LearnerRepository
 	enrollments   repository.EnrollmentRepository
 	announcements PlannerAnnouncementVisibility
+	dueDates      StudentDueDateResolver
 }
 
 func NewLearnerDashboardService(learner repository.LearnerRepository, enrollments repository.EnrollmentRepository) *LearnerDashboardService {
@@ -30,6 +31,13 @@ func NewLearnerDashboardService(learner repository.LearnerRepository, enrollment
 // activity stream (optional; without it no announcements are streamed).
 func (s *LearnerDashboardService) SetAnnouncementVisibility(v PlannerAnnouncementVisibility) *LearnerDashboardService {
 	s.announcements = v
+	return s
+}
+
+// SetDueDateResolver wires the gradebook's effective-date resolver
+// (overrides, accommodations, assign-to visibility) for missing work.
+func (s *LearnerDashboardService) SetDueDateResolver(r StudentDueDateResolver) *LearnerDashboardService {
+	s.dueDates = r
 	return s
 }
 
@@ -567,10 +575,12 @@ func (s *LearnerDashboardService) MissingSubmissions(ctx context.Context, studen
 	}
 	live := map[uint]models.Course{}
 	var liveIDs []uint
+	var liveList []models.Course
 	for _, c := range courses {
 		if c.WorkflowState == models.CourseAvailable {
 			live[c.ID] = c
 			liveIDs = append(liveIDs, c.ID)
+			liveList = append(liveList, c)
 		}
 	}
 	assignments, err := s.learner.PublishedAssignments(ctx, liveIDs)
@@ -581,7 +591,7 @@ func (s *LearnerDashboardService) MissingSubmissions(ctx context.Context, studen
 	for i, a := range assignments {
 		aIDs[i] = a.ID
 	}
-	dues, err := s.learner.OverrideDueDates(ctx, studentID, sectionIDs, aIDs)
+	dates, err := loadStudentDates(ctx, s.dueDates, s.learner, studentID, sectionIDs, liveList, aIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -603,8 +613,8 @@ func (s *LearnerDashboardService) MissingSubmissions(ctx context.Context, studen
 	out := []MissingSubmission{}
 	for i := range assignments {
 		a := &assignments[i]
-		due := effectiveDueAt(a.DueAt, dues[a.ID])
-		if !isMissing(a, due, subBy[a.ID], now) {
+		due, assigned := dates.due(a)
+		if !assigned || !isMissing(a, due, subBy[a.ID], now) {
 			continue
 		}
 		out = append(out, MissingSubmission{

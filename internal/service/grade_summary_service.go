@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
-	"sort"
-	"strconv"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -14,167 +12,31 @@ import (
 )
 
 // GradeSummaryService builds the student Grades page ("grade summary"):
-// every assignment with the student's posted result, status badges,
-// feedback comments and rubric assessment, and course / group totals with
-// assignment-group drop rules and grading periods applied. Only posted
-// grades are ever counted or shown to a student or observer, so the
-// totals match what the student is allowed to know.
+// every assignment assigned to the student with their posted result,
+// status badges, feedback comments and rubric assessment, plus course /
+// group / grading period totals. The numbers come from the gradebook's
+// engine (GradingPolicyService.CourseGrades): the same drop rules, group
+// weights, grading periods, assign-to visibility, effective due dates
+// (overrides and accommodations) and final grade overrides the teacher
+// sees, limited to posted grades for students and observers.
 type GradeSummaryService struct {
-	learner       repository.LearnerRepository
-	enrollments   repository.EnrollmentRepository
-	standardsRepo repository.GradingStandardRepository
+	learner     repository.LearnerRepository
+	enrollments repository.EnrollmentRepository
+	policy      *GradingPolicyService
 }
 
-func NewGradeSummaryService(learner repository.LearnerRepository, enrollments repository.EnrollmentRepository, standards repository.GradingStandardRepository) *GradeSummaryService {
-	return &GradeSummaryService{learner: learner, enrollments: enrollments, standardsRepo: standards}
-}
-
-// GroupRules are an assignment group's drop rules (Canvas rules hash).
-type GroupRules struct {
-	DropLowest  int    `json:"drop_lowest"`
-	DropHighest int    `json:"drop_highest"`
-	NeverDrop   []uint `json:"never_drop"`
-}
-
-// ParseGroupRules reads AssignmentGroup.Rules. Numbers may arrive as JSON
-// numbers or strings (Canvas forms post strings); unknown keys are ignored
-// and malformed JSON means "no rules".
-func ParseGroupRules(raw string) GroupRules {
-	var r GroupRules
-	if raw == "" {
-		return r
-	}
-	var m map[string]any
-	if err := json.Unmarshal([]byte(raw), &m); err != nil {
-		return r
-	}
-	toInt := func(v any) int {
-		switch x := v.(type) {
-		case float64:
-			return int(x)
-		case string:
-			n, _ := strconv.Atoi(x)
-			return n
-		}
-		return 0
-	}
-	r.DropLowest = max(0, toInt(m["drop_lowest"]))
-	r.DropHighest = max(0, toInt(m["drop_highest"]))
-	if nd, ok := m["never_drop"].([]any); ok {
-		for _, v := range nd {
-			if n := toInt(v); n > 0 {
-				r.NeverDrop = append(r.NeverDrop, uint(n))
-			}
-		}
-	}
-	return r
-}
-
-// GradedItem is one assignment's contribution to a group total.
-type GradedItem struct {
-	AssignmentID uint
-	Score        float64 // earned points (0 for ungraded work in the final total)
-	Possible     float64
-}
-
-// keepByRatio picks `keep` items maximizing (best=true) or minimizing the
-// group ratio sum(score)/sum(possible). This is the Canvas "drop the
-// assignments that help / hurt the grade most" selection; a plain sort by
-// percentage is wrong when points possible differ. Solved with Dinkelbach
-// iterations: for a fixed ratio q, the best subset is the top `keep` items
-// by score - q*possible, and q converges in a few rounds.
-func keepByRatio(items []GradedItem, keep int, best bool) []GradedItem {
-	if keep >= len(items) {
-		return items
-	}
-	if keep <= 0 {
-		return nil
-	}
-	ratio := func(set []GradedItem) float64 {
-		var s, p float64
-		for _, it := range set {
-			s += it.Score
-			p += it.Possible
-		}
-		if p == 0 {
-			return 0
-		}
-		return s / p
-	}
-	q := ratio(items)
-	var chosen []GradedItem
-	for iter := 0; iter < 100; iter++ {
-		sorted := append([]GradedItem(nil), items...)
-		sort.SliceStable(sorted, func(i, j int) bool {
-			vi := sorted[i].Score - q*sorted[i].Possible
-			vj := sorted[j].Score - q*sorted[j].Possible
-			if vi != vj {
-				if best {
-					return vi > vj
-				}
-				return vi < vj
-			}
-			return sorted[i].AssignmentID < sorted[j].AssignmentID
-		})
-		next := sorted[:keep]
-		nq := ratio(next)
-		chosen = next
-		if math.Abs(nq-q) < 1e-12 {
-			break
-		}
-		q = nq
-	}
-	return chosen
-}
-
-// ApplyDropRules returns the items that count after the group's rules, and
-// the ids of the dropped ones. Lowest are dropped first, then highest from
-// what remains; never_drop and extra-credit (0-point) items are always
-// kept, and at least one droppable item always remains.
-func ApplyDropRules(items []GradedItem, rules GroupRules) (kept []GradedItem, dropped map[uint]bool) {
-	dropped = map[uint]bool{}
-	if rules.DropLowest == 0 && rules.DropHighest == 0 {
-		return items, dropped
-	}
-	never := map[uint]bool{}
-	for _, id := range rules.NeverDrop {
-		never[id] = true
-	}
-	var fixed, cands []GradedItem
-	for _, it := range items {
-		if never[it.AssignmentID] || it.Possible <= 0 {
-			fixed = append(fixed, it)
-		} else {
-			cands = append(cands, it)
-		}
-	}
-	remaining := cands
-	if rules.DropLowest > 0 && len(remaining) > 1 {
-		remaining = keepByRatio(remaining, max(1, len(remaining)-rules.DropLowest), true)
-	}
-	if rules.DropHighest > 0 && len(remaining) > 1 {
-		remaining = keepByRatio(remaining, max(1, len(remaining)-rules.DropHighest), false)
-	}
-	keptIDs := map[uint]bool{}
-	for _, it := range remaining {
-		keptIDs[it.AssignmentID] = true
-	}
-	for _, it := range cands {
-		if !keptIDs[it.AssignmentID] {
-			dropped[it.AssignmentID] = true
-		}
-	}
-	return append(fixed, remaining...), dropped
+func NewGradeSummaryService(learner repository.LearnerRepository, enrollments repository.EnrollmentRepository, policy *GradingPolicyService) *GradeSummaryService {
+	return &GradeSummaryService{learner: learner, enrollments: enrollments, policy: policy}
 }
 
 // --- Summary types ---
 
 // GradeSummaryGroup is one assignment group with its totals.
 type GradeSummaryGroup struct {
-	ID       uint       `json:"id"`
-	Name     string     `json:"name"`
-	Weight   float64    `json:"group_weight"`
-	Rules    GroupRules `json:"rules"`
+	ID       uint      `json:"id"`
+	Name     string    `json:"name"`
+	Weight   float64   `json:"group_weight"`
+	Rules    DropRules `json:"rules"`
 	Earned   float64    `json:"earned"`
 	Possible float64    `json:"possible"`
 	// Score is the group percentage over graded work (nil: nothing graded).
@@ -216,12 +78,15 @@ type GradeSummaryAssignment struct {
 	SubmittedAt       *time.Time `json:"submitted_at"`
 	GradedAt          *time.Time `json:"graded_at"`
 	Posted            bool       `json:"posted"`
-	Status            string     `json:"status"` // graded | submitted | missing | late | excused | not_posted | unsubmitted
+	Status            string     `json:"status"` // graded | pending_review | submitted | missing | late | excused | not_posted | unsubmitted
 	Late              bool       `json:"late"`
 	Missing           bool       `json:"missing"`
 	Excused           bool       `json:"excused"`
 	Dropped           bool       `json:"dropped"`
 	CountsTowardTotal bool       `json:"counts_toward_total"`
+	// PendingReview: a quiz awaiting manual grading; its partial score is
+	// shown but does not count toward the current grade yet.
+	PendingReview bool `json:"pending_review"`
 	// OmitFromFinalGrade: never counts, even with a What-If score.
 	OmitFromFinalGrade bool                  `json:"omit_from_final_grade"`
 	Comments           []GradeSummaryComment `json:"comments"`
@@ -236,16 +101,24 @@ type GradeSummaryTotals struct {
 	FinalGrade   string   `json:"final_grade"`
 	Earned       float64  `json:"earned"`
 	Possible     float64  `json:"possible"`
+	// OverrideScore / OverrideGrade: the instructor's final grade
+	// override for this scope (the course, or the selected period).
+	OverrideScore *float64 `json:"override_score"`
+	OverrideGrade string   `json:"override_grade,omitempty"`
 }
 
 // GradeSummaryPeriod is a grading period the student can filter by.
 type GradeSummaryPeriod struct {
-	ID        uint      `json:"id"`
-	Title     string    `json:"title"`
-	StartDate time.Time `json:"start_date"`
-	EndDate   time.Time `json:"end_date"`
-	IsClosed  bool      `json:"is_closed"`
-	Weight    *float64  `json:"weight"`
+	ID        uint       `json:"id"`
+	Title     string     `json:"title"`
+	StartDate time.Time  `json:"start_date"`
+	EndDate   time.Time  `json:"end_date"`
+	CloseDate *time.Time `json:"close_date"`
+	IsClosed  bool       `json:"is_closed"`
+	Weight    *float64   `json:"weight"`
+	// OverrideScore / OverrideGrade: the period's final grade override.
+	OverrideScore *float64 `json:"override_score"`
+	OverrideGrade string   `json:"override_grade,omitempty"`
 }
 
 // GradeSummary is the whole Grades page payload.
@@ -275,26 +148,6 @@ type GradeSummaryViewer struct {
 // course (or the course is not in the caller's tenant).
 var ErrGradeSummaryNotFound = errors.New("not found")
 
-// periodFor places a due date in a grading period: by date range, with
-// undated work in the last period (Canvas).
-func periodFor(due *time.Time, periods []models.GradingPeriod) *uint {
-	if len(periods) == 0 {
-		return nil
-	}
-	if due == nil {
-		id := periods[len(periods)-1].ID
-		return &id
-	}
-	for i := range periods {
-		p := periods[i]
-		if !due.Before(p.StartDate) && !due.After(p.EndDate) {
-			id := p.ID
-			return &id
-		}
-	}
-	return nil
-}
-
 // Summary builds the grade summary for studentID in courseID. periodID
 // selects a grading period: nil = the current period (or all when none is
 // current), 0 = all periods.
@@ -309,6 +162,19 @@ func (s *GradeSummaryService) Summary(ctx context.Context, courseID, studentID, 
 		return nil, ErrGradeSummaryNotFound
 	}
 	course := courses[0]
+	if s.policy == nil {
+		return nil, errors.New("grade summary: grading policy service not configured")
+	}
+	// The gradebook's engine, restricted to what this viewer may see.
+	grades, err := s.policy.CourseGrades(ctx, &course, CourseGradesOptions{UserIDs: []uint{studentID}, PostedOnly: !viewer.IsStaff})
+	if err != nil {
+		return nil, err
+	}
+	if len(grades.Students) == 0 {
+		return nil, ErrGradeSummaryNotFound
+	}
+	st := grades.Students[0]
+	scheme := s.policy.CourseScheme(ctx, &course)
 
 	out := &GradeSummary{
 		CourseID:          course.ID,
@@ -316,65 +182,47 @@ func (s *GradeSummaryService) Summary(ctx context.Context, courseID, studentID, 
 		StudentID:         studentID,
 		ApplyGroupWeights: course.ApplyGroupWeights,
 		HideTotals:        course.HideFinalGrades && !viewer.IsStaff,
+		PeriodsWeighted:   grades.WeightedGradingPeriods,
+		GradingScale:      []GradeEntry{},
 		GradingPeriods:    []GradeSummaryPeriod{},
 		Groups:            []GradeSummaryGroup{},
 		Assignments:       []GradeSummaryAssignment{},
 	}
+	if scheme != nil {
+		// A course that turned its grading scheme off shows percentages
+		// only (empty scale, no letter grades).
+		out.GradingScale = scheme.Entries
+	}
 	if users, _ := s.learner.UsersByIDs(ctx, []uint{studentID}); len(users) == 1 {
 		out.StudentName = users[0].Name
 	}
-	if s.standardsRepo != nil {
-		if st, err := s.standardsRepo.FindActiveByCourse(ctx, courseID); err == nil && st != nil {
-			out.GradingScale = parseGradingStandardData(st.Data)
+	gradeFor := func(v *float64) string {
+		if v == nil || scheme == nil {
+			return ""
 		}
-	}
-	if out.GradingScale == nil {
-		out.GradingScale = defaultGradingScale
+		return scheme.ScoreToGrade(*v)
 	}
 
-	// Grading periods come from the course's term.
-	var periods []models.GradingPeriod
-	displayAllTotals := true
-	groupShowsAll := false
-	if course.EnrollmentTermID != nil {
-		terms, _ := s.learner.EnrollmentTermsByIDs(ctx, []uint{*course.EnrollmentTermID})
-		if len(terms) == 1 && terms[0].GradingPeriodGroupID != nil {
-			gid := *terms[0].GradingPeriodGroupID
-			if grp, err := s.learner.GradingPeriodGroup(ctx, gid); err == nil {
-				periods, _ = s.learner.GradingPeriodsForGroup(ctx, gid)
-				groupShowsAll = grp.DisplayTotals || grp.Weighted
-			}
+	// Grading periods: the course term's set (the gradebook's resolver).
+	for _, p := range grades.GradingPeriods {
+		gp := GradeSummaryPeriod{ID: p.ID, Title: p.Title, StartDate: p.StartDate, EndDate: p.EndDate,
+			CloseDate: p.CloseDate, IsClosed: p.IsClosed, Weight: p.Weight}
+		if v, ok := st.PeriodOverrides[p.ID]; ok {
+			vv := v
+			gp.OverrideScore = &vv
+			gp.OverrideGrade = gradeFor(&vv)
 		}
+		out.GradingPeriods = append(out.GradingPeriods, gp)
 	}
-	periodWeights := map[uint]float64{}
-	if len(periods) > 0 {
-		weighted := false
-		for _, p := range periods {
-			out.GradingPeriods = append(out.GradingPeriods, GradeSummaryPeriod{
-				ID: p.ID, Title: p.Title, StartDate: p.StartDate, EndDate: p.EndDate, IsClosed: p.IsClosed, Weight: p.Weight,
-			})
-			if p.Weight != nil {
-				weighted = true
-				periodWeights[p.ID] = *p.Weight
-			}
-		}
-		out.PeriodsWeighted = weighted
-		// The period group's "display totals for All Grading Periods" flag
-		// decides whether the all-periods total is shown (Canvas); weighted
-		// periods always produce one.
-		displayAllTotals = groupShowsAll || weighted
+	if len(grades.GradingPeriods) > 0 {
 		switch {
 		case periodID == nil:
-			now := time.Now()
-			for _, p := range periods {
-				if !now.Before(p.StartDate) && !now.After(p.EndDate) {
-					id := p.ID
-					out.SelectedPeriodID = &id
-				}
+			if pid := grades.CurrentPeriodID(time.Now()); pid != 0 {
+				out.SelectedPeriodID = &pid
 			}
 		case *periodID != 0:
 			found := false
-			for _, p := range periods {
+			for _, p := range grades.GradingPeriods {
 				if p.ID == *periodID {
 					found = true
 				}
@@ -384,6 +232,30 @@ func (s *GradeSummaryService) Summary(ctx context.Context, courseID, studentID, 
 			}
 			id := *periodID
 			out.SelectedPeriodID = &id
+		}
+	}
+
+	// The score set for the selected scope: one period, or the course.
+	set := st.ScoreSet
+	overrideScore := st.OverrideScore
+	if out.SelectedPeriodID != nil {
+		set = ScoreSet{}
+		overrideScore = nil
+		for _, pg := range st.Periods {
+			if pg.GradingPeriodID == *out.SelectedPeriodID {
+				set = pg.ScoreSet
+			}
+		}
+		if v, ok := st.PeriodOverrides[*out.SelectedPeriodID]; ok {
+			overrideScore = &v
+		}
+	}
+	groupGrade := map[uint]GroupGrade{}
+	dropped := map[uint]bool{}
+	for _, g := range set.Groups {
+		groupGrade[g.AssignmentGroupID] = g
+		for _, id := range g.Dropped {
+			dropped[id] = true
 		}
 	}
 
@@ -398,14 +270,6 @@ func (s *GradeSummaryService) Summary(ctx context.Context, courseID, studentID, 
 	aIDs := make([]uint, len(assignments))
 	for i, a := range assignments {
 		aIDs[i] = a.ID
-	}
-	var sectionIDs []uint
-	if enr.CourseSectionID != nil {
-		sectionIDs = []uint{*enr.CourseSectionID}
-	}
-	dues, err := s.learner.OverrideDueDates(ctx, studentID, sectionIDs, aIDs)
-	if err != nil {
-		return nil, err
 	}
 	subs, err := s.learner.SubmissionsForUser(ctx, studentID, aIDs)
 	if err != nil {
@@ -483,19 +347,18 @@ func (s *GradeSummaryService) Summary(ctx context.Context, courseID, studentID, 
 	}
 
 	now := time.Now()
-	groupByID := map[uint]models.AssignmentGroup{}
-	for _, g := range groups {
-		groupByID[g.ID] = g
-	}
-	type rowRef struct {
-		idx     int
-		groupID uint
-	}
-	var refs []rowRef
 	for i := range assignments {
 		a := &assignments[i]
-		due := effectiveDueAt(a.DueAt, dues[a.ID])
-		pid := periodFor(due, periods)
+		dd, assigned := st.DueDates[a.ID]
+		if !assigned {
+			continue // assign-to: not this student's work
+		}
+		due := dd.DueAt
+		var pid *uint
+		if dd.GradingPeriodID != 0 {
+			v := dd.GradingPeriodID
+			pid = &v
+		}
 		if out.SelectedPeriodID != nil && (pid == nil || *pid != *out.SelectedPeriodID) {
 			continue
 		}
@@ -504,15 +367,18 @@ func (s *GradeSummaryService) Summary(ctx context.Context, courseID, studentID, 
 		row := GradeSummaryAssignment{
 			ID: a.ID, Name: a.Name, AssignmentGroupID: a.AssignmentGroupID, DueAt: due,
 			PointsPossible: a.PointsPossible, GradingType: a.GradingType, GradingPeriodID: pid,
-			OmitFromFinalGrade: a.OmitFromFinalGrade,
-			Posted:             posted, Comments: commentsBy[a.ID], Rubric: rubricBy[a.ID],
+			OmitFromFinalGrade: a.OmitFromFinalGrade, Dropped: dropped[a.ID],
+			Posted: posted, Comments: commentsBy[a.ID], Rubric: rubricBy[a.ID],
 		}
 		if row.Comments == nil {
 			row.Comments = []GradeSummaryComment{}
 		}
+		var workflow models.SubmissionWorkflow
 		if sub != nil {
 			row.SubmittedAt = sub.SubmittedAt
 			row.Late = sub.Late
+			row.PendingReview = sub.WorkflowState == models.SubmissionPendingReview
+			workflow = sub.WorkflowState
 		}
 		row.Missing = isMissing(a, due, sub, now)
 		if posted || viewer.IsStaff {
@@ -527,6 +393,8 @@ func (s *GradeSummaryService) Summary(ctx context.Context, courseID, studentID, 
 		switch {
 		case row.Excused:
 			row.Status = "excused"
+		case row.PendingReview:
+			row.Status = "pending_review"
 		case row.Score != nil:
 			row.Status = "graded"
 		case sub != nil && !posted && (sub.Score != nil || sub.Excused):
@@ -540,176 +408,40 @@ func (s *GradeSummaryService) Summary(ctx context.Context, courseID, studentID, 
 		default:
 			row.Status = "unsubmitted"
 		}
-		_, counts := countedItem(a, &models.Submission{Excused: row.Excused, Score: row.Score}, nil)
+		_, counts := countedItem(a, &models.Submission{Excused: row.Excused, Score: row.Score, WorkflowState: workflow}, nil)
 		row.CountsTowardTotal = counts
-		gid := uint(0)
-		if a.AssignmentGroupID != nil {
-			if _, ok := groupByID[*a.AssignmentGroupID]; ok {
-				gid = *a.AssignmentGroupID
-			}
-		}
 		out.Assignments = append(out.Assignments, row)
-		refs = append(refs, rowRef{idx: len(out.Assignments) - 1, groupID: gid})
 	}
 
-	// Totals per group (current: graded work only; final: ungraded as 0).
-	type acc struct {
-		current, final []GradedItem
-	}
-	perGroup := map[uint]*acc{}
-	for _, ref := range refs {
-		row := &out.Assignments[ref.idx]
-		if !row.CountsTowardTotal {
-			continue
-		}
-		possible := 0.0
-		if row.PointsPossible != nil {
-			possible = *row.PointsPossible
-		}
-		a := perGroup[ref.groupID]
-		if a == nil {
-			a = &acc{}
-			perGroup[ref.groupID] = a
-		}
-		earned := 0.0
-		if row.Score != nil {
-			earned = *row.Score
-			a.current = append(a.current, GradedItem{AssignmentID: row.ID, Score: earned, Possible: possible})
-		}
-		a.final = append(a.final, GradedItem{AssignmentID: row.ID, Score: earned, Possible: possible})
-	}
-
-	type groupTotal struct {
-		curEarned, curPossible, finEarned, finPossible float64
-		weight                                         float64
-	}
-	totals := map[uint]*groupTotal{}
-	droppedIDs := map[uint]bool{}
-	sumItems := func(items []GradedItem) (e, p float64) {
-		for _, it := range items {
-			e += it.Score
-			p += it.Possible
-		}
-		return
-	}
-	for gid, a := range perGroup {
-		rules := ParseGroupRules(groupByID[gid].Rules)
-		cur, drops := ApplyDropRules(a.current, rules)
-		for id := range drops {
-			droppedIDs[id] = true
-		}
-		fin, _ := ApplyDropRules(a.final, rules)
-		gt := &groupTotal{weight: groupByID[gid].GroupWeight}
-		gt.curEarned, gt.curPossible = sumItems(cur)
-		gt.finEarned, gt.finPossible = sumItems(fin)
-		totals[gid] = gt
-	}
-	for i := range out.Assignments {
-		if droppedIDs[out.Assignments[i].ID] {
-			out.Assignments[i].Dropped = true
-		}
-	}
 	for _, g := range groups {
-		sg := GradeSummaryGroup{ID: g.ID, Name: g.Name, Weight: g.GroupWeight, Rules: ParseGroupRules(g.Rules)}
+		sg := GradeSummaryGroup{ID: g.ID, Name: g.Name, Weight: g.GroupWeight, Rules: ParseDropRules(g.Rules)}
 		if sg.Rules.NeverDrop == nil {
 			sg.Rules.NeverDrop = []uint{}
 		}
-		if gt := totals[g.ID]; gt != nil {
-			sg.Earned, sg.Possible = gt.curEarned, gt.curPossible
-			if gt.curPossible > 0 {
-				v := roundPct(gt.curEarned / gt.curPossible * 100)
+		if gg, ok := groupGrade[g.ID]; ok {
+			sg.Earned, sg.Possible = roundPct(gg.CurrentScore), roundPct(gg.CurrentPossible)
+			if gg.CurrentPossible > 0 {
+				v := roundPct(gg.CurrentScore / gg.CurrentPossible * 100)
 				sg.Score = &v
 			}
 		}
 		out.Groups = append(out.Groups, sg)
 	}
 
-	if out.HideTotals || (len(periods) > 0 && out.SelectedPeriodID == nil && !displayAllTotals) {
+	// Students see no total when the course hides totals, and no
+	// all-periods total when the period set does not display one (the
+	// engine already withheld those numbers for them).
+	if out.HideTotals || (len(grades.GradingPeriods) > 0 && out.SelectedPeriodID == nil && !grades.DisplayTotalsAllPeriods && !viewer.IsStaff) {
 		return out, nil
 	}
-	var t GradeSummaryTotals
-	useWeights := course.ApplyGroupWeights && len(groups) > 0
-	var cur, fin *float64
-	if useWeights {
-		var cSum, cW, fSum, fW float64
-		for gid, gt := range totals {
-			if gid == 0 || gt.weight <= 0 {
-				continue
-			}
-			if gt.curPossible > 0 {
-				cSum += gt.curEarned / gt.curPossible * 100 * gt.weight
-				cW += gt.weight
-			}
-			if gt.finPossible > 0 {
-				fSum += gt.finEarned / gt.finPossible * 100 * gt.weight
-				fW += gt.weight
-			}
-			t.Earned += gt.curEarned
-			t.Possible += gt.curPossible
-		}
-		if cW > 0 {
-			v := roundPct(cSum / cW)
-			cur = &v
-		}
-		if fW > 0 {
-			v := roundPct(fSum / fW)
-			fin = &v
-		}
-	} else {
-		var fe, fp float64
-		for _, gt := range totals {
-			t.Earned += gt.curEarned
-			t.Possible += gt.curPossible
-			fe += gt.finEarned
-			fp += gt.finPossible
-		}
-		if t.Possible > 0 {
-			v := roundPct(t.Earned / t.Possible * 100)
-			cur = &v
-		}
-		if fp > 0 {
-			v := roundPct(fe / fp * 100)
-			fin = &v
-		}
-	}
-	// All-periods total with weighted grading periods: weight the per-period
-	// current scores instead of pooling the assignments.
-	if len(periods) > 0 && out.SelectedPeriodID == nil && out.PeriodsWeighted {
-		cur = s.weightedPeriodTotal(ctx, courseID, studentID, accountID, periods, periodWeights, viewer)
-	}
-	t.CurrentScore, t.FinalScore = cur, fin
-	if cur != nil {
-		t.CurrentGrade = scoreToLetterGradeWithScale(*cur, out.GradingScale)
-	}
-	if fin != nil {
-		t.FinalGrade = scoreToLetterGradeWithScale(*fin, out.GradingScale)
+	t := GradeSummaryTotals{
+		CurrentScore: set.CurrentScore, FinalScore: set.FinalScore,
+		CurrentGrade: gradeFor(set.CurrentScore), FinalGrade: gradeFor(set.FinalScore),
+		Earned: roundPct(set.CurrentPoints), Possible: roundPct(set.CurrentPossible),
+		OverrideScore: overrideScore, OverrideGrade: gradeFor(overrideScore),
 	}
 	out.Totals = &t
 	return out, nil
-}
-
-// weightedPeriodTotal combines per-period current scores by period weight
-// (periods without graded work are left out and the weights renormalized).
-func (s *GradeSummaryService) weightedPeriodTotal(ctx context.Context, courseID, studentID, accountID uint, periods []models.GradingPeriod, weights map[uint]float64, viewer GradeSummaryViewer) *float64 {
-	var sum, w float64
-	for _, p := range periods {
-		pid := p.ID
-		ps, err := s.Summary(ctx, courseID, studentID, accountID, &pid, viewer)
-		if err != nil || ps.Totals == nil || ps.Totals.CurrentScore == nil {
-			continue
-		}
-		wt := weights[p.ID]
-		if wt <= 0 {
-			continue
-		}
-		sum += *ps.Totals.CurrentScore * wt
-		w += wt
-	}
-	if w == 0 {
-		return nil
-	}
-	v := roundPct(sum / w)
-	return &v
 }
 
 func roundPct(v float64) float64 { return math.Round(v*100) / 100 }

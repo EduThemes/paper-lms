@@ -145,11 +145,14 @@ func newLearnerFixture(t *testing.T) *learnerFixture {
 	obs := service.NewObserverService(enrollmentRepo, courseRepo, users).SetObserverLinkStore(postgres.NewObserverLinkRepository(g))
 	require.NoError(t, obs.LinkObserverToStudent(ctx, lnParent, lnStudent))
 
+	// The gradebook's engine backs dates, missing status and totals.
+	policy := service.NewGradingPolicyService(postgres.NewGradingPolicyRepository(g), postgres.NewGradingStandardRepository(g), nil)
 	planner := service.NewPlannerService(postgres.NewPlannerNoteRepository(g), postgres.NewPlannerOverrideRepository(g),
 		enrollmentRepo, postgres.NewAssignmentRepository(g), postgres.NewQuizRepository(g), postgres.NewCalendarEventRepository(g)).
-		SetLearnerRepository(learner)
-	dash := service.NewLearnerDashboardService(learner, enrollmentRepo)
-	grades := service.NewGradeSummaryService(learner, enrollmentRepo, postgres.NewGradingStandardRepository(g))
+		SetLearnerRepository(learner).SetDueDateResolver(policy)
+	dash := service.NewLearnerDashboardService(learner, enrollmentRepo).SetDueDateResolver(policy)
+	grades := service.NewGradeSummaryService(learner, enrollmentRepo, policy)
+	obs.SetCourseGradeSource(policy)
 	alerts := service.NewObserverAlertService(learner, obs, dash, grades)
 	store := storage.NewLocalBackend(t.TempDir())
 	profiles := service.NewUserProfileService(users, learner, store)

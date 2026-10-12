@@ -23,6 +23,8 @@ type GradingPolicyRepository interface {
 	// ListCourseStudents returns the course's (non-deleted, non-rejected)
 	// student enrollments with their users.
 	ListCourseStudents(ctx context.Context, courseID uint) ([]models.Enrollment, error)
+	// ListCourseStudentsIn is ListCourseStudents limited to userIDs.
+	ListCourseStudentsIn(ctx context.Context, courseID uint, userIDs []uint) ([]models.Enrollment, error)
 	// ListCourseAccommodations returns accommodations in effect now for
 	// the users in the course (course-specific or global).
 	ListCourseAccommodations(ctx context.Context, courseID uint, userIDs []uint) ([]models.StudentAccommodation, error)

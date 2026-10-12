@@ -7,6 +7,7 @@ package service
 // This is the bulk twin of SubmissionService.EffectiveDates.
 
 import (
+	"context"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -168,4 +169,52 @@ func GradingPeriodClosed(p *models.GradingPeriod, now time.Time) bool {
 		return true
 	}
 	return p.CloseDate != nil && now.After(*p.CloseDate)
+}
+
+// StudentDueDateResolver resolves one student's effective dates across
+// courses (GradingPolicyService.StudentDueDates): assignment id -> dates,
+// with unassigned assignments absent.
+type StudentDueDateResolver interface {
+	StudentDueDates(ctx context.Context, userID uint, courses []models.Course) (map[uint]EffectiveDueDate, error)
+}
+
+// studentDates is one student's dates as the planner and the missing-work
+// list read them.
+type studentDates struct {
+	resolved map[uint]EffectiveDueDate
+	// overrides is the fallback when no resolver is wired: the due dates
+	// of the overrides that apply to the student.
+	overrides map[uint][]*time.Time
+}
+
+// due returns the student's due date on a, and whether a is assigned to
+// them at all.
+func (d studentDates) due(a *models.Assignment) (*time.Time, bool) {
+	if d.resolved != nil {
+		dd, ok := d.resolved[a.ID]
+		return dd.DueAt, ok
+	}
+	ov := d.overrides[a.ID]
+	if a.OnlyVisibleToOverrides && len(ov) == 0 {
+		return nil, false
+	}
+	return effectiveDueAt(a.DueAt, ov), true
+}
+
+func loadStudentDates(ctx context.Context, resolver StudentDueDateResolver, learner learnerOverrideDates, userID uint,
+	sectionIDs []uint, courses []models.Course, assignmentIDs []uint) (studentDates, error) {
+	if resolver != nil {
+		m, err := resolver.StudentDueDates(ctx, userID, courses)
+		if m == nil {
+			m = map[uint]EffectiveDueDate{}
+		}
+		return studentDates{resolved: m}, err
+	}
+	ov, err := learner.OverrideDueDates(ctx, userID, sectionIDs, assignmentIDs)
+	return studentDates{overrides: ov}, err
+}
+
+// learnerOverrideDates is the slice of LearnerRepository the fallback uses.
+type learnerOverrideDates interface {
+	OverrideDueDates(ctx context.Context, userID uint, sectionIDs, assignmentIDs []uint) (map[uint][]*time.Time, error)
 }

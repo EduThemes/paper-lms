@@ -381,10 +381,19 @@ func (s *ObserverAlertService) Evaluate(ctx context.Context, t *models.ObserverA
 			// nil period: the current grading period when the course has
 			// periods (what the parent sees by default), else the whole course.
 			sum, err := s.grades.Summary(ctx, cid, t.StudentID, t.AccountID, nil, GradeSummaryViewer{})
-			if err != nil || sum.Totals == nil || sum.Totals.CurrentScore == nil {
+			if err != nil || sum.Totals == nil {
 				continue
 			}
-			score := *sum.Totals.CurrentScore
+			// The grade the student has: the instructor's final grade
+			// override when set, else the computed current score.
+			current := sum.Totals.CurrentScore
+			if sum.Totals.OverrideScore != nil {
+				current = sum.Totals.OverrideScore
+			}
+			if current == nil {
+				continue
+			}
+			score := *current
 			crossed := (low && score < *t.Threshold) || (!low && score > *t.Threshold)
 			if !crossed {
 				// Re-arm: the grade recovered, so a later crossing alerts again.

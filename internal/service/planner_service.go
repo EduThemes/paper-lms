@@ -89,6 +89,7 @@ type PlannerService struct {
 
 	learner       repository.LearnerRepository
 	announcements PlannerAnnouncementVisibility
+	dueDates      StudentDueDateResolver
 }
 
 func NewPlannerService(
@@ -119,6 +120,14 @@ func (s *PlannerService) SetLearnerRepository(r repository.LearnerRepository) *P
 // may see (optional; without it announcements are left out).
 func (s *PlannerService) SetAnnouncementVisibility(v PlannerAnnouncementVisibility) *PlannerService {
 	s.announcements = v
+	return s
+}
+
+// SetDueDateResolver wires the gradebook's effective-date resolver
+// (overrides, accommodations, assign-to visibility). Without it the
+// planner falls back to override dates only.
+func (s *PlannerService) SetDueDateResolver(r StudentDueDateResolver) *PlannerService {
+	s.dueDates = r
 	return s
 }
 
@@ -199,27 +208,6 @@ func effectiveDueAt(base *time.Time, overrides []*time.Time) *time.Time {
 	return latest
 }
 
-// noSubmissionTypes are assignment submission types that never expect an
-// online turn-in, so the work can not be "missing".
-func expectsOnlineSubmission(a *models.Assignment) bool {
-	if a.GradingType == "not_graded" {
-		return false
-	}
-	st := strings.ToLower(a.SubmissionTypes)
-	if st == "" {
-		return true
-	}
-	for _, t := range strings.Split(st, ",") {
-		switch strings.TrimSpace(t) {
-		case "none", "on_paper", "not_graded", "external_tool", "wiki_page":
-			continue
-		default:
-			return true
-		}
-	}
-	return false
-}
-
 // isSubmitted reports whether the student turned the work in.
 func isSubmitted(sub *models.Submission) bool {
 	if sub == nil {
@@ -229,26 +217,22 @@ func isSubmitted(sub *models.Submission) bool {
 		sub.WorkflowState == models.SubmissionPendingReview
 }
 
-// isMissing applies Canvas's missing rule: past the due date with nothing
-// turned in (and not excused), or explicitly marked missing by the teacher.
+// isMissing is the student's missing status against their effective due
+// date, the same rule the gradebook stores (ComputeTardiness): a manual
+// late_policy_status wins, excused work is never missing, and otherwise
+// work is missing when the due date has passed, the assignment expects an
+// online submission, nothing was turned in and no grader has graded it.
 func isMissing(a *models.Assignment, due *time.Time, sub *models.Submission, now time.Time) bool {
-	if sub != nil && sub.Excused {
+	if sub != nil && sub.LatePolicyStatus != nil {
+		return ComputeTardiness(a, sub, due, now).Missing
+	}
+	if a.GradingType == "not_graded" || isSubmitted(sub) {
 		return false
 	}
-	if sub != nil && sub.Missing {
-		return true
+	if sub == nil {
+		return due != nil && now.After(*due) && ExpectsSubmission(a)
 	}
-	if due == nil || !due.Before(now) || !expectsOnlineSubmission(a) {
-		return false
-	}
-	if isSubmitted(sub) {
-		return false
-	}
-	// A posted grade on unsubmitted work (e.g. on-paper scoring) is not missing.
-	if sub != nil && sub.Score != nil && sub.PostedAt != nil {
-		return false
-	}
-	return true
+	return ComputeTardiness(a, sub, due, now).Missing
 }
 
 func submissionStatus(a *models.Assignment, due *time.Time, sub *models.Submission, now time.Time) *PlannerSubmissionStatus {
@@ -292,9 +276,11 @@ func (s *PlannerService) Items(ctx context.Context, userID, accountID uint, q Pl
 		}
 	}
 	var studentCourseIDs []uint
+	var studentCourseList []models.Course
 	for _, id := range courseIDs {
 		if studentCourse[id] {
 			studentCourseIDs = append(studentCourseIDs, id)
+			studentCourseList = append(studentCourseList, courses[id])
 		}
 	}
 
@@ -331,7 +317,7 @@ func (s *PlannerService) Items(ctx context.Context, userID, accountID uint, q Pl
 	for i, a := range assignments {
 		aIDs[i] = a.ID
 	}
-	dueOverrides, err := s.learner.OverrideDueDates(ctx, userID, sectionIDs, aIDs)
+	dates, err := loadStudentDates(ctx, s.dueDates, s.learner, userID, sectionIDs, studentCourseList, aIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -352,8 +338,8 @@ func (s *PlannerService) Items(ctx context.Context, userID, accountID uint, q Pl
 		if quizAssignments[a.ID] {
 			continue
 		}
-		due := effectiveDueAt(a.DueAt, dueOverrides[a.ID])
-		if due == nil || !inDateRange(due, q.Start, q.End) {
+		due, assigned := dates.due(a)
+		if !assigned || due == nil || !inDateRange(due, q.Start, q.End) {
 			continue
 		}
 		cid := a.CourseID

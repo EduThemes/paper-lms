@@ -634,6 +634,8 @@ func main() {
 	submissionService.SetGradingPolicyRepository(gradingPolicyRepo)
 	submissionService.SetPeriodResolver(gradingPolicyService)
 	gradingService.SetPolicyService(gradingPolicyService)
+	// The observer overview's course grade comes from the same engine.
+	observerService.SetCourseGradeSource(gradingPolicyService)
 	questionBankService := service.NewQuestionBankService(questionBankRepo, questionBankEntryRepo, quizQuestionRepo, quizRepo)
 	// P3 Feature services
 	featureFlagService := service.NewFeatureFlagService(featureFlagRepo, courseRepo, accountRepo, userRepo)
@@ -1042,10 +1044,13 @@ func main() {
 	// Learner dashboard lane: planner, dashboard customization, activity
 	// stream, missing work, grade summary, observer alerts, profile.
 	learnerRepo := postgres.NewLearnerRepository(database)
+	// Due dates, missing status and course totals all come from the
+	// gradebook's engine (gradingPolicyService).
 	plannerService := service.NewPlannerService(postgres.NewPlannerNoteRepository(database), postgres.NewPlannerOverrideRepository(database), enrollmentRepo, assignmentRepo, quizRepo, calendarEventRepo).
-		SetLearnerRepository(learnerRepo).SetAnnouncementVisibility(announcementService)
-	learnerDashboardService := service.NewLearnerDashboardService(learnerRepo, enrollmentRepo).SetAnnouncementVisibility(announcementService)
-	gradeSummaryService := service.NewGradeSummaryService(learnerRepo, enrollmentRepo, gradingStandardRepo)
+		SetLearnerRepository(learnerRepo).SetAnnouncementVisibility(announcementService).SetDueDateResolver(gradingPolicyService)
+	learnerDashboardService := service.NewLearnerDashboardService(learnerRepo, enrollmentRepo).SetAnnouncementVisibility(announcementService).
+		SetDueDateResolver(gradingPolicyService)
+	gradeSummaryService := service.NewGradeSummaryService(learnerRepo, enrollmentRepo, gradingPolicyService)
 	observerAlertService := service.NewObserverAlertService(learnerRepo, observerService, learnerDashboardService, gradeSummaryService).SetAnnouncementVisibility(announcementService)
 	learnerHandler := handlers.NewLearnerHandler(plannerService, learnerDashboardService, gradeSummaryService, observerAlertService,
 		service.NewUserProfileService(userRepo, learnerRepo, storageBackend), observerService, userRepo)
