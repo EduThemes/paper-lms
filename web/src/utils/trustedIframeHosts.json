@@ -13,7 +13,7 @@
     "go\\.screenpal\\.com/player/",
     "screencast-o-matic\\.com/(embed|player)",
     "([a-z0-9-]+\\.)+panopto\\.(com|eu)/panopto/pages/(embed|viewer)\\.aspx",
-    "([a-z0-9-]+\\.)*kaltura\\.com/",
+    "([a-z0-9-]+\\.)*kaltura\\.com/(p/[0-9]+/|embed/|browseandembed/|index\\.php/extwidget/)",
     "([a-z0-9-]+\\.)+yuja\\.com/",
     "web\\.microsoftstream\\.com/embed/",
     "(www\\.)?khanacademy\\.org/embed",
@@ -27,9 +27,9 @@
     "(www\\.)?google\\.com/maps/embed",
     "calendar\\.google\\.com/calendar/embed",
     "onedrive\\.live\\.com/embed",
-    "([a-z0-9-]+\\.)+sharepoint\\.com/",
+    "([a-z0-9-]+\\.)+sharepoint\\.com/([^?#]*/)?_layouts/15/(embed|Doc|WopiFrame)\\.aspx",
     "view\\.officeapps\\.live\\.com/op/embed\\.aspx",
-    "forms\\.office\\.com/",
+    "forms\\.office\\.com/(Pages/ResponsePage\\.aspx|r/|e/)",
     "(www|teacher|student)\\.desmos\\.com/",
     "(www\\.)?geogebra\\.org/",
     "phet\\.colorado\\.edu/sims/",
@@ -47,7 +47,7 @@
     "(www\\.)?sketchfab\\.com/models/",
     "w\\.soundcloud\\.com/player/",
     "open\\.spotify\\.com/embed",
-    "codepen\\.io/[a-z0-9_-]+/embed/"
+    "codepen\\.io/[a-z0-9_-]+/embed/(preview/)?[a-z0-9]+"
   ],
   "sameOriginPath": "/courses/[0-9]+/external_tools/retrieve\\?"
 }

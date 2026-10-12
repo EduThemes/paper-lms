@@ -36,7 +36,9 @@ var TrustedIframeHosts = []string{
 	`screencast-o-matic\.com/(embed|player)`,
 	// Lecture capture
 	`([a-z0-9-]+\.)+panopto\.(com|eu)/panopto/pages/(embed|viewer)\.aspx`,
-	`([a-z0-9-]+\.)*kaltura\.com/`,
+	// Kaltura player / MediaSpace / KAF embed paths only: any partner can
+	// host pages elsewhere on a *.kaltura.com subdomain.
+	`([a-z0-9-]+\.)*kaltura\.com/(p/[0-9]+/|embed/|browseandembed/|index\.php/extwidget/)`,
 	`([a-z0-9-]+\.)+yuja\.com/`,
 	`web\.microsoftstream\.com/embed/`,
 	// Interactive video / lessons
@@ -52,9 +54,11 @@ var TrustedIframeHosts = []string{
 	`(www\.)?google\.com/maps/embed`,
 	`calendar\.google\.com/calendar/embed`,
 	`onedrive\.live\.com/embed`,
-	`([a-z0-9-]+\.)+sharepoint\.com/`,
+	// SharePoint/OneDrive-for-Business embed endpoints only: every tenant
+	// can publish arbitrary pages on its *.sharepoint.com host.
+	`([a-z0-9-]+\.)+sharepoint\.com/([^?#]*/)?_layouts/15/(embed|Doc|WopiFrame)\.aspx`,
 	`view\.officeapps\.live\.com/op/embed\.aspx`,
-	`forms\.office\.com/`,
+	`forms\.office\.com/(Pages/ResponsePage\.aspx|r/|e/)`,
 	// Math and science
 	`(www|teacher|student)\.desmos\.com/`,
 	`(www\.)?geogebra\.org/`,
@@ -74,7 +78,7 @@ var TrustedIframeHosts = []string{
 	`(www\.)?sketchfab\.com/models/`,
 	`w\.soundcloud\.com/player/`,
 	`open\.spotify\.com/embed`,
-	`codepen\.io/[a-z0-9_-]+/embed/`,
+	`codepen\.io/[a-z0-9_-]+/embed/(preview/)?[a-z0-9]+`,
 }
 
 // sameOriginIframePath is the one relative iframe src kept: a Canvas-style
@@ -91,9 +95,15 @@ var TrustedIframeSrc = regexp.MustCompile(
 
 // iframeAllowFeatures are the Permissions-Policy features an embed may ask
 // for in its allow="..." attribute (YouTube's default embed code asks for
-// most of them). Each may be followed by a 'self' / 'src' / 'none' / *
+// all of them). Each may be followed by a 'self' / 'src' / 'none' / *
 // allowlist; origins are not accepted.
-const iframeAllowFeatures = `(accelerometer|autoplay|camera|clipboard-read|clipboard-write|display-capture|encrypted-media|fullscreen|gyroscope|microphone|midi|picture-in-picture|screen-wake-lock|web-share|xr-spatial-tracking)`
+//
+// Features that reach the student's devices or data — camera, microphone,
+// display-capture (screen sharing), clipboard-read and midi — are never
+// delegated: an author-chosen embed (a CodePen pen, a tenant page) could
+// otherwise prompt for them inside a course page. The web client mirrors
+// this list in web/src/utils/iframePolicy.js.
+const iframeAllowFeatures = `(accelerometer|autoplay|clipboard-write|encrypted-media|fullscreen|gyroscope|picture-in-picture|screen-wake-lock|web-share|xr-spatial-tracking)`
 
 const iframeAllowEntry = iframeAllowFeatures + `( +('self'|'src'|'none'|\*))?`
 

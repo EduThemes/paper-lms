@@ -19,7 +19,9 @@ export function isTrustedIframeSrc(src) {
   return typeof src === 'string' && TRUSTED_IFRAME_SRC.test(src.trim());
 }
 
-const ALLOW_FEATURES = '(accelerometer|autoplay|camera|clipboard-read|clipboard-write|display-capture|encrypted-media|fullscreen|gyroscope|microphone|midi|picture-in-picture|screen-wake-lock|web-share|xr-spatial-tracking)';
+// Mirrors iframeAllowFeatures: no camera, microphone, display-capture,
+// clipboard-read or midi for author-chosen embeds.
+const ALLOW_FEATURES = '(accelerometer|autoplay|clipboard-write|encrypted-media|fullscreen|gyroscope|picture-in-picture|screen-wake-lock|web-share|xr-spatial-tracking)';
 const ALLOW_ENTRY = `${ALLOW_FEATURES}( +('self'|'src'|'none'|\\*))?`;
 
 /** Mirrors IframeAllowAttr: the allow="..." values the server keeps. */

@@ -68,8 +68,8 @@ func TestSanitize_IframeAllowAttributeIsValidated(t *testing.T) {
 	keep := []string{
 		"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share",
 		"fullscreen",
-		"camera 'src'; microphone 'src'",
 		"autoplay *;",
+		"autoplay 'src'; clipboard-write 'src'",
 	}
 	for _, v := range keep {
 		out := Sanitize(`<iframe src="https://www.youtube.com/embed/x" allow="` + v + `"></iframe>`)
@@ -82,6 +82,12 @@ func TestSanitize_IframeAllowAttributeIsValidated(t *testing.T) {
 		"camera https://attacker.example",
 		"autoplay\" onload=\"alert(1)",
 		"fullscreen; payment",
+		// Device / data features are never delegated to an embed.
+		"camera 'src'; microphone 'src'",
+		"camera *; microphone *; display-capture *; clipboard-read *",
+		"autoplay; display-capture",
+		"clipboard-read",
+		"midi",
 	}
 	for _, v := range drop {
 		out := Sanitize(`<iframe src="https://www.youtube.com/embed/x" allow='` + v + `'></iframe>`)
@@ -144,6 +150,87 @@ func TestSanitize_KeepsEditorMediaAndEquations(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("sanitized output lost %q\nout: %s", want, out)
+		}
+	}
+}
+
+// The audit's case: a user-hosted pen asking for the student's camera,
+// microphone, screen and clipboard keeps its (embed-only) src but loses
+// the allow list.
+func TestSanitize_UserHostedEmbedCannotAskForDevices(t *testing.T) {
+	out := Sanitize(`<iframe src="https://codepen.io/x/embed/abc" allow="camera *; microphone *; display-capture *; clipboard-read *"></iframe>`)
+	if !strings.Contains(out, `src="https://codepen.io/x/embed/abc"`) {
+		t.Errorf("codepen embed src should be kept: %s", out)
+	}
+	if strings.Contains(out, "allow=") {
+		t.Errorf("device permissions should be dropped: %s", out)
+	}
+}
+
+// Hosts where any tenant / partner / user can publish pages are limited
+// to their embed endpoints.
+func TestSanitize_UserHostableIframeHostsAreEmbedPathsOnly(t *testing.T) {
+	keep := []string{
+		"https://contoso.sharepoint.com/sites/Math/_layouts/15/embed.aspx?UniqueId=1234",
+		"https://contoso.sharepoint.com/:w:/r/sites/Math/_layouts/15/Doc.aspx?sourcedoc=%7B1%7D&action=embedview",
+		"https://contoso-my.sharepoint.com/personal/t_contoso_com/_layouts/15/WopiFrame.aspx?sourcedoc=x&action=embedview",
+		"https://forms.office.com/Pages/ResponsePage.aspx?id=abc&embed=true",
+		"https://forms.office.com/r/AbC123",
+		"https://cdnapisec.kaltura.com/p/1/embedPlaykitJs/uiconf_id/2?iframeembed=true&entry_id=1_x",
+		"https://school.mediaspace.kaltura.com/embed/secure/iframe/entryId/1_abc/uiConfId/123",
+		"https://1234.kaf.kaltura.com/browseandembed/index/media/entryid/1_abc",
+		"https://codepen.io/team/embed/preview/abcDEF",
+	}
+	for _, src := range keep {
+		if !TrustedIframeSrc.MatchString(src) {
+			t.Errorf("embed should be allowed: %s", src)
+		}
+	}
+	drop := []string{
+		"https://contoso.sharepoint.com/sites/phish/SitePages/Login.aspx",
+		"https://contoso.sharepoint.com/",
+		"https://forms.office.com/",
+		"https://forms.office.com/Pages/DesignPage.aspx",
+		"https://attacker.kaltura.com/login.html",
+		"https://www.kaltura.com/",
+		"https://codepen.io/x/pen/abc",
+		"https://codepen.io/x/embed/",
+	}
+	for _, src := range drop {
+		if TrustedIframeSrc.MatchString(src) {
+			t.Errorf("non-embed page should be rejected: %s", src)
+		}
+	}
+}
+
+// bluemonday doesn't URL-check <video poster> or <source src>.
+func TestSanitize_MediaPosterAndSourceAreURLChecked(t *testing.T) {
+	keep := []string{
+		"https://cdn.example/poster.jpg",
+		"http://cdn.example/p.png",
+		"/api/v1/files/12/download",
+		"poster.jpg",
+		"files/a.png?x=1",
+		"../img/p.png",
+	}
+	for _, u := range keep {
+		out := Sanitize(`<video controls poster="` + u + `"><source src="` + u + `" type="video/mp4"></video>`)
+		if !strings.Contains(out, `poster="`) || strings.Count(out, `src="`) != 1 {
+			t.Errorf("media URL %q should be kept: %s", u, out)
+		}
+	}
+	drop := []string{
+		"javascript:alert(1)",
+		"JaVaScRiPt:alert(1)",
+		"data:image/svg+xml,<svg onload=alert(1)>",
+		"vbscript:x",
+		"//attacker.example/p.png",
+		"https://cdn.example/a b.png",
+	}
+	for _, u := range drop {
+		out := Sanitize(`<video controls poster="` + u + `"><source src="` + u + `" type="video/mp4"></video>`)
+		if strings.Contains(out, "poster=") || strings.Contains(out, "src=") {
+			t.Errorf("media URL %q should be dropped: %s", u, out)
 		}
 	}
 }

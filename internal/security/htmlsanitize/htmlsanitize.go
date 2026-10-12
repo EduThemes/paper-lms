@@ -64,6 +64,13 @@ var ariaAttributes = []string{
 	"aria-valuenow", "aria-valuetext",
 }
 
+// MediaURL matches the media URLs kept where bluemonday does no scheme
+// check (<video poster>, <source src>): an http(s) URL, a root-relative
+// path (not protocol-relative "//host"), or a relative path. Any other
+// scheme (javascript:, data:, vbscript:, ...) fails, as does whitespace or
+// markup.
+var MediaURL = regexp.MustCompile(`(?i)^(https?://[^\s"'<>]+|/([^/\s"'<>][^\s"'<>]*)?|\.{1,2}/[^\s"'<>]*|[a-z0-9_-][a-z0-9_.-]*([/?#][^\s"'<>]*)?)$`)
+
 // ariaRoleValue matches one or more space-separated ARIA role tokens.
 var ariaRoleValue = regexp.MustCompile(`^[a-z]+( [a-z]+)*$`)
 
@@ -123,10 +130,14 @@ func buildPolicy() *bluemonday.Policy {
 	p.AllowAttrs("size").Matching(regexp.MustCompile(`^[+-]?[1-7]$`)).OnElements("font")
 	p.AllowAttrs("face").Matching(regexp.MustCompile(`^[a-zA-Z0-9 ,'"-]{1,100}$`)).OnElements("font")
 
-	// HTML5 media (Canvas media embeds, uploaded video/audio files). src values
-	// go through the policy's URL-scheme check (http/https/mailto + relative).
+	// HTML5 media (Canvas media embeds, uploaded video/audio files). video /
+	// audio src values go through the policy's URL-scheme check
+	// (http/https/mailto + relative). bluemonday does not URL-check
+	// <video poster> or <source src>, so those must match MediaURL.
 	p.AllowElements("video", "audio", "source", "track")
-	p.AllowAttrs("src", "poster").OnElements("video", "audio", "source")
+	p.AllowAttrs("src").OnElements("video", "audio")
+	p.AllowAttrs("poster").Matching(MediaURL).OnElements("video")
+	p.AllowAttrs("src").Matching(MediaURL).OnElements("source")
 	p.AllowAttrs("controls", "loop", "muted", "playsinline").OnElements("video", "audio")
 	p.AllowAttrs("preload").Matching(regexp.MustCompile(`^(none|metadata|auto)$`)).OnElements("video", "audio")
 	p.AllowAttrs("width", "height").Matching(regexp.MustCompile(`^[0-9]+%?$`)).OnElements("video")

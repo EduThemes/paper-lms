@@ -1,6 +1,6 @@
 import React, { useMemo, useEffect, useRef, useState, useCallback, useContext } from 'react';
 import DOMPurify from 'dompurify';
-import { TRUSTED_IFRAME_SRC } from '../utils/iframePolicy';
+import { TRUSTED_IFRAME_SRC, IFRAME_ALLOW_RE } from '../utils/iframePolicy';
 import { renderMathInElement } from '../utils/mathRender';
 import { enhanceUserContent } from '../utils/enhanceUserContent';
 import { Volume2, Square } from 'lucide-react';
@@ -120,6 +120,12 @@ function getPurifier() {
     }
   });
   purifier.addHook('afterSanitizeAttributes', (node) => {
+    // An iframe's allow= list must be one the server keeps (no camera,
+    // microphone, screen capture, clipboard-read or midi; no origins).
+    if (node.nodeName === 'IFRAME' && node.hasAttribute('allow')
+      && !IFRAME_ALLOW_RE.test(node.getAttribute('allow'))) {
+      node.removeAttribute('allow');
+    }
     // Inline styles may not pin content over the application chrome.
     if (node.style && /^(fixed|sticky)$/i.test(node.style.position || '')) {
       node.style.removeProperty('position');

@@ -53,5 +53,31 @@ describe('iframe allowlist (G001)', () => {
     expect(IFRAME_ALLOW_RE.test('autoplay; fullscreen')).toBe(true);
     expect(IFRAME_ALLOW_RE.test('camera https://attacker.example')).toBe(false);
     expect(IFRAME_ALLOW_RE.test('geolocation')).toBe(false);
+    // Device / data features are never delegated (server parity).
+    ['camera', "microphone 'src'", 'display-capture *', 'clipboard-read', 'midi', 'autoplay; camera *']
+      .forEach((v) => expect(IFRAME_ALLOW_RE.test(v), v).toBe(false));
+    expect(IFRAME_ALLOW_RE.test('accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share')).toBe(true);
+  });
+
+  it('drops a device-permission allow list in the viewer sanitizer', () => {
+    const html = sanitizeHTML('<iframe src="https://codepen.io/x/embed/abc" allow="camera *; microphone *; display-capture *; clipboard-read *"></iframe>');
+    expect(html).toContain('codepen.io/x/embed/abc');
+    expect(html).not.toContain('allow=');
+    expect(sanitizeHTML('<iframe src="https://www.youtube.com/embed/x" allow="autoplay; fullscreen"></iframe>'))
+      .toContain('allow="autoplay; fullscreen"');
+  });
+
+  it('limits user-hostable hosts to their embed endpoints', () => {
+    [
+      'https://contoso.sharepoint.com/sites/Math/_layouts/15/embed.aspx?UniqueId=1',
+      'https://forms.office.com/Pages/ResponsePage.aspx?id=abc&embed=true',
+      'https://cdnapisec.kaltura.com/p/1/sp/100/embedIframeJs/uiconf_id/2/partner_id/1',
+    ].forEach((src) => expect(isTrustedIframeSrc(src), src).toBe(true));
+    [
+      'https://contoso.sharepoint.com/sites/phish/SitePages/Login.aspx',
+      'https://forms.office.com/',
+      'https://attacker.kaltura.com/login.html',
+      'https://codepen.io/x/pen/abc',
+    ].forEach((src) => expect(isTrustedIframeSrc(src), src).toBe(false));
   });
 });
