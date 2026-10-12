@@ -95,7 +95,9 @@ func TestDeleteCalendarEvent_NonOwnerRefused(t *testing.T) {
 	app.Delete("/calendar_events/:id", h.DeleteEvent)
 
 	resp := testutil.MakeRequest(app, http.MethodDelete, "/calendar_events/55", nil)
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	// Another user's personal event is invisible to the caller: 404, as
+	// on read (existence-leak contract), and nothing is deleted.
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	calRepo.AssertNotCalled(t, "Delete", mock.Anything, mock.Anything)
 }
 
