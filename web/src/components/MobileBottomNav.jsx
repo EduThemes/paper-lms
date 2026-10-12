@@ -16,7 +16,7 @@ const ITEMS = [
   { to: '/courses', label: 'Courses', Icon: BookOpen },
   { to: '/inbox', label: 'Inbox', Icon: Inbox, key: 'inbox' },
   { to: '/calendar', label: 'Calendar', Icon: Calendar },
-  { to: '/account', label: 'Account', Icon: User },
+  { to: '/profile/settings', label: 'Account', Icon: User },
 ];
 
 const MobileBottomNav = ({ notificationCount = 0 }) => {
