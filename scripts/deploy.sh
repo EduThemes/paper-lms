@@ -134,19 +134,23 @@ rollback() {
   local reason="${1:-unknown failure}"
   log "Rollback reason: $reason"
 
-  # Retag previous images back to latest
-  if docker image inspect paper-lms-backend:previous >/dev/null 2>&1; then
-    log "Retagging paper-lms-backend:previous → latest"
-    docker tag paper-lms-backend:previous paper-lms-backend:latest
-  fi
-  if docker image inspect paper-lms-frontend:previous >/dev/null 2>&1; then
-    log "Retagging paper-lms-frontend:previous → latest"
-    docker tag paper-lms-frontend:previous paper-lms-frontend:latest
-  fi
+  # Retag previous images back to latest. The compose services run
+  # paper-lms-<svc>:${IMAGE_TAG:-latest}, so :latest is what they start.
+  local have_previous=true
+  for svc in backend frontend; do
+    if docker image inspect "paper-lms-${svc}:previous" >/dev/null 2>&1; then
+      log "Retagging paper-lms-${svc}:previous → latest"
+      docker tag "paper-lms-${svc}:previous" "paper-lms-${svc}:latest"
+    else
+      warn "No paper-lms-${svc}:previous image — ${svc} stays on the new build"
+      have_previous=false
+    fi
+  done
 
-  # Restart services with previous images
+  # Restart services with previous images (force-recreate: the tag name
+  # is unchanged, only the image behind it).
   log "Restarting backend with previous image..."
-  dc up -d --no-deps backend
+  IMAGE_TAG=latest dc up -d --no-deps --force-recreate backend
 
   log "Waiting for backend health..."
   local i=0
@@ -159,8 +163,11 @@ rollback() {
     i=$((i + 1))
   done
 
-  dc up -d --no-deps frontend
+  IMAGE_TAG=latest dc up -d --no-deps --force-recreate frontend
 
+  if [ "$have_previous" = false ]; then
+    warn "Previous images were missing; the code may not have been rolled back."
+  fi
   warn "================================================="
   warn "  ROLLBACK COMPLETE (code only)"
   warn ""
@@ -251,24 +258,29 @@ else
   else
     log "Creating backup: $BACKUP_FILENAME"
 
-    # Run backup via the backup container's postgres tools
-    dc run --rm \
-      -e BACKUP_DIR=/backups \
-      -e RETENTION_DAYS=0 \
-      backup sh -c "pg_dump \"\$DATABASE_URL\" --no-owner --no-privileges | gzip > /backups/$BACKUP_FILENAME"
+    # Run backup via the backup container's postgres tools. The backup
+    # service's entrypoint is ["/bin/sh", "-c"] (for its daily loop), so a
+    # plain `run backup sh -c "..."` becomes `/bin/sh -c sh -c "..."` — a
+    # bare shell that exits 0 without running anything. Override the
+    # entrypoint so the command string is what runs.
+    backup_sh() { dc run --rm -T --entrypoint /bin/sh backup -c "$1"; }
+
+    backup_sh "set -o pipefail; pg_dump \"\$DATABASE_URL\" --no-owner --no-privileges | gzip > /backups/$BACKUP_FILENAME" \
+      || fail "pg_dump failed; not deploying without a backup."
 
     # Verify backup exists and has content
-    BACKUP_SIZE=$(dc run --rm backup sh -c "stat -c%s /backups/$BACKUP_FILENAME 2>/dev/null || stat -f%z /backups/$BACKUP_FILENAME 2>/dev/null || echo 0")
-    BACKUP_SIZE=$(echo "$BACKUP_SIZE" | tr -d '[:space:]')
+    BACKUP_SIZE=$(backup_sh "stat -c%s /backups/$BACKUP_FILENAME 2>/dev/null || echo 0" | tr -cd '0-9')
+    BACKUP_SIZE=${BACKUP_SIZE:-0}
 
     if [ "$BACKUP_SIZE" -lt 1024 ]; then
       fail "Backup file is too small (${BACKUP_SIZE} bytes). Backup may have failed."
     fi
     ok "Backup created: $BACKUP_FILENAME ($(( BACKUP_SIZE / 1024 )) KB)"
 
-    # Verify gzip integrity
-    dc run --rm backup sh -c "gzip -t /backups/$BACKUP_FILENAME"
-    ok "Backup integrity verified (gzip test passed)"
+    # Verify gzip integrity and that it is a pg_dump
+    backup_sh "gzip -t /backups/$BACKUP_FILENAME && gunzip -c /backups/$BACKUP_FILENAME | head -c 4096 | grep -q 'PostgreSQL database dump'" \
+      || fail "Backup $BACKUP_FILENAME is not a valid gzip'd pg_dump."
+    ok "Backup integrity verified (gzip + pg_dump header)"
   fi
 fi
 
@@ -293,13 +305,16 @@ fi
 if [ "$DRY_RUN" = true ]; then
   log "[DRY RUN] Would save rollback metadata"
 else
-  cat > "$DEPLOY_DIR/previous_deploy" <<EOF
-previous_version=$PREVIOUS_VERSION
-migration_version=$CURRENT_MIGRATE_VERSION
-backup_filename=${BACKUP_FILENAME:-none}
-deploy_timestamp=$TIMESTAMP
-rolled_back=false
-EOF
+  # key=value lines, one per line, read by deploy-rollback.sh. Values can
+  # contain spaces (e.g. "Version: 64 (dirty: false)"), so they are never
+  # sourced as shell.
+  {
+    printf 'previous_version=%s\n' "$PREVIOUS_VERSION"
+    printf 'migration_version=%s\n' "$CURRENT_MIGRATE_VERSION"
+    printf 'backup_filename=%s\n' "${BACKUP_FILENAME:-none}"
+    printf 'deploy_timestamp=%s\n' "$TIMESTAMP"
+    printf 'rolled_back=false\n'
+  } > "$DEPLOY_DIR/previous_deploy"
 
   echo "$VERSION" > "$DEPLOY_DIR/current_version"
   ok "Rollback metadata saved to $DEPLOY_DIR/previous_deploy"
@@ -312,13 +327,16 @@ echo ""
 # ---------------------------------------------------------------------------
 log "Step 4: Tagging previous images for rollback"
 
+# Tag whatever image each running container uses (by image id), so this
+# works whatever the image was named when it was built.
 for svc in backend frontend; do
-  IMAGE="paper-lms-${svc}:latest"
-  if docker image inspect "$IMAGE" >/dev/null 2>&1; then
-    dry_run_exec docker tag "$IMAGE" "paper-lms-${svc}:previous"
-    ok "Tagged paper-lms-${svc}:latest → :previous"
+  CID=$(dc ps -q "$svc" 2>/dev/null | head -1)
+  if [ -n "$CID" ]; then
+    RUNNING_IMAGE=$(docker inspect --format '{{.Image}}' "$CID")
+    dry_run_exec docker tag "$RUNNING_IMAGE" "paper-lms-${svc}:previous"
+    ok "Tagged running ${svc} image → paper-lms-${svc}:previous"
   else
-    warn "No existing image paper-lms-${svc}:latest (first deploy?)"
+    warn "No running ${svc} container (first deploy?) — nothing to roll back to"
   fi
 done
 
@@ -334,13 +352,14 @@ if [ "$DRY_RUN" = true ]; then
 else
   confirm "Ready to build. This will take a few minutes. Continue?"
 
-  VERSION="$VERSION" dc build --no-cache backend frontend \
+  VERSION="$VERSION" IMAGE_TAG="$VERSION" dc build --no-cache backend frontend \
     || fail "Image build failed. Previous containers are still running."
 
   # Tag with version and latest
   for svc in backend frontend; do
-    docker tag "paper-lms-${svc}:${VERSION}" "paper-lms-${svc}:latest" 2>/dev/null || true
-    ok "Built and tagged paper-lms-${svc}:${VERSION}"
+    docker tag "paper-lms-${svc}:${VERSION}" "paper-lms-${svc}:latest" \
+      || fail "Built image paper-lms-${svc}:${VERSION} not found. Previous containers are still running."
+    ok "Built and tagged paper-lms-${svc}:${VERSION} (→ :latest)"
   done
 fi
 
@@ -356,7 +375,7 @@ if [ "$DRY_RUN" = true ]; then
 else
   log "Running migrations (old backend is still serving traffic)..."
 
-  if ! VERSION="$VERSION" dc run --rm backend ./migrate up; then
+  if ! VERSION="$VERSION" IMAGE_TAG=latest dc run --rm backend ./migrate up; then
     warn "================================================="
     warn "  MIGRATION FAILED"
     warn ""
@@ -394,7 +413,7 @@ if [ "$DRY_RUN" = true ]; then
 else
   # Restart backend (postgres stays up)
   log "Restarting backend..."
-  VERSION="$VERSION" dc up -d --no-deps backend
+  VERSION="$VERSION" IMAGE_TAG=latest dc up -d --no-deps backend
 
   # Wait for backend health
   log "Waiting for backend health check (timeout: ${HEALTH_TIMEOUT}s)..."
@@ -414,7 +433,7 @@ else
 
   # Restart frontend
   log "Restarting frontend..."
-  VERSION="$VERSION" dc up -d --no-deps frontend
+  VERSION="$VERSION" IMAGE_TAG=latest dc up -d --no-deps frontend
 
   # Brief wait for frontend to start
   sleep 3
