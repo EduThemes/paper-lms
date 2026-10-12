@@ -1065,7 +1065,7 @@ func main() {
 	permMiddleware := middleware.NewPermissionMiddleware(enrollmentRepo, userRepo, courseRepo)
 	pagesFilesRoutes := wirePagesFiles(pagesFilesDeps{database: database, pageRepo: pageRepo, courseRepo: courseRepo, pageHandler: pageHandler,
 		fileService: fileService, fileHandler: fileHandler, settingsLookup: settingsLookup,
-		userHandler: userHandler, authz: authz, permMiddleware: permMiddleware, courseHandler: courseHandler})
+		userHandler: userHandler, authz: authz, permMiddleware: permMiddleware, courseHandler: courseHandler, folderRepo: folderRepo})
 
 	// Create router
 	router := &v1.Router{

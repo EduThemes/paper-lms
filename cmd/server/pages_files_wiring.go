@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+
 	"gorm.io/gorm"
 
 	v1 "github.com/EduThemes/paper-lms/internal/api/v1"
@@ -25,6 +27,25 @@ type pagesFilesDeps struct {
 	authz          *handlers.ResourceAuthorizer
 	permMiddleware *middleware.PermissionMiddleware
 	courseHandler  *handlers.CourseHandler
+	folderRepo     repository.FolderRepository
+}
+
+// folderCourseID resolves a course folder to its course under the
+// caller's tenant (user / group folders and misses: ok=false).
+func folderCourseID(folders repository.FolderRepository) func(ctx context.Context, folderID, accountID uint) (uint, bool) {
+	if folders == nil {
+		return nil
+	}
+	return func(ctx context.Context, folderID, accountID uint) (uint, bool) {
+		if accountID == 0 {
+			return 0, false
+		}
+		f, err := folders.FindByID(ctx, folderID, accountID)
+		if err != nil || f == nil || f.ContextType != "Course" {
+			return 0, false
+		}
+		return f.ContextID, true
+	}
 }
 
 // wirePagesFiles builds the lane's services and handlers, attaches the
@@ -60,5 +81,6 @@ func wirePagesFiles(d pagesFilesDeps) *v1.PagesFilesRoutes {
 		Revisions:      handlers.NewWikiPageRevisionHandler(d.pageHandler, revisionService),
 		FileManagement: true,
 		StudentView:    studentView,
+		FolderCourseID: folderCourseID(d.folderRepo),
 	}
 }

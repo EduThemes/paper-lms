@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -94,4 +95,36 @@ func TestRequireCourseTab_OtherTenantFallsThrough(t *testing.T) {
 	app.Get("/api/v1/courses/:course_id/pages", ok)
 
 	assert.Equal(t, http.StatusOK, testutil.MakeRequest(app, http.MethodGet, "/api/v1/courses/101/pages", nil).StatusCode)
+}
+
+// A course folder's file / subfolder listings are the Files index too:
+// the folder resolves to its course and the hidden tab applies. A folder
+// that is not course content (user / group folders) is not the gate's
+// call.
+func TestRequireCourseTabFor_FolderListings(t *testing.T) {
+	const hiddenFiles = `[{"id":"files","hidden":true,"position":0}]`
+	folderCourse := func(c *fiber.Ctx) (uint, bool) {
+		if c.Params("folder_id") == "7" {
+			return 101, true
+		}
+		return 0, false // a user folder
+	}
+	run := func(enrollment string, path string) int {
+		f := newPermFixture()
+		f.courses.On("FindByID", mock.Anything, uint(101), uint(1)).Return(&models.Course{ID: 101, AccountID: 1, WorkflowState: models.CourseAvailable, NavigationTabs: hiddenFiles}, nil)
+		f.user(3, 1, "user")
+		f.enrollments.On("FindByUserAndCourse", mock.Anything, uint(3), uint(101), uint(1)).Return(&models.Enrollment{Type: enrollment, WorkflowState: "active"}, nil)
+		app := testutil.SetupTestApp()
+		app.Use(stub(3, 1, nil))
+		gate := f.pm.RequireCourseTabFor(middleware.CourseTabFiles, folderCourse)
+		app.Get("/api/v1/folders/:folder_id/files", gate)
+		app.Get("/api/v1/folders/:folder_id/files", ok)
+		app.Get("/api/v1/folders/:folder_id/folders", gate)
+		app.Get("/api/v1/folders/:folder_id/folders", ok)
+		return testutil.MakeRequest(app, http.MethodGet, path, nil).StatusCode
+	}
+	assert.Equal(t, http.StatusNotFound, run("StudentEnrollment", "/api/v1/folders/7/files"))
+	assert.Equal(t, http.StatusNotFound, run("StudentEnrollment", "/api/v1/folders/7/folders"))
+	assert.Equal(t, http.StatusOK, run("TeacherEnrollment", "/api/v1/folders/7/files"))
+	assert.Equal(t, http.StatusOK, run("StudentEnrollment", "/api/v1/folders/8/files"), "not a course folder")
 }

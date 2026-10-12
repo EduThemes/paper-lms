@@ -63,13 +63,24 @@ func courseStaffEnrollment(enrollmentType string) bool {
 // anything it cannot place (no user, an unknown course, no active
 // enrollment, an admin) falls through to the route's real gate.
 func (pm *PermissionMiddleware) RequireCourseTab(tabID string) fiber.Handler {
+	return pm.RequireCourseTabFor(tabID, func(c *fiber.Ctx) (uint, bool) {
+		id, err := pm.extractCourseID(c)
+		return id, err == nil
+	})
+}
+
+// RequireCourseTabFor is RequireCourseTab for an index whose URL carries
+// no course id (a course folder's files / subfolders): resolve maps the
+// request to its course, or ok=false when it is not course content (the
+// request then continues untouched).
+func (pm *PermissionMiddleware) RequireCourseTabFor(tabID string, resolve func(c *fiber.Ctx) (uint, bool)) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		userID, _ := c.Locals("user_id").(uint)
-		if userID == 0 || pm.courseRepo == nil || pm.enrollmentRepo == nil {
+		if userID == 0 || pm.courseRepo == nil || pm.enrollmentRepo == nil || resolve == nil {
 			return c.Next()
 		}
-		courseID, err := pm.extractCourseID(c)
-		if err != nil {
+		courseID, ok := resolve(c)
+		if !ok || courseID == 0 {
 			return c.Next()
 		}
 		if RoleRank(EffectiveRole(c, pm.userRepo)) >= 1 {

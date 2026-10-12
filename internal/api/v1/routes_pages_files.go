@@ -1,6 +1,8 @@
 package v1
 
 import (
+	"context"
+
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/EduThemes/paper-lms/internal/api/v1/handlers"
@@ -20,6 +22,10 @@ type PagesFilesRoutes struct {
 
 	// Student View (G076).
 	StudentView *handlers.StudentViewHandler
+
+	// FolderCourseID maps a folder to its course (ok=false for user and
+	// group folders) so the hidden Files tab also closes folder listings.
+	FolderCourseID func(ctx context.Context, folderID, accountID uint) (uint, bool)
 }
 
 // registerPagesFilesRoutes mounts the pages-files lane routes. Core page,
@@ -39,6 +45,20 @@ func (r *Router) registerPagesFilesRoutes(protected fiber.Router, enrolled, inst
 		protected.Get("/courses/:course_id/files", r.PermMiddleware.RequireCourseTab(middleware.CourseTabFiles))
 		protected.Get("/courses/:course_id/folders", r.PermMiddleware.RequireCourseTab(middleware.CourseTabFiles))
 		protected.Get("/courses/:course_id/quizzes", r.PermMiddleware.RequireCourseTab(middleware.CourseTabQuizzes))
+		// A course folder's file and subfolder listings are the Files
+		// index too; the folder names the course.
+		if pf.FolderCourseID != nil {
+			folderCourse := func(c *fiber.Ctx) (uint, bool) {
+				id, err := c.ParamsInt("folder_id")
+				if err != nil || id <= 0 {
+					return 0, false
+				}
+				account, _ := c.Locals("account_id").(uint)
+				return pf.FolderCourseID(c.Context(), uint(id), account)
+			}
+			protected.Get("/folders/:folder_id/files", r.PermMiddleware.RequireCourseTabFor(middleware.CourseTabFiles, folderCourse))
+			protected.Get("/folders/:folder_id/folders", r.PermMiddleware.RequireCourseTabFor(middleware.CourseTabFiles, folderCourse))
+		}
 	}
 
 	// Page revisions: the handler requires edit rights on the page to read
