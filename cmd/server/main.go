@@ -869,6 +869,7 @@ func main() {
 	courseHandler.SetCanvasAPI(canvasAPIService)
 	sessionTokenHandler := handlers.NewSessionTokenHandler(
 		service.NewLoginSessionTokenService(postgres.NewLoginSessionTokenRepository(database)), loginPipeline, cfg.FrontendURL)
+	sessionTokenHandler.SetSessionSecret(cfg.JWTSecret)
 	externalToolHandler := handlers.NewExternalToolHandler(externalToolService, devKeyService)
 	ltiHandler := handlers.NewLTIHandler(ltiService, agsService, nrpsService, externalToolRepo, ltiConfigRepo, userRepo, accountRepo, parentalConsentRepo)
 	// handlers

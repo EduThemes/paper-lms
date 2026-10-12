@@ -23,7 +23,15 @@ type SessionTokenHandler struct {
 	tokens      *service.LoginSessionTokenService
 	pipeline    *auth.LoginPipeline
 	frontendURL string
+	// sessionSecret verifies an existing session cookie on redemption
+	// (SetSessionSecret).
+	sessionSecret string
 }
+
+// SetSessionSecret wires the JWT secret used to identify an existing
+// session cookie, so redemption can refuse to replace another user's
+// session (login CSRF).
+func (h *SessionTokenHandler) SetSessionSecret(secret string) { h.sessionSecret = secret }
 
 // NewSessionTokenHandler wires the handler. frontendURL is the SPA origin
 // the browser lands on after redemption ("" = same origin).
@@ -126,6 +134,18 @@ func (h *SessionTokenHandler) Redeem(c *fiber.Ctx) error {
 	if err != nil || h.pipeline == nil {
 		return fail()
 	}
+	// Login CSRF: a session_url opened in a browser that is already
+	// signed in as someone else must not silently swap that session for
+	// the token's user (a planted link would sign the victim into the
+	// attacker's account). Refuse; the user signs out first. An expired
+	// or invalid cookie is no session; without the signing secret wired
+	// the handler cannot tell, so any session cookie is refused.
+	if existing := c.Cookies("paper_session"); existing != "" {
+		uid, valid := auth.SessionTokenUserID(existing, h.sessionSecret)
+		if (valid && uid != row.UserID) || h.sessionSecret == "" {
+			return c.Redirect(h.frontendURL+"/login?error=session_token_conflict", fiber.StatusFound)
+		}
+	}
 	outcome := auth.SSOOutcome{
 		ProviderType:    auth.ProviderTypeSessionToken,
 		ExternalSubject: strconv.FormatUint(uint64(row.UserID), 10),
@@ -147,5 +167,10 @@ func (h *SessionTokenHandler) Redeem(c *fiber.Ctx) error {
 		Expires:  time.Now().Add(24 * time.Hour),
 	})
 	c.Set(fiber.HeaderCacheControl, "no-store")
+	if result.MustEnroll {
+		// The tenant requires MFA and the user has not enrolled: the
+		// session exists only to reach enrollment (as on every login).
+		return c.Redirect(h.frontendURL+"/mfa/enroll", fiber.StatusFound)
+	}
 	return c.Redirect(h.frontendURL+row.ReturnTo, fiber.StatusFound)
 }

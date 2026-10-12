@@ -238,13 +238,19 @@ func (p *LoginPipeline) Execute(ctx context.Context, outcome SSOOutcome, meta Re
 	// the OTP step. Suspension and parental-consent gates above still
 	// apply.
 	if outcome.ProviderType == "passkey" || outcome.ProviderType == ProviderTypeSessionToken {
+		// A session token skips the OTP step but not the enrollment
+		// requirement: a user the tenant policy obliges to enroll in MFA
+		// (and who has not) is still sent to /mfa/enroll. A passkey is
+		// itself the second factor, so it satisfies the policy.
+		mustEnroll := outcome.ProviderType == ProviderTypeSessionToken &&
+			decideMFAGate(p.lookupTenantPolicy(ctx, user), user) == mfaGateMustEnroll
 		token, err := GenerateToken(user, p.jwtSecret)
 		if err != nil {
 			return nil, err
 		}
 		p.audit.LoginSucceeded(ctx, user.ID, outcome.ProviderType, meta)
 		_ = isNew
-		return &PipelineResult{Token: token, User: user}, nil
+		return &PipelineResult{Token: token, User: user, MustEnroll: mustEnroll}, nil
 	}
 
 	policy := p.lookupTenantPolicy(ctx, user)
