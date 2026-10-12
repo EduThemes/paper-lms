@@ -12,6 +12,72 @@ type ModuleService struct {
 	moduleRepo         repository.ModuleRepository
 	moduleItemRepo     repository.ModuleItemRepository
 	prerequisiteRepo   repository.ModulePrerequisiteRepository
+
+	// Optional content repositories (SetContentRepos) used to verify a
+	// module item's content_id names content in the module's course.
+	assignmentRepo repository.AssignmentRepository
+	quizRepo       repository.QuizRepository
+	discussionRepo repository.DiscussionTopicRepository
+	pageRepo       repository.PageRepository
+}
+
+// ErrModuleContentNotInCourse is returned when a module item would link
+// content that does not exist in the module's course.
+var ErrModuleContentNotInCourse = errors.New("content not found in this course")
+
+// SetContentRepos wires the repositories ValidateItemContent needs.
+func (s *ModuleService) SetContentRepos(assignmentRepo repository.AssignmentRepository, quizRepo repository.QuizRepository, discussionRepo repository.DiscussionTopicRepository, pageRepo repository.PageRepository) {
+	s.assignmentRepo = assignmentRepo
+	s.quizRepo = quizRepo
+	s.discussionRepo = discussionRepo
+	s.pageRepo = pageRepo
+}
+
+// ValidateItemContent checks that contentID names live content of the
+// given module-item content type inside courseID (and the caller's
+// tenant). It returns the content's title so a blank item title can
+// default to it. Content types without a backing row (ExternalUrl,
+// SubHeader) are not validated here.
+func (s *ModuleService) ValidateItemContent(ctx context.Context, contentType string, contentID, courseID, accountID uint) (string, error) {
+	switch normalizeModuleContentType(contentType) {
+	case "Assignment":
+		if s.assignmentRepo == nil {
+			return "", nil
+		}
+		a, err := s.assignmentRepo.FindByID(ctx, contentID, accountID)
+		if err != nil || a == nil || a.CourseID != courseID || a.WorkflowState == models.AssignmentDeleted {
+			return "", ErrModuleContentNotInCourse
+		}
+		return a.Name, nil
+	case "Quiz":
+		if s.quizRepo == nil {
+			return "", nil
+		}
+		q, err := s.quizRepo.FindByID(ctx, contentID, accountID)
+		if err != nil || q == nil || q.CourseID != courseID || q.WorkflowState == "deleted" {
+			return "", ErrModuleContentNotInCourse
+		}
+		return q.Title, nil
+	case "DiscussionTopic":
+		if s.discussionRepo == nil {
+			return "", nil
+		}
+		d, err := s.discussionRepo.FindByID(ctx, contentID, accountID)
+		if err != nil || d == nil || d.CourseID != courseID || d.WorkflowState == "deleted" {
+			return "", ErrModuleContentNotInCourse
+		}
+		return d.Title, nil
+	case "WikiPage":
+		if s.pageRepo == nil {
+			return "", nil
+		}
+		p, err := s.pageRepo.FindByID(ctx, contentID, accountID)
+		if err != nil || p == nil || p.CourseID != courseID || p.WorkflowState == "deleted" {
+			return "", ErrModuleContentNotInCourse
+		}
+		return p.Title, nil
+	}
+	return "", nil
 }
 
 func NewModuleService(moduleRepo repository.ModuleRepository, moduleItemRepo repository.ModuleItemRepository, opts ...func(*ModuleService)) *ModuleService {
@@ -57,6 +123,17 @@ func (s *ModuleService) Delete(ctx context.Context, id uint) error {
 
 func (s *ModuleService) ListByCourse(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.ContextModule], error) {
 	return s.moduleRepo.ListByCourseID(ctx, courseID, params)
+}
+
+// ListPublishedByCourse is the student-facing module list: published
+// modules with only their published items.
+func (s *ModuleService) ListPublishedByCourse(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.ContextModule], error) {
+	return s.moduleRepo.ListPublishedByCourseID(ctx, courseID, params)
+}
+
+// ListPublishedItems is the student-facing item list for one module.
+func (s *ModuleService) ListPublishedItems(ctx context.Context, moduleID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.ContentTag], error) {
+	return s.moduleItemRepo.ListPublishedByModuleID(ctx, moduleID, params)
 }
 
 func (s *ModuleService) CreateItem(ctx context.Context, item *models.ContentTag) error {

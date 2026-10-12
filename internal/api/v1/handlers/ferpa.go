@@ -14,6 +14,15 @@ import (
 // FERPAHandler handles HTTP requests for FERPA compliance endpoints.
 type FERPAHandler struct {
 	ferpaService *service.FERPAService
+	// authz ties user-keyed admin routes (PII access log) to the caller's
+	// tenant and supplies the DB-backed admin role.
+	authz *ResourceAuthorizer
+}
+
+// SetAuthorizer wires the tenant / DB-role checks.
+func (h *FERPAHandler) SetAuthorizer(a *ResourceAuthorizer) *FERPAHandler {
+	h.authz = a
+	return h
 }
 
 // NewFERPAHandler creates a new FERPAHandler.
@@ -128,12 +137,21 @@ func (h *FERPAHandler) DownloadDataExport(c *fiber.Ctx) error {
 	if callerID == 0 {
 		return responses.Unauthorized(c)
 	}
-	callerIsAdmin, _ := c.Locals("is_admin").(bool)
+	// DB-backed role (masquerade-capped), not the JWT is_admin hint,
+	// which a demoted admin's unexpired token still carries.
+	callerIsAdmin, callerIsSuper := false, false
+	if h.authz != nil {
+		switch middleware.EffectiveRole(c, h.authz.userRepo) {
+		case middleware.RoleSuperAdmin:
+			callerIsAdmin, callerIsSuper = true, true
+		case middleware.RoleAdmin:
+			callerIsAdmin = true
+		}
+	}
 
 	// F-006: pass tenant scope through so cross-tenant admin downloads
 	// are refused (super_admin bypasses).
 	callerAcct, _ := c.Locals("account_id").(uint)
-	callerIsSuper, _ := c.Locals("is_super_admin").(bool)
 	zipBytes, berr := h.ferpaService.BuildExportZip(c.Context(), uint(exportID), callerID, callerAcct, callerIsAdmin, callerIsSuper)
 	if berr != nil {
 		switch berr {
@@ -326,6 +344,14 @@ func (h *FERPAHandler) GetPIIAccessLog(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid user ID")
 	}
+	// The `admin` gate has no tenant on this path: another tenant's user
+	// is a 404.
+	if h.authz == nil {
+		return authzNotFound("user")
+	}
+	if err := h.authz.RequireUserInTenant(c, uint(userID)); err != nil {
+		return err
+	}
 
 	params := middleware.GetPagination(c)
 
@@ -403,7 +429,7 @@ func (h *FERPAHandler) CreateRetentionPolicy(c *fiber.Ctx) error {
 		RetentionPeriod: input.RetentionPeriod,
 		RetentionAction: input.RetentionAction,
 		AutoApply:       input.AutoApply,
-		Description:     service.SanitizeHTML(input.Description),
+		Description:     service.SanitizePlainText(input.Description),
 	}
 
 	if err := h.ferpaService.CreateRetentionPolicy(c.Context(), policy); err != nil {
@@ -475,7 +501,7 @@ func (h *FERPAHandler) UpdateRetentionPolicy(c *fiber.Ctx) error {
 		policy.AutoApply = *input.AutoApply
 	}
 	if input.Description != nil {
-		policy.Description = service.SanitizeHTML(*input.Description)
+		policy.Description = service.SanitizePlainText(*input.Description)
 	}
 
 	if err := h.ferpaService.UpdateRetentionPolicy(c.Context(), policy); err != nil {

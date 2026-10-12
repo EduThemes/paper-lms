@@ -172,14 +172,14 @@ func (s *GradingService) GetStudentGrade(ctx context.Context, courseID, studentI
 	var finalEarned, finalPossible float64
 
 	for _, a := range assignments.Items {
-		if a.PointsPossible == nil || *a.PointsPossible <= 0 {
+		sub := subByAssignment[a.ID]
+		points, counts := assignmentCounts(&a, sub)
+		if !counts {
 			continue
 		}
-		points := *a.PointsPossible
 		finalPossible += points
 
-		sub, exists := subByAssignment[a.ID]
-		if exists && sub.Score != nil {
+		if sub != nil && sub.Score != nil {
 			currentEarned += *sub.Score
 			currentPossible += points
 			finalEarned += *sub.Score
@@ -202,10 +202,66 @@ func (s *GradingService) GetStudentGrade(ctx context.Context, courseID, studentI
 	}, nil
 }
 
+// assignmentCounts decides whether an assignment takes part in a
+// student's grade and with how many points possible (Canvas grade
+// calculator rules, B115/B206):
+//   - unpublished / deleted assignments and not_graded ones never count;
+//   - an excused submission is dropped from both earned and possible;
+//   - a 0-point (or point-less) assignment counts as extra credit: its
+//     score is added to earned with nothing added to possible.
+func assignmentCounts(a *models.Assignment, sub *models.Submission) (pointsPossible float64, counts bool) {
+	if a == nil || !a.IsPublished() || a.GradingType == "not_graded" {
+		return 0, false
+	}
+	if sub != nil && sub.Excused {
+		return 0, false
+	}
+	if a.PointsPossible != nil && *a.PointsPossible > 0 {
+		return *a.PointsPossible, true
+	}
+	// Extra credit: only meaningful when there is a score to add.
+	return 0, sub != nil && sub.Score != nil
+}
+
 // calculateWeightedGrade computes Canvas-compatible weighted grades.
 // Current score: only considers groups where the student has graded submissions.
 // Final score: treats unsubmitted assignments as 0.
 func (s *GradingService) calculateWeightedGrade(assignments []models.Assignment, groups []models.AssignmentGroup, subByAssignment map[uint]*models.Submission) (currentScore, finalScore float64) {
+	currentScore, finalScore, _ = weightedScores(assignments, groups, subByAssignment)
+	return
+}
+
+// CurrentCourseScore is the grade calculator's current score (0-100) for
+// one student, the same number the Grades page and gradebook show: group
+// weights when the course applies them, extra credit and excused work per
+// assignmentCounts, and only graded work counted. subByAssignment must
+// hold only the submissions the viewer may see (e.g. posted grades for a
+// student or observer). ok is false when nothing graded counts yet.
+func CurrentCourseScore(applyGroupWeights bool, assignments []models.Assignment, groups []models.AssignmentGroup, subByAssignment map[uint]*models.Submission) (score float64, ok bool) {
+	if applyGroupWeights && len(groups) > 0 {
+		current, _, hasCurrent := weightedScores(assignments, groups, subByAssignment)
+		return current, hasCurrent
+	}
+	var earned, possible float64
+	for i := range assignments {
+		a := &assignments[i]
+		sub := subByAssignment[a.ID]
+		points, counts := assignmentCounts(a, sub)
+		if !counts || sub == nil || sub.Score == nil {
+			continue
+		}
+		earned += *sub.Score
+		possible += points
+	}
+	if possible <= 0 {
+		return 0, false
+	}
+	return math.Round(earned/possible*10000) / 100, true
+}
+
+// weightedScores is calculateWeightedGrade's body; hasCurrent reports
+// whether any weighted group has graded work.
+func weightedScores(assignments []models.Assignment, groups []models.AssignmentGroup, subByAssignment map[uint]*models.Submission) (currentScore, finalScore float64, hasCurrent bool) {
 	// Build group lookup
 	groupMap := make(map[uint]*models.AssignmentGroup)
 	for i := range groups {
@@ -221,7 +277,8 @@ func (s *GradingService) calculateWeightedGrade(assignments []models.Assignment,
 	totals := make(map[uint]*groupTotals)
 
 	for _, a := range assignments {
-		if a.PointsPossible == nil || *a.PointsPossible <= 0 {
+		points, counts := assignmentCounts(&a, subByAssignment[a.ID])
+		if !counts {
 			continue
 		}
 		groupID := uint(0)
@@ -239,7 +296,6 @@ func (s *GradingService) calculateWeightedGrade(assignments []models.Assignment,
 			totals[groupID] = gt
 		}
 
-		points := *a.PointsPossible
 		gt.finalPossible += points
 
 		sub, hasSub := subByAssignment[a.ID]
@@ -269,6 +325,7 @@ func (s *GradingService) calculateWeightedGrade(assignments []models.Assignment,
 
 	if currentWeightTotal > 0 {
 		currentScore = math.Round(currentWeightedSum/currentWeightTotal*100) / 100
+		hasCurrent = true
 	}
 	if finalWeightTotal > 0 {
 		finalScore = math.Round(finalWeightedSum/finalWeightTotal*100) / 100
@@ -291,12 +348,6 @@ var defaultGradingScale = []GradeEntry{
 	{"D", 0.63},
 	{"D-", 0.60},
 	{"F", 0.0},
-}
-
-// scoreToLetterGrade converts a percentage (0–100) to a letter grade using the
-// default grading scale. Kept for backward compatibility with tests.
-func scoreToLetterGrade(score float64) string {
-	return scoreToLetterGradeWithScale(score, nil)
 }
 
 // scoreToLetterGradeWithScale converts a percentage (0–100) to a letter grade.

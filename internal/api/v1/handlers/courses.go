@@ -9,12 +9,23 @@ import (
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
 
 type CourseHandler struct {
 	courseService     *service.CourseService
 	enrollmentService *service.EnrollmentService
+	// userRepo backs the DB role check (middleware.EffectiveRole) that
+	// gates ?scope=all. Nil means nobody gets the tenant-wide list.
+	userRepo repository.UserRepository
+}
+
+// SetUserRepo wires the user repository used for the admin check on
+// GET /courses?scope=all.
+func (h *CourseHandler) SetUserRepo(r repository.UserRepository) *CourseHandler {
+	h.userRepo = r
+	return h
 }
 
 func NewCourseHandler(courseService *service.CourseService, enrollmentService *service.EnrollmentService) *CourseHandler {
@@ -64,9 +75,18 @@ func (h *CourseHandler) ListCourses(c *fiber.Ctx) error {
 	var totalCount int64
 	var page, perPage int
 
-	// Default: return user's enrolled courses (matches Canvas behavior)
-	// Use ?scope=all to get all courses (admin use case, e.g. course browser)
+	// Default: return user's enrolled courses (matches Canvas behavior).
+	// ?scope=all lists every course in the tenant (the admin course
+	// browser), so it is honored only for admins — the DB role, capped
+	// during masquerade. Anyone else gets their own courses, as without it.
+	scopeAll := false
 	if c.Query("scope") == "all" {
+		switch middleware.EffectiveRole(c, h.userRepo) {
+		case middleware.RoleAdmin, middleware.RoleSuperAdmin:
+			scopeAll = true
+		}
+	}
+	if scopeAll {
 		r, err := h.courseService.List(c.Context(), callerAccountID(c), params)
 		if err != nil {
 			return responses.InternalError(c, "Could not fetch courses")
@@ -274,6 +294,13 @@ func (h *CourseHandler) DeleteCourse(c *fiber.Ctx) error {
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid course ID")
+	}
+
+	// courseService.Delete is keyed by bare id; confirm the course is in
+	// the caller's tenant first (404 across tenants), independent of the
+	// route middleware.
+	if _, err := h.courseService.GetByID(c.Context(), uint(id), callerAccountID(c)); err != nil {
+		return responses.NotFound(c, "course")
 	}
 
 	if err := h.courseService.Delete(c.Context(), uint(id)); err != nil {

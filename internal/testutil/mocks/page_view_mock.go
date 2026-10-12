@@ -46,3 +46,8 @@ func (m *MockPageViewRepository) SumInteractionByUserAndContext(ctx context.Cont
 	args := m.Called(ctx, userID, contextType, contextID)
 	return args.Get(0).(int64), args.Error(1)
 }
+
+func (m *MockPageViewRepository) CountByUserAndContext(ctx context.Context, userID uint, contextType string, contextID uint) (int64, error) {
+	args := m.Called(ctx, userID, contextType, contextID)
+	return args.Get(0).(int64), args.Error(1)
+}

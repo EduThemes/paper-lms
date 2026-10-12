@@ -24,6 +24,17 @@ func NewExternalToolService(toolRepo repository.ContextExternalToolRepository, d
 	}
 }
 
+// ErrExternalToolInvalid wraps every caller-input validation failure of
+// Create so handlers can answer 400 instead of 500 (B084).
+var ErrExternalToolInvalid = errors.New("invalid external tool")
+
+type externalToolValidationError struct{ msg string }
+
+func (e *externalToolValidationError) Error() string { return e.msg }
+func (e *externalToolValidationError) Unwrap() error { return ErrExternalToolInvalid }
+
+func invalidTool(msg string) error { return &externalToolValidationError{msg: msg} }
+
 // validContextTypes lists the allowed context types for tool installations.
 var validContextTypes = map[string]bool{
 	"Course":  true,
@@ -32,26 +43,24 @@ var validContextTypes = map[string]bool{
 
 // Create installs an external tool in a context. The tool must have a name,
 // a valid context_type (Course or Account), and a developer_key_id that
-// references an existing developer key.
-func (s *ExternalToolService) Create(ctx context.Context, tool *models.ContextExternalTool) error {
+// references a developer key of the caller's tenant (accountID).
+// Validation failures wrap ErrExternalToolInvalid.
+func (s *ExternalToolService) Create(ctx context.Context, tool *models.ContextExternalTool, accountID uint) error {
 	if tool.Name == "" {
-		return errors.New("tool name is required")
+		return invalidTool("tool name is required")
 	}
 
 	if !validContextTypes[tool.ContextType] {
-		return errors.New("context_type must be 'Course' or 'Account'")
+		return invalidTool("context_type must be 'Course' or 'Account'")
 	}
 
 	if tool.DeveloperKeyID == 0 {
-		return errors.New("developer_key_id is required")
+		return invalidTool("developer_key_id is required")
 	}
 
-	// Verify the developer key exists. accountID==0 is intentional: this is
-	// an internal validation invoked by the external-tool create path; the
-	// handler already gates the call by tenant via its own tool repo filter.
-	_, err := s.devKeyRepo.FindByID(ctx, tool.DeveloperKeyID, 0)
-	if err != nil {
-		return errors.New("developer key not found")
+	// The developer key must belong to the caller's tenant.
+	if _, err := s.devKeyRepo.FindByID(ctx, tool.DeveloperKeyID, accountID); err != nil {
+		return invalidTool("developer key not found")
 	}
 
 	// Set default workflow state

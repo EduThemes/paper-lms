@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -58,6 +59,47 @@ func conferenceParticipantToJSON(p *models.ConferenceParticipant) fiber.Map {
 	return result
 }
 
+// loadConference fetches a conference in the caller's tenant and applies
+// the course-role gate (instructor for manage, enrollment otherwise). It
+// returns wrote=true after writing the refusal; the caller MUST return
+// err immediately (the (result, wrote, err) convention).
+func (h *ConferenceHandler) loadConference(c *fiber.Ctx, manage bool) (*models.Conference, bool, error) {
+	id, err := c.ParamsInt("id")
+	if err != nil {
+		return nil, true, responses.BadRequest(c, "Invalid conference ID")
+	}
+	conference, err := h.conferenceService.GetByID(c.Context(), uint(id), callerAccountID(c))
+	if err != nil {
+		return nil, true, responses.NotFound(c, "conference")
+	}
+	if conference.ContextType == "Course" {
+		var aerr error
+		if manage {
+			aerr = h.authz.RequireCourseInstructor(c, conference.ContextID)
+		} else {
+			aerr = h.authz.RequireCourseEnrolled(c, conference.ContextID)
+		}
+		if authzDenied(c, aerr) {
+			return nil, true, aerr
+		}
+	}
+	return conference, false, nil
+}
+
+// conferenceLifecycleError maps lifecycle errors onto HTTP statuses.
+func conferenceLifecycleError(c *fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, service.ErrConferenceNotConfigured),
+		errors.Is(err, service.ErrConferenceNotStarted),
+		errors.Is(err, service.ErrConferenceEnded):
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"errors": []fiber.Map{{"message": err.Error()}},
+		})
+	default:
+		return responses.Error(c, fiber.StatusBadGateway, err.Error())
+	}
+}
+
 // ListConferences returns a paginated list of conferences for a course.
 // GET /api/v1/courses/:course_id/conferences
 func (h *ConferenceHandler) ListConferences(c *fiber.Ctx) error {
@@ -98,6 +140,9 @@ func (h *ConferenceHandler) CreateConference(c *fiber.Ctx) error {
 			ConferenceType string `json:"conference_type"`
 			Duration       int    `json:"duration"`
 			Settings       string `json:"settings"`
+			// JoinURL is an optional external meeting link (e.g. a Zoom
+			// link) used when no BigBlueButton server is configured.
+			JoinURL string `json:"join_url"`
 		} `json:"conference"`
 	}
 
@@ -112,9 +157,10 @@ func (h *ConferenceHandler) CreateConference(c *fiber.Ctx) error {
 		ContextID:      uint(courseID),
 		ConferenceType: input.Conference.ConferenceType,
 		Title:          input.Conference.Title,
-		Description:    service.SanitizeHTML(input.Conference.Description),
+		Description:    service.SanitizePlainText(input.Conference.Description),
 		Duration:       input.Conference.Duration,
 		Settings:       input.Conference.Settings,
+		JoinURL:        input.Conference.JoinURL,
 		UserID:         userID,
 	}
 
@@ -129,46 +175,21 @@ func (h *ConferenceHandler) CreateConference(c *fiber.Ctx) error {
 }
 
 // GetConference returns a single conference.
-// GET /api/v1/courses/:course_id/conferences/:id
+// GET /api/v1/conferences/:id
 func (h *ConferenceHandler) GetConference(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid conference ID")
+	conference, wrote, err := h.loadConference(c, false)
+	if wrote {
+		return err
 	}
-
-	conference, err := h.conferenceService.GetByID(c.Context(), uint(id), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "conference")
-	}
-
-	// Authorization: require enrollment for course-scoped conferences
-	if conference.ContextType == "Course" {
-		if err := h.authz.RequireCourseEnrolled(c, conference.ContextID); err != nil {
-			return err
-		}
-	}
-
 	return c.JSON(conferenceToJSON(conference))
 }
 
 // UpdateConference updates an existing conference.
-// PUT /api/v1/courses/:course_id/conferences/:id
+// PUT /api/v1/conferences/:id
 func (h *ConferenceHandler) UpdateConference(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid conference ID")
-	}
-
-	conference, err := h.conferenceService.GetByID(c.Context(), uint(id), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "conference")
-	}
-
-	// Authorization: require instructor for course-scoped conferences
-	if conference.ContextType == "Course" {
-		if err := h.authz.RequireCourseInstructor(c, conference.ContextID); err != nil {
-			return err
-		}
+	conference, wrote, err := h.loadConference(c, true)
+	if wrote {
+		return err
 	}
 
 	var input struct {
@@ -178,7 +199,7 @@ func (h *ConferenceHandler) UpdateConference(c *fiber.Ctx) error {
 			ConferenceType *string `json:"conference_type"`
 			Duration       *int    `json:"duration"`
 			Settings       *string `json:"settings"`
-			WorkflowState  *string `json:"workflow_state"`
+			JoinURL        *string `json:"join_url"`
 		} `json:"conference"`
 	}
 
@@ -190,9 +211,12 @@ func (h *ConferenceHandler) UpdateConference(c *fiber.Ctx) error {
 		conference.Title = *input.Conference.Title
 	}
 	if input.Conference.Description != nil {
-		conference.Description = service.SanitizeHTML(*input.Conference.Description)
+		conference.Description = service.SanitizePlainText(*input.Conference.Description)
 	}
 	if input.Conference.ConferenceType != nil {
+		if *input.Conference.ConferenceType != "BigBlueButton" && *input.Conference.ConferenceType != "Zoom" {
+			return responses.BadRequest(c, "conference_type must be 'BigBlueButton' or 'Zoom'")
+		}
 		conference.ConferenceType = *input.Conference.ConferenceType
 	}
 	if input.Conference.Duration != nil {
@@ -201,9 +225,13 @@ func (h *ConferenceHandler) UpdateConference(c *fiber.Ctx) error {
 	if input.Conference.Settings != nil {
 		conference.Settings = *input.Conference.Settings
 	}
-	if input.Conference.WorkflowState != nil {
-		conference.WorkflowState = *input.Conference.WorkflowState
+	if input.Conference.JoinURL != nil {
+		if err := service.ValidateMeetingURL(*input.Conference.JoinURL); err != nil {
+			return responses.BadRequest(c, err.Error())
+		}
+		conference.JoinURL = *input.Conference.JoinURL
 	}
+	// workflow_state is driven by start/end, not by direct writes.
 
 	if err := h.conferenceService.Update(c.Context(), conference); err != nil {
 		return responses.InternalError(c, "Could not update conference")
@@ -213,24 +241,11 @@ func (h *ConferenceHandler) UpdateConference(c *fiber.Ctx) error {
 }
 
 // DeleteConference deletes a conference.
-// DELETE /api/v1/courses/:course_id/conferences/:id
+// DELETE /api/v1/conferences/:id
 func (h *ConferenceHandler) DeleteConference(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid conference ID")
-	}
-
-	// Fetch first to check authorization
-	conference, err := h.conferenceService.GetByID(c.Context(), uint(id), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "conference")
-	}
-
-	// Authorization: require instructor for course-scoped conferences
-	if conference.ContextType == "Course" {
-		if err := h.authz.RequireCourseInstructor(c, conference.ContextID); err != nil {
-			return err
-		}
+	conference, wrote, err := h.loadConference(c, true)
+	if wrote {
+		return err
 	}
 
 	if err := h.conferenceService.Delete(c.Context(), conference.ID); err != nil {
@@ -240,88 +255,79 @@ func (h *ConferenceHandler) DeleteConference(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"delete": true})
 }
 
-// JoinConference generates a join URL for the current user.
-// POST /api/v1/courses/:course_id/conferences/:id/join
+// StartConference starts a conference (instructor only).
+// POST /api/v1/conferences/:id/start
+func (h *ConferenceHandler) StartConference(c *fiber.Ctx) error {
+	conference, wrote, err := h.loadConference(c, true)
+	if wrote {
+		return err
+	}
+	if conference.EndedAt != nil {
+		return conferenceLifecycleError(c, service.ErrConferenceEnded)
+	}
+
+	started, err := h.conferenceService.StartConference(c.Context(), conference, callerAccountID(c))
+	if err != nil {
+		return conferenceLifecycleError(c, err)
+	}
+	return c.JSON(conferenceToJSON(started))
+}
+
+// JoinConference returns the URL the current user opens to join.
+// POST /api/v1/conferences/:id/join
+//
+// Like Canvas, an instructor joining a conference that has not started
+// yet starts it; students can only join once it is running.
 func (h *ConferenceHandler) JoinConference(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid conference ID")
-	}
-
-	// Fetch to check authorization
-	conference, err := h.conferenceService.GetByID(c.Context(), uint(id), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "conference")
-	}
-
-	// Authorization: require enrollment for course-scoped conferences
-	if conference.ContextType == "Course" {
-		if err := h.authz.RequireCourseEnrolled(c, conference.ContextID); err != nil {
-			return err
-		}
+	conference, wrote, err := h.loadConference(c, false)
+	if wrote {
+		return err
 	}
 
 	userID, _ := c.Locals("user_id").(uint)
+	moderator := conference.ContextType == "Course" && callerIsCourseInstructor(c, h.authz, conference.ContextID)
 
-	joinURL, err := h.conferenceService.JoinConference(c.Context(), conference.ID, userID)
+	if conference.StartedAt == nil && moderator {
+		if _, err := h.conferenceService.StartConference(c.Context(), conference, callerAccountID(c)); err != nil {
+			return conferenceLifecycleError(c, err)
+		}
+	}
+
+	userName, _ := c.Locals("user_name").(string)
+	joinURL, err := h.conferenceService.JoinConference(c.Context(), conference, userID, userName, moderator, callerAccountID(c))
 	if err != nil {
-		return responses.BadRequest(c, err.Error())
+		return conferenceLifecycleError(c, err)
 	}
 
 	return c.JSON(fiber.Map{
-		"status":   "ok",
-		"join_url": joinURL,
+		"status":     "ok",
+		"join_url":   joinURL,
+		"conference": conferenceToJSON(conference),
 	})
 }
 
 // EndConference ends an active conference.
-// POST /api/v1/courses/:course_id/conferences/:id/end
+// POST /api/v1/conferences/:id/end
 func (h *ConferenceHandler) EndConference(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid conference ID")
+	conf, wrote, err := h.loadConference(c, true)
+	if wrote {
+		return err
 	}
 
-	// Fetch first to check authorization
-	conf, err := h.conferenceService.GetByID(c.Context(), uint(id), callerAccountID(c))
+	conference, err := h.conferenceService.EndConference(c.Context(), conf, callerAccountID(c))
 	if err != nil {
-		return responses.NotFound(c, "conference")
-	}
-
-	// Authorization: require instructor for course-scoped conferences
-	if conf.ContextType == "Course" {
-		if err := h.authz.RequireCourseInstructor(c, conf.ContextID); err != nil {
-			return err
-		}
-	}
-
-	conference, err := h.conferenceService.EndConference(c.Context(), conf.ID)
-	if err != nil {
-		return responses.BadRequest(c, err.Error())
+		return conferenceLifecycleError(c, err)
 	}
 
 	return c.JSON(conferenceToJSON(conference))
 }
 
 // GetRecordings returns the recordings for a conference.
-// GET /api/v1/courses/:course_id/conferences/:id/recordings
+// GET /api/v1/conferences/:id/recordings
 func (h *ConferenceHandler) GetRecordings(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid conference ID")
-	}
-
-	// Fetch to check authorization
-	conference, err := h.conferenceService.GetByID(c.Context(), uint(id), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "conference")
-	}
-
-	// Authorization: require enrollment for course-scoped conferences
-	if conference.ContextType == "Course" {
-		if err := h.authz.RequireCourseEnrolled(c, conference.ContextID); err != nil {
-			return err
-		}
+	conference, wrote, err := h.loadConference(c, false)
+	if wrote {
+		return err
 	}
 
 	recordings, err := h.conferenceService.GetRecordings(c.Context(), conference.ID)
@@ -330,30 +336,17 @@ func (h *ConferenceHandler) GetRecordings(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"conference_id": id,
+		"conference_id": conference.ID,
 		"recordings":    recordings,
 	})
 }
 
 // GetParticipants returns the participants for a conference.
-// GET /api/v1/courses/:course_id/conferences/:id/participants
+// GET /api/v1/conferences/:id/participants
 func (h *ConferenceHandler) GetParticipants(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid conference ID")
-	}
-
-	// Fetch to check authorization
-	conference, err := h.conferenceService.GetByID(c.Context(), uint(id), callerAccountID(c))
-	if err != nil {
-		return responses.NotFound(c, "conference")
-	}
-
-	// Authorization: require enrollment for course-scoped conferences
-	if conference.ContextType == "Course" {
-		if err := h.authz.RequireCourseEnrolled(c, conference.ContextID); err != nil {
-			return err
-		}
+	conference, wrote, err := h.loadConference(c, false)
+	if wrote {
+		return err
 	}
 
 	participants, err := h.conferenceService.ListParticipants(c.Context(), conference.ID)

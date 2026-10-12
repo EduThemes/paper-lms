@@ -1,17 +1,22 @@
 package handlers
 
 import (
-	"github.com/gofiber/fiber/v2"
+	"bytes"
+	"encoding/json"
+	"errors"
+
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/gofiber/fiber/v2"
 )
 
 type QuizSubmissionHandler struct {
 	quizService     *service.QuizService
 	observerService *service.ObserverService
 	auditService    *service.AuditService
+	fileService     *service.FileService
 }
 
 func NewQuizSubmissionHandler(quizService *service.QuizService, observerService *service.ObserverService, auditService *service.AuditService) *QuizSubmissionHandler {
@@ -58,15 +63,47 @@ func quizSubmissionAnswerToJSON(a *models.QuizSubmissionAnswer) fiber.Map {
 // requireQuizInCourse verifies the URL's quiz_id is a real quiz inside
 // the URL's course_id AND inside the caller's tenant. Used by every
 // quiz-submission endpoint to close F-003 (cross-course teacher reads)
-// and F-004 (cross-tenant submission enumeration).
+// and F-004 (cross-tenant submission enumeration). Non-staff callers
+// additionally only reach published, non-deleted quizzes (B128).
 //
-// Returns wrote=true if the response has already been written (404 on
-// quiz-not-in-course); caller short-circuits. Returns wrote=false on
-// success. Delegates to the package-level requireQuizInCourse so the
-// quiz-in-course/tenant tie has a single implementation shared with the
-// quiz-question and question-group handlers.
-func (h *QuizSubmissionHandler) requireQuizInCourse(c *fiber.Ctx, quizID, courseID uint) bool {
-	return requireQuizInCourse(c, h.quizService, quizID, courseID)
+// Returns the quiz and wrote=true if the response has already been written
+// (404 on quiz-not-in-course); caller short-circuits.
+func (h *QuizSubmissionHandler) requireQuizInCourse(c *fiber.Ctx, quizID, courseID uint) (*models.Quiz, bool) {
+	return loadQuizForCaller(c, h.quizService, quizID, courseID)
+}
+
+// callerCanViewAttempt reports whether the caller may read another user's
+// quiz attempt: the owner, course staff, or a linked observer.
+func (h *QuizSubmissionHandler) callerCanViewAttempt(c *fiber.Ctx, ownerID uint) bool {
+	userID, _ := c.Locals("user_id").(uint)
+	if userID != 0 && userID == ownerID {
+		return true
+	}
+	if quizCallerIsStaff(c) {
+		return true
+	}
+	if h.observerService != nil && userID != 0 {
+		if ok, _ := h.observerService.IsObserverOf(c.Context(), userID, ownerID); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// loadSubmission parses :submission_id, loads it, and ties it to :quiz_id.
+// Returns wrote=true after writing an error response.
+func (h *QuizSubmissionHandler) loadSubmission(c *fiber.Ctx, quizID uint) (*models.QuizSubmission, bool) {
+	submissionID, err := c.ParamsInt("submission_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid submission ID")
+		return nil, true
+	}
+	submission, err := h.quizService.GetSubmission(c.Context(), uint(submissionID))
+	if err != nil || submission == nil || submission.QuizID != quizID {
+		_ = responses.NotFound(c, "quiz submission")
+		return nil, true
+	}
+	return submission, false
 }
 
 // StartSubmission handles POST /courses/:course_id/quizzes/:quiz_id/submissions.
@@ -87,13 +124,13 @@ func (h *QuizSubmissionHandler) StartSubmission(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if h.requireQuizInCourse(c, uint(quizID), uint(courseID)) {
+	if _, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID)); wrote {
 		return nil
 	}
 
-	userID, err := getUserID(c)
-	if err != nil {
-		return err
+	userID, _ := c.Locals("user_id").(uint)
+	if userID == 0 {
+		return responses.Unauthorized(c)
 	}
 
 	submission, err := h.quizService.StartSubmission(c.Context(), uint(quizID), userID, nil /* time_limit is server-derived, not body-controlled */)
@@ -116,44 +153,23 @@ func (h *QuizSubmissionHandler) GetSubmission(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if h.requireQuizInCourse(c, uint(quizID), uint(courseID)) {
+	if _, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID)); wrote {
 		return nil
 	}
 
-	submissionID, err := c.ParamsInt("submission_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid submission ID")
+	submission, wrote := h.loadSubmission(c, uint(quizID))
+	if wrote {
+		return nil
 	}
 
-	submission, err := h.quizService.GetSubmission(c.Context(), uint(submissionID))
-	if err != nil {
+	// Authorization: only the submission owner, instructor, or observer can view it.
+	// 13.1.E: existence leak — return 404 not 403.
+	if !h.callerCanViewAttempt(c, submission.UserID) {
 		return responses.NotFound(c, "quiz submission")
-	}
-
-	// Verify submission belongs to the URL's quiz (prevents cross-course IDOR)
-	if submission.QuizID != uint(quizID) {
-		return responses.NotFound(c, "quiz submission")
-	}
-
-	// Authorization: only the submission owner, instructor, or observer can view it
-	userID, _ := c.Locals("user_id").(uint)
-	if submission.UserID != userID {
-		enrollmentType, _ := c.Locals("enrollment_type").(string)
-		isTeacherOrTA := enrollmentType == "TeacherEnrollment" || enrollmentType == "TaEnrollment"
-		isObserver := false
-		if h.observerService != nil {
-			isObserver, _ = h.observerService.IsObserverOf(c.Context(), userID, submission.UserID)
-		}
-		if !isTeacherOrTA && !isObserver {
-			// 13.1.E: existence leak — return 404 not 403. The
-			// submission exists but belongs to a different student in a
-			// course where the caller has no role; 403 confirms the
-			// row exists.
-			return responses.NotFound(c, "quiz submission")
-		}
 	}
 
 	// 13.5 PII audit — single-student read of a quiz attempt.
+	userID, _ := c.Locals("user_id").(uint)
 	if userID != 0 && h.auditService != nil {
 		_ = h.auditService.LogPIIAccess(c.Context(), userID, submission.UserID, "read", "quiz_attempt", "quiz_submissions", submission.ID, c.IP(), c.Get("User-Agent"))
 	}
@@ -162,6 +178,34 @@ func (h *QuizSubmissionHandler) GetSubmission(c *fiber.Ctx) error {
 		"quiz_submissions": []fiber.Map{quizSubmissionToJSON(submission)},
 	})
 }
+
+// decodeAnswerValue turns the `answer` JSON value into the string stored on
+// quiz_submission_answers.answer. Strings are stored verbatim; arrays and
+// objects (multiple_answer, ordering, matching, multiple_dropdown,
+// categorization, hot_spot, file_upload …) are stored as their compact
+// JSON text, which is exactly what the graders unmarshal; numbers and
+// booleans keep their literal text; null / absent is "".
+func decodeAnswerValue(raw json.RawMessage) (string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return "", nil
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			return "", err
+		}
+		return s, nil
+	}
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, trimmed); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// maxQuizAnswerBytes bounds a single stored answer (essays included).
+const maxQuizAnswerBytes = 256 * 1024
 
 // AnswerQuestion handles PUT /courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/questions/:question_id
 func (h *QuizSubmissionHandler) AnswerQuestion(c *fiber.Ctx) error {
@@ -173,13 +217,8 @@ func (h *QuizSubmissionHandler) AnswerQuestion(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if h.requireQuizInCourse(c, uint(quizID), uint(courseID)) {
+	if _, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID)); wrote {
 		return nil
-	}
-
-	submissionID, err := c.ParamsInt("submission_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid submission ID")
 	}
 
 	questionID, err := c.ParamsInt("question_id")
@@ -187,32 +226,38 @@ func (h *QuizSubmissionHandler) AnswerQuestion(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid question ID")
 	}
 
-	// Authorization: only the submission owner can answer questions
+	submission, wrote := h.loadSubmission(c, uint(quizID))
+	if wrote {
+		return nil
+	}
+	// Authorization: only the submission owner can answer questions.
+	// 13.1.E: existence leak — return 404 not 403.
 	userID, _ := c.Locals("user_id").(uint)
-	submission, err := h.quizService.GetSubmission(c.Context(), uint(submissionID))
-	if err != nil {
-		return responses.NotFound(c, "quiz submission")
-	}
-	// Verify submission belongs to the URL's quiz
-	if submission.QuizID != uint(quizID) {
-		return responses.NotFound(c, "quiz submission")
-	}
-	if submission.UserID != userID {
-		// 13.1.E: existence leak — return 404 not 403. The submission
-		// exists but belongs to another student; 403 confirms existence.
+	if userID == 0 || submission.UserID != userID {
 		return responses.NotFound(c, "quiz submission")
 	}
 
+	// B024: the answer may be a string (MC id, typed text) or structured
+	// JSON (arrays / objects for the newer item types).
 	var input struct {
-		Answer string `json:"answer"`
+		Answer json.RawMessage `json:"answer"`
 	}
-
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
-
-	answer, err := h.quizService.AnswerQuestion(c.Context(), uint(submissionID), uint(questionID), input.Answer)
+	answerText, err := decodeAnswerValue(input.Answer)
 	if err != nil {
+		return responses.BadRequest(c, "Invalid input")
+	}
+	if len(answerText) > maxQuizAnswerBytes {
+		return responses.BadRequest(c, "Answer is too large")
+	}
+
+	answer, err := h.quizService.AnswerQuestion(c.Context(), submission.ID, uint(questionID), answerText)
+	if err != nil {
+		if errors.Is(err, service.ErrQuestionNotInSubmission) {
+			return responses.NotFound(c, "quiz question")
+		}
 		return responses.BadRequest(c, err.Error())
 	}
 
@@ -229,30 +274,21 @@ func (h *QuizSubmissionHandler) CompleteSubmission(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if h.requireQuizInCourse(c, uint(quizID), uint(courseID)) {
+	if _, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID)); wrote {
 		return nil
 	}
 
-	submissionID, err := c.ParamsInt("submission_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid submission ID")
+	sub, wrote := h.loadSubmission(c, uint(quizID))
+	if wrote {
+		return nil
 	}
 
-	// Verify submission belongs to the URL's quiz
-	sub, err := h.quizService.GetSubmission(c.Context(), uint(submissionID))
-	if err != nil {
-		return responses.NotFound(c, "quiz submission")
-	}
-	if sub.QuizID != uint(quizID) {
-		return responses.NotFound(c, "quiz submission")
+	userID, _ := c.Locals("user_id").(uint)
+	if userID == 0 {
+		return responses.Unauthorized(c)
 	}
 
-	userID, err := getUserID(c)
-	if err != nil {
-		return err
-	}
-
-	submission, err := h.quizService.CompleteSubmission(c.Context(), uint(submissionID), userID)
+	submission, err := h.quizService.CompleteSubmission(c.Context(), sub.ID, userID)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
@@ -263,6 +299,10 @@ func (h *QuizSubmissionHandler) CompleteSubmission(c *fiber.Ctx) error {
 }
 
 // GetSubmissionAnswers handles GET /courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/answers
+//
+// B033: the submission owner, course staff (SpeedGrader-style review, item
+// analysis) and linked observers may read an attempt's answers; anyone
+// else gets a 404.
 func (h *QuizSubmissionHandler) GetSubmissionAnswers(c *fiber.Ctx) error {
 	courseID, err := c.ParamsInt("course_id")
 	if err != nil {
@@ -272,41 +312,41 @@ func (h *QuizSubmissionHandler) GetSubmissionAnswers(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if h.requireQuizInCourse(c, uint(quizID), uint(courseID)) {
+	quiz, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID))
+	if wrote {
 		return nil
 	}
 
-	submissionID, err := c.ParamsInt("submission_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid submission ID")
+	sub, wrote := h.loadSubmission(c, uint(quizID))
+	if wrote {
+		return nil
 	}
-
-	// Verify submission belongs to the URL's quiz
-	sub, err := h.quizService.GetSubmission(c.Context(), uint(submissionID))
-	if err != nil {
-		return responses.NotFound(c, "quiz submission")
-	}
-	if sub.QuizID != uint(quizID) {
+	if !h.callerCanViewAttempt(c, sub.UserID) {
 		return responses.NotFound(c, "quiz submission")
 	}
 
-	userID, err := getUserID(c)
-	if err != nil {
-		return err
-	}
-
-	answers, err := h.quizService.ListSubmissionAnswers(c.Context(), uint(submissionID), userID)
+	staff := quizCallerIsStaff(c)
+	answers, err := h.quizService.ListSubmissionAnswers(c.Context(), sub.ID, staff)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 
+	// Per-answer correctness and points are the attempt's results: a
+	// student (or observer) sees them only when the quiz's hide_results
+	// policy allows, as on the questions view.
+	showResults := staff || resultsVisibleAfterAttempt(quiz, sub)
 	result := make([]fiber.Map, len(answers))
-	for i, a := range answers {
-		result[i] = quizSubmissionAnswerToJSON(&a)
+	for i := range answers {
+		result[i] = quizSubmissionAnswerToJSON(&answers[i])
+		if !showResults {
+			result[i]["correct"] = nil
+			result[i]["points"] = nil
+		}
 	}
 
 	// 13.5 PII audit — student-keyed read of a quiz attempt's answers.
 	// Subject is the quiz submission's owner (sub.UserID).
+	userID, _ := c.Locals("user_id").(uint)
 	if userID != 0 && h.auditService != nil {
 		_ = h.auditService.LogPIIAccess(c.Context(), userID, sub.UserID, "read", "quiz_answers", "quiz_submissions", sub.ID, c.IP(), c.Get("User-Agent"))
 	}
@@ -316,8 +356,46 @@ func (h *QuizSubmissionHandler) GetSubmissionAnswers(c *fiber.Ctx) error {
 	})
 }
 
+// resultsVisibleAfterAttempt reports whether a non-staff viewer may see a
+// finished attempt's per-question results (correct / points). Canvas
+// hide_results: "always" never, "until_after_last_attempt" only once the
+// last allowed attempt is used.
+func resultsVisibleAfterAttempt(quiz *models.Quiz, submission *models.QuizSubmission) bool {
+	if quiz == nil || submission == nil || submission.WorkflowState == "untaken" {
+		return false
+	}
+	switch quiz.HideResults {
+	case "always":
+		return false
+	case "until_after_last_attempt":
+		return quiz.AllowedAttempts > 0 && submission.Attempt >= quiz.AllowedAttempts
+	}
+	return true
+}
+
+// answerKeyVisibleAfterAttempt reports whether a non-staff viewer may see
+// the answer key for a finished attempt (Canvas show_correct_answers /
+// hide_results semantics).
+func answerKeyVisibleAfterAttempt(quiz *models.Quiz, submission *models.QuizSubmission) bool {
+	if submission.WorkflowState == "untaken" {
+		return false
+	}
+	if !quiz.ShowCorrectAnswers {
+		return false
+	}
+	switch quiz.HideResults {
+	case "always":
+		return false
+	case "until_after_last_attempt":
+		return quiz.AllowedAttempts > 0 && submission.Attempt >= quiz.AllowedAttempts
+	}
+	return true
+}
+
 // GetSubmissionQuestions handles GET /courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/questions
-// Returns the personalized set of questions for this submission (randomized from groups).
+// Returns the personalized set of questions for this submission (randomized
+// from groups). Students only see the answer key once the attempt is over
+// and the quiz's result policy allows it.
 func (h *QuizSubmissionHandler) GetSubmissionQuestions(c *fiber.Ctx) error {
 	courseID, err := c.ParamsInt("course_id")
 	if err != nil {
@@ -327,48 +405,36 @@ func (h *QuizSubmissionHandler) GetSubmissionQuestions(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if h.requireQuizInCourse(c, uint(quizID), uint(courseID)) {
+	quiz, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID))
+	if wrote {
 		return nil
 	}
 
-	submissionID, err := c.ParamsInt("submission_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid submission ID")
-	}
-
-	// Verify submission exists and belongs to this quiz
-	submission, err := h.quizService.GetSubmission(c.Context(), uint(submissionID))
-	if err != nil {
-		return responses.NotFound(c, "quiz submission")
-	}
-	if submission.QuizID != uint(quizID) {
-		return responses.NotFound(c, "quiz submission")
+	submission, wrote := h.loadSubmission(c, uint(quizID))
+	if wrote {
+		return nil
 	}
 
 	// Authorization: only the submission owner, instructor, or observer can view
-	userID, _ := c.Locals("user_id").(uint)
-	if submission.UserID != userID {
-		enrollmentType, _ := c.Locals("enrollment_type").(string)
-		isTeacherOrTA := enrollmentType == "TeacherEnrollment" || enrollmentType == "TaEnrollment"
-		isObserver := false
-		if h.observerService != nil {
-			isObserver, _ = h.observerService.IsObserverOf(c.Context(), userID, submission.UserID)
-		}
-		if !isTeacherOrTA && !isObserver {
-			// 13.1.E: existence leak — return 404 not 403. Same
-			// rationale as GetSubmission above.
-			return responses.NotFound(c, "quiz submission")
-		}
+	// (13.1.E: 404, not 403).
+	if !h.callerCanViewAttempt(c, submission.UserID) {
+		return responses.NotFound(c, "quiz submission")
 	}
 
-	questions, err := h.quizService.GetSubmissionQuestions(c.Context(), uint(submissionID))
+	questions, err := h.quizService.GetSubmissionQuestions(c.Context(), submission.ID)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch submission questions")
 	}
 
-	result := make([]fiber.Map, len(questions))
-	for i, q := range questions {
-		result[i] = quizQuestionToJSON(&q)
+	showKey := quizCallerIsStaff(c) || answerKeyVisibleAfterAttempt(quiz, submission)
+	stimuli := h.quizService.StimuliForQuestions(c.Context(), quiz.CourseID, questions)
+	result := make([]fiber.Map, 0, len(questions))
+	for i := range questions {
+		q := &questions[i]
+		if q.QuizID != submission.QuizID {
+			continue // never serve a row from another quiz
+		}
+		result = append(result, quizQuestionToViewerJSON(q, showKey, service.QuizShuffleSeed(submission.ID, q.ID), stimuli))
 	}
 
 	return c.JSON(result)
@@ -376,14 +442,11 @@ func (h *QuizSubmissionHandler) GetSubmissionQuestions(c *fiber.Ctx) error {
 
 // ListSubmissions handles GET /courses/:course_id/quizzes/:quiz_id/submissions.
 //
-// SECURITY (F-004): the pre-fix path returned every submission for the
-// supplied quiz_id with no parent-tie check, so any enrolled student
-// could enumerate any quiz's submissions across courses and tenants
-// just by changing the quiz_id path segment. The fix:
-//   1. The quiz_id MUST belong to the URL's course_id within the
-//      caller's tenant (requireQuizInCourse).
-//   2. The caller MUST be an instructor / TA / admin of the course —
-//      students see only their own attempts via GetSubmission.
+// SECURITY (F-004): the quiz_id MUST belong to the URL's course_id within
+// the caller's tenant (requireQuizInCourse). Course staff see every
+// attempt; a student sees only their own attempts and an observer only
+// their linked students' attempts (B034 — Canvas parity: students list
+// their own quiz submissions).
 func (h *QuizSubmissionHandler) ListSubmissions(c *fiber.Ctx) error {
 	courseID, err := c.ParamsInt("course_id")
 	if err != nil {
@@ -393,16 +456,33 @@ func (h *QuizSubmissionHandler) ListSubmissions(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if h.requireQuizInCourse(c, uint(quizID), uint(courseID)) {
+	if _, wrote := h.requireQuizInCourse(c, uint(quizID), uint(courseID)); wrote {
 		return nil
 	}
 
-	// Restrict to instructor / TA / admin. Students do not have a
-	// roster-wide read on the quiz's attempts.
-	enrollmentType, _ := c.Locals("enrollment_type").(string)
-	isAdmin, _ := c.Locals("is_admin").(bool)
-	if !isAdmin && enrollmentType != "TeacherEnrollment" && enrollmentType != "TaEnrollment" {
-		return responses.NotFound(c, "quiz")
+	callerID, _ := c.Locals("user_id").(uint)
+
+	if !quizCallerIsStaff(c) {
+		if callerID == 0 {
+			return responses.Unauthorized(c)
+		}
+		userIDs := []uint{callerID}
+		if et, _ := c.Locals("enrollment_type").(string); et == "ObserverEnrollment" && h.observerService != nil {
+			if observed, oErr := h.observerService.ListObservedStudents(c.Context(), callerID); oErr == nil {
+				userIDs = append(userIDs, observed...)
+			}
+		}
+		subs, err := h.quizService.ListSubmissionsForUsers(c.Context(), uint(quizID), userIDs)
+		if err != nil {
+			return responses.InternalError(c, "Could not fetch quiz submissions")
+		}
+		out := make([]fiber.Map, len(subs))
+		for i := range subs {
+			out[i] = quizSubmissionToJSON(&subs[i])
+		}
+		return c.JSON(fiber.Map{
+			"quiz_submissions": out,
+		})
 	}
 
 	params := middleware.GetPagination(c)
@@ -415,8 +495,8 @@ func (h *QuizSubmissionHandler) ListSubmissions(c *fiber.Ctx) error {
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
 
 	submissions := make([]fiber.Map, len(result.Items))
-	for i, qs := range result.Items {
-		submissions[i] = quizSubmissionToJSON(&qs)
+	for i := range result.Items {
+		submissions[i] = quizSubmissionToJSON(&result.Items[i])
 	}
 
 	// 13.5 PII audit — bulk-read semantics. Per-row would explode the
@@ -424,7 +504,7 @@ func (h *QuizSubmissionHandler) ListSubmissions(c *fiber.Ctx) error {
 	// student_id=0 + data_field="bulk_quiz_attempt_list_read" is what
 	// audit investigations actually want (who pulled this quiz's
 	// attempts, when).
-	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+	if callerID != 0 && h.auditService != nil {
 		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_quiz_attempt_list_read", "quiz_submissions", uint(quizID), c.IP(), c.Get("User-Agent"))
 	}
 

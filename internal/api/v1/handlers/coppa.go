@@ -13,6 +13,38 @@ import (
 // COPPAHandler handles HTTP requests for COPPA 2025 compliance endpoints.
 type COPPAHandler struct {
 	coppaService *service.COPPAService
+	// authz ties user- and record-keyed admin routes to the caller's
+	// tenant (the `admin` gate checks the tenant only on /accounts/:id).
+	authz *ResourceAuthorizer
+}
+
+// SetAuthorizer wires the tenant checks. Without it, the user- and
+// record-keyed routes refuse every request.
+func (h *COPPAHandler) SetAuthorizer(a *ResourceAuthorizer) *COPPAHandler {
+	h.authz = a
+	return h
+}
+
+// requireStudentInTenant 404s unless the student is in the caller's tenant.
+func (h *COPPAHandler) requireStudentInTenant(c *fiber.Ctx, studentID uint) error {
+	if h.authz == nil {
+		return authzNotFound("user")
+	}
+	return h.authz.RequireUserInTenant(c, studentID)
+}
+
+// dpaAccountParam resolves :account_id ("self" = the caller's tenant). The
+// `admin` gate has already refused another tenant's id.
+func dpaAccountParam(c *fiber.Ctx) (uint, error) {
+	raw := c.Params("account_id")
+	if raw == "self" {
+		return callerAccountID(c), nil
+	}
+	id, err := strconv.Atoi(raw)
+	if err != nil || id <= 0 {
+		return 0, fiber.NewError(fiber.StatusBadRequest, "Invalid account ID")
+	}
+	return uint(id), nil
 }
 
 // NewCOPPAHandler creates a new COPPAHandler.
@@ -63,6 +95,9 @@ func (h *COPPAHandler) RequestConsent(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid user ID")
 	}
+	if err := h.requireStudentInTenant(c, uint(userID)); err != nil {
+		return err
+	}
 
 	var input struct {
 		ParentEmail string `json:"parent_email"`
@@ -86,6 +121,9 @@ func (h *COPPAHandler) ListConsents(c *fiber.Ctx) error {
 	userID, err := strconv.Atoi(c.Params("user_id"))
 	if err != nil {
 		return responses.BadRequest(c, "Invalid user ID")
+	}
+	if err := h.requireStudentInTenant(c, uint(userID)); err != nil {
+		return err
 	}
 
 	consents, err := h.coppaService.ListConsentsForStudent(c.Context(), uint(userID))
@@ -116,11 +154,19 @@ func (h *COPPAHandler) VerifyConsent(c *fiber.Ctx) error {
 	return c.JSON(parentalConsentToJSON(consent))
 }
 
-// RevokeConsent handles DELETE /api/v1/parental_consent/:id
+// RevokeConsent handles DELETE /api/v1/consent/:id. The consent's student
+// must be in the caller's tenant (404 otherwise).
 func (h *COPPAHandler) RevokeConsent(c *fiber.Ctx) error {
 	consentID, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid consent ID")
+	}
+	consent, err := h.coppaService.GetConsent(c.Context(), uint(consentID))
+	if err != nil || consent == nil {
+		return responses.NotFound(c, "consent record")
+	}
+	if err := h.requireStudentInTenant(c, consent.StudentID); err != nil {
+		return authzNotFound("consent record")
 	}
 
 	userID, _ := c.Locals("user_id").(uint)
@@ -134,9 +180,9 @@ func (h *COPPAHandler) RevokeConsent(c *fiber.Ctx) error {
 
 // ListDPAs handles GET /api/v1/accounts/:account_id/data_processing_agreements
 func (h *COPPAHandler) ListDPAs(c *fiber.Ctx) error {
-	accountID, err := strconv.Atoi(c.Params("account_id"))
+	accountID, err := dpaAccountParam(c)
 	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
+		return err
 	}
 
 	params := middleware.GetPagination(c)
@@ -158,9 +204,9 @@ func (h *COPPAHandler) ListDPAs(c *fiber.Ctx) error {
 
 // CreateDPA handles POST /api/v1/accounts/:account_id/data_processing_agreements
 func (h *COPPAHandler) CreateDPA(c *fiber.Ctx) error {
-	accountID, err := strconv.Atoi(c.Params("account_id"))
+	accountID, err := dpaAccountParam(c)
 	if err != nil {
-		return responses.BadRequest(c, "Invalid account ID")
+		return err
 	}
 
 	var input struct {
@@ -203,6 +249,10 @@ func (h *COPPAHandler) UpdateDPA(c *fiber.Ctx) error {
 	dpa, err := h.coppaService.GetDPA(c.Context(), uint(dpaID))
 	if err != nil {
 		return responses.NotFound(c, "data processing agreement")
+	}
+	// Another tenant's agreement is a 404 (super_admin crosses tenants).
+	if assertSameTenant(c, dpa.AccountID) {
+		return nil
 	}
 
 	var input struct {

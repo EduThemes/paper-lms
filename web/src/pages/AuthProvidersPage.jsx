@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Shield, Plus, Trash2, Edit3, AlertTriangle, X, TestTube2, Check } from 'lucide-react';
 import Layout from '../components/Layout';
 import { getCSRFToken } from '../services/api';
+import useAccountId from '../hooks/useAccountId';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 const getHeaders = () => ({
@@ -9,7 +10,7 @@ const getHeaders = () => ({
   'X-CSRF-Token': getCSRFToken(),
 });
 
-const ACCOUNT_ID = 1;
+// The tenant comes from the signed-in user (useAccountId), never a constant.
 
 const AUTH_TYPES = [
   { value: 'saml', label: 'SAML' },
@@ -53,6 +54,7 @@ const EMPTY_FORM = {
 };
 
 const AuthProvidersPage = () => {
+  const ACCOUNT_ID = useAccountId();
   const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -88,11 +90,11 @@ const AuthProvidersPage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [ACCOUNT_ID]);
 
   useEffect(() => {
-    fetchProviders();
-  }, [fetchProviders]);
+    if (ACCOUNT_ID) fetchProviders();
+  }, [ACCOUNT_ID, fetchProviders]);
 
   const resetForm = () => {
     setFormData({ ...EMPTY_FORM });

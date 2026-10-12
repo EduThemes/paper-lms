@@ -101,7 +101,7 @@ func (h *RubricHandler) CreateCourseRubric(c *fiber.Ctx) error {
 		ContextType:               "Course",
 		ContextID:                 uint(courseID),
 		Title:                     input.Rubric.Title,
-		Description:               service.SanitizeHTML(input.Rubric.Description),
+		Description:               service.SanitizePlainText(input.Rubric.Description),
 		Data:                      input.Rubric.Data,
 		PointsPossible:            input.Rubric.PointsPossible,
 		FreeFormCriterionComments: input.Rubric.FreeFormCriterionComments,
@@ -161,7 +161,7 @@ func (h *RubricHandler) UpdateRubric(c *fiber.Ctx) error {
 		rubric.Title = *input.Rubric.Title
 	}
 	if input.Rubric.Description != nil {
-		rubric.Description = service.SanitizeHTML(*input.Rubric.Description)
+		rubric.Description = service.SanitizePlainText(*input.Rubric.Description)
 	}
 	if input.Rubric.Data != nil {
 		rubric.Data = *input.Rubric.Data

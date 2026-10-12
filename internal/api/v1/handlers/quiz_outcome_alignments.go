@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
@@ -26,14 +28,31 @@ func quizOutcomeAlignmentToJSON(a *models.QuizQuestionOutcomeAlignment) fiber.Ma
 	}
 }
 
-// Align creates an alignment.
-// POST /api/v1/quiz_questions/:question_id/outcome_alignments
+// alignmentQuestionScope parses :course_id/:quiz_id/:question_id and ties
+// question -> quiz -> course in the caller's tenant. Any miss is a 404.
+func (h *QuizOutcomeAlignmentHandler) alignmentQuestionScope(c *fiber.Ctx) (courseID, quizID, questionID uint, err error) {
+	cid, e1 := c.ParamsInt("course_id")
+	qid, e2 := c.ParamsInt("quiz_id")
+	qqid, e3 := c.ParamsInt("question_id")
+	if e1 != nil || e2 != nil || e3 != nil || cid <= 0 || qid <= 0 || qqid <= 0 {
+		return 0, 0, 0, fiber.NewError(fiber.StatusBadRequest, "Invalid course, quiz or question ID")
+	}
+	if err := h.svc.RequireQuestionInCourse(c.Context(), uint(cid), uint(qid), uint(qqid), callerAccountID(c)); err != nil {
+		return 0, 0, 0, authzNotFound("quiz question")
+	}
+	return uint(cid), uint(qid), uint(qqid), nil
+}
+
+// Align creates an alignment. The question must belong to a quiz of the
+// course, and the outcome must be the course's own or an account outcome of
+// the caller's tenant.
+// POST /api/v1/courses/:course_id/quizzes/:quiz_id/questions/:question_id/outcome_alignments
 //
 //	body: {"outcome_id": N, "mastery_threshold": 0.7}
 func (h *QuizOutcomeAlignmentHandler) Align(c *fiber.Ctx) error {
-	questionID, err := c.ParamsInt("question_id")
+	courseID, quizID, questionID, err := h.alignmentQuestionScope(c)
 	if err != nil {
-		return responses.BadRequest(c, "Invalid question ID")
+		return err
 	}
 	var input struct {
 		OutcomeID        uint     `json:"outcome_id"`
@@ -46,38 +65,41 @@ func (h *QuizOutcomeAlignmentHandler) Align(c *fiber.Ctx) error {
 	if input.MasteryThreshold != nil {
 		threshold = *input.MasteryThreshold
 	}
-	a, err := h.svc.Align(c.Context(), uint(questionID), input.OutcomeID, threshold)
+	a, err := h.svc.AlignInCourse(c.Context(), courseID, quizID, questionID, input.OutcomeID, callerAccountID(c), threshold)
 	if err != nil {
+		if errors.Is(err, service.ErrAlignmentScope) {
+			return authzNotFound("outcome")
+		}
 		return responses.BadRequest(c, err.Error())
 	}
 	return c.Status(fiber.StatusCreated).JSON(quizOutcomeAlignmentToJSON(a))
 }
 
 // Unalign deletes an alignment.
-// DELETE /api/v1/quiz_questions/:question_id/outcome_alignments/:outcome_id
+// DELETE /api/v1/courses/:course_id/quizzes/:quiz_id/questions/:question_id/outcome_alignments/:outcome_id
 func (h *QuizOutcomeAlignmentHandler) Unalign(c *fiber.Ctx) error {
-	questionID, err := c.ParamsInt("question_id")
+	_, _, questionID, err := h.alignmentQuestionScope(c)
 	if err != nil {
-		return responses.BadRequest(c, "Invalid question ID")
+		return err
 	}
 	outcomeID, err := c.ParamsInt("outcome_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid outcome ID")
 	}
-	if err := h.svc.Unalign(c.Context(), uint(questionID), uint(outcomeID)); err != nil {
+	if err := h.svc.Unalign(c.Context(), questionID, uint(outcomeID)); err != nil {
 		return responses.InternalError(c, "Could not remove alignment")
 	}
 	return c.JSON(fiber.Map{"delete": true})
 }
 
 // ListByQuestion returns every alignment for a quiz question.
-// GET /api/v1/quiz_questions/:question_id/outcome_alignments
+// GET /api/v1/courses/:course_id/quizzes/:quiz_id/questions/:question_id/outcome_alignments
 func (h *QuizOutcomeAlignmentHandler) ListByQuestion(c *fiber.Ctx) error {
-	questionID, err := c.ParamsInt("question_id")
+	_, _, questionID, err := h.alignmentQuestionScope(c)
 	if err != nil {
-		return responses.BadRequest(c, "Invalid question ID")
+		return err
 	}
-	items, err := h.svc.ListByQuestion(c.Context(), uint(questionID))
+	items, err := h.svc.ListByQuestion(c.Context(), questionID)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch alignments")
 	}
@@ -88,15 +110,22 @@ func (h *QuizOutcomeAlignmentHandler) ListByQuestion(c *fiber.Ctx) error {
 	return c.JSON(out)
 }
 
-// ListByOutcome returns every alignment for a learning outcome.
-// GET /api/v1/learning_outcomes/:outcome_id/quiz_question_alignments
+// ListByOutcome returns the outcome's alignments to questions in this course.
+// GET /api/v1/courses/:course_id/outcomes/:outcome_id/quiz_question_alignments
 func (h *QuizOutcomeAlignmentHandler) ListByOutcome(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil || courseID <= 0 {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	outcomeID, err := c.ParamsInt("outcome_id")
-	if err != nil {
+	if err != nil || outcomeID <= 0 {
 		return responses.BadRequest(c, "Invalid outcome ID")
 	}
-	items, err := h.svc.ListByOutcome(c.Context(), uint(outcomeID))
+	items, err := h.svc.ListByOutcomeInCourse(c.Context(), uint(courseID), uint(outcomeID), callerAccountID(c))
 	if err != nil {
+		if errors.Is(err, service.ErrAlignmentScope) {
+			return authzNotFound("outcome")
+		}
 		return responses.InternalError(c, "Could not fetch alignments")
 	}
 	out := make([]fiber.Map, len(items))

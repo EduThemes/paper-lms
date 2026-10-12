@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { CheckCircle, Clock, AlertCircle, Plus, Trash2, Pencil } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { datetimeLocalToISO, isoToDatetimeLocal } from '../utils/datetimeLocal';
 import {
   Dialog,
   DialogContent,
@@ -103,7 +104,7 @@ const DiscussionCheckpointsPanel = ({
       setEditorRows(
         checkpoints.map((c) => ({
           checkpoint_type: c.checkpoint_type,
-          due_at: c.due_at ? c.due_at.slice(0, 16) : '',
+          due_at: isoToDatetimeLocal(c.due_at),
           points_possible: c.points_possible || 0,
           required_replies: c.required_replies || 1,
         })),
@@ -122,7 +123,7 @@ const DiscussionCheckpointsPanel = ({
       const payload = {
         checkpoints: editorRows.map((r) => ({
           checkpoint_type: r.checkpoint_type,
-          due_at: r.due_at ? new Date(r.due_at).toISOString() : null,
+          due_at: datetimeLocalToISO(r.due_at),
           points_possible: Number(r.points_possible) || 0,
           required_replies: Number(r.required_replies) || 1,
         })),

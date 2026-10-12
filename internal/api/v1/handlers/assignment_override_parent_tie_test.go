@@ -85,6 +85,10 @@ func TestDeleteOverride_AcceptsSameCourseAssignment(t *testing.T) {
 		CourseID: 10, // matches URL :course_id
 	}, nil)
 	overrideRepo.On("Delete", mock.Anything, uint(55)).Return(nil)
+	// Deleting an override also removes its student rows (B112).
+	overrideStudentRepo.On("ListByOverrideID", mock.Anything, uint(55)).
+		Return([]models.AssignmentOverrideStudent{{AssignmentOverrideID: 55, UserID: 9}}, nil)
+	overrideStudentRepo.On("Delete", mock.Anything, uint(55), uint(9)).Return(nil)
 
 	overrideService := service.NewOverrideService(overrideRepo, overrideStudentRepo, enrollmentRepo, sectionRepo)
 	assignmentService := service.NewAssignmentService(assignmentRepo)

@@ -357,7 +357,7 @@ func testJSON(t *testing.T, app *fiber.App, method, path string, payload any) *h
 
 func readAll(t *testing.T, r io.ReadCloser) []byte {
 	t.Helper()
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	b, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatalf("read body: %v", err)
@@ -405,6 +405,9 @@ func (r *fakePasskeyUserRepo) FindByLoginID(context.Context, string) (*models.Us
 	panic("unused")
 }
 func (r *fakePasskeyUserRepo) FindByEmail(context.Context, string) (*models.User, error) {
+	panic("unused")
+}
+func (r *fakePasskeyUserRepo) FindByEmailInAccount(context.Context, string, uint) (*models.User, error) {
 	panic("unused")
 }
 func (r *fakePasskeyUserRepo) FindBySISUserID(context.Context, string) (*models.User, error) {

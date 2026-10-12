@@ -1,26 +1,40 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import i18n from 'i18next';
 import { api } from '../services/api';
+import { setCurrentAccountId } from '../services/currentAccount';
+import { clearAllRceDrafts } from '../components/rce/rceDrafts';
+import { applyUserLocale } from '../utils/localePreference';
 
 const AuthContext = createContext(null);
 
-// Apply the account's default_locale only if the user has NOT made an explicit choice
-// (localStorage 'paperlms_locale' / legacy 'i18nextLng' takes priority over the account default).
-const applyAccountDefaultLocale = (data) => {
-  if (!data) return;
-  const explicit = typeof localStorage !== 'undefined'
-    ? (localStorage.getItem('paperlms_locale') || localStorage.getItem('i18nextLng'))
-    : null;
-  if (explicit) return;
-  const acctLocale = data?.account?.default_locale || data?.account_default_locale;
-  if (acctLocale && acctLocale !== i18n.language) {
-    i18n.changeLanguage(acctLocale);
+// Apply the signed-in user's locale. Priority (see pickLocale): the user's
+// saved profile locale (B210 — it was saved in Account Settings but never
+// applied, so it did not follow the user to other devices), then an
+// explicit choice made on this device (localStorage 'paperlms_locale'),
+// then the account's default_locale.
+const readDeviceLocale = () => {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage.getItem('paperlms_locale') : null;
+  } catch {
+    return null;
   }
 };
 
+const applyAccountDefaultLocale = (data) => {
+  applyUserLocale(data, { i18n, deviceLocale: readDeviceLocale() });
+};
+
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  const [user, setUserState] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Keep the API client's tenant id in step with the signed-in user, set
+  // synchronously so admin pages that fetch on mount already use it.
+  const setUser = (next) => {
+    const value = typeof next === 'function' ? next(user) : next;
+    setCurrentAccountId(value?.account_id);
+    setUserState(value);
+  };
 
   useEffect(() => {
     // On mount, verify session by calling /users/self
@@ -116,6 +130,10 @@ export const AuthProvider = ({ children }) => {
     // Clear any legacy localStorage data
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    // Editor autosave drafts are plaintext course content; don't leave them
+    // for the next person on a shared machine (B103). Session expiry keeps
+    // them so an interrupted author can sign back in and restore.
+    clearAllRceDrafts();
     setUser(null);
   };
 
@@ -125,6 +143,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const data = await api.getSelf();
       setUser(data);
+      applyAccountDefaultLocale(data);
       return data;
     } catch {
       setUser(null);
@@ -138,6 +157,10 @@ export const AuthProvider = ({ children }) => {
     </AuthContext.Provider>
   );
 };
+
+// useOptionalAuth returns the auth context, or null outside an AuthProvider
+// (for components that also render standalone, e.g. in isolated tests).
+export const useOptionalAuth = () => useContext(AuthContext);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);

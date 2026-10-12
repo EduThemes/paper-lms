@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	mathrand "math/rand"
+	"sync"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -15,8 +16,13 @@ type QuizItemBankService struct {
 	bankRepo     repository.QuizItemBankRepository
 	itemRepo     repository.QuizItemBankItemRepository
 	questionRepo repository.QuizQuestionRepository
+	quizRepo     repository.QuizRepository
 	now          func() time.Time
 	rand         *mathrand.Rand
+	// randMu serializes s.rand: a *rand.Rand is not safe for concurrent
+	// use, and random_draw requests from different teachers run in
+	// parallel.
+	randMu sync.Mutex
 }
 
 func NewQuizItemBankService(
@@ -31,6 +37,63 @@ func NewQuizItemBankService(
 		now:          time.Now,
 		rand:         mathrand.New(mathrand.NewSource(time.Now().UnixNano())),
 	}
+}
+
+// SetQuizRepo wires the quiz repository used to verify that a destination
+// quiz lives in the bank's course (and the caller's tenant) before items
+// are copied into it. Without it, quiz-integration calls fail closed.
+func (s *QuizItemBankService) SetQuizRepo(repo repository.QuizRepository) {
+	s.quizRepo = repo
+}
+
+// ErrItemBankQuizNotInCourse is returned when the destination quiz is not
+// in the item bank's course / caller's tenant.
+var ErrItemBankQuizNotInCourse = errors.New("target quiz not found in this course")
+
+// VerifyQuizInCourse checks quizID names a live quiz in courseID within the
+// caller's tenant (accountID).
+func (s *QuizItemBankService) VerifyQuizInCourse(ctx context.Context, quizID, courseID, accountID uint) error {
+	if s.quizRepo == nil || quizID == 0 {
+		return ErrItemBankQuizNotInCourse
+	}
+	quiz, err := s.quizRepo.FindByID(ctx, quizID, accountID)
+	if err != nil || quiz == nil || quiz.CourseID != courseID || quiz.WorkflowState == "deleted" {
+		return ErrItemBankQuizNotInCourse
+	}
+	return nil
+}
+
+// GetBankItemInBank loads an item and verifies it belongs to bankID.
+func (s *QuizItemBankService) GetBankItemInBank(ctx context.Context, bankID, itemID uint) (*models.QuizItemBankItem, error) {
+	item, err := s.itemRepo.FindByID(ctx, itemID)
+	if err != nil || item == nil || item.BankID != bankID {
+		return nil, errors.New("bank item not found")
+	}
+	return item, nil
+}
+
+// DrawItemsIntoQuiz randomly draws `count` items from the bank and persists
+// them as questions of quizID (B133: the draw used to be returned but never
+// saved). Returns the created questions.
+func (s *QuizItemBankService) DrawItemsIntoQuiz(ctx context.Context, bankID, quizID uint, count, startPosition int) ([]models.QuizQuestion, error) {
+	if quizID == 0 {
+		return nil, errors.New("quiz_id is required")
+	}
+	drawn, err := s.RandomDrawFromBank(ctx, bankID, count)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.QuizQuestion, 0, len(drawn))
+	for i := range drawn {
+		q := drawn[i]
+		q.QuizID = quizID
+		q.Position = startPosition + i
+		if err := s.questionRepo.Create(ctx, &q); err != nil {
+			return out, err
+		}
+		out = append(out, q)
+	}
+	return out, nil
 }
 
 // ---------- Bank CRUD ----------
@@ -216,9 +279,11 @@ func (s *QuizItemBankService) RandomDrawFromBank(ctx context.Context, bankID uin
 	// Shuffle a copy so we never mutate the caller's slice.
 	shuffled := make([]models.QuizItemBankItem, len(pool))
 	copy(shuffled, pool)
+	s.randMu.Lock()
 	s.rand.Shuffle(len(shuffled), func(i, j int) {
 		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 	})
+	s.randMu.Unlock()
 
 	if count > len(shuffled) {
 		count = len(shuffled)

@@ -267,7 +267,7 @@ func bootstrapExtensions(t *testing.T, dbURL string) {
 	if err != nil {
 		t.Fatalf("open %s: %v", dbURL, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if _, err := conn.Exec(`CREATE EXTENSION IF NOT EXISTS vector`); err != nil {
 		t.Fatalf("create extension vector: %v", err)
 	}

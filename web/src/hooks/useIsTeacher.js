@@ -1,36 +1,22 @@
-import { useState, useEffect } from 'react';
-import { useAuth } from '../contexts/AuthContext';
-import { api } from '../services/api';
+import useCourseStaffRole from './useCourseStaffRole';
 
 /**
  * Hook to detect if the current user is a teacher/TA/admin in a course.
  * Returns null while loading, true/false once resolved.
  *
+ * Reads the caller's own enrollments from
+ * GET /courses/:id/enrollments/self (B072). It used to scan the first
+ * page of the whole roster (per_page=200, silently capped at 100 by the
+ * server), so a teacher whose enrollment was created after 100 students
+ * lost every editing control; super_admin was also not recognised.
+ *
+ * TAs count as staff here. For the few teacher-only actions use
+ * useCourseStaffRole(courseId)?.teacher.
+ *
  * @param {string|number} courseId
  * @returns {boolean|null}
  */
 export default function useIsTeacher(courseId) {
-  const { user } = useAuth();
-  const [isTeacher, setIsTeacher] = useState(null);
-
-  useEffect(() => {
-    if (!courseId || !user) return;
-    api.getEnrollments(courseId, 1, 200)
-      .then(result => {
-        const enrollments = result.data || [];
-        const myEnrollment = enrollments.find(e =>
-          e.user_id === user.id || e.user?.id === user.id
-        );
-        setIsTeacher(
-          user.role === 'admin' ||
-          myEnrollment?.type === 'TeacherEnrollment' ||
-          myEnrollment?.type === 'TaEnrollment' ||
-          myEnrollment?.role === 'TeacherEnrollment' ||
-          myEnrollment?.role === 'TaEnrollment'
-        );
-      })
-      .catch(() => setIsTeacher(false));
-  }, [courseId, user]);
-
-  return isTeacher;
+  const role = useCourseStaffRole(courseId);
+  return role == null ? null : role.staff;
 }

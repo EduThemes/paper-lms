@@ -12,6 +12,7 @@ const ModulesPage = React.lazy(() => import('./pages/ModulesPage'));
 const PeoplePage = React.lazy(() => import('./pages/PeoplePage'));
 const AccessTokensPage = React.lazy(() => import('./pages/AccessTokensPage'));
 const DeveloperKeysPage = React.lazy(() => import('./pages/DeveloperKeysPage'));
+const OAuthConsentPage = React.lazy(() => import('./pages/OAuthConsentPage'));
 const ExternalToolsPage = React.lazy(() => import('./pages/ExternalToolsPage'));
 const DiscussionsPage = React.lazy(() => import('./pages/DiscussionsPage'));
 const DiscussionTopicPage = React.lazy(() => import('./pages/DiscussionTopicPageV2'));
@@ -77,6 +78,7 @@ import PublicPageView from './pages/PublicPageView';
 import NotFoundPage from './pages/NotFoundPage';
 const CourseSettingsPage = React.lazy(() => import('./pages/CourseSettingsPage'));
 import ProtectedRoute from './components/ProtectedRoute';
+import { OAuthConsentGate, ResumePendingOAuthConsent } from './components/OAuthConsentResume';
 import SuperAdminGate from './components/SuperAdminGate';
 import { CourseUIProvider } from './contexts/CourseUIContext';
 import { useAuth } from './contexts/AuthContext';
@@ -154,6 +156,7 @@ const App = () => {
         {/* Wave 1.6 follow-up — anonymous (pending-password-reset
             JWT is the credential). Mirrors /mfa/verify in spirit. */}
         <Route path="/auth/password-set" element={<PasswordResetRequiredPage />} />
+        <Route path="/login/oauth2/confirm" element={<OAuthConsentGate><OAuthConsentPage /></OAuthConsentGate>} />
         <Route path="/users/self/passkeys" element={<ProtectedRoute><PasskeyListPage /></ProtectedRoute>} />
         <Route path="/users/self/passkeys/enroll" element={<ProtectedRoute><PasskeyEnrollPage /></ProtectedRoute>} />
         <Route path="/consent/verify/:token" element={<ParentalConsentPage />} />
@@ -163,7 +166,9 @@ const App = () => {
           path="/"
           element={
             <ProtectedRoute>
-              <DashboardPage />
+              <ResumePendingOAuthConsent>
+                <DashboardPage />
+              </ResumePendingOAuthConsent>
             </ProtectedRoute>
           }
         />
@@ -197,6 +202,7 @@ const App = () => {
           <Route path="pages" element={<PagesPage />} />
           <Route path="pages/:slug" element={<PageDetailPage />} />
           <Route path="quizzes" element={<QuizzesPage />} />
+          <Route path="quizzes/:quizId" element={<Navigate to="take" replace />} />
           <Route path="quizzes/:quizId/take" element={<QuizTakePage />} />
           <Route path="quizzes/:quizId/edit" element={<QuizEditorPage />} />
           <Route path="quizzes/:quizId/submissions/:submissionId/review" element={<QuizReviewPage />} />

@@ -237,7 +237,9 @@ func TestLTILaunchTemplate_EscapesRedirectURI(t *testing.T) {
 	// attribute and start a new tag. Confirm the only `<script>` left
 	// in the rendered HTML is the legitimate inline submit script at
 	// the end of the template.
-	scriptCount := strings.Count(out, "<script>")
+	// The legitimate tag carries a CSP nonce attribute (B080), so count
+	// opening tags by prefix.
+	scriptCount := strings.Count(out, "<script")
 	if scriptCount != 1 {
 		t.Fatalf("expected exactly one <script> tag (the auto-submit one); got %d in: %s", scriptCount, out)
 	}

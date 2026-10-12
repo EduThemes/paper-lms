@@ -1111,11 +1111,24 @@ func TestAwardBadgeToUser_TenantMismatch_404(t *testing.T) {
 }
 
 func TestRevokeBadgeFromUser_NoContent(t *testing.T) {
-	app, _, _, _, _, awardRepo := setupGamificationHandler(7, true)
+	app, _, _, _, badgeRepo, awardRepo := setupGamificationHandler(7, true)
+	row := fixtureBadge()
+	badgeRepo.On("FindByID", mock.Anything, uint(50)).Return(&row, nil)
 	awardRepo.On("Revoke", mock.Anything, uint(42), uint(50)).Return(nil)
 	resp := deleteReq(app, "/api/v1/users/42/badges/50")
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 	awardRepo.AssertExpectations(t)
+}
+
+// F10: another tenant's badge can't be revoked (404, nothing deleted).
+func TestRevokeBadgeFromUser_OtherTenantBadgeIsNotFound(t *testing.T) {
+	app, _, _, _, badgeRepo, awardRepo := setupGamificationHandler(7, true)
+	row := fixtureBadge()
+	row.TenantID = 2
+	badgeRepo.On("FindByID", mock.Anything, uint(50)).Return(&row, nil)
+	resp := deleteReq(app, "/api/v1/users/42/badges/50")
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	awardRepo.AssertNotCalled(t, "Revoke", mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestListBadges_HappyPath(t *testing.T) {

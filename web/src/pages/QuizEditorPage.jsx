@@ -8,9 +8,10 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import QuizzesSubNav from '../components/quiz/QuizzesSubNav';
 import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
+import { clearRceDraft } from '../components/rce/rceDrafts';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
-import { ALL_TYPES as QUESTION_TYPES, defaultAnswersForType, parseAnswers, stringifyAnswers } from '../components/quiz/itemTypes/types';
+import { ALL_TYPES as QUESTION_TYPES, defaultAnswersForType, parseAnswers, stringifyAnswers, computeQuizPointsPossible } from '../components/quiz/itemTypes/types';
 import MultipleAnswerEditor from '../components/quiz/itemTypes/MultipleAnswerEditor';
 import MultipleDropdownEditor from '../components/quiz/itemTypes/MultipleDropdownEditor';
 import FillInBlankEditor from '../components/quiz/itemTypes/FillInBlankEditor';
@@ -28,7 +29,12 @@ const emptyAnswer = () => ({
   comments: '',
 });
 
-const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId, stimuli = [] }) => {
+// Draft keys are scoped to the quiz so a question draft never surfaces in a
+// different quiz, and are cleared once the save lands (B103).
+const questionDraftKey = (courseId, quizId, question, index) =>
+  `quiz-question-${courseId}-${quizId}-${question.id || `new-${index}`}-text`;
+
+const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId, quizId, stimuli = [] }) => {
   const [expanded, setExpanded] = useState(true);
   const [answers, setAnswers] = useState([]);
 
@@ -66,7 +72,11 @@ const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId,
   };
 
   const addAnswer = () => {
-    updateAnswers([...answers, emptyAnswer()]);
+    // Every short-answer option is an acceptable answer, so it must carry
+    // full weight (a 0-weight alternative could never match).
+    const next = emptyAnswer();
+    if ((question.question_type || 'multiple_choice') === 'short_answer') next.weight = 100;
+    updateAnswers([...answers, next]);
   };
 
   const removeAnswer = (answerIndex) => {
@@ -177,7 +187,7 @@ const QuestionEditor = ({ question, index, onUpdate, onDelete, groups, courseId,
               placeholder="Enter the question..."
               minHeight="100px"
               courseId={courseId}
-              autoSaveKey={`quiz-question-${courseId}-${question.id || `new-${index}`}-text`}
+              autoSaveKey={questionDraftKey(courseId, quizId, question, index)}
             />
           </div>
 
@@ -431,7 +441,10 @@ const QuizEditorPage = () => {
           published: qd.published || false,
         });
         const qr = questionResult.value;
-        setQuestions(((qr.data || qr || []) instanceof Array ? (qr.data || qr) : []).sort((a, b) => (a.position || 0) - (b.position || 0)));
+        // Per-attempt copies of bank-group draws are not authored questions.
+        setQuestions(((qr.data || qr || []) instanceof Array ? (qr.data || qr) : [])
+          .filter(q => q.question_bank_entry_id == null)
+          .sort((a, b) => (a.position || 0) - (b.position || 0)));
         if (groupsData.status === 'fulfilled') setGroups(groupsData.value || []);
         if (banksData.status === 'fulfilled') setQuestionBanks(banksData.value || []);
         if (stimuliData.status === 'fulfilled') setStimuli(stimuliData.value || []);
@@ -458,6 +471,7 @@ const QuizEditorPage = () => {
         published: quizForm.published,
       };
       const updated = await api.updateQuiz(courseId, quizId, payload);
+      clearRceDraft(`quiz-${courseId}-${quizId || 'new'}-description`);
       setQuiz(updated);
       setIsDirty(false);
       setMessage('Quiz settings saved.');
@@ -521,6 +535,7 @@ const QuizEditorPage = () => {
           stimulus_id: updated.stimulus_id || null,
         };
         await api.updateQuizQuestion(courseId, quizId, updated.id, payload);
+        clearRceDraft(questionDraftKey(courseId, quizId, updated));
       } catch (err) {
         setMessage('Error saving question: ' + err.message);
       }
@@ -556,6 +571,8 @@ const QuizEditorPage = () => {
       };
       if (groupForm.question_bank_id) {
         payload.question_bank_id = Number(groupForm.question_bank_id);
+      } else if (editingGroup) {
+        payload.question_bank_id = null; // explicit null unlinks the bank
       }
 
       if (editingGroup) {
@@ -598,8 +615,9 @@ const QuizEditorPage = () => {
     }
   };
 
-  // Auto-calculate total points from questions
-  const totalPoints = questions.reduce((sum, q) => sum + (q.points_possible ?? 1), 0);
+  // Total points a student can earn: ungrouped questions once each, plus
+  // pick_count × per-question points for every question group (Canvas).
+  const totalPoints = computeQuizPointsPossible(questions, groups);
 
   // Auto-sync quiz points_possible when questions change (skip initial load)
   const initialTotalRef = useRef(null);
@@ -913,6 +931,7 @@ const QuizEditorPage = () => {
                 onDelete={() => handleDeleteQuestion(q.id)}
                 groups={groups}
                 courseId={courseId}
+                quizId={quizId}
                 stimuli={stimuli}
               />
             ))}

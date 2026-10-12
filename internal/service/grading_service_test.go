@@ -13,6 +13,13 @@ import (
 )
 
 func makeAssignments(assignments ...models.Assignment) *repository.PaginatedResult[models.Assignment] {
+	// Fixtures that don't set a state are published assignments (only
+	// published work counts toward a grade).
+	for i := range assignments {
+		if assignments[i].WorkflowState == "" {
+			assignments[i].WorkflowState = models.AssignmentPublished
+		}
+	}
 	return &repository.PaginatedResult[models.Assignment]{
 		Items:      assignments,
 		TotalCount: int64(len(assignments)),

@@ -38,7 +38,15 @@ func NewAuditLogRepository(db *gorm.DB) *AuditLogRepo {
 
 // Create inserts a new audit log entry.
 func (r *AuditLogRepo) Create(ctx context.Context, log *models.AuditLog) error {
-	return r.db.WithContext(ctx).Create(log).Error
+	q := r.db.WithContext(ctx)
+	if log.UserID == 0 {
+		// System / anonymous events (e.g. auth.login_failed for an unknown
+		// account) have no acting user. audit_logs.user_id references
+		// users(id), so writing 0 violated the FK and the row was silently
+		// lost; omit the column so it is stored as NULL.
+		q = q.Omit("UserID")
+	}
+	return q.Create(log).Error
 }
 
 // ListByFilter returns a paginated list of audit logs matching the given filter.
@@ -63,10 +71,16 @@ func (r *AuditLogRepo) ListByFilter(ctx context.Context, filter AuditLogFilter, 
 	}, nil
 }
 
-// CountByEventType returns aggregated counts per event type within a date range.
-func (r *AuditLogRepo) CountByEventType(ctx context.Context, dateFrom, dateTo *time.Time) ([]EventTypeCount, error) {
+// CountByEventType returns aggregated counts per event type within a date
+// range. accountID != nil restricts the counts to one tenant; nil counts the
+// whole deployment (super_admin only).
+func (r *AuditLogRepo) CountByEventType(ctx context.Context, accountID *uint, dateFrom, dateTo *time.Time) ([]EventTypeCount, error) {
 	query := r.db.WithContext(ctx).Model(&models.AuditLog{}).
 		Select("event_type, COUNT(*) as count")
+
+	if accountID != nil {
+		query = query.Where("account_id = ?", *accountID)
+	}
 
 	if dateFrom != nil {
 		query = query.Where("created_at >= ?", *dateFrom)
@@ -81,7 +95,7 @@ func (r *AuditLogRepo) CountByEventType(ctx context.Context, dateFrom, dateTo *t
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []EventTypeCount
 	for rows.Next() {

@@ -261,7 +261,7 @@ const AccommodationsPage = () => {
     const fetchStudents = async () => {
       try {
         if (courseFilter && courseFilter !== 'all') {
-          const result = await api.getEnrollments(courseFilter, 1, 200);
+          const result = await api.getAllEnrollments(courseFilter);
           const enrollments = result.data || [];
           const studentEnrollments = enrollments.filter(
             (e) => e.type === 'StudentEnrollment' || e.role === 'StudentEnrollment' || e.enrollment_type === 'student'

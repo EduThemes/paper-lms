@@ -54,10 +54,12 @@ const AppointmentGroupsPage = () => {
     fetchMyReservations();
   }, [fetchGroups, fetchMyReservations]);
 
+  // Always fetch full slots too: a student's own booking fills a 1-person
+  // slot, and it must stay visible so it can be cancelled. The
+  // "Available" filter is applied client-side (visibleSlots).
   const loadSlots = async (groupId) => {
     try {
-      const includeFull = filter === 'all' || isTeacher;
-      const result = await api.listAppointmentSlots(groupId, includeFull);
+      const result = await api.listAppointmentSlots(groupId, true);
       setSlotsByGroup((prev) => ({ ...prev, [groupId]: result.data || [] }));
     } catch (err) {
       setError(err.message);
@@ -86,15 +88,22 @@ const AppointmentGroupsPage = () => {
     }
   };
 
+  const visibleSlots = (groupId) => {
+    const slots = slotsByGroup[groupId] || [];
+    if (isTeacher || filter === 'all') return slots;
+    return slots.filter((s) => s.available || reservedSlotIds.has(s.id));
+  };
+
   const cancel = async (groupId, slot) => {
     setBusy(true);
     try {
-      // We need to find the reservation id; reload slot info first.
+      // Find the caller's reservation for this slot (GET /users/self/appointments).
       const reservations = await api.listMyAppointmentReservations();
       const mine = (reservations.data || []).find((r) => r.slot_id === slot.id);
-      if (mine) {
-        await api.cancelAppointmentReservation(groupId, slot.id, mine.id);
+      if (!mine) {
+        throw new Error('Could not find your reservation for this slot.');
       }
+      await api.cancelAppointmentReservation(groupId, slot.id, mine.id);
       await loadSlots(groupId);
       await fetchMyReservations();
     } catch (err) {
@@ -218,7 +227,7 @@ const AppointmentGroupsPage = () => {
               {expandedId === group.id && (
                 <div className="border-t border-border-subtle p-4">
                   <SlotPicker
-                    slots={slotsByGroup[group.id] || []}
+                    slots={visibleSlots(group.id)}
                     reservedIds={reservedSlotIds}
                     onReserve={(slot) => reserve(group.id, slot)}
                     onCancel={(slot) => cancel(group.id, slot)}

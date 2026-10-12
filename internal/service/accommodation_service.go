@@ -141,6 +141,21 @@ func (s *AccommodationService) ApplyAccommodationsToAssignment(ctx context.Conte
 	}, nil
 }
 
+// accommodationInEffect reports whether an accommodation is active and its
+// effective_from / effective_until window covers t.
+func accommodationInEffect(a *models.StudentAccommodation, t time.Time) bool {
+	if a.Status != "" && a.Status != "active" {
+		return false
+	}
+	if !a.EffectiveFrom.IsZero() && a.EffectiveFrom.After(t) {
+		return false
+	}
+	if a.EffectiveUntil != nil && a.EffectiveUntil.Before(t) {
+		return false
+	}
+	return true
+}
+
 // QuizAdjustment holds the result of applying accommodations to a quiz.
 type QuizAdjustment struct {
 	AccommodationID   uint    `json:"accommodation_id"`
@@ -171,9 +186,15 @@ func (s *AccommodationService) ApplyAccommodationsToQuiz(ctx context.Context, us
 	// Find the most generous accommodation with time_multiplier
 	var bestAccommodation *models.StudentAccommodation
 	bestMultiplier := 1.0
+	now := time.Now()
 
 	for i := range accommodations {
 		a := &accommodations[i]
+		// B132: only accommodations whose effective window covers now
+		// apply (defense in depth on top of the repository filter).
+		if !accommodationInEffect(a, now) {
+			continue
+		}
 		if a.TimeMultiplier != nil && *a.TimeMultiplier > bestMultiplier {
 			bestMultiplier = *a.TimeMultiplier
 			bestAccommodation = a

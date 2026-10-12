@@ -34,5 +34,25 @@ func TestConversationCreateMessage_SanitizesBody(t *testing.T) {
 	require.NoError(t, svc.CreateMessage(context.Background(), msg))
 
 	assert.NotContains(t, msg.Body, "<script>", "script tag must be stripped from DM body")
+	assert.NotContains(t, msg.Body, "<b>", "DM bodies are plain text: no markup survives")
 	assert.Contains(t, msg.Body, "Hi", "legitimate text must survive sanitization")
+}
+
+// B005: DM bodies are plain text rendered as text by the inbox. The HTML
+// sanitizer entity-encoded them, so "Don't forget A & B" displayed as
+// "Don&#39;t forget A &amp; B". The stored body must be the literal text.
+func TestConversationCreateMessage_KeepsPlainTextLiteral(t *testing.T) {
+	msgRepo := new(mocks.MockConversationMessageRepository)
+	convRepo := new(mocks.MockConversationRepository)
+	msgRepo.On("Create", mock.Anything, mock.Anything).Return(nil)
+	convRepo.On("FindByID", mock.Anything, mock.Anything, mock.Anything).
+		Return(&models.Conversation{ID: 1}, nil)
+	convRepo.On("Update", mock.Anything, mock.Anything).Return(nil)
+
+	svc := service.NewConversationService(convRepo, nil, msgRepo)
+
+	msg := &models.ConversationMessage{ConversationID: 1, UserID: 2, Body: "Don't forget A & B\nsee you \"soon\""}
+	require.NoError(t, svc.CreateMessage(context.Background(), msg))
+
+	assert.Equal(t, "Don't forget A & B\nsee you \"soon\"", msg.Body)
 }

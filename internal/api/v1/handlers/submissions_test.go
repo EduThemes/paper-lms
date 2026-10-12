@@ -29,6 +29,21 @@ func setupSubmissionTest() (
 	commentRepo *mocks.MockSubmissionCommentRepository,
 	userRepo *mocks.MockUserRepository,
 ) {
+	return setupSubmissionTestAs(1, "TeacherEnrollment")
+}
+
+// setupSubmissionTestAs is setupSubmissionTest with an explicit caller.
+// Assignment 1 is a published assignment of course 1 (tenant 1) and user
+// 2 is a student of course 1; tests register their own expectations for
+// anything else.
+func setupSubmissionTestAs(callerID uint, enrollmentType string) (
+	app *fiber.App,
+	submissionRepo *mocks.MockSubmissionRepository,
+	assignmentRepo *mocks.MockAssignmentRepository,
+	enrollmentRepo *mocks.MockEnrollmentRepository,
+	commentRepo *mocks.MockSubmissionCommentRepository,
+	userRepo *mocks.MockUserRepository,
+) {
 	submissionRepo = new(mocks.MockSubmissionRepository)
 	assignmentRepo = new(mocks.MockAssignmentRepository)
 	enrollmentRepo = new(mocks.MockEnrollmentRepository)
@@ -43,18 +58,25 @@ func setupSubmissionTest() (
 	submissionService := service.NewSubmissionService(submissionRepo, assignmentRepo, enrollmentRepo, latePolicyRepo, courseRepo, gradingPeriodGroupRepo, gradingPeriodRepo, nil)
 	handler := handlers.NewSubmissionHandler(submissionService, commentRepo, attachmentRepo, userRepo, assignmentRepo, nil, nil, nil, nil, nil)
 
+	assignmentRepo.On("FindByID", mock.Anything, uint(1), uint(1)).Return(&models.Assignment{
+		ID: 1, CourseID: 1, Name: "Essay 1", WorkflowState: models.AssignmentPublished,
+		SubmissionTypes: "online_text_entry,online_upload",
+	}, nil).Maybe()
+	enrollmentRepo.On("FindByUserAndCourse", mock.Anything, uint(2), uint(1), uint(1)).
+		Return(&models.Enrollment{UserID: 2, CourseID: 1, Type: "StudentEnrollment", WorkflowState: "active"}, nil).Maybe()
+
 	app = testutil.SetupTestApp()
 
 	// Auth middleware stub: set user_id in Locals for all requests.
 	app.Use(func(c *fiber.Ctx) error {
-		c.Locals("user_id", uint(1))
+		c.Locals("user_id", callerID)
 		c.Locals("account_id", uint(1))
-		// These handler tests exercise course-staff operations (grading,
+		// Most handler tests exercise course-staff operations (grading,
 		// listing the whole class's submissions). Post-SEC-002/004 the read
-		// endpoints enforce object-level authz, so the caller acts as a
-		// teacher. The non-staff/student restriction is covered separately in
-		// submissions_authz_test.go.
-		c.Locals("enrollment_type", "TeacherEnrollment")
+		// endpoints enforce object-level authz, so the default caller acts
+		// as a teacher. The non-staff/student restriction is covered in
+		// submissions_authz_test.go and grading_parity_test.go.
+		c.Locals("enrollment_type", enrollmentType)
 		return c.Next()
 	})
 
@@ -74,14 +96,8 @@ func setupSubmissionTest() (
 }
 
 func TestCreateSubmission_Success(t *testing.T) {
-	app, submissionRepo, assignmentRepo, _, _, _ := setupSubmissionTest()
-
-	assignment := &models.Assignment{
-		ID:       1,
-		CourseID: 1,
-		Name:     "Essay 1",
-	}
-	assignmentRepo.On("FindByID", mock.Anything, uint(1), uint(0)).Return(assignment, nil)
+	// Only students submit (B111).
+	app, submissionRepo, assignmentRepo, _, _, _ := setupSubmissionTestAs(1, "StudentEnrollment")
 
 	// No existing submission for this user+assignment.
 	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(1), uint(0)).Return(nil, errors.New("not found"))
@@ -334,6 +350,11 @@ func TestCreateSubmissionComment(t *testing.T) {
 	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(2), uint(1)).Return(submission, nil)
 	commentRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.SubmissionComment")).Return(nil)
 	userRepo.On("FindByID", mock.Anything, uint(1), uint(1)).Return(&models.User{ID: 1, Name: "Test Teacher"}, nil)
+	// A teacher comment on an automatically-posted assignment posts the
+	// submission (Canvas), which persists posted_at.
+	submissionRepo.On("Update", mock.Anything, mock.MatchedBy(func(s *models.Submission) bool {
+		return s.PostedAt != nil
+	})).Return(nil).Once()
 
 	body := testutil.JSONBody(map[string]interface{}{
 		"comment": map[string]interface{}{

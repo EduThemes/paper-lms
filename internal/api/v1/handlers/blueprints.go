@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
@@ -198,30 +200,19 @@ func (h *BlueprintHandler) UpdateAssociations(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid input")
 	}
 
-	// Build the final set: current + add - remove
-	params := middleware.GetPagination(c)
-	existing, err := h.blueprintService.ListAssociatedCourses(c.Context(), template.ID, params)
-	if err != nil {
-		return responses.InternalError(c, "Could not fetch current associations")
-	}
-
-	courseSet := make(map[uint]bool)
-	for _, sub := range existing.Items {
-		courseSet[sub.ChildCourseID] = true
-	}
-	for _, id := range input.CourseIDsToAdd {
-		courseSet[id] = true
-	}
-	for _, id := range input.CourseIDsToRemove {
-		delete(courseSet, id)
-	}
-
-	finalIDs := make([]uint, 0, len(courseSet))
-	for id := range courseSet {
-		finalIDs = append(finalIDs, id)
-	}
-
-	if err := h.blueprintService.UpdateAssociations(c.Context(), template.ID, finalIDs); err != nil {
+	// B037: every course to add is authorized by the service (same
+	// account as the blueprint, caller teaches it or is an admin, not
+	// already in another blueprint). B040: the service applies the
+	// add/remove deltas to the FULL association set; the pre-fix handler
+	// rebuilt the set from one paginated page (default 10) and silently
+	// dropped every association past it.
+	userID, _ := c.Locals("user_id").(uint)
+	isAdmin, _ := c.Locals("is_admin").(bool)
+	caller := service.BlueprintCaller{UserID: userID, AccountID: callerAccountID(c), IsAdmin: isAdmin}
+	if err := h.blueprintService.ModifyAssociations(c.Context(), template, caller, input.CourseIDsToAdd, input.CourseIDsToRemove); err != nil {
+		if errors.Is(err, service.ErrBlueprintInvalidAssociation) {
+			return responses.BadRequest(c, err.Error())
+		}
 		return responses.InternalError(c, "Could not update associations")
 	}
 
@@ -292,17 +283,49 @@ func (h *BlueprintHandler) CreateMigration(c *fiber.Ctx) error {
 // GetMigration returns a specific migration.
 // GET /api/v1/courses/:course_id/blueprint_templates/default/migrations/:migration_id
 func (h *BlueprintHandler) GetMigration(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	migrationID, err := c.ParamsInt("migration_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid migration ID")
 	}
 
-	migration, err := h.blueprintService.GetMigration(c.Context(), uint(migrationID))
+	template, err := h.blueprintService.GetOrCreateTemplate(c.Context(), uint(courseID))
 	if err != nil {
+		return responses.NotFound(c, "blueprint migration")
+	}
+	migration, err := h.blueprintService.GetMigration(c.Context(), uint(migrationID))
+	// F-013 parent-tie: the migration must belong to this course's
+	// blueprint template.
+	if err != nil || migration == nil || migration.BlueprintTemplateID != template.ID {
 		return responses.NotFound(c, "blueprint migration")
 	}
 
 	return c.JSON(blueprintMigrationToJSON(migration))
+}
+
+// requireSubscriptionInCourse verifies :subscription_id is a
+// subscription whose child course is the URL's :course_id. Writes a 404
+// and returns wrote=true on a miss.
+func (h *BlueprintHandler) requireSubscriptionInCourse(c *fiber.Ctx) (*models.BlueprintSubscription, bool) {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid course ID")
+		return nil, true
+	}
+	subscriptionID, err := c.ParamsInt("subscription_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid subscription ID")
+		return nil, true
+	}
+	sub, err := h.blueprintService.GetSubscription(c.Context(), uint(subscriptionID))
+	if err != nil || sub == nil || sub.ChildCourseID != uint(courseID) {
+		_ = responses.NotFound(c, "blueprint subscription")
+		return nil, true
+	}
+	return sub, false
 }
 
 // GetUnsyncedChanges returns unsynced changes for the default template (placeholder).
@@ -353,13 +376,13 @@ func (h *BlueprintHandler) ListSubscriptions(c *fiber.Ctx) error {
 // GetSubscriptionMigrations lists migrations for a specific subscription.
 // GET /api/v1/courses/:course_id/blueprint_subscriptions/:subscription_id/migrations
 func (h *BlueprintHandler) GetSubscriptionMigrations(c *fiber.Ctx) error {
-	subscriptionID, err := c.ParamsInt("subscription_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid subscription ID")
+	sub, wrote := h.requireSubscriptionInCourse(c)
+	if wrote {
+		return nil
 	}
 
 	params := middleware.GetPagination(c)
-	result, err := h.blueprintService.ListSubscriptionMigrations(c.Context(), uint(subscriptionID), params)
+	result, err := h.blueprintService.ListSubscriptionMigrations(c.Context(), sub.ID, params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch subscription migrations")
 	}
@@ -377,13 +400,17 @@ func (h *BlueprintHandler) GetSubscriptionMigrations(c *fiber.Ctx) error {
 // GetSubscriptionMigration returns a specific migration for a subscription.
 // GET /api/v1/courses/:course_id/blueprint_subscriptions/:subscription_id/migrations/:migration_id
 func (h *BlueprintHandler) GetSubscriptionMigration(c *fiber.Ctx) error {
+	sub, wrote := h.requireSubscriptionInCourse(c)
+	if wrote {
+		return nil
+	}
 	migrationID, err := c.ParamsInt("migration_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid migration ID")
 	}
 
 	migration, err := h.blueprintService.GetMigration(c.Context(), uint(migrationID))
-	if err != nil {
+	if err != nil || migration == nil || migration.BlueprintTemplateID != sub.BlueprintTemplateID {
 		return responses.NotFound(c, "blueprint migration")
 	}
 

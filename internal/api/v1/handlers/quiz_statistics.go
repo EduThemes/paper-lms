@@ -61,7 +61,16 @@ type quizLevelStatistic struct {
 }
 
 // GetQuizStatistics handles GET /courses/:course_id/quizzes/:quiz_id/statistics
+//
+// B031: the quiz must live in the URL's course AND the caller's tenant. The
+// `instructor` middleware only checks :course_id, so without this tie a
+// teacher of any course could read another tenant's question text, answer
+// key and score distribution by quiz id.
 func (h *QuizStatisticsHandler) GetQuizStatistics(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
@@ -69,10 +78,10 @@ func (h *QuizStatisticsHandler) GetQuizStatistics(c *fiber.Ctx) error {
 
 	ctx := c.Context()
 
-	// 1. Fetch quiz to get points_possible
-	quiz, err := h.quizService.GetQuiz(ctx, uint(quizID))
-	if err != nil {
-		return responses.NotFound(c, "quiz")
+	// 1. Fetch quiz (tenant + course scoped) to get points_possible
+	quiz, wrote := loadQuizForCaller(c, h.quizService, uint(quizID), uint(courseID))
+	if wrote {
+		return nil
 	}
 
 	// 2. Fetch all questions for this quiz

@@ -754,8 +754,10 @@ func (h *GamificationHandler) RevokeBadgeFromUser(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "invalid badge_id")
 	}
-	if err := h.badgeService.Revoke(c.Context(), uint(uidRaw), uint(bidRaw)); err != nil {
-		return responses.InternalError(c, "could not revoke badge")
+	// The target user's tenant is enforced by the route's selfOrAdmin gate;
+	// the badge must be the caller's tenant's too.
+	if err := h.badgeService.RevokeInTenant(c.Context(), uint(uidRaw), uint(bidRaw), callerAccountID(c)); err != nil {
+		return mapBadgeServiceError(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
 }

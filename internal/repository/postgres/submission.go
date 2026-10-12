@@ -107,7 +107,8 @@ func (r *submissionRepo) ListByUserAndCourse(ctx context.Context, userID, course
 
 	subQuery := r.db.Model(&models.Assignment{}).Select("id").Where("course_id = ? AND workflow_state != ?", courseID, "deleted")
 
-	if err := r.db.WithContext(ctx).Where("user_id = ? AND assignment_id IN (?)", userID, subQuery).Find(&submissions).Error; err != nil {
+	// Stable order: the course-submissions endpoint paginates this list.
+	if err := r.db.WithContext(ctx).Where("user_id = ? AND assignment_id IN (?)", userID, subQuery).Order("id ASC").Find(&submissions).Error; err != nil {
 		return nil, err
 	}
 	return submissions, nil
@@ -148,9 +149,18 @@ func (r *submissionRepo) BulkListByCourse(ctx context.Context, courseID uint, pa
 	}, nil
 }
 
+// PostGradesByAssignment posts (postedAt != nil) or hides (postedAt ==
+// nil) an assignment's grades. Posting releases every graded or excused
+// submission that is not posted yet (an excused row has no score, and
+// used to stay hidden forever on a manual post policy); already-posted
+// rows keep their original posted_at. Hiding clears posted_at on every
+// posted submission, including ones posted by an instructor comment.
 func (r *submissionRepo) PostGradesByAssignment(ctx context.Context, assignmentID uint, postedAt *time.Time) error {
-	return r.db.WithContext(ctx).
-		Model(&models.Submission{}).
-		Where("assignment_id = ? AND score IS NOT NULL", assignmentID).
-		Update("posted_at", postedAt).Error
+	q := r.db.WithContext(ctx).Model(&models.Submission{}).Where("assignment_id = ?", assignmentID)
+	if postedAt == nil {
+		q = q.Where("posted_at IS NOT NULL")
+	} else {
+		q = q.Where("posted_at IS NULL AND (score IS NOT NULL OR excused = ?)", true)
+	}
+	return q.Update("posted_at", postedAt).Error
 }

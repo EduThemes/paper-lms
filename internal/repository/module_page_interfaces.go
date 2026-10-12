@@ -16,6 +16,9 @@ type ModuleRepository interface {
 	Update(ctx context.Context, module *models.ContextModule) error
 	Delete(ctx context.Context, id uint) error
 	ListByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.ContextModule], error)
+	// ListPublishedByCourseID is the student-facing list: only published
+	// (active) modules, each preloaded with only its published items.
+	ListPublishedByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.ContextModule], error)
 	FindActiveByDateRange(ctx context.Context, courseID uint, date time.Time) (*models.ContextModule, error)
 	ReorderModules(ctx context.Context, courseID uint, moduleIDs []uint) error
 }
@@ -26,6 +29,9 @@ type ModuleItemRepository interface {
 	Update(ctx context.Context, item *models.ContentTag) error
 	Delete(ctx context.Context, id uint) error
 	ListByModuleID(ctx context.Context, moduleID uint, params PaginationParams) (*PaginatedResult[models.ContentTag], error)
+	// ListPublishedByModuleID is the student-facing list: published
+	// (active) items only.
+	ListPublishedByModuleID(ctx context.Context, moduleID uint, params PaginationParams) (*PaginatedResult[models.ContentTag], error)
 	ReorderItems(ctx context.Context, moduleID uint, itemIDs []uint) error
 	MoveItemToModule(ctx context.Context, itemID uint, targetModuleID uint, position int) error
 }
@@ -39,6 +45,15 @@ type PageRepository interface {
 	Update(ctx context.Context, page *models.WikiPage) error
 	Delete(ctx context.Context, id uint) error
 	ListByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.WikiPage], error)
+	// ListPublishedByCourseID is the student-facing list: published
+	// (active) pages only.
+	ListPublishedByCourseID(ctx context.Context, courseID uint, params PaginationParams) (*PaginatedResult[models.WikiPage], error)
+	// FindFrontPage returns the course's front page (front_page = true,
+	// not deleted), or an error when none is set.
+	FindFrontPage(ctx context.Context, courseID uint) (*models.WikiPage, error)
+	// ClearFrontPage unsets front_page on every page of the course
+	// except exceptID, so a course has at most one front page.
+	ClearFrontPage(ctx context.Context, courseID, exceptID uint) error
 }
 
 type ModulePrerequisiteRepository interface {

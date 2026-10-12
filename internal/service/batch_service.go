@@ -294,7 +294,8 @@ func (s *BatchService) cloneQuizzes(ctx context.Context, sourceCourseID, destCou
 		if err != nil {
 			continue // skip question cloning if fetch fails
 		}
-		for _, question := range questions.Items {
+		// Per-attempt bank-draw copies stay with the source quiz.
+		for _, question := range models.AuthoredQuizQuestions(questions.Items) {
 			newQuestion := &models.QuizQuestion{
 				QuizID:            newQuiz.ID,
 				Position:          question.Position,
@@ -603,19 +604,28 @@ func (s *BatchService) BulkSendMessage(
 
 // BulkEnrollUsers enrolls multiple users into a course at once. Each enrollment
 // request specifies a user ID, enrollment type, and optional section ID.
+//
+// accountID scopes the course lookup to the caller's tenant (0 = a
+// super_admin request, unscoped). Every user must belong to the course's
+// account and every section to the course (B068): a teacher can't pull
+// another tenant's users into their roster and read their PII back.
 func (s *BatchService) BulkEnrollUsers(
 	ctx context.Context,
 	courseID uint,
 	enrollments []BulkEnrollmentRequest,
+	accountID uint,
 ) (*BulkEnrollResult, error) {
 	if len(enrollments) == 0 {
 		return nil, errors.New("at least one enrollment is required")
 	}
 
-	// Verify the course exists
-	_, err := s.courseRepo.FindByID(ctx, courseID, 0)
-	if err != nil {
-		return nil, fmt.Errorf("course not found: %w", err)
+	// Verify the course exists (in the caller's tenant)
+	course, err := s.courseRepo.FindByID(ctx, courseID, accountID)
+	if err != nil || course == nil {
+		return nil, errors.New("course not found")
+	}
+	if s.userRepo == nil || s.sectionRepo == nil {
+		return nil, errors.New("bulk enroll tenant guards not configured")
 	}
 
 	validTypes := map[string]bool{
@@ -641,6 +651,17 @@ func (s *BatchService) BulkEnrollUsers(
 		if !validTypes[req.Type] {
 			result.Errors = append(result.Errors, fmt.Sprintf("enrollment[%d]: invalid enrollment type %q", i, req.Type))
 			continue
+		}
+
+		if u, uErr := s.userRepo.FindByID(ctx, req.UserID, course.AccountID); uErr != nil || u == nil || u.AccountID != course.AccountID {
+			result.Errors = append(result.Errors, fmt.Sprintf("enrollment[%d]: user %d not found", i, req.UserID))
+			continue
+		}
+		if req.SectionID != nil {
+			if sec, sErr := s.sectionRepo.FindByID(ctx, *req.SectionID); sErr != nil || sec == nil || sec.CourseID != courseID {
+				result.Errors = append(result.Errors, fmt.Sprintf("enrollment[%d]: course section %d not found", i, *req.SectionID))
+				continue
+			}
 		}
 
 		// Check for existing enrollment

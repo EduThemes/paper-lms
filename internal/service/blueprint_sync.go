@@ -1,17 +1,29 @@
 package service
 
-// Blueprint sync orchestration. This is the bulk of the service — it
-// copies content (modules, assignments, pages, quizzes, quiz questions,
-// discussion topics, and module items) from a blueprint template course
-// to each associated child course. Re-runs are idempotent via title-based
-// dedup; module items use an idMap keyed by "ContentType:OldID" to remap
-// content references to the freshly-created child content.
+// Blueprint sync orchestration. It copies content (modules, assignments,
+// pages, quizzes with their questions, discussion topics and module
+// items) from a blueprint template course to each associated child
+// course, and on later syncs pushes blueprint edits to the existing
+// copies (B041).
+//
+// Identity: each copy is recorded in blueprint_content_tags (source id →
+// child id per child course), so a renamed blueprint item updates its
+// copy instead of spawning a duplicate. Copies made before the identity
+// map existed are adopted by title on the first sync that sees them.
+//
+// Change propagation follows Canvas's master-courses rules:
+//   - a blueprint item changed since the last completed sync is pushed;
+//   - if the child copy was edited locally since it was last synced (a
+//     "downstream change"), the local edit wins — unless the blueprint
+//     locks content (default restrictions {"content": true}), in which
+//     case the blueprint version is forced.
 //
 // Wave 5 split (chore/wave5-split-quiz-blueprint). All methods hang off
 // *BlueprintService so the handler call surface is unchanged.
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,20 +34,12 @@ import (
 	"github.com/EduThemes/paper-lms/internal/repository"
 )
 
-// repository is imported because TriggerSync constructs a one-off
-// PaginationParams literal below. The package-level `bigPage` lives in
-// blueprint_service.go for reuse across the sync sub-methods.
+// downstreamSlack absorbs clock/rounding noise between a child row's
+// updated_at (written by the sync) and the tag's synced_at.
+const downstreamSlack = time.Second
 
 // TriggerSync creates a migration record and performs actual content sync from the
 // blueprint template course to all associated child courses.
-//
-// For each child course the sync:
-//  1. Copies modules (skipping those already present by title match)
-//  2. Copies assignments (skip by name match)
-//  3. Copies pages (skip by title match)
-//  4. Copies quizzes with their questions (skip by title match)
-//  5. Copies discussion topics (skip by title match)
-//  6. Copies module items, remapping content IDs to the newly created child content
 func (s *BlueprintService) TriggerSync(ctx context.Context, templateID, userID uint, comment string) (*models.BlueprintMigration, error) {
 	if templateID == 0 {
 		return nil, errors.New("template_id is required")
@@ -50,6 +54,9 @@ func (s *BlueprintService) TriggerSync(ctx context.Context, templateID, userID u
 		return nil, fmt.Errorf("template not found: %w", err)
 	}
 	sourceCourseID := template.CourseID
+
+	// The previous completed sync is the baseline for "changed since".
+	lastSync := s.lastCompletedSync(ctx, templateID)
 
 	// Create a migration record in "running" state
 	migration := &models.BlueprintMigration{
@@ -76,7 +83,14 @@ func (s *BlueprintService) TriggerSync(ctx context.Context, templateID, userID u
 		if sub.WorkflowState != "active" {
 			continue
 		}
-		if err := s.syncCourseContent(ctx, sourceCourseID, sub.ChildCourseID); err != nil {
+		sc := &syncCtx{
+			templateID:  templateID,
+			child:       sub.ChildCourseID,
+			lastSync:    lastSync,
+			lockContent: contentLocked(template),
+			idMap:       make(map[string]uint),
+		}
+		if err := s.syncCourseContent(ctx, sourceCourseID, sc); err != nil {
 			slog.Error("blueprint sync failed for child course",
 				"template_id", templateID,
 				"source_course_id", sourceCourseID,
@@ -103,6 +117,35 @@ func (s *BlueprintService) TriggerSync(ctx context.Context, templateID, userID u
 	return migration, nil
 }
 
+// lastCompletedSync returns the completion time of the template's most
+// recent completed migration, or the zero time when it was never synced.
+func (s *BlueprintService) lastCompletedSync(ctx context.Context, templateID uint) time.Time {
+	migrations, err := s.migRepo.ListByTemplateID(ctx, templateID, repository.PaginationParams{Page: 1, PerPage: 100})
+	if err != nil {
+		return time.Time{}
+	}
+	for _, m := range migrations.Items {
+		if m.WorkflowState == "completed" && m.CompletedAt != nil {
+			return *m.CompletedAt
+		}
+	}
+	return time.Time{}
+}
+
+// contentLocked reports whether the template's default restrictions
+// lock content, which makes blueprint edits overwrite local child edits.
+func contentLocked(t *models.BlueprintTemplate) bool {
+	if t == nil || !t.UseDefaultRestrictions || strings.TrimSpace(t.DefaultRestrictions) == "" {
+		return false
+	}
+	var r map[string]interface{}
+	if err := json.Unmarshal([]byte(t.DefaultRestrictions), &r); err != nil {
+		return false
+	}
+	locked, _ := r["content"].(bool)
+	return locked
+}
+
 // failMigration marks a migration as failed.
 func (s *BlueprintService) failMigration(ctx context.Context, migration *models.BlueprintMigration, reason error) {
 	now := time.Now()
@@ -112,373 +155,666 @@ func (s *BlueprintService) failMigration(ctx context.Context, migration *models.
 	_ = s.migRepo.Update(ctx, migration)
 }
 
-// syncCourseContent copies all content types from sourceCourseID to childCourseID.
-// It uses title-matching to avoid creating duplicates on subsequent syncs.
-func (s *BlueprintService) syncCourseContent(ctx context.Context, sourceCourseID, childCourseID uint) error {
-	// idMap tracks old content ID -> new content ID per content type.
-	// Keys are formatted as "ContentType:OldID" -> NewID.
-	idMap := make(map[string]uint)
+// syncCtx is the per-child-course sync state.
+type syncCtx struct {
+	templateID  uint
+	child       uint
+	lastSync    time.Time // zero = first sync
+	lockContent bool
+	// idMap maps contentKey(type, sourceID) → child id, for remapping
+	// module item content ids.
+	idMap map[string]uint
+}
 
-	// ---------- 1. Sync Modules ----------
-	if err := s.syncModules(ctx, sourceCourseID, childCourseID, idMap); err != nil {
+// sourceChanged reports whether a blueprint row changed since the last
+// completed sync.
+func (sc *syncCtx) sourceChanged(updatedAt time.Time) bool {
+	return sc.lastSync.IsZero() || updatedAt.After(sc.lastSync)
+}
+
+// shouldPush decides whether a changed blueprint row overwrites its
+// existing child copy: yes unless the copy was edited locally since it
+// was last synced and the blueprint does not lock content.
+func (sc *syncCtx) shouldPush(srcUpdated time.Time, tag *models.BlueprintContentTag, childUpdated time.Time) bool {
+	if !sc.sourceChanged(srcUpdated) {
+		return false
+	}
+	if sc.lockContent {
+		return true
+	}
+	var baseline time.Time
+	switch {
+	case tag != nil:
+		baseline = tag.SyncedAt
+	case !sc.lastSync.IsZero():
+		baseline = sc.lastSync
+	default:
+		return true
+	}
+	downstreamChanged := childUpdated.After(baseline.Add(downstreamSlack))
+	return !downstreamChanged
+}
+
+// findTag returns the identity-map row for a source item (nil if none or
+// the map is not wired).
+func (s *BlueprintService) findTag(ctx context.Context, sc *syncCtx, contentType string, sourceID uint) *models.BlueprintContentTag {
+	if s.tagRepo == nil {
+		return nil
+	}
+	tag, err := s.tagRepo.Find(ctx, sc.templateID, sc.child, contentType, sourceID)
+	if err != nil {
+		return nil
+	}
+	return tag
+}
+
+// noteSynced maintains the identity-map row for one source item:
+//   - pushed (copy created or overwritten): synced now;
+//   - adopted without a push (no tag yet, or the tag pointed at a copy
+//     that no longer exists): record the copy with the previous sync as
+//     its baseline, so a local edit made since then still counts as a
+//     downstream change next time;
+//   - otherwise the row is left alone — refreshing synced_at for a copy
+//     that was NOT overwritten would hide its local edits.
+func (s *BlueprintService) noteSynced(ctx context.Context, sc *syncCtx, contentType string, sourceID, childID uint, tag *models.BlueprintContentTag, pushed bool) error {
+	if s.tagRepo == nil {
+		return nil
+	}
+	var syncedAt time.Time
+	switch {
+	case pushed:
+		syncedAt = time.Now()
+	case tag == nil || tag.ChildID != childID:
+		syncedAt = sc.lastSync
+		if syncedAt.IsZero() {
+			syncedAt = time.Now()
+		}
+	default:
+		return nil
+	}
+	return s.tagRepo.Upsert(ctx, &models.BlueprintContentTag{
+		BlueprintTemplateID: sc.templateID,
+		ChildCourseID:       sc.child,
+		ContentType:         contentType,
+		SourceID:            sourceID,
+		ChildID:             childID,
+		SyncedAt:            syncedAt,
+	})
+}
+
+// syncCourseContent copies / updates all content types from
+// sourceCourseID into sc.child.
+func (s *BlueprintService) syncCourseContent(ctx context.Context, sourceCourseID uint, sc *syncCtx) error {
+	if err := s.syncModules(ctx, sourceCourseID, sc); err != nil {
 		return fmt.Errorf("sync modules: %w", err)
 	}
-
-	// ---------- 2. Sync Assignments ----------
-	if err := s.syncAssignments(ctx, sourceCourseID, childCourseID, idMap); err != nil {
+	if err := s.syncAssignments(ctx, sourceCourseID, sc); err != nil {
 		return fmt.Errorf("sync assignments: %w", err)
 	}
-
-	// ---------- 3. Sync Pages ----------
-	if err := s.syncPages(ctx, sourceCourseID, childCourseID, idMap); err != nil {
+	if err := s.syncPages(ctx, sourceCourseID, sc); err != nil {
 		return fmt.Errorf("sync pages: %w", err)
 	}
-
-	// ---------- 4. Sync Quizzes (with questions) ----------
-	if err := s.syncQuizzes(ctx, sourceCourseID, childCourseID, idMap); err != nil {
+	if err := s.syncQuizzes(ctx, sourceCourseID, sc); err != nil {
 		return fmt.Errorf("sync quizzes: %w", err)
 	}
-
-	// ---------- 5. Sync Discussion Topics ----------
-	if err := s.syncDiscussions(ctx, sourceCourseID, childCourseID, idMap); err != nil {
+	if err := s.syncDiscussions(ctx, sourceCourseID, sc); err != nil {
 		return fmt.Errorf("sync discussions: %w", err)
 	}
-
-	// ---------- 6. Sync Module Items (must come last so idMap is populated) ----------
-	if err := s.syncModuleItems(ctx, sourceCourseID, childCourseID, idMap); err != nil {
+	// Module items last, so idMap holds every content copy.
+	if err := s.syncModuleItems(ctx, sourceCourseID, sc); err != nil {
 		return fmt.Errorf("sync module items: %w", err)
 	}
-
 	return nil
 }
 
-// syncModules copies modules from source to child, skipping those with matching titles.
-func (s *BlueprintService) syncModules(ctx context.Context, sourceCourseID, childCourseID uint, idMap map[string]uint) error {
+// ---------- Modules ----------
+
+func applyModuleFields(dst *models.ContextModule, src *models.ContextModule) {
+	dst.Name = src.Name
+	dst.Position = src.Position
+	dst.UnlockAt = src.UnlockAt
+	dst.EndAt = src.EndAt
+	dst.RequireSequentialProgress = src.RequireSequentialProgress
+	dst.WorkflowState = src.WorkflowState
+}
+
+func (s *BlueprintService) syncModules(ctx context.Context, sourceCourseID uint, sc *syncCtx) error {
 	sourceModules, err := s.moduleRepo.ListByCourseID(ctx, sourceCourseID, bigPage)
 	if err != nil {
 		return err
 	}
-
-	// Build a set of existing child module titles for deduplication
-	childModules, err := s.moduleRepo.ListByCourseID(ctx, childCourseID, bigPage)
+	childModules, err := s.moduleRepo.ListByCourseID(ctx, sc.child, bigPage)
 	if err != nil {
 		return err
 	}
-	existingTitles := make(map[string]uint, len(childModules.Items))
-	for _, m := range childModules.Items {
-		existingTitles[m.Name] = m.ID
+	byID := make(map[uint]*models.ContextModule, len(childModules.Items))
+	byTitle := make(map[string]*models.ContextModule, len(childModules.Items))
+	for i := range childModules.Items {
+		m := &childModules.Items[i]
+		byID[m.ID] = m
+		if _, ok := byTitle[m.Name]; !ok {
+			byTitle[m.Name] = m
+		}
 	}
 
-	for _, src := range sourceModules.Items {
-		// Check if module already exists in child by title
-		if existingID, exists := existingTitles[src.Name]; exists {
-			idMap[fmt.Sprintf("ContextModule:%d", src.ID)] = existingID
-			continue
+	for i := range sourceModules.Items {
+		src := &sourceModules.Items[i]
+		tag := s.findTag(ctx, sc, "ContextModule", src.ID)
+		pushed := false
+		var child *models.ContextModule
+		if tag != nil {
+			child = byID[tag.ChildID]
+		} else if !sc.lastSync.IsZero() {
+			child = byTitle[src.Name] // adopt a pre-identity-map copy
 		}
 
-		newModule := &models.ContextModule{
-			CourseID:                  childCourseID,
-			Name:                      src.Name,
-			Position:                  src.Position,
-			UnlockAt:                  src.UnlockAt,
-			EndAt:                     src.EndAt,
-			RequireSequentialProgress: src.RequireSequentialProgress,
-			WorkflowState:             src.WorkflowState,
+		switch {
+		case child == nil:
+			if tag != nil && !sc.sourceChanged(src.UpdatedAt) {
+				// Deleted in the child course and unchanged in the
+				// blueprint: respect the local deletion.
+				continue
+			}
+			nm := &models.ContextModule{CourseID: sc.child}
+			applyModuleFields(nm, src)
+			if err := s.moduleRepo.Create(ctx, nm); err != nil {
+				return fmt.Errorf("create module %q: %w", src.Name, err)
+			}
+			child = nm
+			pushed = true
+		case sc.shouldPush(src.UpdatedAt, tag, child.UpdatedAt):
+			applyModuleFields(child, src)
+			child.Items = nil
+			if err := s.moduleRepo.Update(ctx, child); err != nil {
+				return fmt.Errorf("update module %q: %w", src.Name, err)
+			}
+			pushed = true
 		}
-		if err := s.moduleRepo.Create(ctx, newModule); err != nil {
-			return fmt.Errorf("create module %q: %w", src.Name, err)
+		sc.idMap[contentKey("ContextModule", src.ID)] = child.ID
+		if err := s.noteSynced(ctx, sc, "ContextModule", src.ID, child.ID, tag, pushed); err != nil {
+			return err
 		}
-		idMap[fmt.Sprintf("ContextModule:%d", src.ID)] = newModule.ID
 	}
-
 	return nil
 }
 
-// syncAssignments copies assignments from source to child, skipping those with matching names.
-func (s *BlueprintService) syncAssignments(ctx context.Context, sourceCourseID, childCourseID uint, idMap map[string]uint) error {
+// ---------- Assignments ----------
+
+func applyAssignmentFields(dst, src *models.Assignment) {
+	dst.Name = src.Name
+	dst.Description = src.Description
+	dst.DueAt = src.DueAt
+	dst.UnlockAt = src.UnlockAt
+	dst.LockAt = src.LockAt
+	dst.PointsPossible = src.PointsPossible
+	dst.GradingType = src.GradingType
+	dst.SubmissionTypes = src.SubmissionTypes
+	dst.Position = src.Position
+	dst.WorkflowState = src.WorkflowState
+	dst.Published = src.Published
+	dst.AnonymousGrading = src.AnonymousGrading
+	dst.PostPolicy = src.PostPolicy
+	dst.PeerReviewsEnabled = src.PeerReviewsEnabled
+	dst.PeerReviewCount = src.PeerReviewCount
+}
+
+func (s *BlueprintService) syncAssignments(ctx context.Context, sourceCourseID uint, sc *syncCtx) error {
 	sourceAssignments, err := s.assignRepo.ListByCourseID(ctx, sourceCourseID, bigPage)
 	if err != nil {
 		return err
 	}
-
-	childAssignments, err := s.assignRepo.ListByCourseID(ctx, childCourseID, bigPage)
+	childAssignments, err := s.assignRepo.ListByCourseID(ctx, sc.child, bigPage)
 	if err != nil {
 		return err
 	}
-	existingNames := make(map[string]uint, len(childAssignments.Items))
-	for _, a := range childAssignments.Items {
-		existingNames[a.Name] = a.ID
+	byID := make(map[uint]*models.Assignment, len(childAssignments.Items))
+	byName := make(map[string]*models.Assignment, len(childAssignments.Items))
+	for i := range childAssignments.Items {
+		a := &childAssignments.Items[i]
+		byID[a.ID] = a
+		if _, ok := byName[a.Name]; !ok {
+			byName[a.Name] = a
+		}
 	}
 
-	for _, src := range sourceAssignments.Items {
-		if existingID, exists := existingNames[src.Name]; exists {
-			idMap[fmt.Sprintf("Assignment:%d", src.ID)] = existingID
-			continue
+	for i := range sourceAssignments.Items {
+		src := &sourceAssignments.Items[i]
+		tag := s.findTag(ctx, sc, "Assignment", src.ID)
+		pushed := false
+		var child *models.Assignment
+		if tag != nil {
+			child = byID[tag.ChildID]
+		} else if !sc.lastSync.IsZero() {
+			child = byName[src.Name]
 		}
 
-		newAssignment := &models.Assignment{
-			CourseID:           childCourseID,
-			Name:               src.Name,
-			Description:        src.Description,
-			DueAt:              src.DueAt,
-			UnlockAt:           src.UnlockAt,
-			LockAt:             src.LockAt,
-			PointsPossible:     src.PointsPossible,
-			GradingType:        src.GradingType,
-			SubmissionTypes:    src.SubmissionTypes,
-			Position:           src.Position,
-			WorkflowState:      src.WorkflowState,
-			Published:          src.Published,
-			AnonymousGrading:   src.AnonymousGrading,
-			PostPolicy:         src.PostPolicy,
-			PeerReviewsEnabled: src.PeerReviewsEnabled,
-			PeerReviewCount:    src.PeerReviewCount,
+		switch {
+		case child == nil:
+			if tag != nil && !sc.sourceChanged(src.UpdatedAt) {
+				continue
+			}
+			na := &models.Assignment{CourseID: sc.child}
+			applyAssignmentFields(na, src)
+			if err := s.assignRepo.Create(ctx, na); err != nil {
+				return fmt.Errorf("create assignment %q: %w", src.Name, err)
+			}
+			child = na
+			pushed = true
+		case sc.shouldPush(src.UpdatedAt, tag, child.UpdatedAt):
+			applyAssignmentFields(child, src)
+			if err := s.assignRepo.Update(ctx, child); err != nil {
+				return fmt.Errorf("update assignment %q: %w", src.Name, err)
+			}
+			pushed = true
 		}
-		if err := s.assignRepo.Create(ctx, newAssignment); err != nil {
-			return fmt.Errorf("create assignment %q: %w", src.Name, err)
+		sc.idMap[contentKey("Assignment", src.ID)] = child.ID
+		if err := s.noteSynced(ctx, sc, "Assignment", src.ID, child.ID, tag, pushed); err != nil {
+			return err
 		}
-		idMap[fmt.Sprintf("Assignment:%d", src.ID)] = newAssignment.ID
 	}
-
 	return nil
 }
 
-// syncPages copies wiki pages from source to child, skipping those with matching titles.
-func (s *BlueprintService) syncPages(ctx context.Context, sourceCourseID, childCourseID uint, idMap map[string]uint) error {
+// ---------- Pages ----------
+
+func applyPageFields(dst, src *models.WikiPage) {
+	dst.Title = src.Title
+	dst.Body = src.Body
+	dst.WorkflowState = src.WorkflowState
+	dst.EditingRoles = src.EditingRoles
+	dst.Public = src.Public
+	dst.WebsiteMode = src.WebsiteMode
+}
+
+func (s *BlueprintService) syncPages(ctx context.Context, sourceCourseID uint, sc *syncCtx) error {
 	sourcePages, err := s.pageRepo.ListByCourseID(ctx, sourceCourseID, bigPage)
 	if err != nil {
 		return err
 	}
-
-	childPages, err := s.pageRepo.ListByCourseID(ctx, childCourseID, bigPage)
+	childPages, err := s.pageRepo.ListByCourseID(ctx, sc.child, bigPage)
 	if err != nil {
 		return err
 	}
-	existingTitles := make(map[string]uint, len(childPages.Items))
-	for _, p := range childPages.Items {
-		existingTitles[p.Title] = p.ID
+	byID := make(map[uint]*models.WikiPage, len(childPages.Items))
+	byTitle := make(map[string]*models.WikiPage, len(childPages.Items))
+	for i := range childPages.Items {
+		p := &childPages.Items[i]
+		byID[p.ID] = p
+		if _, ok := byTitle[p.Title]; !ok {
+			byTitle[p.Title] = p
+		}
 	}
 
-	for _, src := range sourcePages.Items {
-		if existingID, exists := existingTitles[src.Title]; exists {
-			idMap[fmt.Sprintf("WikiPage:%d", src.ID)] = existingID
-			continue
+	for i := range sourcePages.Items {
+		src := &sourcePages.Items[i]
+		tag := s.findTag(ctx, sc, "WikiPage", src.ID)
+		pushed := false
+		var child *models.WikiPage
+		if tag != nil {
+			child = byID[tag.ChildID]
+		} else if !sc.lastSync.IsZero() {
+			child = byTitle[src.Title]
 		}
 
-		newPage := &models.WikiPage{
-			CourseID:      childCourseID,
-			Title:         src.Title,
-			URL:           src.URL,
-			Body:          src.Body,
-			WorkflowState: src.WorkflowState,
-			EditingRoles:  src.EditingRoles,
-			FrontPage:     src.FrontPage,
-			Public:        src.Public,
-			WebsiteMode:   src.WebsiteMode,
+		switch {
+		case child == nil:
+			if tag != nil && !sc.sourceChanged(src.UpdatedAt) {
+				continue
+			}
+			np := &models.WikiPage{CourseID: sc.child, URL: src.URL, FrontPage: src.FrontPage}
+			applyPageFields(np, src)
+			if err := s.pageRepo.Create(ctx, np); err != nil {
+				return fmt.Errorf("create page %q: %w", src.Title, err)
+			}
+			child = np
+			pushed = true
+		case sc.shouldPush(src.UpdatedAt, tag, child.UpdatedAt):
+			applyPageFields(child, src)
+			if err := s.pageRepo.Update(ctx, child); err != nil {
+				return fmt.Errorf("update page %q: %w", src.Title, err)
+			}
+			pushed = true
 		}
-		if err := s.pageRepo.Create(ctx, newPage); err != nil {
-			return fmt.Errorf("create page %q: %w", src.Title, err)
+		sc.idMap[contentKey("WikiPage", src.ID)] = child.ID
+		if err := s.noteSynced(ctx, sc, "WikiPage", src.ID, child.ID, tag, pushed); err != nil {
+			return err
 		}
-		idMap[fmt.Sprintf("WikiPage:%d", src.ID)] = newPage.ID
 	}
-
 	return nil
 }
 
-// syncQuizzes copies quizzes and their questions from source to child.
-func (s *BlueprintService) syncQuizzes(ctx context.Context, sourceCourseID, childCourseID uint, idMap map[string]uint) error {
+// ---------- Quizzes (with questions) ----------
+
+func applyQuizFields(dst, src *models.Quiz) {
+	dst.Title = src.Title
+	dst.Description = src.Description
+	dst.QuizType = src.QuizType
+	dst.TimeLimit = src.TimeLimit
+	dst.AllowedAttempts = src.AllowedAttempts
+	dst.DueAt = src.DueAt
+	dst.UnlockAt = src.UnlockAt
+	dst.LockAt = src.LockAt
+	dst.PointsPossible = src.PointsPossible
+	dst.ShuffleAnswers = src.ShuffleAnswers
+	dst.ScoringPolicy = src.ScoringPolicy
+	dst.ShowCorrectAnswers = src.ShowCorrectAnswers
+	dst.HideResults = src.HideResults
+	dst.OneQuestionAtATime = src.OneQuestionAtATime
+	dst.CantGoBack = src.CantGoBack
+	dst.Published = src.Published
+	dst.WorkflowState = src.WorkflowState
+}
+
+func applyQuestionFields(dst, src *models.QuizQuestion) {
+	dst.Position = src.Position
+	dst.QuestionType = src.QuestionType
+	dst.QuestionText = src.QuestionText
+	dst.PointsPossible = src.PointsPossible
+	dst.Answers = src.Answers
+	dst.CorrectComments = src.CorrectComments
+	dst.IncorrectComments = src.IncorrectComments
+	dst.NeutralComments = src.NeutralComments
+	dst.WorkflowState = src.WorkflowState
+}
+
+// quizChangedAt is the latest of the quiz row's and its questions'
+// updated_at — editing a question is editing the quiz.
+func (s *BlueprintService) quizChangedAt(ctx context.Context, q *models.Quiz) time.Time {
+	latest := q.UpdatedAt
+	if qs, err := s.qqRepo.ListByQuizID(ctx, q.ID, bigPage); err == nil {
+		// Bank-draw copies are written when students take the quiz; they
+		// are not authoring changes.
+		for _, qq := range models.AuthoredQuizQuestions(qs.Items) {
+			if qq.UpdatedAt.After(latest) {
+				latest = qq.UpdatedAt
+			}
+		}
+	}
+	return latest
+}
+
+func (s *BlueprintService) syncQuizzes(ctx context.Context, sourceCourseID uint, sc *syncCtx) error {
 	sourceQuizzes, err := s.quizRepo.ListByCourseID(ctx, sourceCourseID, bigPage)
 	if err != nil {
 		return err
 	}
-
-	childQuizzes, err := s.quizRepo.ListByCourseID(ctx, childCourseID, bigPage)
+	childQuizzes, err := s.quizRepo.ListByCourseID(ctx, sc.child, bigPage)
 	if err != nil {
 		return err
 	}
-	existingTitles := make(map[string]uint, len(childQuizzes.Items))
-	for _, q := range childQuizzes.Items {
-		existingTitles[q.Title] = q.ID
-	}
-
-	for _, src := range sourceQuizzes.Items {
-		if existingID, exists := existingTitles[src.Title]; exists {
-			idMap[fmt.Sprintf("Quiz:%d", src.ID)] = existingID
-			continue
-		}
-
-		newQuiz := &models.Quiz{
-			CourseID:        childCourseID,
-			Title:           src.Title,
-			Description:     src.Description,
-			QuizType:        src.QuizType,
-			TimeLimit:       src.TimeLimit,
-			AllowedAttempts: src.AllowedAttempts,
-			DueAt:           src.DueAt,
-			UnlockAt:        src.UnlockAt,
-			LockAt:          src.LockAt,
-			PointsPossible:  src.PointsPossible,
-			Published:       src.Published,
-			WorkflowState:   src.WorkflowState,
-		}
-		if err := s.quizRepo.Create(ctx, newQuiz); err != nil {
-			return fmt.Errorf("create quiz %q: %w", src.Title, err)
-		}
-		idMap[fmt.Sprintf("Quiz:%d", src.ID)] = newQuiz.ID
-
-		// Copy quiz questions
-		if err := s.syncQuizQuestions(ctx, src.ID, newQuiz.ID); err != nil {
-			return fmt.Errorf("sync questions for quiz %q: %w", src.Title, err)
+	byID := make(map[uint]*models.Quiz, len(childQuizzes.Items))
+	byTitle := make(map[string]*models.Quiz, len(childQuizzes.Items))
+	for i := range childQuizzes.Items {
+		q := &childQuizzes.Items[i]
+		byID[q.ID] = q
+		if _, ok := byTitle[q.Title]; !ok {
+			byTitle[q.Title] = q
 		}
 	}
 
+	for i := range sourceQuizzes.Items {
+		src := &sourceQuizzes.Items[i]
+		changedAt := s.quizChangedAt(ctx, src)
+		tag := s.findTag(ctx, sc, "Quiz", src.ID)
+		pushed := false
+		var child *models.Quiz
+		if tag != nil {
+			child = byID[tag.ChildID]
+		} else if !sc.lastSync.IsZero() {
+			child = byTitle[src.Title]
+		}
+
+		switch {
+		case child == nil:
+			if tag != nil && !sc.sourceChanged(changedAt) {
+				continue
+			}
+			nq := &models.Quiz{CourseID: sc.child}
+			applyQuizFields(nq, src)
+			if err := s.quizRepo.Create(ctx, nq); err != nil {
+				return fmt.Errorf("create quiz %q: %w", src.Title, err)
+			}
+			if err := s.syncQuizQuestions(ctx, src.ID, nq.ID); err != nil {
+				return fmt.Errorf("sync questions for quiz %q: %w", src.Title, err)
+			}
+			child = nq
+			pushed = true
+		case sc.shouldPush(changedAt, tag, s.quizChangedAt(ctx, child)):
+			applyQuizFields(child, src)
+			if err := s.quizRepo.Update(ctx, child); err != nil {
+				return fmt.Errorf("update quiz %q: %w", src.Title, err)
+			}
+			if err := s.syncQuizQuestions(ctx, src.ID, child.ID); err != nil {
+				return fmt.Errorf("sync questions for quiz %q: %w", src.Title, err)
+			}
+			pushed = true
+		}
+		sc.idMap[contentKey("Quiz", src.ID)] = child.ID
+		if err := s.noteSynced(ctx, sc, "Quiz", src.ID, child.ID, tag, pushed); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-// syncQuizQuestions copies all questions from sourceQuizID to newQuizID.
-func (s *BlueprintService) syncQuizQuestions(ctx context.Context, sourceQuizID, newQuizID uint) error {
-	questions, err := s.qqRepo.ListByQuizID(ctx, sourceQuizID, bigPage)
+// syncQuizQuestions makes the child quiz's live questions mirror the
+// source quiz's, matching by order: existing child questions are
+// updated in place, missing ones created, surplus ones deleted. Only
+// authored questions take part on either side: per-attempt bank-draw
+// copies (QuestionBankEntryID) are neither copied nor matched/deleted.
+func (s *BlueprintService) syncQuizQuestions(ctx context.Context, sourceQuizID, childQuizID uint) error {
+	srcPage, err := s.qqRepo.ListByQuizID(ctx, sourceQuizID, bigPage)
 	if err != nil {
 		return err
 	}
-
-	for _, src := range questions.Items {
-		newQ := &models.QuizQuestion{
-			QuizID:            newQuizID,
-			Position:          src.Position,
-			QuestionType:      src.QuestionType,
-			QuestionText:      src.QuestionText,
-			PointsPossible:    src.PointsPossible,
-			Answers:           src.Answers,
-			CorrectComments:   src.CorrectComments,
-			IncorrectComments: src.IncorrectComments,
-			NeutralComments:   src.NeutralComments,
-			WorkflowState:     src.WorkflowState,
+	childPage, err := s.qqRepo.ListByQuizID(ctx, childQuizID, bigPage)
+	if err != nil {
+		return err
+	}
+	srcItems := models.AuthoredQuizQuestions(srcPage.Items)
+	childItems := models.AuthoredQuizQuestions(childPage.Items)
+	for i := range srcItems {
+		src := &srcItems[i]
+		if i < len(childItems) {
+			dst := childItems[i]
+			applyQuestionFields(&dst, src)
+			if err := s.qqRepo.Update(ctx, &dst); err != nil {
+				return fmt.Errorf("update question (position %d): %w", src.Position, err)
+			}
+			continue
 		}
-		// Preserve question group reference if it exists within the same quiz
-		// (cross-quiz group references are not synced for simplicity)
-		if err := s.qqRepo.Create(ctx, newQ); err != nil {
+		// Question groups, bank items and stimuli belong to the source
+		// course; they are not copied.
+		nq := &models.QuizQuestion{QuizID: childQuizID}
+		applyQuestionFields(nq, src)
+		if err := s.qqRepo.Create(ctx, nq); err != nil {
 			return fmt.Errorf("create question (position %d): %w", src.Position, err)
 		}
 	}
-
+	for i := len(srcItems); i < len(childItems); i++ {
+		if err := s.qqRepo.Delete(ctx, childItems[i].ID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-// syncDiscussions copies discussion topics from source to child.
-func (s *BlueprintService) syncDiscussions(ctx context.Context, sourceCourseID, childCourseID uint, idMap map[string]uint) error {
+// ---------- Discussion topics ----------
+
+func applyDiscussionFields(dst, src *models.DiscussionTopic) {
+	dst.Title = src.Title
+	dst.Message = src.Message
+	dst.DiscussionType = src.DiscussionType
+	dst.PostedAt = src.PostedAt
+	dst.DelayedPostAt = src.DelayedPostAt
+	dst.LockAt = src.LockAt
+	dst.Pinned = src.Pinned
+	dst.Locked = src.Locked
+	dst.AllowRating = src.AllowRating
+	dst.OnlyGradersCanRate = src.OnlyGradersCanRate
+	dst.SortByRating = src.SortByRating
+	dst.RequireInitialPost = src.RequireInitialPost
+	dst.WorkflowState = src.WorkflowState
+}
+
+func (s *BlueprintService) syncDiscussions(ctx context.Context, sourceCourseID uint, sc *syncCtx) error {
 	sourceTopics, err := s.discRepo.ListByCourseID(ctx, sourceCourseID, 0, bigPage)
 	if err != nil {
 		return err
 	}
-
-	childTopics, err := s.discRepo.ListByCourseID(ctx, childCourseID, 0, bigPage)
+	childTopics, err := s.discRepo.ListByCourseID(ctx, sc.child, 0, bigPage)
 	if err != nil {
 		return err
 	}
-	existingTitles := make(map[string]uint, len(childTopics.Items))
-	for _, t := range childTopics.Items {
-		existingTitles[t.Title] = t.ID
+	byID := make(map[uint]*models.DiscussionTopic, len(childTopics.Items))
+	byTitle := make(map[string]*models.DiscussionTopic, len(childTopics.Items))
+	for i := range childTopics.Items {
+		t := &childTopics.Items[i]
+		byID[t.ID] = t
+		if _, ok := byTitle[t.Title]; !ok {
+			byTitle[t.Title] = t
+		}
 	}
 
-	for _, src := range sourceTopics.Items {
-		if existingID, exists := existingTitles[src.Title]; exists {
-			idMap[fmt.Sprintf("DiscussionTopic:%d", src.ID)] = existingID
-			continue
+	for i := range sourceTopics.Items {
+		src := &sourceTopics.Items[i]
+		tag := s.findTag(ctx, sc, "DiscussionTopic", src.ID)
+		pushed := false
+		var child *models.DiscussionTopic
+		if tag != nil {
+			child = byID[tag.ChildID]
+		} else if !sc.lastSync.IsZero() {
+			child = byTitle[src.Title]
 		}
 
-		newTopic := &models.DiscussionTopic{
-			CourseID:           childCourseID,
-			UserID:             src.UserID,
-			Title:              src.Title,
-			Message:            src.Message,
-			DiscussionType:     src.DiscussionType,
-			PostedAt:           src.PostedAt,
-			DelayedPostAt:      src.DelayedPostAt,
-			LockAt:             src.LockAt,
-			Pinned:             src.Pinned,
-			Locked:             src.Locked,
-			AllowRating:        src.AllowRating,
-			OnlyGradersCanRate: src.OnlyGradersCanRate,
-			SortByRating:       src.SortByRating,
-			RequireInitialPost: src.RequireInitialPost,
-			WorkflowState:      src.WorkflowState,
+		switch {
+		case child == nil:
+			if tag != nil && !sc.sourceChanged(src.UpdatedAt) {
+				continue
+			}
+			nt := &models.DiscussionTopic{CourseID: sc.child, UserID: src.UserID}
+			applyDiscussionFields(nt, src)
+			if err := s.discRepo.Create(ctx, nt); err != nil {
+				return fmt.Errorf("create discussion %q: %w", src.Title, err)
+			}
+			child = nt
+			pushed = true
+		case sc.shouldPush(src.UpdatedAt, tag, child.UpdatedAt):
+			applyDiscussionFields(child, src)
+			if err := s.discRepo.Update(ctx, child); err != nil {
+				return fmt.Errorf("update discussion %q: %w", src.Title, err)
+			}
+			pushed = true
 		}
-		if err := s.discRepo.Create(ctx, newTopic); err != nil {
-			return fmt.Errorf("create discussion %q: %w", src.Title, err)
+		sc.idMap[contentKey("DiscussionTopic", src.ID)] = child.ID
+		if err := s.noteSynced(ctx, sc, "DiscussionTopic", src.ID, child.ID, tag, pushed); err != nil {
+			return err
 		}
-		idMap[fmt.Sprintf("DiscussionTopic:%d", src.ID)] = newTopic.ID
 	}
-
 	return nil
 }
 
-// syncModuleItems copies module items from source modules to child modules,
-// remapping content IDs via the idMap built from earlier sync steps.
-func (s *BlueprintService) syncModuleItems(ctx context.Context, sourceCourseID, childCourseID uint, idMap map[string]uint) error {
+// ---------- Module items ----------
+
+// applyItemFields copies a source module item onto its child copy,
+// remapping the module and content ids. ok=false when the item links
+// content that was not synced (the copy would dangle).
+func (sc *syncCtx) applyItemFields(dst, src *models.ContentTag, childModuleID uint) (ok bool) {
+	dst.ContextModuleID = childModuleID
+	dst.ContentType = src.ContentType
+	dst.Title = src.Title
+	dst.Position = src.Position
+	dst.URL = src.URL
+	dst.Indent = src.Indent
+	dst.NewTab = src.NewTab
+	dst.WorkflowState = src.WorkflowState
+	dst.CompletionType = src.CompletionType
+	dst.MinScore = src.MinScore
+	dst.ContentID = nil
+	if src.ContentID != nil {
+		newID, found := sc.idMap[contentKey(src.ContentType, *src.ContentID)]
+		if !found {
+			// ExternalUrl / SubHeader carry no content; anything else
+			// (files, tools) is not part of blueprint sync.
+			return false
+		}
+		dst.ContentID = &newID
+	}
+	return true
+}
+
+func (s *BlueprintService) syncModuleItems(ctx context.Context, sourceCourseID uint, sc *syncCtx) error {
 	sourceModules, err := s.moduleRepo.ListByCourseID(ctx, sourceCourseID, bigPage)
 	if err != nil {
 		return err
 	}
 
 	for _, srcModule := range sourceModules.Items {
-		// Look up the child module ID
-		childModuleID, ok := idMap[fmt.Sprintf("ContextModule:%d", srcModule.ID)]
+		childModuleID, ok := sc.idMap[contentKey("ContextModule", srcModule.ID)]
 		if !ok {
-			// Module was not synced (should not happen), skip
-			continue
+			continue // module copy deleted downstream
 		}
 
-		// Fetch source module items
 		sourceItems, err := s.itemRepo.ListByModuleID(ctx, srcModule.ID, bigPage)
 		if err != nil {
 			return fmt.Errorf("list items for module %d: %w", srcModule.ID, err)
 		}
-
-		// Fetch existing child module items for deduplication by title
 		childItems, err := s.itemRepo.ListByModuleID(ctx, childModuleID, bigPage)
 		if err != nil {
 			return fmt.Errorf("list child items for module %d: %w", childModuleID, err)
 		}
-		existingTitles := make(map[string]bool, len(childItems.Items))
-		for _, item := range childItems.Items {
-			existingTitles[item.Title] = true
+		byTitle := make(map[string]*models.ContentTag, len(childItems.Items))
+		for i := range childItems.Items {
+			it := &childItems.Items[i]
+			if _, ok := byTitle[it.Title]; !ok {
+				byTitle[it.Title] = it
+			}
 		}
 
-		for _, srcItem := range sourceItems.Items {
-			// Skip items that already exist in the child module by title
-			if existingTitles[srcItem.Title] {
-				continue
-			}
-
-			newItem := &models.ContentTag{
-				ContextModuleID: childModuleID,
-				ContentType:     srcItem.ContentType,
-				Title:           srcItem.Title,
-				Position:        srcItem.Position,
-				URL:             srcItem.URL,
-				Indent:          srcItem.Indent,
-				NewTab:          srcItem.NewTab,
-				WorkflowState:   srcItem.WorkflowState,
-			}
-
-			// Remap content_id to the new child content using the idMap
-			if srcItem.ContentID != nil {
-				mapKey := fmt.Sprintf("%s:%d", srcItem.ContentType, *srcItem.ContentID)
-				if newID, found := idMap[mapKey]; found {
-					newItem.ContentID = &newID
+		for i := range sourceItems.Items {
+			srcItem := &sourceItems.Items[i]
+			tag := s.findTag(ctx, sc, "ContentTag", srcItem.ID)
+			pushed := false
+			var child *models.ContentTag
+			if tag != nil {
+				// The copy may have been moved to another child module.
+				if it, err := s.itemRepo.FindByID(ctx, tag.ChildID); err == nil && it != nil && it.WorkflowState != models.ContentTagDeleted {
+					child = it
 				}
-				// If not found in idMap, the content type might not be synced
-				// (e.g., ExternalUrl, ContextModuleSubHeader have no content_id
-				// or reference unsupported types). Leave content_id nil in that case.
+			} else if !sc.lastSync.IsZero() {
+				child = byTitle[srcItem.Title]
 			}
 
-			if err := s.itemRepo.Create(ctx, newItem); err != nil {
-				return fmt.Errorf("create item %q in module %d: %w", srcItem.Title, childModuleID, err)
+			switch {
+			case child == nil:
+				if tag != nil && !sc.sourceChanged(srcItem.UpdatedAt) {
+					continue
+				}
+				ni := &models.ContentTag{}
+				if !sc.applyItemFields(ni, srcItem, childModuleID) {
+					continue
+				}
+				if err := s.itemRepo.Create(ctx, ni); err != nil {
+					return fmt.Errorf("create item %q in module %d: %w", srcItem.Title, childModuleID, err)
+				}
+				child = ni
+				pushed = true
+			case sc.shouldPush(srcItem.UpdatedAt, tag, child.UpdatedAt):
+				updated := *child
+				if !sc.applyItemFields(&updated, srcItem, childModuleID) {
+					continue
+				}
+				if err := s.itemRepo.Update(ctx, &updated); err != nil {
+					return fmt.Errorf("update item %q in module %d: %w", srcItem.Title, childModuleID, err)
+				}
+				child = &updated
+				pushed = true
+			}
+			if err := s.noteSynced(ctx, sc, "ContentTag", srcItem.ID, child.ID, tag, pushed); err != nil {
+				return err
 			}
 		}
 	}
 
 	return nil
 }
-

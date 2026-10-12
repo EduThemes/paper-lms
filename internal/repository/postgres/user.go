@@ -109,6 +109,24 @@ func (r *userRepo) FindByEmail(ctx context.Context, email string) (*models.User,
 	return &user, nil
 }
 
+// FindByEmailInAccount is the tenant-scoped variant of FindByEmail, used by
+// the LoginPipeline's SSO email auto-link. An authentication provider
+// belongs to one account; its IdP's email assertion may only match users of
+// that account. accountID must be non-zero.
+func (r *userRepo) FindByEmailInAccount(ctx context.Context, email string, accountID uint) (*models.User, error) {
+	if accountID == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var user models.User
+	if err := r.db.WithContext(ctx).
+		Where("account_id = ? AND LOWER(email) = LOWER(?)", accountID, email).
+		Order("id ASC").
+		First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
 // FindBySISUserID is part of the AUTH-INTERNAL boundary.
 //
 // Tenant scope deliberately NOT enforced. Callers are SIS import paths

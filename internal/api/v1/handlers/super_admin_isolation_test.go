@@ -66,7 +66,7 @@ func mountSuperAdminRoutes(t *testing.T, callerUserID, callerAccountID uint, rol
 	userRepo.On("FindByID", mock.Anything, callerUserID, uint(0)).Return(user, nil)
 
 	enrollmentRepo := new(mocks.MockEnrollmentRepository)
-	pm := middleware.NewPermissionMiddleware(enrollmentRepo, userRepo)
+	pm := middleware.NewPermissionMiddleware(enrollmentRepo, userRepo, new(mocks.MockCourseRepository))
 
 	repo := newMemSettingRepo()
 	svc := settings.NewService(repo, &fakeAccountAncestry{parents: map[uint]uint{}}, nil)
@@ -185,7 +185,7 @@ func TestSuperAdminGate_CompromisedRoleLiteralRejected(t *testing.T) {
 func TestSuperAdminGate_HandlerExistsAndCompiles(t *testing.T) {
 	pm := middleware.NewPermissionMiddleware(
 		new(mocks.MockEnrollmentRepository),
-		new(mocks.MockUserRepository),
+		new(mocks.MockUserRepository), new(mocks.MockCourseRepository),
 	)
 	gate := pm.RequireSuperAdmin()
 	if gate == nil {

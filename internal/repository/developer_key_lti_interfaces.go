@@ -38,6 +38,25 @@ type NonceRepository interface {
 	DeleteExpired(ctx context.Context) error
 }
 
+// OAuthAuthorizationCodeRepository stores OAuth2 authorization codes so a
+// code minted on one replica can be exchanged on another (B192).
+type OAuthAuthorizationCodeRepository interface {
+	Create(ctx context.Context, code *models.OAuthAuthorizationCode) error
+	// Consume atomically deletes and returns the code row (single use).
+	// A miss returns an error.
+	Consume(ctx context.Context, codeHash string) (*models.OAuthAuthorizationCode, error)
+	// DeleteExpired purges codes whose expires_at is before now.
+	DeleteExpired(ctx context.Context) error
+}
+
+// LTIPlatformKeyRepository persists the platform's LTI signing key (B181).
+type LTIPlatformKeyRepository interface {
+	FindByName(ctx context.Context, name string) (*models.LTIPlatformKey, error)
+	// CreateIfAbsent inserts the key unless a row with the same name
+	// already exists (another replica won the race); it never overwrites.
+	CreateIfAbsent(ctx context.Context, key *models.LTIPlatformKey) error
+}
+
 type LTIToolConfigurationRepository interface {
 	Create(ctx context.Context, config *models.LTIToolConfiguration) error
 	FindByID(ctx context.Context, id uint) (*models.LTIToolConfiguration, error)
@@ -85,5 +104,7 @@ type LTIResultRepository interface {
 	Create(ctx context.Context, result *models.LTIResult) error
 	FindByID(ctx context.Context, id uint) (*models.LTIResult, error)
 	Upsert(ctx context.Context, result *models.LTIResult) error // Create or update by line_item_id + user_id
-	ListByLineItem(ctx context.Context, lineItemID uint, params PaginationParams) (*PaginatedResult[models.LTIResult], error)
+	// ListByLineItem lists a line item's results; userID != 0 restricts the
+	// list to that user's result (AGS ?user_id filter / student self-view).
+	ListByLineItem(ctx context.Context, lineItemID, userID uint, params PaginationParams) (*PaginatedResult[models.LTIResult], error)
 }

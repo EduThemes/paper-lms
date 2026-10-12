@@ -215,6 +215,10 @@ func (r *Router) Register(app *fiber.App) {
 	ltiAuthenticated := api.Group("", r.AuthMiddleware.Protected())
 	ltiAuthenticated.Post("/lti/oidc/login", authLimit, r.LTIHandler.OIDCLogin)
 	ltiAuthenticated.Post("/lti/launch", authLimit, r.LTIHandler.LaunchDirect)
+	// OIDC authorization endpoint the tool redirects (GET) or posts back to
+	// after the login initiation (B083).
+	ltiAuthenticated.Get("/lti/authorize", authLimit, r.LTIHandler.LaunchDirect)
+	ltiAuthenticated.Post("/lti/authorize", authLimit, r.LTIHandler.LaunchDirect)
 
 	// Logout runs behind auth + CSRF (moved off the public group). It
 	// revokes the caller's own session token and clears the cookie, so
@@ -255,8 +259,10 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Put("/accounts/:account_id/developer_keys/:id", admin, r.DeveloperKeyHandler.UpdateDeveloperKey)
 	protected.Delete("/accounts/:account_id/developer_keys/:id", admin, r.DeveloperKeyHandler.DeleteDeveloperKey)
 
-	// OAuth2 Authorization (requires auth for consent)
-	protected.Get("/login/oauth2/auth", r.OAuth2Handler.Authorize)
+	// OAuth2 Authorization (requires auth for consent). The GET
+	// authorization endpoint itself is public (routes_public.go) and only
+	// redirects to the SPA consent screen; codes are minted on POST (B076).
+	protected.Get("/login/oauth2/auth/info", r.OAuth2Handler.AuthorizeInfo)
 	protected.Post("/login/oauth2/auth", r.OAuth2Handler.AuthorizePost)
 
 	// Courses (list: any user sees their own; create: admin; manage: instructor)
@@ -264,7 +270,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Post("/courses", admin, r.CourseHandler.CreateCourse)
 	protected.Get("/courses/:id", enrolled, r.CourseHandler.GetCourse)
 	protected.Put("/courses/:id", instructor, r.CourseHandler.UpdateCourse)
-	protected.Delete("/courses/:id", instructor, r.CourseHandler.DeleteCourse)
+	protected.Delete("/courses/:id", r.PermMiddleware.RequireCourseRole("TeacherEnrollment"), r.CourseHandler.DeleteCourse) // B178: TAs can't delete a course
 
 	// External Tools (view: enrolled; manage: instructor)
 	protected.Get("/courses/:course_id/external_tools", enrolled, r.ExternalToolHandler.ListExternalTools)
@@ -281,6 +287,8 @@ func (r *Router) Register(app *fiber.App) {
 	// Enrollments (view: enrolled; create: instructor)
 	protected.Get("/courses/:course_id/enrollments", enrolled, r.EnrollmentHandler.ListEnrollments)
 	protected.Post("/courses/:course_id/enrollments", instructor, r.EnrollmentHandler.CreateEnrollment)
+	protected.Get("/courses/:course_id/enrollments/self", enrolled, r.EnrollmentHandler.MyCourseEnrollments)
+	protected.Get("/courses/:course_id/enrollable_users", instructor, r.EnrollmentHandler.SearchEnrollableUsers)
 
 	// Modules (view: enrolled; manage: instructor)
 	protected.Get("/courses/:course_id/modules", enrolled, r.ModuleHandler.ListModules)
@@ -318,6 +326,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Get("/courses/:course_id/pages/:url_or_id", enrolled, r.PageHandler.GetPage)
 	protected.Put("/courses/:course_id/pages/:url_or_id", instructor, r.PageHandler.UpdatePage)
 	protected.Delete("/courses/:course_id/pages/:url_or_id", instructor, r.PageHandler.DeletePage)
+	protected.Get("/courses/:course_id/front_page", enrolled, r.PageHandler.GetFrontPage)
 
 	// Assignments (view: enrolled; manage: instructor)
 	protected.Get("/courses/:course_id/assignments", enrolled, r.AssignmentHandler.ListAssignments)
@@ -340,6 +349,8 @@ func (r *Router) Register(app *fiber.App) {
 	// Submissions (view: enrolled; create: enrolled; grade: instructor)
 	protected.Get("/courses/:course_id/assignments/:assignment_id/submissions", enrolled, r.SubmissionHandler.ListSubmissions)
 	protected.Post("/courses/:course_id/assignments/:assignment_id/submissions", enrolled, r.SubmissionHandler.CreateSubmission)
+	protected.Post("/courses/:course_id/assignments/:assignment_id/submissions/self/files", middleware.UploadRateLimit(), middleware.EnforceUploadSize(r.SettingsLookup), enrolled, r.SubmissionHandler.UploadSubmissionFile)
+	protected.Get("/courses/:course_id/assignments/:assignment_id/submissions/:user_id/files/:file_id/download", enrolled, r.SubmissionHandler.DownloadSubmissionFile)
 	protected.Get("/courses/:course_id/assignments/:assignment_id/submissions/:user_id", enrolled, r.SubmissionHandler.GetSubmission)
 	protected.Put("/courses/:course_id/assignments/:assignment_id/submissions/:user_id", instructor, r.SubmissionHandler.UpdateSubmission)
 
@@ -381,7 +392,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Get("/courses/:course_id/discussion_topics/:topic_id/entries", enrolled, r.DiscussionEntryHandler.ListEntries)
 	protected.Post("/courses/:course_id/discussion_topics/:topic_id/entries", enrolled, r.DiscussionEntryHandler.CreateEntry)
 	protected.Put("/courses/:course_id/discussion_topics/:topic_id/entries/:id", enrolled, r.DiscussionEntryHandler.UpdateEntry)
-	protected.Delete("/courses/:course_id/discussion_topics/:topic_id/entries/:id", instructor, r.DiscussionEntryHandler.DeleteEntry)
+	protected.Delete("/courses/:course_id/discussion_topics/:topic_id/entries/:id", enrolled, r.DiscussionEntryHandler.DeleteEntry) // author or staff; enforced in handler
 	protected.Get("/courses/:course_id/discussion_topics/:topic_id/entries/:entry_id/replies", enrolled, r.DiscussionEntryHandler.ListReplies)
 	protected.Post("/courses/:course_id/discussion_topics/:topic_id/entries/:entry_id/replies", enrolled, r.DiscussionEntryHandler.CreateReply)
 	protected.Post("/courses/:course_id/discussion_topics/:topic_id/entries/:entry_id/rating", enrolled, r.DiscussionEntryHandler.RateEntry)
@@ -434,6 +445,8 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Post("/courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/complete", enrolled, r.QuizSubmissionHandler.CompleteSubmission)
 	protected.Get("/courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/answers", enrolled, r.QuizSubmissionHandler.GetSubmissionAnswers)
 	protected.Get("/courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/questions", enrolled, r.QuizSubmissionHandler.GetSubmissionQuestions)
+	protected.Post("/courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/questions/:question_id/file", middleware.UploadRateLimit(), middleware.EnforceUploadSize(r.SettingsLookup), enrolled, r.QuizSubmissionHandler.UploadAnswerFile)
+	protected.Get("/courses/:course_id/quizzes/:quiz_id/submissions/:submission_id/questions/:question_id/file", enrolled, r.QuizSubmissionHandler.DownloadAnswerFile)
 
 	// Quiz Statistics (instructor only)
 	protected.Get("/courses/:course_id/quizzes/:quiz_id/statistics", instructor, r.QuizStatisticsHandler.GetQuizStatistics)
@@ -504,6 +517,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Get("/conversations/:id/messages", r.ConversationHandler.ListMessages)
 	protected.Post("/conversations/:id/messages", r.ConversationHandler.CreateMessage)
 	protected.Put("/conversations/:id/mark_as_read", r.ConversationHandler.MarkAsRead)
+	protected.Get("/search/recipients", r.ConversationHandler.SearchRecipients) // inbox picker: users sharing a course with the caller
 
 	// Notifications (any authenticated user)
 	protected.Get("/notifications", r.NotificationHandler.ListNotifications)
@@ -599,6 +613,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Get("/conferences/:id", r.ConferenceHandler.GetConference)
 	protected.Put("/conferences/:id", r.ConferenceHandler.UpdateConference)
 	protected.Delete("/conferences/:id", r.ConferenceHandler.DeleteConference)
+	protected.Post("/conferences/:id/start", r.ConferenceHandler.StartConference)
 	protected.Post("/conferences/:id/join", r.ConferenceHandler.JoinConference)
 	protected.Post("/conferences/:id/end", r.ConferenceHandler.EndConference)
 	protected.Get("/conferences/:id/recordings", r.ConferenceHandler.GetRecordings)
@@ -671,7 +686,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Delete("/announcements/:id", r.AnnouncementHandler.DeleteAnnouncement)
 	protected.Post("/announcements/:id/read", r.AnnouncementHandler.MarkAsRead)
 	protected.Post("/announcements/:id/acknowledge", r.AnnouncementHandler.AcknowledgeAnnouncement)
-	protected.Get("/announcements/:id/read_receipts", instructor, r.AnnouncementHandler.GetReadReceipts)
+	protected.Get("/announcements/:id/read_receipts", r.AnnouncementHandler.GetReadReceipts) // authz in handler (no :course_id for course-role middleware)
 	protected.Get("/accounts/:account_id/announcements", r.AnnouncementHandler.ListAccountAnnouncements)
 	protected.Post("/accounts/:account_id/announcements", admin, r.AnnouncementHandler.CreateAccountAnnouncement)
 
@@ -692,12 +707,15 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Post("/admin/notification_deliveries/retry", admin, r.NotificationDeliveryHandler.RetryFailedDeliveries)
 	protected.Get("/users/self/communication_channels", r.NotificationDeliveryHandler.ListChannels)
 	protected.Post("/users/self/communication_channels", r.NotificationDeliveryHandler.CreateChannel)
+	protected.Post("/users/self/communication_channels/:id/confirm", r.NotificationDeliveryHandler.ConfirmChannel)
 	protected.Delete("/users/self/communication_channels/:id", r.NotificationDeliveryHandler.DeleteChannel)
 
 	// Audit Logs (course: instructor; account: admin)
-	protected.Get("/courses/:course_id/audit_log", instructor, r.AuditHandler.GetCourseAuditLog)
+	// B179: the course activity trail is teacher/admin only (no TAs), and
+	// IP address / user agent are admin-only inside the handler.
+	protected.Get("/courses/:course_id/audit_log", r.PermMiddleware.RequireCourseRole("TeacherEnrollment"), r.AuditHandler.GetCourseAuditLog)
 	protected.Get("/courses/:course_id/grade_change_log", instructor, r.AuditHandler.GetCourseGradeChangeLog)
-	protected.Get("/courses/:course_id/audit_log.csv", instructor, r.AuditHandler.ExportCourseAuditLogCSV)
+	protected.Get("/courses/:course_id/audit_log.csv", r.PermMiddleware.RequireCourseRole("TeacherEnrollment"), r.AuditHandler.ExportCourseAuditLogCSV)
 	protected.Get("/courses/:course_id/grade_change_log.csv", instructor, r.AuditHandler.ExportCourseGradeChangeLogCSV)
 	protected.Get("/accounts/:account_id/audit_log", admin, r.AuditHandler.GetAccountAuditLog)
 	protected.Get("/admin/audit_log/summary", admin, r.AuditHandler.GetAuditLogSummary)
@@ -738,12 +756,12 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Post("/annotations/:id/replies", r.DocumentAnnotationHandler.ReplyToAnnotation)
 
 	// COPPA / Parental Consent (admin + public verify)
-	protected.Post("/consent/request", admin, r.COPPAHandler.RequestConsent)
-	protected.Get("/consent", admin, r.COPPAHandler.ListConsents)
+	protected.Post("/users/:user_id/parental_consent", admin, r.COPPAHandler.RequestConsent)
+	protected.Get("/users/:user_id/parental_consent", admin, r.COPPAHandler.ListConsents)
 	protected.Post("/consent/verify/:token", r.COPPAHandler.VerifyConsent)
 	protected.Delete("/consent/:id", admin, r.COPPAHandler.RevokeConsent)
-	protected.Get("/data_processing_agreements", admin, r.COPPAHandler.ListDPAs)
-	protected.Post("/data_processing_agreements", admin, r.COPPAHandler.CreateDPA)
+	protected.Get("/accounts/:account_id/data_processing_agreements", admin, r.COPPAHandler.ListDPAs)
+	protected.Post("/accounts/:account_id/data_processing_agreements", admin, r.COPPAHandler.CreateDPA)
 	protected.Put("/data_processing_agreements/:id", admin, r.COPPAHandler.UpdateDPA)
 
 	// FERPA Compliance (self/admin)
@@ -788,11 +806,16 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Put("/portfolios/:id", r.PortfolioHandler.UpdatePortfolio)
 	protected.Delete("/portfolios/:id", r.PortfolioHandler.DeletePortfolio)
 	protected.Post("/portfolios/:id/publish", r.PortfolioHandler.PublishPortfolio)
+	protected.Delete("/portfolios/:id/publish", r.PortfolioHandler.UnpublishPortfolio)
+	protected.Post("/portfolios/:id/duplicate", r.PortfolioHandler.DuplicatePortfolio)
 	protected.Post("/portfolios/:id/sections", r.PortfolioHandler.AddSection)
+	// reorder must be registered before :section_id, which would match it.
+	protected.Put("/portfolios/:id/sections/reorder", r.PortfolioHandler.ReorderSections)
 	protected.Put("/portfolios/:id/sections/:section_id", r.PortfolioHandler.UpdateSection)
 	protected.Delete("/portfolios/:id/sections/:section_id", r.PortfolioHandler.DeleteSection)
-	protected.Put("/portfolios/:id/sections/reorder", r.PortfolioHandler.ReorderSections)
 	protected.Post("/portfolios/:id/artifacts", r.PortfolioHandler.AddArtifact)
+	protected.Post("/portfolios/:id/artifacts/upload", middleware.UploadRateLimit(), middleware.EnforceUploadSize(r.SettingsLookup), r.PortfolioHandler.UploadArtifactFile)
+	protected.Get("/portfolios/:id/files/:file_id", r.PortfolioHandler.DownloadArtifactFile)
 	protected.Put("/portfolios/:id/artifacts/:artifact_id", r.PortfolioHandler.UpdateArtifact)
 	protected.Delete("/portfolios/:id/artifacts/:artifact_id", r.PortfolioHandler.DeleteArtifact)
 	protected.Post("/portfolios/:id/artifacts/:artifact_id/reflections", r.PortfolioHandler.AddReflection)
@@ -816,7 +839,7 @@ func (r *Router) Register(app *fiber.App) {
 	protected.Get("/courses/:course_id/question_banks/:bank_id", enrolled, r.QuestionBankHandler.GetBank)
 	protected.Put("/courses/:course_id/question_banks/:bank_id", instructor, r.QuestionBankHandler.UpdateBank)
 	protected.Delete("/courses/:course_id/question_banks/:bank_id", instructor, r.QuestionBankHandler.DeleteBank)
-	protected.Get("/courses/:course_id/question_banks/:bank_id/questions", enrolled, r.QuestionBankHandler.ListQuestions)
+	protected.Get("/courses/:course_id/question_banks/:bank_id/questions", instructor, r.QuestionBankHandler.ListQuestions)
 	protected.Post("/courses/:course_id/question_banks/:bank_id/questions", instructor, r.QuestionBankHandler.AddQuestion)
 	protected.Put("/courses/:course_id/question_banks/:bank_id/questions/:question_id", instructor, r.QuestionBankHandler.UpdateQuestion)
 	protected.Delete("/courses/:course_id/question_banks/:bank_id/questions/:question_id", instructor, r.QuestionBankHandler.DeleteQuestion)
@@ -825,9 +848,6 @@ func (r *Router) Register(app *fiber.App) {
 	// Module Prerequisites (view: enrolled; manage: instructor)
 	protected.Get("/courses/:course_id/modules/:id/prerequisites", enrolled, r.ModuleHandler.GetPrerequisites)
 	protected.Put("/courses/:course_id/modules/:id/prerequisites", instructor, r.ModuleHandler.SetPrerequisites)
-
-	// Public portfolio view (no auth required)
-	api.Get("/portfolios/public/:slug", r.PortfolioHandler.GetPublicPortfolio)
 
 	r.registerP3FeatureRoutes(protected, admin, enrolled, instructor)
 	r.registerQuizExtensionRoutes(protected, enrolled, instructor)

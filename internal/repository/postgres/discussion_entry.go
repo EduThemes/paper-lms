@@ -114,3 +114,19 @@ func (r *discussionEntryRepo) ListAllByTopicID(ctx context.Context, topicID, acc
 	}
 	return entries, nil
 }
+
+func (r *discussionEntryRepo) ListAllByTopicIDIncludingDeleted(ctx context.Context, topicID, accountID uint) ([]models.DiscussionEntry, error) {
+	var entries []models.DiscussionEntry
+	q := r.db.WithContext(ctx).Where("discussion_topic_id = ?", topicID)
+	if accountID != 0 {
+		q = q.Where(`discussion_topic_id IN (
+			SELECT id FROM discussion_topics WHERE course_id IN (
+				SELECT id FROM courses WHERE account_id = ?
+			)
+		)`, accountID)
+	}
+	if err := q.Order("created_at ASC, id ASC").Find(&entries).Error; err != nil {
+		return nil, err
+	}
+	return entries, nil
+}

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"log"
 	"log/slog"
 	"net/url"
@@ -133,6 +135,22 @@ func main() {
 			log.Printf("warning: LDAP bind password backfill skipped (%v) — plaintext rows remain; set MFA_ENCRYPTION_KEY and reboot to seal them", err)
 		} else if sealed > 0 {
 			log.Printf("LDAP bind password backfill: sealed %d row(s) into encrypted column", sealed)
+		}
+	}
+
+	// B191: seal any LTI 1.1 shared secrets still stored in plaintext.
+	// Idempotent; no-ops once every row carries the sealed prefix.
+	{
+		bctx, bcancel := context.WithTimeout(context.Background(), 60*time.Second)
+		sealed, err := auth.BackfillExternalToolSharedSecrets(bctx, database)
+		bcancel()
+		if err != nil {
+			if cfg.Environment == "production" {
+				log.Fatalf("external tool shared secret backfill failed: %v", err)
+			}
+			log.Printf("warning: external tool shared secret backfill skipped (%v) — set MFA_ENCRYPTION_KEY and reboot to seal them", err)
+		} else if sealed > 0 {
+			log.Printf("external tool shared secret backfill: sealed %d row(s)", sealed)
 		}
 	}
 
@@ -351,7 +369,7 @@ func main() {
 	// Initialize services
 	userService := service.NewUserService(userRepo)
 	courseService := service.NewCourseService(courseRepo, enrollmentRepo, sectionRepo)
-	enrollmentService := service.NewEnrollmentService(enrollmentRepo)
+	enrollmentService := service.NewEnrollmentService(enrollmentRepo).SetTenantRepos(userRepo, courseRepo, sectionRepo)
 	contentViewService := service.NewContentViewService(contentViewRepo)
 	moduleService := service.NewModuleService(moduleRepo, moduleItemRepo, service.WithPrerequisiteRepo(modulePrerequisiteRepo))
 	pageService := service.NewPageService(pageRepo)
@@ -362,16 +380,32 @@ func main() {
 	devKeyService := service.NewDeveloperKeyService(devKeyRepo)
 	accessTokenService := service.NewAccessTokenService(accessTokenRepo)
 	oauth2Service := service.NewOAuth2Service(devKeyService, accessTokenService)
+	// Authorization codes live in Postgres so any replica can redeem them (B192).
+	oauth2Service.SetCodeRepository(postgres.NewOAuthAuthorizationCodeRepository(database))
 	externalToolService := service.NewExternalToolService(externalToolRepo, devKeyRepo)
 
 	// Determine platform issuer URL from frontend URL or fallback
 	platformIssuer := cfg.FrontendURL
-	ltiService, err := service.NewLTIService(devKeyRepo, ltiConfigRepo, nonceRepo, enrollmentRepo, courseRepo, platformIssuer)
+	ltiService, err := service.NewLTIService(devKeyRepo, ltiConfigRepo, nonceRepo, enrollmentRepo, courseRepo, externalToolRepo, platformIssuer)
 	if err != nil {
 		log.Fatalf("Failed to initialize LTI service: %v", err)
 	}
+	// B181: sign LTI launches with the persisted, replica-shared platform
+	// key (LTI_PLATFORM_PRIVATE_KEY, else the secretbox-sealed DB row).
+	{
+		kctx, kcancel := context.WithTimeout(context.Background(), 30*time.Second)
+		keyErr := ltiService.LoadPersistentPlatformKey(kctx, postgres.NewLTIPlatformKeyRepository(database),
+			os.Getenv(service.LTIPlatformKeyEnvVar), auth.Encrypt, auth.Decrypt)
+		kcancel()
+		if keyErr != nil {
+			if cfg.Environment == "production" {
+				log.Fatalf("LTI platform key unavailable: %v", keyErr)
+			}
+			log.Printf("warning: LTI platform key not persisted (%v) — using an ephemeral key; launches break across restarts/replicas. Set MFA_ENCRYPTION_KEY or %s.", keyErr, service.LTIPlatformKeyEnvVar)
+		}
+	}
 
-	agsService := service.NewLTIAGSService(lineItemRepo, resultRepo, submissionRepo, assignmentRepo)
+	agsService := service.NewLTIAGSService(lineItemRepo, resultRepo, assignmentRepo, enrollmentRepo, submissionService)
 	nrpsService := service.NewLTINRPSService(enrollmentRepo, userRepo)
 	// services
 	discussionService := service.NewDiscussionService(discussionTopicRepo, discussionEntryRepo, discussionRatingRepo)
@@ -408,6 +442,8 @@ func main() {
 	quizService := service.NewQuizService(quizRepo, quizQuestionRepo, quizSubmissionRepo, quizSubmissionAnswerRepo,
 		service.WithQuestionGroupRepo(quizQuestionGroupRepo),
 		service.WithBankEntryRepo(questionBankEntryRepo),
+		service.WithQuestionBankRepo(questionBankRepo),
+		service.WithStimulusRepo(postgres.NewQuizStimulusRepository(database)),
 	)
 	// Phase 6 Wave 1 Sprint D-1: register every gamification emit
 	// callback against the services that own the lifecycle event. The
@@ -469,7 +505,7 @@ func main() {
 	collaborationService := service.NewCollaborationService(collaborationRepo)
 	conferenceService := service.NewConferenceService(conferenceRepo, conferenceParticipantRepo)
 	analyticsService := service.NewAnalyticsService(pageViewRepo, submissionRepo, enrollmentRepo, assignmentRepo)
-	observerService := service.NewObserverService(enrollmentRepo, courseRepo, userRepo)
+	observerService := service.NewObserverService(enrollmentRepo, courseRepo, userRepo).SetObserverLinkStore(postgres.NewObserverLinkRepository(database)).SetAssignmentGroupRepo(assignmentGroupRepo)
 	observerService.SetOverviewDeps(
 		assignmentRepo,
 		submissionRepo,
@@ -570,6 +606,15 @@ func main() {
 	portfolioService := service.NewPortfolioService(portfolioRepo, portfolioSectionRepo, portfolioArtifactRepo, portfolioReflectionRepo, portfolioTemplateRepo, portfolioCommentRepo, submissionRepo, assignmentRepo)
 	courseHomeService := service.NewCourseHomeService(courseRepo, courseHomeButtonRepo, todaysLessonOverrideRepo, courseVisitRepo, moduleRepo)
 	peerReviewService := service.NewPeerReviewService(peerReviewRepo, submissionRepo, enrollmentRepo)
+	// Grading parity (B022/B121): per-student dates from overrides and
+	// accommodations, and a grade-change audit trail on every grade write.
+	submissionService.SetOverrideService(overrideService)
+	submissionService.SetAccommodationService(accommodationService)
+	submissionService.SetGradeChangeLogger(func(ctx context.Context, ch service.GradeChange) {
+		if err := auditService.LogGradeChange(ctx, ch.CourseID, ch.AssignmentID, ch.StudentID, ch.GraderID, ch.SubmissionID, ch.OldGrade, ch.NewGrade, ch.OldScore, ch.NewScore, ch.Excused, "manual"); err != nil {
+			slog.Warn("grade change audit failed", "submission_id", ch.SubmissionID, "err", err)
+		}
+	})
 	questionBankService := service.NewQuestionBankService(questionBankRepo, questionBankEntryRepo, quizQuestionRepo, quizRepo)
 	// P3 Feature services
 	featureFlagService := service.NewFeatureFlagService(featureFlagRepo, courseRepo, accountRepo, userRepo)
@@ -578,6 +623,10 @@ func main() {
 	appointmentGroupService := service.NewAppointmentGroupService(appointmentGroupRepo, appointmentSlotRepo, appointmentReservationRepo, database)
 	outcomeProficiencyService := service.NewOutcomeProficiencyService(outcomeProficiencyRepo)
 	masteryGradebookService := service.NewMasteryGradebookService(enrollmentRepo, outcomeRepo, outcomeResultRepo, userRepo, outcomeProficiencyService)
+
+	// Outcome results for every visible grade, whichever path wrote it
+	// (bulk grading, curve, CSV import, LTI AGS included).
+	submissionService.OnGraded(service.OutcomeResultsGradedCallback(submissionRepo, assignmentRepo, outcomeAlignmentRepo, learningOutcomeService))
 
 	// Wire mastery-paths evaluation to fire after every successful grade.
 	submissionService.OnGraded(func(ctx context.Context, subID uint) {
@@ -615,6 +664,17 @@ func main() {
 		moduleRepo,
 		discussionTopicRepo,
 	)
+	// Content-lane parity wiring: Commons deep copy (quiz questions,
+	// module items), blueprint association authz + sync identity map,
+	// pacing course ties / overrides / start dates, module-item content
+	// validation.
+	commonsService.SetContentDeps(quizQuestionRepo, moduleItemRepo)
+	blueprintService.SetDeps(courseRepo, enrollmentRepo, postgres.NewBlueprintContentTagRepository(database))
+	coursePaceService.SetDeps(service.CoursePaceDeps{
+		ModuleRepo: moduleRepo, OverrideRepo: assignmentOverrideRepo, OverrideStudentRepo: assignmentOverrideStudentRepo,
+		CourseRepo: courseRepo, EnrollmentRepo: enrollmentRepo, SectionRepo: sectionRepo,
+	})
+	moduleService.SetContentRepos(assignmentRepo, quizRepo, discussionTopicRepo, pageRepo)
 	// Wave 5: AI Assist resolves `ai.anthropic.api_key` per-request
 	// via the Settings Engine (shared settingsLookup closure declared
 	// up by notificationDeliveryService).
@@ -639,6 +699,12 @@ func main() {
 	// before SAML/LDAP/CAS so the legacy SSO handlers can take it as
 	// a dependency (Sprint 10-C).
 	federatedIdentityRepo := postgres.NewFederatedIdentityRepository(database)
+	// Quiz presentation order is keyed by a subkey of the JWT secret so a
+	// student can't recompute it from the ids (and recover the answer order).
+	shuffleKey := hmac.New(sha256.New, []byte(cfg.JWTSecret))
+	_, _ = shuffleKey.Write([]byte("paper-lms quiz shuffle v1"))
+	service.SetQuizShuffleKey(shuffleKey.Sum(nil))
+
 	authAudit := auth.NewAuthAudit(auditService)
 	loginPipeline := auth.NewLoginPipeline(
 		userRepo,
@@ -748,7 +814,7 @@ func main() {
 	userHandler := handlers.NewUserHandler(userService, cfg.JWTSecret, cfg.Environment, tokenBlacklist, auditService, loginPipeline).
 		WithCOPPADeps(accountRepo, ageVerificationRepo, parentalConsentRepo, authAudit)
 	accountHandler := handlers.NewAccountHandler(accountRepo)
-	courseHandler := handlers.NewCourseHandler(courseService, enrollmentService)
+	courseHandler := handlers.NewCourseHandler(courseService, enrollmentService).SetUserRepo(userRepo)
 	// sectionHandler is constructed below, after `authz` is available.
 	// See the NewResourceAuthorizer line further down in this same
 	// init block. Section authz piggy-backs on RequireCourseEnrolled.
@@ -766,18 +832,22 @@ func main() {
 	assignmentHandler := handlers.NewAssignmentHandler(assignmentService)
 	assignmentGroupHandler := handlers.NewAssignmentGroupHandler(assignmentGroupService)
 	submissionHandler := handlers.NewSubmissionHandler(submissionService, submissionCommentRepo, attachmentRepo, userRepo, assignmentRepo, notificationDeliveryService, observerService, outcomeAlignmentRepo, learningOutcomeService, auditService)
+	submissionHandler.SetFileService(fileService)
+	submissionHandler.SetPeerReviewService(peerReviewService)
 	gradebookHandler := handlers.NewGradebookHandler(gradingService, auditService)
 	gradingStandardHandler := handlers.NewGradingStandardHandler(gradingStandardRepo)
 	developerKeyHandler := handlers.NewDeveloperKeyHandler(devKeyService)
 	accessTokenHandler := handlers.NewAccessTokenHandler(accessTokenService)
 	oauth2Handler := handlers.NewOAuth2Handler(oauth2Service, devKeyService, accessTokenService, userService)
+	oauth2Handler.SetFrontendURL(cfg.FrontendURL)
 	externalToolHandler := handlers.NewExternalToolHandler(externalToolService, devKeyService)
 	ltiHandler := handlers.NewLTIHandler(ltiService, agsService, nrpsService, externalToolRepo, ltiConfigRepo, userRepo, accountRepo, parentalConsentRepo)
 	// handlers
 	discussionHandler := handlers.NewDiscussionHandler(discussionService)
-	discussionEntryHandler := handlers.NewDiscussionEntryHandler(discussionService)
+	discussionEntryHandler := handlers.NewDiscussionEntryHandler(discussionService).SetVersionHistory(discussionV2Service)
 	fileHandler := handlers.NewFileHandler(fileService, enrollmentRepo, groupMembershipRepo, auditService)
-	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo)
+	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo, courseRepo)
+	fileHandler.SetAuthorizer(authz)
 	folderHandler := handlers.NewFolderHandler(fileService, authz)
 	sectionHandler = handlers.NewSectionHandler(sectionRepo, authz)
 	sisImportHandler := handlers.NewSISImportHandler(sisImportService)
@@ -785,8 +855,10 @@ func main() {
 	quizHandler := handlers.NewQuizHandler(quizRepo)
 	quizQuestionHandler := handlers.NewQuizQuestionHandler(quizService)
 	quizSubmissionHandler := handlers.NewQuizSubmissionHandler(quizService, observerService, auditService)
+	quizSubmissionHandler.SetFileService(fileService)
 	rubricHandler := handlers.NewRubricHandler(rubricService)
 	rubricAssessmentHandler := handlers.NewRubricAssessmentHandler(rubricService)
+	rubricAssessmentHandler.SetVisibilityDeps(submissionService, observerService)
 	gradingPeriodHandler := handlers.NewGradingPeriodHandler(gradingPeriodService)
 	assignmentOverrideHandler := handlers.NewAssignmentOverrideHandler(overrideService, assignmentService)
 	latePolicyHandler := handlers.NewLatePolicyHandler(latePolicyService)
@@ -797,6 +869,8 @@ func main() {
 	// handlers
 	contentMigrationHandler := handlers.NewContentMigrationHandler(contentMigrationService)
 	learningOutcomeHandler := handlers.NewLearningOutcomeHandler(learningOutcomeService, outcomeAlignmentRepo, auditService)
+	learningOutcomeHandler.SetEnrollmentRepo(enrollmentRepo)
+	learningOutcomeHandler.SetAssignmentRepo(assignmentRepo)
 	speedGraderHandler := handlers.NewSpeedGraderHandler(speedGraderService, auditService)
 	// handlers
 	groupHandler := handlers.NewGroupHandler(groupService, authz, auditService)
@@ -817,23 +891,34 @@ func main() {
 	syllabusHandler := handlers.NewSyllabusHandler(courseService, assignmentService, assignmentGroupService, calendarService, gradingService, enrollmentService, submissionService)
 	// handlers
 	notificationDeliveryHandler := handlers.NewNotificationDeliveryHandler(notificationDeliveryService, communicationChannelRepo)
+	// Communications wiring: announcements and inbox messages notify
+	// their recipients; the inbox picker searches users who share a
+	// course; conferences resolve the per-tenant BigBlueButton server.
+	announcementService.SetNotifier(notificationDeliveryService)
+	conversationHandler.SetNotifier(notificationDeliveryService)
+	conversationHandler.SetRecipientSearch(postgres.NewRecipientSearchRepository(database))
+	conferenceService.SetSettingsLookup(settingsLookup)
+	discussionService.OnEntryCreated(service.DiscussionReplyNotificationCallback(discussionEntryRepo, discussionTopicRepo, notificationDeliveryService))
 	auditHandler := handlers.NewAuditHandler(auditService)
 	// handlers
 	customRoleHandler := handlers.NewCustomRoleHandler(customRoleService)
 	onerosterHandler := handlers.NewOneRosterHandler(onerosterService)
-	documentAnnotationHandler := handlers.NewDocumentAnnotationHandler(documentAnnotationService, submissionService, assignmentRepo, submissionRepo, authz)
+	documentAnnotationHandler := handlers.NewDocumentAnnotationHandler(documentAnnotationService, submissionService, assignmentRepo, submissionRepo, authz).SetObserverService(observerService)
 	// handlers
 	discussionV2Handler := handlers.NewDiscussionV2Handler(discussionV2Service)
 	contentImportHandler := handlers.NewContentImportHandler(imsccParser, contentMigrationService, cfg.FileStoragePath)
 	batchHandler := handlers.NewBatchHandler(batchService, authz)
 	// handlers
-	coppaHandler := handlers.NewCOPPAHandler(coppaService)
-	ferpaHandler := handlers.NewFERPAHandler(ferpaService)
+	coppaHandler := handlers.NewCOPPAHandler(coppaService).SetAuthorizer(authz)
+	ferpaHandler := handlers.NewFERPAHandler(ferpaService).SetAuthorizer(authz)
 	accommodationHandler := handlers.NewAccommodationHandler(accommodationService, assignmentService, authz, auditService)
 	attendanceHandler := handlers.NewAttendanceHandler(attendanceService, auditService)
 	portfolioHandler := handlers.NewPortfolioHandler(portfolioService, authz)
+	portfolioHandler.SetFileService(fileService)
+	portfolioService.SetUserRepository(userRepo)
 	courseHomeHandler := handlers.NewCourseHomeHandler(courseHomeService)
 	peerReviewHandler := handlers.NewPeerReviewHandler(peerReviewService, auditService)
+	peerReviewHandler.SetAssignmentService(assignmentService)
 	questionBankHandler := handlers.NewQuestionBankHandler(questionBankService)
 	quizQuestionGroupHandler := handlers.NewQuizQuestionGroupHandler(quizService)
 	quizStatisticsHandler := handlers.NewQuizStatisticsHandler(quizService)
@@ -871,8 +956,10 @@ func main() {
 	quizStimulusRepo := postgres.NewQuizStimulusRepository(database)
 	quizQuestionOutcomeAlignmentRepo := postgres.NewQuizQuestionOutcomeAlignmentRepository(database)
 	quizItemBankService := service.NewQuizItemBankService(quizItemBankRepo, quizItemBankItemRepo, quizQuestionRepo)
+	quizItemBankService.SetQuizRepo(quizRepo)
 	quizStimulusService := service.NewQuizStimulusService(quizStimulusRepo, quizQuestionRepo)
-	quizOutcomeAlignmentService := service.NewQuizOutcomeAlignmentService(quizQuestionOutcomeAlignmentRepo, quizQuestionRepo, outcomeRepo)
+	quizStimulusService.SetQuizRepo(quizRepo)
+	quizOutcomeAlignmentService := service.NewQuizOutcomeAlignmentService(quizQuestionOutcomeAlignmentRepo, quizQuestionRepo, outcomeRepo).SetQuizRepo(quizRepo)
 	quizItemBankHandler := handlers.NewQuizItemBankHandler(quizItemBankService)
 	quizStimulusHandler := handlers.NewQuizStimulusHandler(quizStimulusService)
 	quizOutcomeAlignmentHandler := handlers.NewQuizOutcomeAlignmentHandler(quizOutcomeAlignmentService)
@@ -884,7 +971,7 @@ func main() {
 	qtiImportHandler := handlers.NewQTIImportHandler(qtiImportService)
 
 	authMiddleware := middleware.NewAuthMiddleware(cfg.JWTSecret, accessTokenService, userRepo, tokenBlacklist)
-	permMiddleware := middleware.NewPermissionMiddleware(enrollmentRepo, userRepo)
+	permMiddleware := middleware.NewPermissionMiddleware(enrollmentRepo, userRepo, courseRepo)
 
 	// Create router
 	router := &v1.Router{
@@ -1120,6 +1207,7 @@ func main() {
 	// wiring is mounted UNCONDITIONALLY below so DISABLE_SCHEDULER does not
 	// silently disable in-flight request draining.
 	var sched *scheduler.Scheduler
+	var minuteSched *scheduler.Scheduler
 	if os.Getenv("DISABLE_SCHEDULER") != "1" {
 		sched = scheduler.NewScheduler(time.Hour)
 		// 13.7 — Postgres advisory-lock leader election. Multi-pod
@@ -1129,10 +1217,21 @@ func main() {
 		weeklyJob, dailyJob := scheduler.NewDigestJobs(notificationDeliveryService)
 		sched.Register("weeklyDigest", scheduler.WeeklyAt(time.Monday, 7), weeklyJob)
 		sched.Register("dailyDigest", scheduler.DailyAt(7), dailyJob)
+		sched.Register("onerosterAutoSync", scheduler.EveryTick(), scheduler.NewOneRosterAutoSyncJob(onerosterService))
 
 		schedCtx, schedCancel := context.WithCancel(context.Background())
 		defer schedCancel()
 		sched.Start(schedCtx)
+
+		// Per-minute jobs: delayed announcements become visible (and
+		// notify) on time, and "immediately" notifications are sent
+		// without waiting for a digest window.
+		minuteSched = scheduler.NewScheduler(time.Minute)
+		minuteSched.SetLeaderLock(scheduler.NewPGLeaderLock(database))
+		publishJob, deliverJob := scheduler.NewMinuteJobs(announcementService, notificationDeliveryService)
+		minuteSched.Register("publishScheduledAnnouncements", scheduler.EveryTick(), publishJob)
+		minuteSched.Register("deliverImmediateNotifications", scheduler.EveryTick(), deliverJob)
+		minuteSched.Start(schedCtx)
 	}
 
 	// Graceful shutdown — wired even when the scheduler is disabled so
@@ -1145,6 +1244,9 @@ func main() {
 		slog.Info("shutdown signal received, draining…")
 		if sched != nil {
 			sched.Stop()
+		}
+		if minuteSched != nil {
+			minuteSched.Stop()
 		}
 		_ = app.ShutdownWithTimeout(30 * time.Second)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

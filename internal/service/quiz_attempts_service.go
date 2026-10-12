@@ -70,13 +70,21 @@ func (s *QuizService) generateSelectedQuestions(ctx context.Context, quizID uint
 		return nil, err
 	}
 
+	// Every authored question (per-attempt bank-draw copies are never
+	// served on their own — only through their group).
+	authoredIDs := func() []uint {
+		ids := make([]uint, 0, len(allQuestions.Items))
+		for _, q := range allQuestions.Items {
+			if q.QuestionBankEntryID == nil {
+				ids = append(ids, q.ID)
+			}
+		}
+		return ids
+	}
+
 	// If no group repo is configured, return all question IDs
 	if s.groupRepo == nil {
-		ids := make([]uint, len(allQuestions.Items))
-		for i, q := range allQuestions.Items {
-			ids[i] = q.ID
-		}
-		return ids, nil
+		return authoredIDs(), nil
 	}
 
 	// Get all question groups for this quiz
@@ -87,45 +95,100 @@ func (s *QuizService) generateSelectedQuestions(ctx context.Context, quizID uint
 
 	// If no groups exist, return all question IDs (no randomization needed)
 	if len(groups) == 0 {
-		ids := make([]uint, len(allQuestions.Items))
-		for i, q := range allQuestions.Items {
-			ids[i] = q.ID
-		}
-		return ids, nil
+		return authoredIDs(), nil
 	}
 
 	var selectedIDs []uint
 
 	// Track which questions belong to a group so we can add ungrouped ones
 	groupedQuestionIDs := make(map[uint]bool)
+	liveGroups := make(map[uint]bool, len(groups))
+	for _, g := range groups {
+		liveGroups[g.ID] = true
+	}
 
 	rng := mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
 
-	for _, group := range groups {
-		var pool []uint
+	// poolEntry is either a real quiz question (questionID != 0) or a
+	// question-bank entry that still has to be materialized into this quiz
+	// (bankEntry != nil). Bank entry IDs live in a DIFFERENT table
+	// (question_bank_entries) and must never be mixed into quiz-question
+	// IDs — resolving one through questionRepo would serve an unrelated
+	// (possibly cross-tenant) quiz_questions row.
+	type poolEntry struct {
+		questionID uint
+		bankEntry  *models.QuestionBankEntry
+	}
 
-		// Option 1: Group pulls from a linked QuestionBank
+	var quizCourseID uint
+	quizLoaded := false
+
+	for _, group := range groups {
+		var pool []poolEntry
+
+		listed, gqErr := s.questionRepo.ListByGroupID(ctx, group.ID)
+		if gqErr != nil {
+			listed = nil
+		}
+		// Only this quiz's questions (defends against stale cross-quiz
+		// group ids).
+		groupQuestions := make([]models.QuizQuestion, 0, len(listed))
+		for _, q := range listed {
+			if q.QuizID == quizID {
+				groupQuestions = append(groupQuestions, q)
+			}
+		}
+		// Already-materialized copies of bank entries, keyed by entry id.
+		materialized := make(map[uint]uint)
+		for _, q := range groupQuestions {
+			groupedQuestionIDs[q.ID] = true
+			if q.QuestionBankEntryID != nil {
+				materialized[*q.QuestionBankEntryID] = q.ID
+			}
+		}
+
+		// Option 1: Group pulls from a linked QuestionBank (same course only).
 		if group.QuestionBankID != nil && s.bankEntryRepo != nil {
-			entries, err := s.bankEntryRepo.ListByBankID(ctx, *group.QuestionBankID)
-			if err == nil {
-				for _, entry := range entries {
-					pool = append(pool, entry.ID)
+			bankOK := true
+			if s.questionBankRepo != nil {
+				if !quizLoaded {
+					if quiz, qErr := s.quizRepo.FindByID(ctx, quizID, 0); qErr == nil && quiz != nil {
+						quizCourseID = quiz.CourseID
+					}
+					quizLoaded = true
+				}
+				bank, bErr := s.questionBankRepo.FindByID(ctx, *group.QuestionBankID)
+				bankOK = bErr == nil && bank != nil && bank.CourseID == quizCourseID && bank.WorkflowState != "deleted"
+			}
+			if bankOK {
+				if entries, err := s.bankEntryRepo.ListByBankID(ctx, *group.QuestionBankID); err == nil {
+					for i := range entries {
+						entry := entries[i]
+						if entry.QuestionBankID != *group.QuestionBankID {
+							continue
+						}
+						if qid, ok := materialized[entry.ID]; ok {
+							pool = append(pool, poolEntry{questionID: qid})
+						} else {
+							pool = append(pool, poolEntry{bankEntry: &entry})
+						}
+					}
 				}
 			}
 		}
 
-		// Option 2: Group uses questions directly assigned to it via QuizQuestionGroupID
-		groupQuestions, err := s.questionRepo.ListByGroupID(ctx, group.ID)
-		if err == nil {
-			for _, q := range groupQuestions {
-				pool = append(pool, q.ID)
-				groupedQuestionIDs[q.ID] = true
+		// Option 2: questions directly assigned to the group. Materialized
+		// bank copies were already added via option 1 (only while their
+		// entry is still in the bank).
+		for _, q := range groupQuestions {
+			if q.QuestionBankEntryID != nil {
+				continue
 			}
+			pool = append(pool, poolEntry{questionID: q.ID})
 		}
 
 		// Randomly pick PickCount questions from the pool
 		if len(pool) > 0 {
-			// Shuffle the pool
 			rng.Shuffle(len(pool), func(i, j int) {
 				pool[i], pool[j] = pool[j], pool[i]
 			})
@@ -134,18 +197,65 @@ func (s *QuizService) generateSelectedQuestions(ctx context.Context, quizID uint
 			if pickCount > len(pool) {
 				pickCount = len(pool)
 			}
-			selectedIDs = append(selectedIDs, pool[:pickCount]...)
+			for _, pe := range pool[:pickCount] {
+				if pe.questionID != 0 {
+					selectedIDs = append(selectedIDs, pe.questionID)
+					continue
+				}
+				qid, err := s.materializeBankEntry(ctx, quizID, group, pe.bankEntry)
+				if err != nil {
+					return nil, err
+				}
+				selectedIDs = append(selectedIDs, qid)
+			}
 		}
 	}
 
-	// Add all ungrouped questions (questions not assigned to any group)
+	// Add all ungrouped questions. A question whose group was deleted (a
+	// dangling quiz_question_group_id) is treated as ungrouped rather than
+	// silently dropped from every attempt. Materialized bank copies are
+	// never "ungrouped" — they only enter an attempt through their group.
 	for _, q := range allQuestions.Items {
-		if !groupedQuestionIDs[q.ID] && (q.QuizQuestionGroupID == nil || *q.QuizQuestionGroupID == 0) {
+		if groupedQuestionIDs[q.ID] || q.QuestionBankEntryID != nil {
+			continue
+		}
+		if q.QuizQuestionGroupID == nil || *q.QuizQuestionGroupID == 0 || !liveGroups[*q.QuizQuestionGroupID] {
 			selectedIDs = append(selectedIDs, q.ID)
 		}
 	}
 
 	return selectedIDs, nil
+}
+
+// materializeBankEntry copies a question-bank entry into the quiz as a
+// QuizQuestion owned by the group (QuestionBankEntryID records the
+// provenance so later attempts reuse the same row). Returns the quiz
+// question id.
+func (s *QuizService) materializeBankEntry(ctx context.Context, quizID uint, group models.QuizQuestionGroup, entry *models.QuestionBankEntry) (uint, error) {
+	groupID := group.ID
+	entryID := entry.ID
+	pts := groupItemPoints(&group, entry.PointsPossible)
+	q := &models.QuizQuestion{
+		QuizID:              quizID,
+		QuizQuestionGroupID: &groupID,
+		QuestionBankEntryID: &entryID,
+		Position:            entry.Position,
+		QuestionType:        NormalizeQuizQuestionType(entry.QuestionType),
+		QuestionText:        entry.QuestionText,
+		PointsPossible:      &pts,
+		Answers:             entry.Answers,
+		WorkflowState:       "active",
+	}
+	if q.QuestionText == "" {
+		q.QuestionText = entry.QuestionName
+	}
+	if q.Answers == "" {
+		q.Answers = "[]"
+	}
+	if err := s.questionRepo.Create(ctx, q); err != nil {
+		return 0, err
+	}
+	return q.ID, nil
 }
 
 // GetSubmissionQuestions returns the personalized list of questions for a specific submission.
@@ -180,7 +290,13 @@ func (s *QuizService) GetSubmissionQuestions(ctx context.Context, submissionID u
 	if err != nil {
 		return nil, err
 	}
-	return result.Items, nil
+	authored := make([]models.QuizQuestion, 0, len(result.Items))
+	for _, q := range result.Items {
+		if q.QuestionBankEntryID == nil {
+			authored = append(authored, q)
+		}
+	}
+	return authored, nil
 }
 
 // ---------- Quiz Submission Methods ----------
@@ -205,6 +321,10 @@ func (s *QuizService) StartSubmission(ctx context.Context, quizID, userID uint, 
 	// the submissions table.
 	quiz, err := s.quizRepo.FindByID(ctx, quizID, 0)
 	if err != nil {
+		return nil, errors.New("quiz not found")
+	}
+	// A soft-deleted quiz is gone; it can never be taken.
+	if quiz.WorkflowState == "deleted" {
 		return nil, errors.New("quiz not found")
 	}
 
@@ -302,6 +422,61 @@ func (s *QuizService) GetSubmission(ctx context.Context, id uint) (*models.QuizS
 	return s.submissionRepo.FindByID(ctx, id)
 }
 
+// GetSubmissionAnswer returns the stored answer for one question of an
+// attempt (callers must already have authorized access to the attempt).
+func (s *QuizService) GetSubmissionAnswer(ctx context.Context, submissionID, questionID uint) (*models.QuizSubmissionAnswer, error) {
+	return s.answerRepo.FindBySubmissionAndQuestion(ctx, submissionID, questionID)
+}
+
+// FileUploadQuestionForSubmission loads a question and verifies it is a
+// file_upload question that belongs to the attempt.
+func (s *QuizService) FileUploadQuestionForSubmission(ctx context.Context, submission *models.QuizSubmission, questionID uint) (*models.QuizQuestion, error) {
+	question, err := s.questionRepo.FindByID(ctx, questionID)
+	if err != nil || question == nil {
+		return nil, ErrQuestionNotInSubmission
+	}
+	selected, hasSelected := selectedQuestionSet(submission)
+	if !questionBelongsToSubmission(submission, question, selected, hasSelected) ||
+		NormalizeQuizQuestionType(question.QuestionType) != "file_upload" {
+		return nil, ErrQuestionNotInSubmission
+	}
+	return question, nil
+}
+
+// ErrQuestionNotInSubmission is returned when an answer targets a question
+// that is not part of the submission's quiz / personalized question set.
+var ErrQuestionNotInSubmission = errors.New("question is not part of this quiz submission")
+
+// selectedQuestionSet parses submission.SelectedQuestions. ok=false means
+// the submission has no personalized set (every quiz question applies).
+func selectedQuestionSet(submission *models.QuizSubmission) (map[uint]bool, bool) {
+	if submission.SelectedQuestions == "" {
+		return nil, false
+	}
+	var ids []uint
+	if err := json.Unmarshal([]byte(submission.SelectedQuestions), &ids); err != nil {
+		return map[uint]bool{}, true
+	}
+	set := make(map[uint]bool, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+	return set, true
+}
+
+// questionBelongsToSubmission reports whether the question is gradable in
+// this attempt: it must belong to the submission's quiz and, when the
+// attempt has a personalized question set, be one of the selected ones.
+func questionBelongsToSubmission(submission *models.QuizSubmission, question *models.QuizQuestion, selected map[uint]bool, hasSelected bool) bool {
+	if question == nil || question.QuizID != submission.QuizID {
+		return false
+	}
+	if hasSelected && !selected[question.ID] {
+		return false
+	}
+	return true
+}
+
 // AnswerQuestion upserts an answer for a specific question in a quiz submission.
 func (s *QuizService) AnswerQuestion(ctx context.Context, submissionID, questionID uint, answer string) (*models.QuizSubmissionAnswer, error) {
 	// Verify the submission exists and is still in progress
@@ -317,6 +492,18 @@ func (s *QuizService) AnswerQuestion(ctx context.Context, submissionID, question
 	// Check if time has expired
 	if submission.EndAt != nil && time.Now().After(*submission.EndAt) {
 		return nil, errors.New("quiz time has expired")
+	}
+
+	// The question must belong to this attempt — otherwise a student could
+	// store answers to questions from other quizzes and have them graded
+	// into this submission's score.
+	question, qErr := s.questionRepo.FindByID(ctx, questionID)
+	if qErr != nil || question == nil || question.WorkflowState == "deleted" {
+		return nil, ErrQuestionNotInSubmission
+	}
+	selected, hasSelected := selectedQuestionSet(submission)
+	if !questionBelongsToSubmission(submission, question, selected, hasSelected) {
+		return nil, ErrQuestionNotInSubmission
 	}
 
 	// Attempt to find an existing answer for this question in this submission
@@ -370,13 +557,25 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 	totalScore := 0.0
 	needsReview := false
 
+	selected, hasSelected := selectedQuestionSet(submission)
+	groupCache := map[uint]*models.QuizQuestionGroup{}
+	seenQuestion := map[uint]bool{}
+
 	for i := range answers {
 		question, qErr := s.questionRepo.FindByID(ctx, answers[i].QuestionID)
 		if qErr != nil {
 			continue
 		}
+		// Only questions that belong to this attempt count toward the
+		// score (B025: stray answers to other quizzes' questions are
+		// ignored), and each question is scored at most once.
+		if !questionBelongsToSubmission(submission, question, selected, hasSelected) || seenQuestion[question.ID] {
+			continue
+		}
+		seenQuestion[question.ID] = true
 
-		points, correct, gradable := s.autoGrade(question, answers[i].Answer)
+		pointsPossible := s.effectiveQuestionPoints(ctx, question, groupCache)
+		points, correct, gradable := s.autoGradeWithPoints(question, answers[i].Answer, pointsPossible)
 
 		if gradable {
 			answers[i].Correct = &correct
@@ -429,7 +628,20 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 		submission.WorkflowState = "complete"
 	}
 
-	if err := s.submissionRepo.Update(ctx, submission); err != nil {
+	// B134: two concurrent /complete calls (double click, or the timer
+	// firing as the student clicks Submit) both read 'untaken'. The real
+	// repository finalizes with a conditional UPDATE … WHERE
+	// workflow_state='untaken' so only one caller wins and only the winner
+	// fires the completion callbacks.
+	if fin, ok := s.submissionRepo.(quizSubmissionFinalizer); ok {
+		won, err := fin.FinalizeIfInProgress(ctx, submission)
+		if err != nil {
+			return nil, err
+		}
+		if !won {
+			return nil, errors.New("quiz submission is not in progress")
+		}
+	} else if err := s.submissionRepo.Update(ctx, submission); err != nil {
 		return nil, err
 	}
 
@@ -441,21 +653,79 @@ func (s *QuizService) CompleteSubmission(ctx context.Context, submissionID, user
 	return submission, nil
 }
 
+// quizSubmissionFinalizer is implemented by the Postgres repository: it
+// writes the terminal state only if the row is still 'untaken' and reports
+// whether this caller won.
+type quizSubmissionFinalizer interface {
+	FinalizeIfInProgress(ctx context.Context, submission *models.QuizSubmission) (bool, error)
+}
+
+// effectiveQuestionPoints returns the points a question is worth in an
+// attempt: the owning group's points_per_item override when set (Canvas
+// question-group "points per question"), else the question's own points.
+func (s *QuizService) effectiveQuestionPoints(ctx context.Context, question *models.QuizQuestion, cache map[uint]*models.QuizQuestionGroup) float64 {
+	pts := 1.0
+	if question.PointsPossible != nil {
+		pts = *question.PointsPossible
+	}
+	if s.groupRepo == nil || question.QuizQuestionGroupID == nil || *question.QuizQuestionGroupID == 0 {
+		return pts
+	}
+	gid := *question.QuizQuestionGroupID
+	group, ok := cache[gid]
+	if !ok {
+		g, err := s.groupRepo.FindByID(ctx, gid)
+		if err != nil || g == nil || g.QuizID != question.QuizID {
+			g = nil
+		}
+		cache[gid] = g
+		group = g
+	}
+	if group != nil {
+		return groupItemPoints(group, pts)
+	}
+	return pts
+}
+
+// groupItemPoints is what one question picked by a group is worth: the
+// group's points_per_item, or — for a bank-linked group without one —
+// 1 point (Canvas question_points default). Drawn bank entries must not
+// fall back to their own points, or the quiz total the editor saves
+// (pick_count x 1) disagrees with what an attempt can score.
+func groupItemPoints(group *models.QuizQuestionGroup, questionPoints float64) float64 {
+	if group.PointsPerItem != nil {
+		return *group.PointsPerItem
+	}
+	if group.QuestionBankID != nil && *group.QuestionBankID != 0 {
+		return 1
+	}
+	return questionPoints
+}
+
 func (s *QuizService) ListSubmissions(ctx context.Context, quizID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.QuizSubmission], error) {
 	return s.submissionRepo.ListByQuizID(ctx, quizID, params)
 }
 
+// ListSubmissionsForUsers returns every attempt the given users made on the
+// quiz (a student's own history, or an observer's linked students). Used
+// for non-staff callers, who must never see the course-wide roster.
+func (s *QuizService) ListSubmissionsForUsers(ctx context.Context, quizID uint, userIDs []uint) ([]models.QuizSubmission, error) {
+	if len(userIDs) == 0 {
+		return []models.QuizSubmission{}, nil
+	}
+	return s.submissionRepo.ListByQuizAndUserIDs(ctx, quizID, userIDs)
+}
+
 // ListSubmissionAnswers returns all answers for a completed quiz submission.
-func (s *QuizService) ListSubmissionAnswers(ctx context.Context, submissionID, userID uint) ([]models.QuizSubmissionAnswer, error) {
+// Authorization (owner / course staff / linked observer) is the handler's
+// job; this method only refuses to expose an attempt that is still in
+// progress to anyone but staff.
+func (s *QuizService) ListSubmissionAnswers(ctx context.Context, submissionID uint, viewerIsStaff bool) ([]models.QuizSubmissionAnswer, error) {
 	submission, err := s.submissionRepo.FindByID(ctx, submissionID)
 	if err != nil {
 		return nil, errors.New("quiz submission not found")
 	}
-	// Only the submitting user (or via instructor route) can view answers
-	if submission.UserID != userID {
-		return nil, errors.New("unauthorized: submission does not belong to this user")
-	}
-	if submission.WorkflowState == "untaken" {
+	if submission.WorkflowState == "untaken" && !viewerIsStaff {
 		return nil, errors.New("quiz submission is still in progress")
 	}
 	return s.answerRepo.ListBySubmissionID(ctx, submissionID)

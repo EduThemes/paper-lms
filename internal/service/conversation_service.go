@@ -112,9 +112,11 @@ func (s *ConversationService) CreateMessage(ctx context.Context, msg *models.Con
 		return errors.New("message body is required")
 	}
 	// Sanitize at the single message-creation chokepoint (covers 1:1, bulk,
-	// and any future sender) — message bodies render as rich content, so an
-	// unsanitized body was a stored-XSS vector in private DMs.
-	msg.Body = SanitizeHTML(msg.Body)
+	// and any future sender) so a body can never carry markup (stored XSS in
+	// private DMs). Message bodies are plain text — typed in a textarea and
+	// rendered as text, as in Canvas — so use the plain-text sanitizer: the
+	// HTML one entity-encoded them and the inbox showed "Don&#39;t" (B005).
+	msg.Body = SanitizePlainText(msg.Body)
 	if msg.WorkflowState == "" {
 		msg.WorkflowState = "active"
 	}

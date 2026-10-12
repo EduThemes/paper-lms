@@ -50,13 +50,29 @@ type checkpointInput struct {
 	RequiredReplies int        `json:"required_replies"`
 }
 
+// requireCheckpointInTopic resolves :id as a live checkpoint on the
+// already-resolved topic. Writes a 404 and returns wrote=true otherwise.
+func (h *DiscussionCheckpointHandler) requireCheckpointInTopic(c *fiber.Ctx, topicID uint) (*models.DiscussionCheckpoint, bool) {
+	id, err := c.ParamsInt("id")
+	if err != nil || id <= 0 {
+		_ = responses.BadRequest(c, "Invalid checkpoint ID")
+		return nil, true
+	}
+	cp, err := h.checkpointService.GetCheckpoint(c.Context(), uint(id), callerAccountID(c))
+	if err != nil || cp == nil || cp.DiscussionTopicID != topicID || cp.WorkflowState == "deleted" {
+		_ = responses.NotFound(c, "checkpoint")
+		return nil, true
+	}
+	return cp, false
+}
+
 // ListCheckpoints — GET /api/v1/courses/:course_id/discussion_topics/:topic_id/checkpoints
 func (h *DiscussionCheckpointHandler) ListCheckpoints(c *fiber.Ctx) error {
-	topicID, err := c.ParamsInt("topic_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid topic ID")
+	topic, wrote := requireTopicInCourse(c, h.checkpointService)
+	if wrote {
+		return nil
 	}
-	checkpoints, err := h.checkpointService.ListCheckpoints(c.Context(), uint(topicID))
+	checkpoints, err := h.checkpointService.ListCheckpoints(c.Context(), topic.ID)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch checkpoints")
 	}
@@ -70,9 +86,9 @@ func (h *DiscussionCheckpointHandler) ListCheckpoints(c *fiber.Ctx) error {
 // CreateCheckpoints — POST /api/v1/courses/:course_id/discussion_topics/:topic_id/checkpoints
 // Body: { "checkpoints": [ { ... }, { ... } ] }  (replaces the existing set)
 func (h *DiscussionCheckpointHandler) CreateCheckpoints(c *fiber.Ctx) error {
-	topicID, err := c.ParamsInt("topic_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid topic ID")
+	topic, wrote := requireTopicInCourse(c, h.checkpointService)
+	if wrote {
+		return nil
 	}
 
 	var body struct {
@@ -95,7 +111,7 @@ func (h *DiscussionCheckpointHandler) CreateCheckpoints(c *fiber.Ctx) error {
 		})
 	}
 
-	created, err := h.checkpointService.CreateCheckpoints(c.Context(), uint(topicID), checkpoints)
+	created, err := h.checkpointService.CreateCheckpoints(c.Context(), topic.ID, checkpoints)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
@@ -109,9 +125,13 @@ func (h *DiscussionCheckpointHandler) CreateCheckpoints(c *fiber.Ctx) error {
 
 // UpdateCheckpoint — PUT /api/v1/courses/:course_id/discussion_topics/:topic_id/checkpoints/:id
 func (h *DiscussionCheckpointHandler) UpdateCheckpoint(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid checkpoint ID")
+	topic, wrote := requireTopicInCourse(c, h.checkpointService)
+	if wrote {
+		return nil
+	}
+	cp, wrote := h.requireCheckpointInTopic(c, topic.ID)
+	if wrote {
+		return nil
 	}
 
 	var in checkpointInput
@@ -119,17 +139,10 @@ func (h *DiscussionCheckpointHandler) UpdateCheckpoint(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid request body")
 	}
 
-	cp := &models.DiscussionCheckpoint{
-		ID:              uint(id),
-		CheckpointType:  in.CheckpointType,
-		DueAt:           in.DueAt,
-		PointsPossible:  in.PointsPossible,
-		RequiredReplies: in.RequiredReplies,
-		WorkflowState:   "active",
-	}
-	if topicID, terr := c.ParamsInt("topic_id"); terr == nil {
-		cp.DiscussionTopicID = uint(topicID)
-	}
+	cp.CheckpointType = in.CheckpointType
+	cp.DueAt = in.DueAt
+	cp.PointsPossible = in.PointsPossible
+	cp.RequiredReplies = in.RequiredReplies
 
 	if err := h.checkpointService.UpdateCheckpoint(c.Context(), cp); err != nil {
 		return responses.BadRequest(c, err.Error())
@@ -139,35 +152,51 @@ func (h *DiscussionCheckpointHandler) UpdateCheckpoint(c *fiber.Ctx) error {
 
 // DeleteCheckpoint — DELETE /api/v1/courses/:course_id/discussion_topics/:topic_id/checkpoints/:id
 func (h *DiscussionCheckpointHandler) DeleteCheckpoint(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid checkpoint ID")
+	topic, wrote := requireTopicInCourse(c, h.checkpointService)
+	if wrote {
+		return nil
 	}
-	if err := h.checkpointService.DeleteCheckpoint(c.Context(), uint(id)); err != nil {
+	cp, wrote := h.requireCheckpointInTopic(c, topic.ID)
+	if wrote {
+		return nil
+	}
+	if err := h.checkpointService.DeleteCheckpoint(c.Context(), cp.ID); err != nil {
 		return responses.InternalError(c, "Could not delete checkpoint")
 	}
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
 // GetUserProgress — GET /api/v1/courses/:course_id/discussion_topics/:topic_id/checkpoints/progress?user_id=N
-// If user_id is omitted, falls back to the authenticated user.
+// If user_id is omitted, falls back to the authenticated user. Only
+// course staff may ask about another user; a student asking for a
+// classmate's progress gets 403.
 func (h *DiscussionCheckpointHandler) GetUserProgress(c *fiber.Ctx) error {
-	topicID, err := c.ParamsInt("topic_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid topic ID")
+	topic, wrote := requireTopicInCourse(c, h.checkpointService)
+	if wrote {
+		return nil
 	}
 
-	userID, err := strconv.ParseUint(c.Query("user_id", ""), 10, 64)
-	if err != nil || userID == 0 {
-		// Fall back to the authenticated user if available.
-		if v, ok := c.Locals("user_id").(uint); ok && v != 0 {
-			userID = uint64(v)
-		} else {
-			return responses.BadRequest(c, "user_id is required")
+	callerID, _ := c.Locals("user_id").(uint)
+
+	var userID uint
+	raw := c.Query("user_id", "")
+	if raw == "" || raw == "self" {
+		userID = callerID
+	} else {
+		parsed, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return responses.BadRequest(c, "Invalid user_id")
 		}
+		userID = uint(parsed)
+	}
+	if userID == 0 {
+		return responses.BadRequest(c, "user_id is required")
+	}
+	if userID != callerID && !discussionCallerIsStaff(c) {
+		return responses.Forbidden(c, "You can only view your own checkpoint progress")
 	}
 
-	progress, err := h.checkpointService.EvaluateUserProgress(c.Context(), uint(topicID), uint(userID))
+	progress, err := h.checkpointService.EvaluateUserProgress(c.Context(), topic.ID, userID)
 	if err != nil {
 		return responses.InternalError(c, "Could not evaluate progress")
 	}

@@ -40,6 +40,9 @@ func (r *Router) registerPublicRoutes(api fiber.Router, authLimit fiber.Handler)
 
 	// Public OAuth2 token endpoint (no auth required)
 	api.Post("/login/oauth2/token", r.OAuth2Handler.Token)
+	// OAuth2 authorization endpoint: validates the client and redirects
+	// to the SPA consent screen. Never issues a code (B076).
+	api.Get("/login/oauth2/auth", authLimit, r.OAuth2Handler.Authorize)
 
 	// Public LTI endpoints (no auth required)
 	//
@@ -88,4 +91,13 @@ func (r *Router) registerPublicRoutes(api fiber.Router, authLimit fiber.Handler)
 
 	// Public page endpoint (no auth required)
 	api.Get("/courses/:course_id/p/:slug", r.PageHandler.GetPublicPage)
+
+	// Public ePortfolio view + its uploaded files (no auth required; only
+	// published, public portfolios resolve). These must be registered
+	// here, before the protected group's auth middleware is mounted on
+	// /api/v1, or anonymous visitors get 401.
+	if r.PortfolioHandler != nil {
+		api.Get("/portfolios/public/:slug", r.PortfolioHandler.GetPublicPortfolio)
+		api.Get("/portfolios/public/:slug/files/:file_id", r.PortfolioHandler.DownloadPublicArtifactFile)
+	}
 }

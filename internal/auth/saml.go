@@ -129,18 +129,6 @@ func (h *SAMLHandler) resolveCertPath(ctx context.Context) string {
 	return h.config.CertPEM
 }
 
-// resolveKeyPath returns the live SP key filesystem path. Reserved for
-// future AuthnRequest signing — kept alongside its siblings so all
-// three settings keys are wired in one place.
-func (h *SAMLHandler) resolveKeyPath(ctx context.Context) string {
-	if h.lookup != nil {
-		if v, err := h.lookup(ctx, "auth.saml.key_file"); err == nil && v != "" {
-			return v
-		}
-	}
-	return h.config.KeyPEM
-}
-
 // loadCertPEM returns the SP signing cert as raw PEM bytes.
 // Resolution priority (Wave 9):
 //
@@ -178,30 +166,6 @@ func (h *SAMLHandler) loadCertPEM(ctx context.Context) (string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read SAML cert at %q: %w", path, err)
-	}
-	return string(b), nil
-}
-
-// loadKeyPEM returns the SP signing key as raw PEM bytes. Same
-// resolution priority as loadCertPEM. Returns empty + nil when
-// nothing is configured.
-//
-// Reserved for future AuthnRequest signing — not currently called
-// from the ceremony path. Wired in this wave so the inline-PEM
-// resolution is consistent across cert and key.
-func (h *SAMLHandler) loadKeyPEM(ctx context.Context) (string, error) {
-	if h.lookup != nil {
-		if v, err := h.lookup(ctx, "auth.saml.key_pem"); err == nil && v != "" {
-			return v, nil
-		}
-	}
-	path := h.resolveKeyPath(ctx)
-	if path == "" {
-		return "", nil
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read SAML key at %q: %w", path, err)
 	}
 	return string(b), nil
 }
@@ -703,6 +667,15 @@ func (h *SAMLHandler) HandleACS(c *fiber.Ctx) error {
 	// the SAML handler grows multi-IDP support, this field will be
 	// resolved from the RelayState's `provider_id` query param.
 	providerID := h.resolveProviderID(c)
+	// An unverified response must never log anyone in. signedID is ""
+	// only on the no-IdP-certificate dev path above; if that response
+	// still resolves to a real provider, refuse it here rather than hand
+	// a forged assertion to the pipeline.
+	if signedID == "" && providerID != 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"errors": []fiber.Map{{"message": "SAML signature verification failed: no IdP certificate configured for this provider"}},
+		})
+	}
 	outcome := SSOOutcome{
 		ProviderID:      providerID,
 		ProviderType:    "saml",
@@ -771,28 +744,39 @@ func (h *SAMLHandler) HandleACS(c *fiber.Ctx) error {
 // active SAML provider on account 1; if there are several, the
 // first one wins. Callers that need precise routing should pre-set
 // RelayState with the provider_id encoded.
+//
+// SECURITY: the provider decides which tenant the LoginPipeline resolves
+// (and JIT-provisions) the user in, while verifyResponseSignature checks
+// the response only against account 1's SAML providers. A provider_id
+// from the request is therefore honoured only when it names one of those
+// active account-1 SAML providers. It used to be taken verbatim, so a
+// response could be attributed to any provider of any type in any tenant
+// — and, when account 1 had no SAML provider (signature check skipped),
+// an unsigned, forged assertion logged in as any user of that tenant.
+// An ineligible explicit provider_id resolves to 0, which the pipeline
+// refuses. Returns 0 when no eligible provider exists.
 func (h *SAMLHandler) resolveProviderID(c *fiber.Ctx) uint {
-	// If a provider_id query/form param is set (e.g. via RelayState
-	// the SP carved out earlier), honor it.
-	if raw := c.Query("provider_id"); raw != "" {
-		if id, err := strconv.ParseUint(raw, 10, 64); err == nil {
-			return uint(id)
-		}
+	var requested uint
+	raw := c.Query("provider_id")
+	if raw == "" {
+		raw = c.FormValue("provider_id")
 	}
-	if raw := c.FormValue("provider_id"); raw != "" {
-		if id, err := strconv.ParseUint(raw, 10, 64); err == nil {
-			return uint(id)
+	if raw != "" {
+		id, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || id == 0 {
+			return 0
 		}
+		requested = uint(id)
 	}
-	// Fallback: pick the first active SAML provider on account 1.
-	// Returns 0 if none — pipeline.resolveUser refuses to JIT when
-	// ProviderID is 0, so that's a safe failure mode.
 	page, err := h.authProviderRepo.ListByAccountID(c.Context(), 1, repository.PaginationParams{Page: 1, PerPage: 100})
 	if err != nil || page == nil {
 		return 0
 	}
 	for _, p := range page.Items {
-		if p.AuthType == "saml" && p.WorkflowState == "active" {
+		if p.AuthType != "saml" || p.WorkflowState != "active" {
+			continue
+		}
+		if requested == 0 || p.ID == requested {
 			return p.ID
 		}
 	}

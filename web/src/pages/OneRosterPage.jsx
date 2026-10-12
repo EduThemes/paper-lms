@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { RefreshCw, Plus, Trash2, Edit3, AlertTriangle, X, Check, Clock, Loader2, ChevronDown, ChevronRight, Database } from 'lucide-react';
 import Layout from '../components/Layout';
 import { getCSRFToken } from '../services/api';
+import useAccountId from '../hooks/useAccountId';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 const getHeaders = () => ({
@@ -9,7 +10,7 @@ const getHeaders = () => ({
   'X-CSRF-Token': getCSRFToken(),
 });
 
-const ACCOUNT_ID = 1;
+// The tenant comes from the signed-in user (useAccountId), never a constant.
 
 const EMPTY_FORM = {
   name: '',
@@ -36,6 +37,7 @@ const SYNC_LOG_STATUS = {
 };
 
 const OneRosterPage = () => {
+  const ACCOUNT_ID = useAccountId();
   const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -67,7 +69,7 @@ const OneRosterPage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [ACCOUNT_ID]);
 
   const fetchSyncLogs = useCallback(async (connectionId) => {
     setSyncLogsLoading(true);
@@ -83,7 +85,7 @@ const OneRosterPage = () => {
     } finally {
       setSyncLogsLoading(false);
     }
-  }, []);
+  }, [ACCOUNT_ID]);
 
   const pollSyncStatus = useCallback(async (connectionId) => {
     try {
@@ -108,16 +110,16 @@ const OneRosterPage = () => {
     } catch {
       // Ignore polling errors
     }
-  }, [fetchConnections, fetchSyncLogs, selectedConnection]);
+  }, [ACCOUNT_ID, fetchConnections, fetchSyncLogs, selectedConnection]);
 
   useEffect(() => {
-    fetchConnections();
+    if (ACCOUNT_ID) fetchConnections();
     return () => {
       if (pollRef.current) {
         clearInterval(pollRef.current);
       }
     };
-  }, [fetchConnections]);
+  }, [ACCOUNT_ID, fetchConnections]);
 
   const resetForm = () => {
     setFormData({ ...EMPTY_FORM });

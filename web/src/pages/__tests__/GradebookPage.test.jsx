@@ -8,7 +8,7 @@ vi.mock('../../services/api', () => ({
   api: {
     getCourse: vi.fn(),
     getAssignments: vi.fn(),
-    getEnrollments: vi.fn(),
+    getAllEnrollments: vi.fn(),
     getAssignmentGroups: vi.fn(),
     getGradingStandards: vi.fn(),
     getGradebook: vi.fn(),
@@ -75,7 +75,7 @@ describe('GradebookPage', () => {
   test('shows skeleton while data is loading', () => {
     api.getCourse.mockReturnValue(new Promise(() => {}));
     api.getAssignments.mockReturnValue(new Promise(() => {}));
-    api.getEnrollments.mockReturnValue(new Promise(() => {}));
+    api.getAllEnrollments.mockReturnValue(new Promise(() => {}));
     api.getAssignmentGroups.mockReturnValue(new Promise(() => {}));
     const { container } = renderPage();
     expect(container.querySelector('.animate-pulse')).toBeInTheDocument();
@@ -86,7 +86,7 @@ describe('GradebookPage', () => {
     api.getAssignments.mockResolvedValue({
       data: [{ id: 100, name: 'Problem Set 1', points_possible: 10, assignment_group_id: 1 }],
     });
-    api.getEnrollments.mockResolvedValue({
+    api.getAllEnrollments.mockResolvedValue({
       data: [
         {
           user_id: 7,
@@ -109,7 +109,7 @@ describe('GradebookPage', () => {
   test('shows error UI when getCourse rejects', async () => {
     api.getCourse.mockRejectedValue(new Error('gradebook down'));
     api.getAssignments.mockResolvedValue({ data: [] });
-    api.getEnrollments.mockResolvedValue({ data: [] });
+    api.getAllEnrollments.mockResolvedValue({ data: [] });
     api.getAssignmentGroups.mockResolvedValue({ data: [] });
 
     renderPage();
@@ -117,5 +117,26 @@ describe('GradebookPage', () => {
       expect(screen.getByText('gradebook down')).toBeInTheDocument();
     });
     expect(screen.getByRole('button', { name: /Try Again/i })).toBeInTheDocument();
+  });
+
+  // F19: the gradebook builds its rows from the whole roster (per_page caps
+  // at 100, so a fixed page size dropped students in large courses).
+  test('loads every student, not just the first page', async () => {
+    api.getCourse.mockResolvedValue({ id: 1, name: 'Calculus I' });
+    api.getAssignments.mockResolvedValue({ data: [] });
+    api.getAllEnrollments.mockResolvedValue({
+      data: Array.from({ length: 250 }, (_, i) => ({
+        user_id: 1000 + i,
+        type: 'StudentEnrollment',
+        user: { id: 1000 + i, name: `Student ${i}`, sortable_name: `Student ${i}` },
+      })),
+    });
+    api.getAssignmentGroups.mockResolvedValue({ data: [] });
+
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/250 students/i)).toBeInTheDocument();
+    });
+    expect(api.getAllEnrollments).toHaveBeenCalledWith('1');
   });
 });

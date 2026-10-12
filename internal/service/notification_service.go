@@ -30,15 +30,9 @@ func (s *NotificationService) GetOrCreatePreferences(ctx context.Context, userID
 		return prefs, nil
 	}
 
-	// Not found — create with defaults
-	prefs = &models.NotificationPreference{
-		UserID:                userID,
-		Policy:                "daily",
-		NotifyNewMessage:      true,
-		NotifyEventStart:      false,
-		NotifySubmissionGrade: true,
-		NotifyNewAnnouncement: true,
-	}
+	// Not found — create with defaults (shared with QueueNotification so
+	// an unsaved preference page behaves exactly like the saved defaults).
+	prefs = DefaultNotificationPreference(userID)
 	if err := s.prefRepo.Create(ctx, prefs); err != nil {
 		return nil, err
 	}

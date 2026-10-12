@@ -136,48 +136,77 @@ func (h *QuizStimulusHandler) DeleteStimulus(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"delete": true})
 }
 
-// LinkQuestion attaches a stimulus to a quiz question.
-// POST /api/v1/quiz_stimuli/:stimulus_id/questions/:question_id
+// stimulusQuestionParams parses :course_id / :stimulus_id (and
+// :question_id when wantQuestion). Writes a 400 and returns ok=false on a
+// malformed id.
+func stimulusQuestionParams(c *fiber.Ctx, wantQuestion bool) (courseID, stimulusID, questionID uint, ok bool) {
+	cid, err := c.ParamsInt("course_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid course ID")
+		return 0, 0, 0, false
+	}
+	sid, err := c.ParamsInt("stimulus_id")
+	if err != nil {
+		_ = responses.BadRequest(c, "Invalid stimulus ID")
+		return 0, 0, 0, false
+	}
+	if wantQuestion {
+		qid, err := c.ParamsInt("question_id")
+		if err != nil {
+			_ = responses.BadRequest(c, "Invalid question ID")
+			return 0, 0, 0, false
+		}
+		questionID = uint(qid)
+	}
+	return uint(cid), uint(sid), questionID, true
+}
+
+// LinkQuestion attaches a stimulus to a quiz question. Both must belong to
+// :course_id (B126 / answer-key exposure: these routes used to be
+// course-less and unscoped).
+// POST /api/v1/courses/:course_id/quiz_stimuli/:stimulus_id/questions/:question_id
 func (h *QuizStimulusHandler) LinkQuestion(c *fiber.Ctx) error {
-	stimulusID, err := c.ParamsInt("stimulus_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid stimulus ID")
+	courseID, stimulusID, questionID, ok := stimulusQuestionParams(c, true)
+	if !ok {
+		return nil
 	}
-	questionID, err := c.ParamsInt("question_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid question ID")
-	}
-	if err := h.svc.LinkQuestionToStimulus(c.Context(), uint(questionID), uint(stimulusID)); err != nil {
-		return responses.BadRequest(c, err.Error())
+	if err := h.svc.LinkQuestionToStimulusInCourse(c.Context(), courseID, callerAccountID(c), questionID, stimulusID); err != nil {
+		return responses.NotFound(c, "quiz question")
 	}
 	return c.JSON(fiber.Map{"linked": true})
 }
 
+// UnlinkQuestion clears the stimulus link on a question of :course_id.
+// DELETE /api/v1/courses/:course_id/quiz_stimuli/:stimulus_id/questions/:question_id
 func (h *QuizStimulusHandler) UnlinkQuestion(c *fiber.Ctx) error {
-	questionID, err := c.ParamsInt("question_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid question ID")
+	courseID, stimulusID, questionID, ok := stimulusQuestionParams(c, true)
+	if !ok {
+		return nil
 	}
-	if err := h.svc.UnlinkQuestionFromStimulus(c.Context(), uint(questionID)); err != nil {
-		return responses.BadRequest(c, err.Error())
+	if err := h.svc.UnlinkQuestionFromStimulusInCourse(c.Context(), courseID, callerAccountID(c), questionID, stimulusID); err != nil {
+		return responses.NotFound(c, "quiz question")
 	}
 	return c.JSON(fiber.Map{"unlinked": true})
 }
 
-// ListQuestions returns every quiz_question pointing at this stimulus.
-// GET /api/v1/quiz_stimuli/:stimulus_id/questions
+// ListQuestions returns the course's quiz questions pointing at this
+// stimulus — WITH answer keys, so the route is instructor-only.
+// GET /api/v1/courses/:course_id/quiz_stimuli/:stimulus_id/questions
 func (h *QuizStimulusHandler) ListQuestions(c *fiber.Ctx) error {
-	stimulusID, err := c.ParamsInt("stimulus_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid stimulus ID")
+	courseID, stimulusID, _, ok := stimulusQuestionParams(c, false)
+	if !ok {
+		return nil
 	}
-	questions, err := h.svc.ListQuestionsForStimulus(c.Context(), uint(stimulusID))
+	if !quizCallerIsStaff(c) {
+		return responses.NotFound(c, "stimulus")
+	}
+	questions, err := h.svc.ListQuestionsForStimulusInCourse(c.Context(), courseID, callerAccountID(c), stimulusID)
 	if err != nil {
 		return responses.NotFound(c, "stimulus")
 	}
 	out := make([]fiber.Map, len(questions))
-	for i, q := range questions {
-		out[i] = quizQuestionToJSON(&q)
+	for i := range questions {
+		out[i] = quizQuestionToJSON(&questions[i])
 	}
 	return c.JSON(out)
 }

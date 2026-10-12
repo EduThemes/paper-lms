@@ -28,6 +28,10 @@ type UserRepository interface {
 	FindByID(ctx context.Context, id, accountID uint) (*models.User, error)
 	FindByLoginID(ctx context.Context, loginID string) (*models.User, error)
 	FindByEmail(ctx context.Context, email string) (*models.User, error)
+	// FindByEmailInAccount is the tenant-scoped email lookup used by the
+	// SSO email auto-link: an IdP configured on tenant B may only link to
+	// tenant B's users. AUTH-INTERNAL (pre-authentication).
+	FindByEmailInAccount(ctx context.Context, email string, accountID uint) (*models.User, error)
 	FindBySISUserID(ctx context.Context, sisUserID string) (*models.User, error)
 	FindByIDs(ctx context.Context, ids []uint, accountID uint) ([]models.User, error)
 	Update(ctx context.Context, user *models.User) error

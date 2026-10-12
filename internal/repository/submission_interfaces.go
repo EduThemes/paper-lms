@@ -51,7 +51,8 @@ type PeerReviewRepository interface {
 	FindByAssignmentAndReviewerAndReviewee(ctx context.Context, assignmentID, reviewerID, revieweeID, accountID uint) (*models.PeerReview, error)
 	// 13.1.D — tenant scope via parent assignment->course->account_id.
 	// 0 means no tenant scope (internal callers only).
-	DeleteByAssignment(ctx context.Context, assignmentID, accountID uint) error
+	// Deletes only reviews that are not yet completed (B117).
+	DeleteIncompleteByAssignment(ctx context.Context, assignmentID, accountID uint) error
 }
 
 type DocumentAnnotationRepository interface {

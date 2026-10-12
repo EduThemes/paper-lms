@@ -37,7 +37,7 @@ func makeIMSCCFromDir(t *testing.T, dir string) []byte {
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		_, err = io.Copy(w, f)
 		return err
 	}); err != nil {
@@ -60,7 +60,9 @@ func writeTempZip(t *testing.T, data []byte) string {
 	if _, err := f.Write(data); err != nil {
 		t.Fatalf("write temp: %v", err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
 	t.Cleanup(func() { _ = os.Remove(f.Name()) })
 	return f.Name()
 }

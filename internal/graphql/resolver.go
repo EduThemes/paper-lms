@@ -102,7 +102,7 @@ func (r *Resolver) resolveRootField(ctx context.Context, userID uint, name strin
 	case "course":
 		return r.resolveCourse(ctx, userID, args, subFields, variables)
 	case "allCourses":
-		return r.resolveAllCourses(ctx, args, subFields, variables)
+		return r.resolveAllCourses(ctx, userID, args, subFields, variables)
 	case "assignment":
 		return r.resolveAssignment(ctx, userID, args, subFields)
 	case "self":
@@ -137,8 +137,12 @@ func (r *Resolver) resolveCourse(ctx context.Context, userID uint, args map[stri
 	// Authz parity with REST GET /courses/:id (RequireEnrolled): the
 	// caller must be enrolled in the course or be an admin. Without this,
 	// any authenticated user could read any course in their tenant by id.
-	if !r.callerIsAdmin(ctx, userID) {
-		if _, err := r.enrollmentService.GetUserRole(ctx, userID, id, AccountIDFromContext(ctx)); err != nil {
+	isAdmin := r.callerIsAdmin(ctx, userID)
+	role := ""
+	if !isAdmin {
+		var err error
+		role, err = r.enrollmentService.GetUserRole(ctx, userID, id, AccountIDFromContext(ctx))
+		if err != nil {
 			return nil, fmt.Errorf("not authorized to view this course")
 		}
 	}
@@ -147,27 +151,88 @@ func (r *Resolver) resolveCourse(ctx context.Context, userID uint, args map[stri
 	if err != nil {
 		return nil, fmt.Errorf("course not found: %w", err)
 	}
+	// REST courseGate parity: students and observers can't reach a course
+	// that has not been published yet.
+	if !isAdmin && learnerBlockedFromCourse(course, role) {
+		return nil, fmt.Errorf("not authorized to view this course")
+	}
 
-	return r.buildCourseMap(ctx, course, subFields, variables)
+	return r.buildCourseMap(ctx, course, isAdmin || isStaffEnrollmentType(role), subFields, variables)
 }
 
-func (r *Resolver) resolveAllCourses(ctx context.Context, args map[string]interface{}, subFields []Field, variables map[string]interface{}) (interface{}, error) {
+// learnerBlockedFromCourse reports whether a student/observer enrollment
+// is refused because the course is still unpublished (claimed, created or
+// unpublished) — the same rule as the REST course gate.
+func learnerBlockedFromCourse(course *models.Course, enrollmentType string) bool {
+	if enrollmentType != "StudentEnrollment" && enrollmentType != "ObserverEnrollment" {
+		return false
+	}
+	switch course.WorkflowState {
+	case models.CourseClaimed, models.CourseCreated, models.CourseUnpublished:
+		return true
+	}
+	return false
+}
+
+// isStaffEnrollmentType reports whether an enrollment type may see a
+// course's unpublished content (teacher, TA, designer).
+func isStaffEnrollmentType(enrollmentType string) bool {
+	switch enrollmentType {
+	case "TeacherEnrollment", "TaEnrollment", "DesignerEnrollment":
+		return true
+	}
+	return false
+}
+
+// resolveAllCourses lists courses visible to the caller.
+//
+// B086: admins see every course in their tenant; everyone else sees only
+// the courses they are enrolled in (REST GET /courses parity). Previously
+// any user got every course in the tenant, with full rosters and
+// unpublished assignments.
+func (r *Resolver) resolveAllCourses(ctx context.Context, userID uint, args map[string]interface{}, subFields []Field, variables map[string]interface{}) (interface{}, error) {
 	page := getIntArgOr(args, "page", 1)
 	perPage := getIntArgOr(args, "perPage", 10)
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 || perPage > 100 {
+		perPage = 100
+	}
 
 	params := repository.PaginationParams{
 		Page:    page,
 		PerPage: perPage,
 	}
 
-	result, err := r.courseService.List(ctx, AccountIDFromContext(ctx), params)
+	isAdmin := r.callerIsAdmin(ctx, userID)
+	var result *repository.PaginatedResult[models.Course]
+	var err error
+	if isAdmin {
+		result, err = r.courseService.List(ctx, AccountIDFromContext(ctx), params)
+	} else {
+		result, err = r.courseService.ListForUser(ctx, userID, params)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to list courses: %w", err)
 	}
 
 	var courses []interface{}
 	for i := range result.Items {
-		c, err := r.buildCourseMap(ctx, &result.Items[i], subFields, variables)
+		course := &result.Items[i]
+		staff := isAdmin
+		if !staff {
+			role, roleErr := r.enrollmentService.GetUserRole(ctx, userID, course.ID, AccountIDFromContext(ctx))
+			if roleErr != nil {
+				// Not (or no longer) enrolled: never expose the course.
+				continue
+			}
+			if learnerBlockedFromCourse(course, role) {
+				continue
+			}
+			staff = isStaffEnrollmentType(role)
+		}
+		c, err := r.buildCourseMap(ctx, course, staff, subFields, variables)
 		if err != nil {
 			return nil, err
 		}
@@ -192,8 +257,13 @@ func (r *Resolver) resolveAssignment(ctx context.Context, userID uint, args map[
 	// (RequireEnrolled): the caller must be enrolled in the assignment's
 	// course or be an admin.
 	if !r.callerIsAdmin(ctx, userID) {
-		if _, err := r.enrollmentService.GetUserRole(ctx, userID, assignment.CourseID, AccountIDFromContext(ctx)); err != nil {
+		role, err := r.enrollmentService.GetUserRole(ctx, userID, assignment.CourseID, AccountIDFromContext(ctx))
+		if err != nil {
 			return nil, fmt.Errorf("not authorized to view this assignment")
+		}
+		// Unpublished assignments are staff-only (B086).
+		if !assignment.Published && !isStaffEnrollmentType(role) {
+			return nil, fmt.Errorf("assignment not found")
 		}
 	}
 
@@ -235,7 +305,9 @@ func (r *Resolver) resolveUser(ctx context.Context, userID uint, args map[string
 
 // --- Map builders ---
 
-func (r *Resolver) buildCourseMap(ctx context.Context, course *models.Course, subFields []Field, variables map[string]interface{}) (map[string]interface{}, error) {
+// buildCourseMap renders a course. viewerIsStaff gates unpublished
+// assignments: students only ever see published ones.
+func (r *Resolver) buildCourseMap(ctx context.Context, course *models.Course, viewerIsStaff bool, subFields []Field, variables map[string]interface{}) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
 
 	for _, f := range subFields {
@@ -264,7 +336,7 @@ func (r *Resolver) buildCourseMap(ctx context.Context, course *models.Course, su
 			result["updated_at"] = formatTime(course.UpdatedAt)
 		case "assignments":
 			resolvedArgs := resolveVariables(f.Arguments, variables)
-			assignments, err := r.resolveCourseAssignments(ctx, course.ID, resolvedArgs, f.Fields)
+			assignments, err := r.resolveCourseAssignments(ctx, course.ID, viewerIsStaff, resolvedArgs, f.Fields)
 			if err != nil {
 				return nil, err
 			}
@@ -278,7 +350,7 @@ func (r *Resolver) buildCourseMap(ctx context.Context, course *models.Course, su
 			result["enrollments"] = enrollments
 		case "modules":
 			resolvedArgs := resolveVariables(f.Arguments, variables)
-			modules, err := r.resolveCourseModules(ctx, course.ID, resolvedArgs, f.Fields)
+			modules, err := r.resolveCourseModules(ctx, course.ID, viewerIsStaff, resolvedArgs, f.Fields)
 			if err != nil {
 				return nil, err
 			}
@@ -461,7 +533,7 @@ func buildModuleMap(mod *models.ContextModule, subFields []Field) map[string]int
 
 // --- Nested resolvers ---
 
-func (r *Resolver) resolveCourseAssignments(ctx context.Context, courseID uint, args map[string]interface{}, subFields []Field) (interface{}, error) {
+func (r *Resolver) resolveCourseAssignments(ctx context.Context, courseID uint, viewerIsStaff bool, args map[string]interface{}, subFields []Field) (interface{}, error) {
 	page := getIntArgOr(args, "page", 1)
 	perPage := getIntArgOr(args, "perPage", 100)
 
@@ -473,6 +545,9 @@ func (r *Resolver) resolveCourseAssignments(ctx context.Context, courseID uint, 
 
 	var items []interface{}
 	for i := range result.Items {
+		if !viewerIsStaff && !result.Items[i].Published {
+			continue
+		}
 		items = append(items, buildAssignmentMap(&result.Items[i], subFields))
 	}
 
@@ -497,12 +572,20 @@ func (r *Resolver) resolveCourseEnrollments(ctx context.Context, courseID uint, 
 	return items, nil
 }
 
-func (r *Resolver) resolveCourseModules(ctx context.Context, courseID uint, args map[string]interface{}, subFields []Field) (interface{}, error) {
+// resolveCourseModules lists a course's modules. Students and observers get
+// published modules only (REST B045 parity); staff see drafts too.
+func (r *Resolver) resolveCourseModules(ctx context.Context, courseID uint, viewerIsStaff bool, args map[string]interface{}, subFields []Field) (interface{}, error) {
 	page := getIntArgOr(args, "page", 1)
 	perPage := getIntArgOr(args, "perPage", 100)
 
 	params := repository.PaginationParams{Page: page, PerPage: perPage}
-	result, err := r.moduleService.ListByCourse(ctx, courseID, params)
+	var result *repository.PaginatedResult[models.ContextModule]
+	var err error
+	if viewerIsStaff {
+		result, err = r.moduleService.ListByCourse(ctx, courseID, params)
+	} else {
+		result, err = r.moduleService.ListPublishedByCourse(ctx, courseID, params)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to list modules for course %d: %w", courseID, err)
 	}

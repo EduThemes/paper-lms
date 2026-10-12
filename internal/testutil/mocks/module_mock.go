@@ -45,6 +45,14 @@ func (m *MockModuleRepository) ListByCourseID(ctx context.Context, courseID uint
 	return args.Get(0).(*repository.PaginatedResult[models.ContextModule]), args.Error(1)
 }
 
+func (m *MockModuleRepository) ListPublishedByCourseID(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.ContextModule], error) {
+	args := m.Called(ctx, courseID, params)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*repository.PaginatedResult[models.ContextModule]), args.Error(1)
+}
+
 func (m *MockModuleRepository) FindActiveByDateRange(ctx context.Context, courseID uint, date time.Time) (*models.ContextModule, error) {
 	args := m.Called(ctx, courseID, date)
 	if args.Get(0) == nil {

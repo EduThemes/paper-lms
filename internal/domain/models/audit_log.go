@@ -7,6 +7,10 @@ type AuditLog struct {
 	ID          uint      `json:"id" gorm:"column:id;primaryKey"`
 	EventType   string    `json:"event_type" gorm:"index"`   // grade_change, course_update, enrollment_change, assignment_update, submission_update, user_update, account_update
 	UserID      uint      `json:"user_id" gorm:"index"`      // who performed the action
+	// RealUserID is the masquerading admin when the action was taken
+	// during a masquerade (UserID is then the impersonated user). NULL for
+	// ordinary requests.
+	RealUserID *uint `json:"real_user_id" gorm:"index"`
 	CourseID    *uint     `json:"course_id" gorm:"index"`    // related course (if applicable)
 	AccountID   *uint     `json:"account_id" gorm:"index"`   // related account
 	ContextType string    `json:"context_type"`              // Submission, Course, Enrollment, Assignment, User, etc.

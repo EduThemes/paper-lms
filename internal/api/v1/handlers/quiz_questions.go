@@ -1,11 +1,11 @@
 package handlers
 
 import (
-	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/service"
+	"github.com/gofiber/fiber/v2"
 )
 
 type QuizQuestionHandler struct {
@@ -16,25 +16,45 @@ func NewQuizQuestionHandler(quizService *service.QuizService) *QuizQuestionHandl
 	return &QuizQuestionHandler{quizService: quizService}
 }
 
+// quizQuestionToJSON serializes a question WITH its answer key. Only use it
+// for course staff; students get quizQuestionToViewerJSON.
 func quizQuestionToJSON(q *models.QuizQuestion) fiber.Map {
 	return fiber.Map{
-		"id":                      q.ID,
-		"quiz_id":                 q.QuizID,
-		"quiz_question_group_id":  q.QuizQuestionGroupID,
-		"position":                q.Position,
-		"question_type":           q.QuestionType,
-		"question_text":           q.QuestionText,
-		"points_possible":         q.PointsPossible,
-		"answers":                 q.Answers,
-		"correct_comments":        q.CorrectComments,
-		"incorrect_comments":      q.IncorrectComments,
-		"neutral_comments":        q.NeutralComments,
-		"workflow_state":          q.WorkflowState,
-		"bank_item_id":            q.BankItemID,
-		"stimulus_id":             q.StimulusID,
-		"created_at":              q.CreatedAt,
-		"updated_at":              q.UpdatedAt,
+		"id":                     q.ID,
+		"quiz_id":                q.QuizID,
+		"quiz_question_group_id": q.QuizQuestionGroupID,
+		"position":               q.Position,
+		"question_type":          service.NormalizeQuizQuestionType(q.QuestionType),
+		"question_text":          q.QuestionText,
+		"points_possible":        q.PointsPossible,
+		"answers":                q.Answers,
+		"correct_comments":       q.CorrectComments,
+		"incorrect_comments":     q.IncorrectComments,
+		"neutral_comments":       q.NeutralComments,
+		"workflow_state":         q.WorkflowState,
+		"bank_item_id":           q.BankItemID,
+		"stimulus_id":            q.StimulusID,
+		"question_bank_entry_id": q.QuestionBankEntryID,
+		"created_at":             q.CreatedAt,
+		"updated_at":             q.UpdatedAt,
 	}
+}
+
+// quizQuestionToViewerJSON serializes a question for the caller: staff get
+// the full answer key; everyone else gets a redacted copy (B023). The
+// linked stimulus passage, if any, is embedded so the take page can render
+// it (B126).
+func quizQuestionToViewerJSON(q *models.QuizQuestion, showKey bool, seed int64, stimuli map[uint]*models.QuizStimulus) fiber.Map {
+	m := quizQuestionToJSON(q)
+	if !showKey {
+		m = redactQuizQuestionJSON(m, q, seed)
+	}
+	if q.StimulusID != nil {
+		if stim := stimuli[*q.StimulusID]; stim != nil {
+			m["stimulus"] = quizStimulusToJSON(stim)
+		}
+	}
+	return m
 }
 
 // scopedQuizQuestion loads the :question_id question and verifies it
@@ -43,31 +63,32 @@ func quizQuestionToJSON(q *models.QuizQuestion) fiber.Map {
 // miss so the caller short-circuits with `return nil`. Closes the
 // nested-route cross-tenant / cross-quiz IDOR — the route middleware
 // only guards :course_id.
-func (h *QuizQuestionHandler) scopedQuizQuestion(c *fiber.Ctx) (*models.QuizQuestion, bool) {
+func (h *QuizQuestionHandler) scopedQuizQuestion(c *fiber.Ctx) (*models.Quiz, *models.QuizQuestion, bool) {
 	courseID, err := c.ParamsInt("course_id")
 	if err != nil {
 		_ = responses.BadRequest(c, "Invalid course ID")
-		return nil, true
+		return nil, nil, true
 	}
 	quizID, err := c.ParamsInt("quiz_id")
 	if err != nil {
 		_ = responses.BadRequest(c, "Invalid quiz ID")
-		return nil, true
+		return nil, nil, true
 	}
 	questionID, err := c.ParamsInt("question_id")
 	if err != nil {
 		_ = responses.BadRequest(c, "Invalid question ID")
-		return nil, true
+		return nil, nil, true
 	}
-	if requireQuizInCourse(c, h.quizService, uint(quizID), uint(courseID)) {
-		return nil, true
+	quiz, wrote := loadQuizForCaller(c, h.quizService, uint(quizID), uint(courseID))
+	if wrote {
+		return nil, nil, true
 	}
 	question, err := h.quizService.GetQuestion(c.Context(), uint(questionID))
 	if err != nil || question.QuizID != uint(quizID) {
 		_ = responses.NotFound(c, "quiz question")
-		return nil, true
+		return nil, nil, true
 	}
-	return question, false
+	return quiz, question, false
 }
 
 func (h *QuizQuestionHandler) ListQuestions(c *fiber.Ctx) error {
@@ -79,7 +100,8 @@ func (h *QuizQuestionHandler) ListQuestions(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if requireQuizInCourse(c, h.quizService, uint(quizID), uint(courseID)) {
+	quiz, wrote := loadQuizForCaller(c, h.quizService, uint(quizID), uint(courseID))
+	if wrote {
 		return nil
 	}
 
@@ -92,21 +114,49 @@ func (h *QuizQuestionHandler) ListQuestions(c *fiber.Ctx) error {
 
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
 
-	questions := make([]fiber.Map, len(result.Items))
-	for i, q := range result.Items {
-		questions[i] = quizQuestionToJSON(&q)
+	staff := quizCallerIsStaff(c)
+	stimuli := h.quizService.StimuliForQuestions(c.Context(), quiz.CourseID, result.Items)
+	questions := make([]fiber.Map, 0, len(result.Items))
+	for i := range result.Items {
+		q := &result.Items[i]
+		// Per-attempt copies of bank entries are not part of the authored
+		// quiz; students never see them outside an attempt.
+		if !staff && q.QuestionBankEntryID != nil {
+			continue
+		}
+		questions = append(questions, quizQuestionToViewerJSON(q, staff, service.QuizShuffleSeed(q.ID), stimuli))
 	}
 
 	return c.JSON(questions)
 }
 
 func (h *QuizQuestionHandler) GetQuestion(c *fiber.Ctx) error {
-	question, wrote := h.scopedQuizQuestion(c)
+	quiz, question, wrote := h.scopedQuizQuestion(c)
 	if wrote {
 		return nil
 	}
 
-	return c.JSON(quizQuestionToJSON(question))
+	stimuli := h.quizService.StimuliForQuestions(c.Context(), quiz.CourseID, []models.QuizQuestion{*question})
+	return c.JSON(quizQuestionToViewerJSON(question, quizCallerIsStaff(c), service.QuizShuffleSeed(question.ID), stimuli))
+}
+
+// validateQuestionLinks checks that a group id belongs to the quiz and a
+// stimulus id to the course. Returns wrote=true after writing a 400.
+func (h *QuizQuestionHandler) validateQuestionLinks(c *fiber.Ctx, quiz *models.Quiz, groupID, stimulusID *uint) bool {
+	if groupID != nil && *groupID != 0 {
+		group, err := h.quizService.GetQuestionGroup(c.Context(), *groupID)
+		if err != nil || group == nil || group.QuizID != quiz.ID {
+			_ = responses.BadRequest(c, "quiz_question_group_id does not belong to this quiz")
+			return true
+		}
+	}
+	if stimulusID != nil && *stimulusID != 0 {
+		if err := h.quizService.ValidateStimulusForCourse(c.Context(), *stimulusID, quiz.CourseID); err != nil {
+			_ = responses.BadRequest(c, "stimulus_id does not belong to this course")
+			return true
+		}
+	}
+	return false
 }
 
 func (h *QuizQuestionHandler) CreateQuestion(c *fiber.Ctx) error {
@@ -118,7 +168,8 @@ func (h *QuizQuestionHandler) CreateQuestion(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid quiz ID")
 	}
-	if requireQuizInCourse(c, h.quizService, uint(quizID), uint(courseID)) {
+	quiz, wrote := loadQuizForCaller(c, h.quizService, uint(quizID), uint(courseID))
+	if wrote {
 		return nil
 	}
 
@@ -133,11 +184,15 @@ func (h *QuizQuestionHandler) CreateQuestion(c *fiber.Ctx) error {
 			IncorrectComments   string   `json:"incorrect_comments"`
 			NeutralComments     string   `json:"neutral_comments"`
 			QuizQuestionGroupID *uint    `json:"quiz_question_group_id"`
+			StimulusID          *uint    `json:"stimulus_id"`
 		} `json:"question"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
+	}
+	if h.validateQuestionLinks(c, quiz, input.Question.QuizQuestionGroupID, input.Question.StimulusID) {
+		return nil
 	}
 
 	question := &models.QuizQuestion{
@@ -152,6 +207,12 @@ func (h *QuizQuestionHandler) CreateQuestion(c *fiber.Ctx) error {
 		IncorrectComments:   input.Question.IncorrectComments,
 		NeutralComments:     input.Question.NeutralComments,
 	}
+	if input.Question.StimulusID != nil && *input.Question.StimulusID != 0 {
+		question.StimulusID = input.Question.StimulusID
+	}
+	if question.QuizQuestionGroupID != nil && *question.QuizQuestionGroupID == 0 {
+		question.QuizQuestionGroupID = nil
+	}
 
 	if err := h.quizService.CreateQuestion(c.Context(), question); err != nil {
 		return responses.BadRequest(c, err.Error())
@@ -161,27 +222,43 @@ func (h *QuizQuestionHandler) CreateQuestion(c *fiber.Ctx) error {
 }
 
 func (h *QuizQuestionHandler) UpdateQuestion(c *fiber.Ctx) error {
-	question, wrote := h.scopedQuizQuestion(c)
+	quiz, question, wrote := h.scopedQuizQuestion(c)
 	if wrote {
 		return nil
 	}
 
+	// quiz_question_group_id and stimulus_id are optionalField so an
+	// explicit null clears the link (B129 / B126); an absent key leaves it.
 	var input struct {
 		Question struct {
-			Position            *int     `json:"position"`
-			QuestionType        *string  `json:"question_type"`
-			QuestionText        *string  `json:"question_text"`
-			PointsPossible      *float64 `json:"points_possible"`
-			Answers             *string  `json:"answers"`
-			CorrectComments     *string  `json:"correct_comments"`
-			IncorrectComments   *string  `json:"incorrect_comments"`
-			NeutralComments     *string  `json:"neutral_comments"`
-			QuizQuestionGroupID *uint    `json:"quiz_question_group_id"`
+			Position            *int                `json:"position"`
+			QuestionType        *string             `json:"question_type"`
+			QuestionText        *string             `json:"question_text"`
+			PointsPossible      *float64            `json:"points_possible"`
+			Answers             *string             `json:"answers"`
+			CorrectComments     *string             `json:"correct_comments"`
+			IncorrectComments   *string             `json:"incorrect_comments"`
+			NeutralComments     *string             `json:"neutral_comments"`
+			QuizQuestionGroupID optionalField[uint] `json:"quiz_question_group_id"`
+			StimulusID          optionalField[uint] `json:"stimulus_id"`
 		} `json:"question"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
+	}
+
+	var newGroup, newStimulus *uint
+	if input.Question.QuizQuestionGroupID.Set && !input.Question.QuizQuestionGroupID.Null {
+		v := input.Question.QuizQuestionGroupID.Value
+		newGroup = &v
+	}
+	if input.Question.StimulusID.Set && !input.Question.StimulusID.Null {
+		v := input.Question.StimulusID.Value
+		newStimulus = &v
+	}
+	if h.validateQuestionLinks(c, quiz, newGroup, newStimulus) {
+		return nil
 	}
 
 	if input.Question.Position != nil {
@@ -208,8 +285,19 @@ func (h *QuizQuestionHandler) UpdateQuestion(c *fiber.Ctx) error {
 	if input.Question.NeutralComments != nil {
 		question.NeutralComments = *input.Question.NeutralComments
 	}
-	if input.Question.QuizQuestionGroupID != nil {
-		question.QuizQuestionGroupID = input.Question.QuizQuestionGroupID
+	if input.Question.QuizQuestionGroupID.Set {
+		if newGroup == nil || *newGroup == 0 {
+			question.QuizQuestionGroupID = nil
+		} else {
+			question.QuizQuestionGroupID = newGroup
+		}
+	}
+	if input.Question.StimulusID.Set {
+		if newStimulus == nil || *newStimulus == 0 {
+			question.StimulusID = nil
+		} else {
+			question.StimulusID = newStimulus
+		}
 	}
 
 	if err := h.quizService.UpdateQuestion(c.Context(), question); err != nil {
@@ -220,7 +308,7 @@ func (h *QuizQuestionHandler) UpdateQuestion(c *fiber.Ctx) error {
 }
 
 func (h *QuizQuestionHandler) DeleteQuestion(c *fiber.Ctx) error {
-	question, wrote := h.scopedQuizQuestion(c)
+	_, question, wrote := h.scopedQuizQuestion(c)
 	if wrote {
 		return nil
 	}

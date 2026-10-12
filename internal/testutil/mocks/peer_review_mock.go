@@ -54,7 +54,7 @@ func (m *MockPeerReviewRepository) FindByAssignmentAndReviewerAndReviewee(ctx co
 	return args.Get(0).(*models.PeerReview), args.Error(1)
 }
 
-func (m *MockPeerReviewRepository) DeleteByAssignment(ctx context.Context, assignmentID, accountID uint) error {
+func (m *MockPeerReviewRepository) DeleteIncompleteByAssignment(ctx context.Context, assignmentID, accountID uint) error {
 	args := m.Called(ctx, assignmentID, accountID)
 	return args.Error(0)
 }

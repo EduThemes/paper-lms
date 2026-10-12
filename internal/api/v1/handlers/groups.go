@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"strconv"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
@@ -46,6 +48,35 @@ func (h *GroupHandler) getCourseIDFromGroup(c *fiber.Ctx, groupID uint) (uint, e
 	return h.getCourseIDFromCategory(c, group.GroupCategoryID)
 }
 
+// groupCourseID resolves the course of a loaded group through its category,
+// tenant-scoped. A category the caller's tenant can't see is a 404 — it is
+// never treated as "no course" (that used to skip authorization entirely).
+func (h *GroupHandler) groupCourseID(c *fiber.Ctx, group *models.Group) (uint, error) {
+	courseID, err := h.getCourseIDFromCategory(c, group.GroupCategoryID)
+	if err != nil {
+		return 0, authzNotFound("group")
+	}
+	return courseID, nil
+}
+
+// callerIsGroupMember reports whether the caller has an accepted membership
+// in the group.
+func (h *GroupHandler) callerIsGroupMember(c *fiber.Ctx, groupID, callerID uint) bool {
+	if callerID == 0 {
+		return false
+	}
+	members, err := h.groupService.ListMembers(c.Context(), groupID, repository.PaginationParams{Page: 1, PerPage: 10000})
+	if err != nil || members == nil {
+		return false
+	}
+	for _, m := range members.Items {
+		if m.UserID == callerID && m.WorkflowState == "accepted" {
+			return true
+		}
+	}
+	return false
+}
+
 // ---- JSON converters ----
 
 func groupCategoryToJSON(c *models.GroupCategory) fiber.Map {
@@ -81,7 +112,10 @@ func groupToJSON(g *models.Group) fiber.Map {
 	}
 }
 
-func groupMembershipToJSON(m *models.GroupMembership) fiber.Map {
+// groupMembershipToJSON renders a membership. includeContact adds the
+// member's email and login_id, which only course staff and admins may see
+// (EnrollmentHandler.ListEnrollments rule); classmates get the name only.
+func groupMembershipToJSON(m *models.GroupMembership, includeContact bool) fiber.Map {
 	result := fiber.Map{
 		"id":             m.ID,
 		"group_id":       m.GroupID,
@@ -92,14 +126,17 @@ func groupMembershipToJSON(m *models.GroupMembership) fiber.Map {
 		"updated_at":     m.UpdatedAt,
 	}
 	if m.User != nil {
-		result["user"] = fiber.Map{
+		user := fiber.Map{
 			"id":            m.User.ID,
 			"name":          m.User.Name,
 			"sortable_name": m.User.SortableName,
 			"short_name":    m.User.ShortName,
-			"login_id":      m.User.LoginID,
-			"email":         m.User.Email,
 		}
+		if includeContact {
+			user["login_id"] = m.User.LoginID
+			user["email"] = m.User.Email
+		}
+		result["user"] = user
 	}
 	return result
 }
@@ -310,15 +347,29 @@ func (h *GroupHandler) CreateGroup(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid category ID")
 	}
 
-	// Authorization: require instructor for course-scoped categories
-	courseID, err := h.getCourseIDFromCategory(c, uint(categoryID))
-	if err != nil {
+	// The category is loaded tenant-scoped; the group's context is derived
+	// from it, never from the request body (groupRepo scopes tenants by
+	// context_type/context_id, so a client-chosen context would plant the
+	// group in another tenant).
+	category, err := h.groupService.GetCategory(c.Context(), uint(categoryID), callerAccountID(c))
+	if err != nil || category == nil {
 		return responses.NotFound(c, "group category")
 	}
-	if courseID != 0 {
-		if err := h.authz.RequireCourseInstructor(c, courseID); err != nil {
+	var contextType string
+	var contextID uint
+	switch {
+	case category.CourseID != nil && *category.CourseID != 0:
+		if err := h.authz.RequireCourseInstructor(c, *category.CourseID); err != nil {
 			return err
 		}
+		contextType, contextID = "Course", *category.CourseID
+	case category.AccountID != nil && *category.AccountID != 0:
+		if !callerIsAdmin(c, h.authz) {
+			return authzForbidden("admin access required")
+		}
+		contextType, contextID = "Account", *category.AccountID
+	default:
+		return responses.NotFound(c, "group category")
 	}
 
 	var input struct {
@@ -328,8 +379,6 @@ func (h *GroupHandler) CreateGroup(c *fiber.Ctx) error {
 			MaxMembership *int   `json:"max_membership"`
 			IsPublic      bool   `json:"is_public"`
 			JoinLevel     string `json:"join_level"`
-			ContextType   string `json:"context_type"`
-			ContextID     uint   `json:"context_id"`
 		} `json:"group"`
 	}
 
@@ -340,12 +389,12 @@ func (h *GroupHandler) CreateGroup(c *fiber.Ctx) error {
 	group := &models.Group{
 		GroupCategoryID: uint(categoryID),
 		Name:            input.Group.Name,
-		Description:     service.SanitizeHTML(input.Group.Description),
+		Description:     service.SanitizePlainText(input.Group.Description),
 		MaxMembership:   input.Group.MaxMembership,
 		IsPublic:        input.Group.IsPublic,
 		JoinLevel:       input.Group.JoinLevel,
-		ContextType:     input.Group.ContextType,
-		ContextID:       input.Group.ContextID,
+		ContextType:     contextType,
+		ContextID:       contextID,
 	}
 
 	if err := h.groupService.CreateGroup(c.Context(), group); err != nil {
@@ -366,11 +415,20 @@ func (h *GroupHandler) GetGroup(c *fiber.Ctx) error {
 		return responses.NotFound(c, "group")
 	}
 
-	// Authorization: require enrollment for course-scoped groups
-	courseID, err := h.getCourseIDFromCategory(c, group.GroupCategoryID)
-	if err == nil && courseID != 0 {
+	// Authorization: enrollment for course groups; membership, moderator
+	// or admin for non-course groups. A category lookup miss is a 404.
+	courseID, err := h.groupCourseID(c, group)
+	if err != nil {
+		return err
+	}
+	if courseID != 0 {
 		if err := h.authz.RequireCourseEnrolled(c, courseID); err != nil {
 			return err
+		}
+	} else {
+		callerID, _ := c.Locals("user_id").(uint)
+		if !callerIsAdmin(c, h.authz) && !h.callerIsGroupMember(c, group.ID, callerID) {
+			return authzNotFound("group")
 		}
 	}
 
@@ -388,11 +446,20 @@ func (h *GroupHandler) UpdateGroup(c *fiber.Ctx) error {
 		return responses.NotFound(c, "group")
 	}
 
-	// Authorization: require instructor for course-scoped groups
-	courseID, err := h.getCourseIDFromCategory(c, group.GroupCategoryID)
-	if err == nil && courseID != 0 {
+	// Authorization: instructor for course groups; admin or group
+	// moderator for non-course groups. A category lookup miss is a 404.
+	courseID, err := h.groupCourseID(c, group)
+	if err != nil {
+		return err
+	}
+	if courseID != 0 {
 		if err := h.authz.RequireCourseInstructor(c, courseID); err != nil {
 			return err
+		}
+	} else {
+		callerID, _ := c.Locals("user_id").(uint)
+		if !callerIsAdmin(c, h.authz) && !h.callerIsGroupModerator(c, group.ID, callerID) {
+			return authzForbidden("only group moderators or admins can modify this group")
 		}
 	}
 
@@ -414,7 +481,7 @@ func (h *GroupHandler) UpdateGroup(c *fiber.Ctx) error {
 		group.Name = *input.Group.Name
 	}
 	if input.Group.Description != nil {
-		group.Description = service.SanitizeHTML(*input.Group.Description)
+		group.Description = service.SanitizePlainText(*input.Group.Description)
 	}
 	if input.Group.MaxMembership != nil {
 		group.MaxMembership = input.Group.MaxMembership
@@ -445,11 +512,20 @@ func (h *GroupHandler) DeleteGroup(c *fiber.Ctx) error {
 		return responses.NotFound(c, "group")
 	}
 
-	// Authorization: require instructor for course-scoped groups
-	courseID, err := h.getCourseIDFromCategory(c, group.GroupCategoryID)
-	if err == nil && courseID != 0 {
+	// Authorization: instructor for course groups; admin or group
+	// moderator for non-course groups. A category lookup miss is a 404.
+	courseID, err := h.groupCourseID(c, group)
+	if err != nil {
+		return err
+	}
+	if courseID != 0 {
 		if err := h.authz.RequireCourseInstructor(c, courseID); err != nil {
 			return err
+		}
+	} else {
+		callerID, _ := c.Locals("user_id").(uint)
+		if !callerIsAdmin(c, h.authz) && !h.callerIsGroupModerator(c, group.ID, callerID) {
+			return authzForbidden("only group moderators or admins can modify this group")
 		}
 	}
 
@@ -468,15 +544,25 @@ func (h *GroupHandler) ListGroupMemberships(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "Invalid group ID")
 	}
 
-	// Authorization: require enrollment for course-scoped groups
+	// Authorization: enrollment for course groups; membership, moderator
+	// or admin for non-course groups. Contact fields (email, login_id) are
+	// for course staff and admins only.
 	courseID, err := h.getCourseIDFromGroup(c, uint(groupID))
 	if err != nil {
 		return responses.NotFound(c, "group")
 	}
+	callerID, _ := c.Locals("user_id").(uint)
+	includeContact := callerIsAdmin(c, h.authz)
 	if courseID != 0 {
 		if err := h.authz.RequireCourseEnrolled(c, courseID); err != nil {
 			return err
 		}
+		if !includeContact {
+			includeContact = callerIsCourseInstructor(c, h.authz, courseID)
+		}
+	} else if !includeContact && !h.callerIsGroupMember(c, uint(groupID), callerID) &&
+		!h.callerIsGroupModerator(c, uint(groupID), callerID) {
+		return responses.NotFound(c, "group")
 	}
 
 	params := middleware.GetPagination(c)
@@ -490,13 +576,13 @@ func (h *GroupHandler) ListGroupMemberships(c *fiber.Ctx) error {
 
 	memberships := make([]fiber.Map, len(result.Items))
 	for i, m := range result.Items {
-		memberships[i] = groupMembershipToJSON(&m)
+		memberships[i] = groupMembershipToJSON(&m, includeContact)
 	}
 
-	// Wave 5.2 FERPA audit: membership list embeds user.email +
-	// user.login_id for every group member — directory-level PII.
-	// Bulk read (studentID=0) keyed on the group resource.
-	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil {
+	// Wave 5.2 FERPA audit: for staff/admins the membership list embeds
+	// user.email + user.login_id for every group member — directory-level
+	// PII. Bulk read (studentID=0) keyed on the group resource.
+	if includeContact && callerID != 0 && h.auditService != nil {
 		_ = h.auditService.LogPIIAccess(c.Context(), callerID, 0, "read", "bulk_group_memberships", "groups", uint(groupID), c.IP(), c.Get("User-Agent"))
 	}
 
@@ -543,7 +629,8 @@ func (h *GroupHandler) CreateGroupMembership(c *fiber.Ctx) error {
 	}
 
 	callerID, _ := c.Locals("user_id").(uint)
-	isAdmin, _ := c.Locals("is_admin").(bool)
+	// DB-backed role (masquerade-capped), not the JWT is_admin hint.
+	isAdmin := callerIsAdmin(c, h.authz)
 
 	// If user_id not provided, use the authenticated user (self-signup)
 	userID := input.Membership.UserID
@@ -555,8 +642,25 @@ func (h *GroupHandler) CreateGroupMembership(c *fiber.Ctx) error {
 	}
 
 	if courseID != 0 {
-		if err := h.authz.RequireCourseInstructor(c, courseID); err != nil {
-			return err
+		if !callerIsCourseInstructor(c, h.authz, courseID) {
+			// Self-signup (Canvas Group#allow_self_signup?): a student may
+			// add only themselves, as a plain accepted member, to a group
+			// whose set has self sign-up enabled. Everything else needs an
+			// instructor.
+			if userID != callerID || input.Membership.Moderator ||
+				(input.Membership.WorkflowState != "" && input.Membership.WorkflowState != "accepted") {
+				return responses.Forbidden(c, "instructor access required")
+			}
+			if err := h.authz.RequireCourseEnrolled(c, courseID); authzDenied(c, err) {
+				return err
+			}
+			group, gerr := h.groupService.GetGroup(c.Context(), uint(groupID), callerAccountID(c))
+			if gerr != nil {
+				return responses.NotFound(c, "group")
+			}
+			if err := h.groupService.CheckSelfSignup(c.Context(), group, callerID, courseID); err != nil {
+				return responses.Forbidden(c, err.Error())
+			}
 		}
 	} else {
 		// Non-course group. Self-signup is OK with constrained fields;
@@ -590,7 +694,7 @@ func (h *GroupHandler) CreateGroupMembership(c *fiber.Ctx) error {
 		return responses.BadRequest(c, err.Error())
 	}
 
-	return c.Status(fiber.StatusCreated).JSON(groupMembershipToJSON(membership))
+	return c.Status(fiber.StatusCreated).JSON(groupMembershipToJSON(membership, false))
 }
 
 // callerIsGroupModerator returns true if the caller has an accepted
@@ -627,7 +731,7 @@ func (h *GroupHandler) UpdateGroupMembership(c *fiber.Ctx) error {
 	}
 
 	membership, err := h.groupService.GetMembership(c.Context(), uint(membershipID), callerAccountID(c))
-	if err != nil {
+	if err != nil || (c.Params("group_id") != "" && c.Params("group_id") != strconv.FormatUint(uint64(membership.GroupID), 10)) {
 		return responses.NotFound(c, "group membership")
 	}
 
@@ -636,16 +740,22 @@ func (h *GroupHandler) UpdateGroupMembership(c *fiber.Ctx) error {
 	// audit fix, the account-scope branch had NO authz gate, which let
 	// a pending member self-accept by writing workflow_state=accepted.
 	courseID, err := h.getCourseIDFromGroup(c, membership.GroupID)
-	if err == nil && courseID != 0 {
+	if err != nil {
+		return responses.NotFound(c, "group membership")
+	}
+	includeContact := false
+	if courseID != 0 {
 		if err := h.authz.RequireCourseInstructor(c, courseID); err != nil {
 			return err
 		}
+		includeContact = true
 	} else {
 		callerID, _ := c.Locals("user_id").(uint)
-		isAdmin, _ := c.Locals("is_admin").(bool)
+		isAdmin := callerIsAdmin(c, h.authz)
 		if !isAdmin && !h.callerIsGroupModerator(c, membership.GroupID, callerID) {
 			return responses.Forbidden(c, "only group moderators or admins can modify memberships")
 		}
+		includeContact = isAdmin
 	}
 
 	var input struct {
@@ -670,7 +780,7 @@ func (h *GroupHandler) UpdateGroupMembership(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not update group membership")
 	}
 
-	return c.JSON(groupMembershipToJSON(membership))
+	return c.JSON(groupMembershipToJSON(membership, includeContact))
 }
 
 // DeleteGroupMembership removes a member from a group.
@@ -687,22 +797,24 @@ func (h *GroupHandler) DeleteGroupMembership(c *fiber.Ctx) error {
 
 	// Fetch first to check authorization
 	membership, err := h.groupService.GetMembership(c.Context(), uint(membershipID), callerAccountID(c))
-	if err != nil {
+	if err != nil || (c.Params("group_id") != "" && c.Params("group_id") != strconv.FormatUint(uint64(membership.GroupID), 10)) {
 		return responses.NotFound(c, "group membership")
 	}
 
 	callerID, _ := c.Locals("user_id").(uint)
-	isAdmin, _ := c.Locals("is_admin").(bool)
 
 	// Self-removal is always allowed (leave-the-group UX).
 	if membership.UserID != callerID {
 		// Authorization: require instructor for course-scoped groups
 		courseID, err := h.getCourseIDFromGroup(c, membership.GroupID)
-		if err == nil && courseID != 0 {
+		if err != nil {
+			return responses.NotFound(c, "group membership")
+		}
+		if courseID != 0 {
 			if err := h.authz.RequireCourseInstructor(c, courseID); err != nil {
 				return err
 			}
-		} else if !isAdmin && !h.callerIsGroupModerator(c, membership.GroupID, callerID) {
+		} else if !callerIsAdmin(c, h.authz) && !h.callerIsGroupModerator(c, membership.GroupID, callerID) {
 			return responses.Forbidden(c, "only group moderators or admins can remove other members")
 		}
 	}

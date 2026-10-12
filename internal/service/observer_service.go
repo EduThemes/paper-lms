@@ -80,10 +80,26 @@ type ObserverEnrollmentRepository interface {
 	Update(ctx context.Context, enrollment *models.Enrollment) error
 }
 
+// ObserverLinkStore persists the durable observer -> student pairing
+// (postgres.ObserverLinkRepository). Consumer-side interface, wired via
+// SetObserverLinkStore.
+type ObserverLinkStore interface {
+	Activate(ctx context.Context, observerID, studentID, accountID uint) (bool, error)
+	Deactivate(ctx context.Context, observerID, studentID uint) (bool, error)
+	IsLinked(ctx context.Context, observerID, studentID uint) (bool, error)
+	ListStudentIDs(ctx context.Context, observerID uint) ([]uint, error)
+	SyncStudent(ctx context.Context, studentID uint) error
+}
+
 type ObserverService struct {
 	enrollmentRepo ObserverEnrollmentRepository
 	courseRepo     repository.CourseRepository
 	userRepo       repository.UserRepository
+
+	// links is the durable pairing store (B177). When nil the service
+	// falls back to deriving pairings from ObserverEnrollment rows (the
+	// pre-000072 behavior), which unit tests with mock repos rely on.
+	links ObserverLinkStore
 
 	// Optional dependencies — only required for GetChildOverview. They are
 	// configured via SetOverviewDeps so the existing constructor signature
@@ -94,6 +110,16 @@ type ObserverService struct {
 	quizRepo         repository.QuizRepository
 	announcementRepo ObserverAnnouncementRepository
 	pageRepo         repository.PageRepository
+	// assignmentGroupRepo lets the overview apply assignment-group weights
+	// (same grade as the Grades page). Nil: unweighted point totals.
+	assignmentGroupRepo repository.AssignmentGroupRepository
+}
+
+// SetAssignmentGroupRepo wires the assignment groups the overview's course
+// grade needs for weighted courses.
+func (s *ObserverService) SetAssignmentGroupRepo(r repository.AssignmentGroupRepository) *ObserverService {
+	s.assignmentGroupRepo = r
+	return s
 }
 
 func NewObserverService(
@@ -125,9 +151,19 @@ func (s *ObserverService) SetOverviewDeps(
 	s.pageRepo = pageRepo
 }
 
-// LinkObserverToStudent creates an ObserverEnrollment for each active course the
-// student is enrolled in. The AssociatedUserID on each enrollment is set to the
-// student's user ID so the observer is linked to that student.
+// SetObserverLinkStore wires the durable pairing store. Call from
+// cmd/server/main.go after constructing the service.
+func (s *ObserverService) SetObserverLinkStore(links ObserverLinkStore) *ObserverService {
+	s.links = links
+	return s
+}
+
+// LinkObserverToStudent pairs an observer with a student. With the link
+// store wired (production) the pairing is durable: it succeeds even when
+// the student has no courses yet, and the observer's ObserverEnrollments
+// then follow the student's StudentEnrollments as they are added,
+// concluded or dropped (Enrollment.AfterSave). Without it, it falls back
+// to snapshotting an ObserverEnrollment into each current course.
 func (s *ObserverService) LinkObserverToStudent(ctx context.Context, observerUserID, studentUserID uint) error {
 	// Validate that the observer user exists. Observer linking
 	// (pairing-code flow) was already tenant-validated upstream via
@@ -139,9 +175,20 @@ func (s *ObserverService) LinkObserverToStudent(ctx context.Context, observerUse
 	}
 
 	// Validate that the student user exists.
-	_, err = s.userRepo.FindByID(ctx, studentUserID, 0)
+	student, err := s.userRepo.FindByID(ctx, studentUserID, 0)
 	if err != nil {
 		return errors.New("student user not found")
+	}
+
+	if s.links != nil {
+		created, err := s.links.Activate(ctx, observerUserID, studentUserID, student.AccountID)
+		if err != nil {
+			return err
+		}
+		if !created {
+			return errors.New("observer is already linked to this student")
+		}
+		return s.links.SyncStudent(ctx, studentUserID)
 	}
 
 	// Check if the observer is already linked to this student.
@@ -190,12 +237,22 @@ func (s *ObserverService) LinkObserverToStudent(ctx context.Context, observerUse
 // UnlinkObserver removes observer enrollments for the given student by setting
 // the workflow_state to "deleted" on each matching ObserverEnrollment.
 func (s *ObserverService) UnlinkObserver(ctx context.Context, observerUserID, studentUserID uint) error {
+	found := false
+	if s.links != nil {
+		// Deactivate the durable link first so the AfterSave mirror stops
+		// re-creating observer enrollments for this pair.
+		removed, err := s.links.Deactivate(ctx, observerUserID, studentUserID)
+		if err != nil {
+			return err
+		}
+		found = removed
+	}
+
 	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
 	if err != nil {
 		return errors.New("could not fetch observer enrollments")
 	}
 
-	found := false
 	for _, e := range enrollments {
 		if e.Type != "ObserverEnrollment" {
 			continue
@@ -221,7 +278,39 @@ func (s *ObserverService) UnlinkObserver(ctx context.Context, observerUserID, st
 // ListObservedStudents returns a list of unique student user IDs the observer is
 // linked to, derived from active ObserverEnrollment records where
 // associated_user_id is not null.
+//
+// With the link store wired the durable links come first, followed by any
+// student the observer only observes through an associated enrollment
+// that has no link behind it (e.g. an enrollments.csv row with
+// associated_user_id, which Canvas scopes to that one course).
 func (s *ObserverService) ListObservedStudents(ctx context.Context, observerUserID uint) ([]uint, error) {
+	if s.links == nil {
+		return s.enrollmentObservees(ctx, observerUserID)
+	}
+	linked, err := s.links.ListStudentIDs(ctx, observerUserID)
+	if err != nil {
+		return nil, err
+	}
+	viaEnrollment, err := s.enrollmentObservees(ctx, observerUserID)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[uint]bool, len(linked))
+	for _, id := range linked {
+		seen[id] = true
+	}
+	for _, id := range viaEnrollment {
+		if !seen[id] {
+			seen[id] = true
+			linked = append(linked, id)
+		}
+	}
+	return linked, nil
+}
+
+// enrollmentObservees derives observed students from the observer's
+// active ObserverEnrollments that carry an associated student.
+func (s *ObserverService) enrollmentObservees(ctx context.Context, observerUserID uint) ([]uint, error) {
 	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
 	if err != nil {
 		return nil, errors.New("could not fetch observer enrollments")
@@ -249,9 +338,109 @@ func (s *ObserverService) ListObservedStudents(ctx context.Context, observerUser
 	return studentIDs, nil
 }
 
+// ObservedStudent is a linked student as shown in the observer's child
+// picker (B202: the picker only had ids and rendered "Student #<id>").
+type ObservedStudent struct {
+	ID           uint   `json:"id"`
+	Name         string `json:"name"`
+	SortableName string `json:"sortable_name"`
+	ShortName    string `json:"short_name"`
+	AvatarURL    string `json:"avatar_url"`
+}
+
+// ListObservedStudentProfiles returns the observer's linked students with
+// their display names, in link order.
+func (s *ObserverService) ListObservedStudentProfiles(ctx context.Context, observerUserID uint) ([]ObservedStudent, error) {
+	ids, err := s.ListObservedStudents(ctx, observerUserID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ObservedStudent, 0, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	byID := map[uint]models.User{}
+	// accountID=0: the ids come from the observer's own active observer
+	// enrollments (created by the pairing-code flow), not from input.
+	if users, err := s.userRepo.FindByIDs(ctx, ids, 0); err == nil {
+		for _, u := range users {
+			byID[u.ID] = u
+		}
+	}
+	for _, id := range ids {
+		st := ObservedStudent{ID: id}
+		if u, ok := byID[id]; ok {
+			st.Name = u.Name
+			st.SortableName = u.SortableName
+			st.ShortName = u.ShortName
+			st.AvatarURL = u.AvatarURL
+		}
+		out = append(out, st)
+	}
+	return out, nil
+}
+
+// syncObserverEnrollments gives the observer an ObserverEnrollment in every
+// course the linked student is actively enrolled in. Linking only covered
+// the student's courses at pairing time, so a course the student joined
+// later was invisible to the parent and failed course authorization
+// (B204). Canvas keeps observers enrolled in all of an observee's courses.
+// Best effort: failures leave the existing enrollments untouched.
+//
+// Only without the observer-link store: with it wired, ObserverLink
+// activation plus Enrollment.AfterSave (SyncObserverEnrollmentsForStudent)
+// keep linked observers enrolled — and remove them when the student
+// leaves — while an enrollment-only pairing (e.g. an SIS
+// associated_user_id row) must stay limited to its own course. Creating
+// link-less ObserverEnrollments here would spread such a pairing to every
+// course and leave rows nothing ever removes.
+func (s *ObserverService) syncObserverEnrollments(ctx context.Context, observerUserID, studentUserID uint, studentEnrollments []models.Enrollment) {
+	if s.links != nil {
+		return
+	}
+	observerEnrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
+	if err != nil {
+		return
+	}
+	// Any existing observer enrollment for (course, student) — in whatever
+	// state — is left alone, so one an admin removed is not resurrected.
+	existing := map[uint]bool{}
+	for _, e := range observerEnrollments {
+		if e.Type == "ObserverEnrollment" && e.AssociatedUserID != nil && *e.AssociatedUserID == studentUserID {
+			existing[e.CourseID] = true
+		}
+	}
+	for _, se := range studentEnrollments {
+		if se.WorkflowState != models.EnrollmentActive || se.Type != "StudentEnrollment" || existing[se.CourseID] {
+			continue
+		}
+		existing[se.CourseID] = true
+		student := studentUserID
+		_ = s.enrollmentRepo.Create(ctx, &models.Enrollment{
+			UserID:           observerUserID,
+			CourseID:         se.CourseID,
+			CourseSectionID:  se.CourseSectionID,
+			Type:             "ObserverEnrollment",
+			Role:             "ObserverEnrollment",
+			WorkflowState:    models.EnrollmentActive,
+			AssociatedUserID: &student,
+		})
+	}
+}
+
 // IsObserverOf checks whether the observer has an active ObserverEnrollment
 // linked to the given student.
+//
+// With the link store wired an active link is enough; an active
+// associated ObserverEnrollment created without a link (e.g. by an SIS
+// enrollments.csv associated_user_id row) still counts, as it always has.
 func (s *ObserverService) IsObserverOf(ctx context.Context, observerUserID, studentUserID uint) (bool, error) {
+	if s.links != nil {
+		linked, err := s.links.IsLinked(ctx, observerUserID, studentUserID)
+		if err != nil || linked {
+			return linked, err
+		}
+	}
 	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
 	if err != nil {
 		return false, errors.New("could not fetch observer enrollments")
@@ -275,6 +464,32 @@ func (s *ObserverService) IsObserverOf(ctx context.Context, observerUserID, stud
 	return false, nil
 }
 
+// observedCourseScope reports which of the student's courses the observer
+// may see. all=true for a link-store pairing (or the legacy model, where
+// syncObserverEnrollments enrolls the observer everywhere). For an
+// enrollment-only pairing under the link store, only the courses where the
+// observer holds an active ObserverEnrollment associated with the student.
+func (s *ObserverService) observedCourseScope(ctx context.Context, observerUserID, studentUserID uint) (courses map[uint]bool, all bool) {
+	if s.links == nil {
+		return nil, true
+	}
+	if linked, err := s.links.IsLinked(ctx, observerUserID, studentUserID); err == nil && linked {
+		return nil, true
+	}
+	courses = map[uint]bool{}
+	enrollments, err := s.enrollmentRepo.ListByUserID(ctx, observerUserID, 0)
+	if err != nil {
+		return courses, false
+	}
+	for _, e := range enrollments {
+		if e.Type == "ObserverEnrollment" && e.WorkflowState == models.EnrollmentActive &&
+			e.AssociatedUserID != nil && *e.AssociatedUserID == studentUserID {
+			courses[e.CourseID] = true
+		}
+	}
+	return courses, false
+}
+
 // GetObserveeCourses returns the courses a specific observed student is enrolled
 // in where the observer also has an active ObserverEnrollment linked to that student.
 func (s *ObserverService) GetObserveeCourses(ctx context.Context, observerUserID, studentUserID uint) ([]models.Course, error) {
@@ -292,12 +507,17 @@ func (s *ObserverService) GetObserveeCourses(ctx context.Context, observerUserID
 	if err != nil {
 		return nil, errors.New("could not fetch student enrollments")
 	}
+	s.syncObserverEnrollments(ctx, observerUserID, studentUserID, studentEnrollments)
+	visible, all := s.observedCourseScope(ctx, observerUserID, studentUserID)
 
 	seen := make(map[uint]bool)
 	var courses []models.Course
 
 	for _, e := range studentEnrollments {
 		if e.WorkflowState != "active" {
+			continue
+		}
+		if !all && !visible[e.CourseID] {
 			continue
 		}
 		if seen[e.CourseID] {
@@ -336,12 +556,17 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 	if err != nil {
 		return nil, errors.New("could not fetch student enrollments")
 	}
+	s.syncObserverEnrollments(ctx, parentID, childID, studentEnrollments)
+	visible, all := s.observedCourseScope(ctx, parentID, childID)
 
 	// Build the unique active course set for the child.
 	courseIDs := []uint{}
 	courseByID := map[uint]*models.Course{}
 	for _, e := range studentEnrollments {
 		if e.WorkflowState != "active" {
+			continue
+		}
+		if !all && !visible[e.CourseID] {
 			continue
 		}
 		if _, ok := courseByID[e.CourseID]; ok {
@@ -369,7 +594,7 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 		course := courseByID[courseID]
 
 		// Per-course assignments (used for upcoming + grade calculation).
-		assignments, _ := s.assignmentRepo.ListByCourseID(ctx, courseID, listParams)
+		assignments, _ := s.assignmentRepo.ListByCourseID(ctx, courseID, repository.PaginationParams{Page: 1, PerPage: 1000})
 		assignmentByID := map[uint]models.Assignment{}
 		if assignments != nil {
 			for _, a := range assignments.Items {
@@ -412,7 +637,8 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 
 		// Submissions for this child in this course (drives grade % + recent + pending).
 		subs, serr := s.submissionRepo.ListByUserAndCourse(ctx, childID, courseID)
-		var earned, possible float64
+		// The submissions the child can see, for the grade calculator.
+		visibleSubs := map[uint]*models.Submission{}
 		pending := 0
 		if serr == nil {
 			for _, sub := range subs {
@@ -427,13 +653,20 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 						pending++
 					}
 				}
-				// Grade contribution: only graded, posted submissions with score.
-				if sub.Score != nil && assn.PointsPossible != nil && *assn.PointsPossible > 0 && sub.PostedAt != nil {
-					earned += *sub.Score
-					possible += *assn.PointsPossible
+				// B110: an observer sees exactly what the student sees — a
+				// grade only once it is posted (grading posts it at once on
+				// an automatic post policy; a manual policy waits for "Post
+				// grades"). Excused work and unpublished assignments never
+				// count.
+				visible := sub.Score != nil && sub.PostedAt != nil && !sub.Excused && assn.IsPublished()
+				// Grade contribution: posted grades (and excusals, which drop
+				// the assignment); a hidden grade counts as not graded yet.
+				if visible || sub.Excused {
+					subCopy := sub
+					visibleSubs[sub.AssignmentID] = &subCopy
 				}
-				// Recent grades feed.
-				if sub.GradedAt != nil && sub.Score != nil {
+				// Recent grades feed: hidden (unposted) grades never leak here.
+				if visible && sub.GradedAt != nil && sub.Score != nil {
 					recentGrades = append(recentGrades, RecentGradeItem{
 						SubmissionID:   sub.ID,
 						AssignmentID:   sub.AssignmentID,
@@ -448,9 +681,20 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 			}
 		}
 
+		// Same calculator as the Grades page and gradebook (group weights,
+		// extra credit, not_graded/unpublished/excused rules).
 		var grade *float64
-		if possible > 0 {
-			pct := (earned / possible) * 100.0
+		var groups []models.AssignmentGroup
+		if course.ApplyGroupWeights && s.assignmentGroupRepo != nil {
+			if gr, gerr := s.assignmentGroupRepo.ListByCourseID(ctx, courseID, repository.PaginationParams{Page: 1, PerPage: 100}); gerr == nil && gr != nil {
+				groups = gr.Items
+			}
+		}
+		var assignmentList []models.Assignment
+		if assignments != nil {
+			assignmentList = assignments.Items
+		}
+		if pct, ok := CurrentCourseScore(course.ApplyGroupWeights, assignmentList, groups, visibleSubs); ok {
 			grade = &pct
 		}
 		courseSummaries = append(courseSummaries, ChildCourseSummary{
@@ -480,9 +724,16 @@ func (s *ObserverService) GetChildOverview(ctx context.Context, parentID, childI
 			}
 		}
 
-		pages, _ := s.pageRepo.ListByCourseID(ctx, courseID, listParams)
+		// Observers see only published pages (B045): the unfiltered list
+		// leaked draft page titles into the observer activity feed.
+		pages, _ := s.pageRepo.ListPublishedByCourseID(ctx, courseID, listParams)
 		if pages != nil {
 			for _, p := range pages.Items {
+				// B203: ListByCourseID returns drafts too; only published
+				// ("active") pages are visible to students and observers.
+				if p.WorkflowState != "active" {
+					continue
+				}
 				activity = append(activity, ActivityItem{
 					Type:       "page",
 					ID:         p.ID,

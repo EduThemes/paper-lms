@@ -1,9 +1,16 @@
 package handlers
 
 import (
+	"bytes"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -17,29 +24,56 @@ import (
 
 // ltiLaunchTemplate renders the form_post response. html/template's
 // contextual auto-escape blocks HTML injection in the action= attribute
-// and the id_token value. Compiled once at package init; Execute is
+// and the id_token/state values. Compiled once at package init; Execute is
 // goroutine-safe.
+//
+// B080: the auto-submit script carries a per-response CSP nonce (the
+// handler sends a matching Content-Security-Policy), and the <noscript>
+// fallback is a real submit button.
 var ltiLaunchTemplate = template.Must(template.New("lti_launch").Parse(`<!DOCTYPE html>
 <html>
 <head><title>LTI Launch</title></head>
 <body>
 <form id="lti_launch_form" action="{{.RedirectURI}}" method="POST">
     <input type="hidden" name="id_token" value="{{.IDToken}}" />
-    <input type="hidden" name="state" value="" />
-    <noscript><input type="submit" value="Continue" /></noscript>
+    {{if .State}}<input type="hidden" name="state" value="{{.State}}" />{{end}}
+    <noscript><button type="submit">Continue</button></noscript>
 </form>
-<script>document.getElementById('lti_launch_form').submit();</script>
+<script nonce="{{.Nonce}}">document.getElementById('lti_launch_form').submit();</script>
 </body>
 </html>`))
+
+type ltiLaunchPage struct {
+	RedirectURI string
+	IDToken     string
+	State       string
+	Nonce       string
+}
 
 // RenderLTILaunchForTest exposes the launch-HTML template render so
 // tests in this package's external _test package can assert on the
 // escape contract (F-056). NOT for production callers.
 func RenderLTILaunchForTest(w interface{ Write([]byte) (int, error) }, redirectURI, idToken string) error {
-	return ltiLaunchTemplate.Execute(w, struct {
-		RedirectURI string
-		IDToken     string
-	}{RedirectURI: redirectURI, IDToken: idToken})
+	return ltiLaunchTemplate.Execute(w, ltiLaunchPage{RedirectURI: redirectURI, IDToken: idToken, Nonce: "test-nonce"})
+}
+
+// ltiLaunchCSP builds the Content-Security-Policy for the auto-post page
+// (B080). The app-wide policy (script-src 'self'; form-action 'self';
+// frame-ancestors 'none') blocks exactly what this page must do: run its
+// inline submit script and post cross-origin to the tool. This policy
+// allows only the nonce'd script, only form posts to the tool's origin
+// (plus https: for tools that redirect after the launch POST), and
+// framing by Paper itself so a launch can render in a course iframe.
+func ltiLaunchCSP(redirectURI, nonce string) string {
+	formAction := "https:"
+	if u, err := url.Parse(redirectURI); err == nil && u.Scheme != "" && u.Host != "" {
+		formAction = u.Scheme + "://" + u.Host + " https:"
+	}
+	return "default-src 'none'; " +
+		"script-src 'nonce-" + nonce + "'; " +
+		"form-action " + formAction + "; " +
+		"frame-ancestors 'self'; " +
+		"base-uri 'none'"
 }
 
 // requireSessionUserMatches verifies the authenticated caller IS the user
@@ -159,6 +193,59 @@ func (h *LTIHandler) gateLTILaunchForCOPPA(c *fiber.Ctx, userID uint) bool {
 	return true
 }
 
+// callerIsTenantAdmin re-checks the admin role against the user row (the
+// JWT role claim is only a soft hint) and requires the admin to belong to
+// the caller's tenant.
+func (h *LTIHandler) callerIsTenantAdmin(c *fiber.Ctx, userID, accountID uint) bool {
+	if h.userRepo == nil {
+		return false
+	}
+	// AUTH-INTERNAL: userID is the session subject; the tenant match is
+	// asserted below.
+	user, err := h.userRepo.FindByID(c.Context(), userID, 0)
+	if err != nil || user == nil || user.AccountID != accountID {
+		return false
+	}
+	return user.Role == models.RoleAdmin || user.Role == models.RoleSuperUser
+}
+
+// ltiParams reads LTI/OIDC parameters from the query string, a form body
+// or a JSON body, in that order (the OIDC flows use GET and form_post;
+// Paper's own UI posts JSON).
+type ltiParams struct {
+	c    *fiber.Ctx
+	json map[string]string
+}
+
+func newLTIParams(c *fiber.Ctx) *ltiParams {
+	p := &ltiParams{c: c, json: map[string]string{}}
+	body := bytes.TrimSpace(c.Body())
+	if len(body) > 0 && body[0] == '{' {
+		var raw map[string]interface{}
+		if json.Unmarshal(body, &raw) == nil {
+			for k, v := range raw {
+				switch tv := v.(type) {
+				case string:
+					p.json[k] = tv
+				case float64:
+					p.json[k] = strconv.FormatFloat(tv, 'f', -1, 64)
+				}
+			}
+		}
+	}
+	return p
+}
+
+func (p *ltiParams) get(name string) string {
+	if v := p.c.Query(name); v != "" {
+		return v
+	}
+	if v := p.c.FormValue(name); v != "" {
+		return v
+	}
+	return p.json[name]
+}
+
 // --------------------------------------------------------------------------
 // JWKS Endpoint
 // --------------------------------------------------------------------------
@@ -180,40 +267,22 @@ func (h *LTIHandler) JWKS(c *fiber.Ctx) error {
 // OIDC Login Initiation
 // --------------------------------------------------------------------------
 
-// OIDCLogin handles the LTI 1.3 OIDC third-party login initiation.
-// POST /api/v1/lti/oidc/login (PUBLIC)
+// OIDCLogin starts an LTI 1.3 launch: the platform's third-party-initiated
+// login. POST /api/v1/lti/oidc/login (session required)
 //
-// The tool platform receives the login initiation request from the browser
-// and responds with a redirect to the tool's OIDC authorization endpoint.
+// The browser is redirected to the tool's OIDC initiation URL with iss,
+// login_hint, target_link_uri, lti_message_hint, client_id and
+// lti_deployment_id (B083). The tool answers by sending the browser to
+// the platform authorization endpoint (LaunchDirect).
 func (h *LTIHandler) OIDCLogin(c *fiber.Ctx) error {
-	// Accept both form-encoded and JSON bodies
-	clientID := c.FormValue("client_id")
-	loginHint := c.FormValue("login_hint")
-	targetLinkURI := c.FormValue("target_link_uri")
-	ltiMessageHint := c.FormValue("lti_message_hint")
-
-	// Fall back to JSON body if form values are empty
-	if clientID == "" {
-		var body struct {
-			ClientID       string `json:"client_id"`
-			LoginHint      string `json:"login_hint"`
-			TargetLinkURI  string `json:"target_link_uri"`
-			LTIMessageHint string `json:"lti_message_hint"`
-			Iss            string `json:"iss"`
-		}
-		if err := c.BodyParser(&body); err == nil {
-			clientID = body.ClientID
-			loginHint = body.LoginHint
-			targetLinkURI = body.TargetLinkURI
-			ltiMessageHint = body.LTIMessageHint
-		}
-	}
+	p := newLTIParams(c)
+	clientID := p.get("client_id")
+	loginHint := p.get("login_hint")
+	targetLinkURI := p.get("target_link_uri")
+	ltiMessageHint := p.get("lti_message_hint")
 
 	if clientID == "" {
 		return responses.BadRequest(c, "client_id is required")
-	}
-	if targetLinkURI == "" {
-		return responses.BadRequest(c, "target_link_uri is required")
 	}
 
 	// SECURITY (F-055): the caller MUST be the user being launched.
@@ -236,6 +305,7 @@ func (h *LTIHandler) OIDCLogin(c *fiber.Ctx) error {
 
 	redirectURL, err := h.ltiService.InitiateLogin(
 		c.Context(),
+		callerAccountID(c),
 		clientID,
 		loginHint,
 		targetLinkURI,
@@ -249,37 +319,27 @@ func (h *LTIHandler) OIDCLogin(c *fiber.Ctx) error {
 }
 
 // --------------------------------------------------------------------------
-// LTI Launch
+// LTI Launch (OIDC authorization endpoint)
 // --------------------------------------------------------------------------
 
-// --------------------------------------------------------------------------
-// LTI Launch
-// --------------------------------------------------------------------------
-
-// LaunchDirect handles the LTI 1.3 resource link launch with direct config lookup.
-// This is a more complete implementation that resolves the tool configuration
-// through the developer key ID stored in the message hint.
+// LaunchDirect is the platform's OIDC authorization endpoint for LTI 1.3
+// launches. GET|POST /api/v1/lti/authorize (and POST /api/v1/lti/launch).
 //
-// POST /api/v1/lti/launch (PUBLIC)
+// The tool sends the browser here (after OIDCLogin) with scope=openid,
+// response_type=id_token, response_mode=form_post, prompt=none,
+// client_id, redirect_uri, login_hint, lti_message_hint, and its own
+// nonce and state. The handler checks the session user is login_hint,
+// the COPPA gate, and (in the service) the client/redirect/course/
+// enrollment/installation rules (B186), then auto-posts id_token + state
+// to the tool's redirect_uri.
 //
 // Message hint format: "courseID:resourceLinkID:developerKeyID"
 func (h *LTIHandler) LaunchDirect(c *fiber.Ctx) error {
-	loginHint := c.FormValue("login_hint")
-	ltiMessageHint := c.FormValue("lti_message_hint")
-
-	if loginHint == "" {
-		var body struct {
-			LoginHint      string `json:"login_hint"`
-			LTIMessageHint string `json:"lti_message_hint"`
-		}
-		if err := c.BodyParser(&body); err == nil {
-			loginHint = body.LoginHint
-			ltiMessageHint = body.LTIMessageHint
-		}
-	}
+	p := newLTIParams(c)
+	loginHint := p.get("login_hint")
 
 	// SECURITY (F-055): the session JWT is the source of identity, not
-	// the login_hint form value. See OIDCLogin and Launch above.
+	// the login_hint form value.
 	userID, ok := h.requireSessionUserMatches(c, loginHint)
 	if !ok {
 		return nil
@@ -290,98 +350,91 @@ func (h *LTIHandler) LaunchDirect(c *fiber.Ctx) error {
 		return nil
 	}
 
-	// Parse the message hint to extract course ID, resource link ID, and developer key ID
-	courseID, resourceLinkID, devKeyID, err := parseExtendedMessageHint(ltiMessageHint)
-	if err != nil {
+	req := service.LTIAuthRequest{
+		UserID:         userID,
+		Scope:          p.get("scope"),
+		ResponseType:   p.get("response_type"),
+		ResponseMode:   p.get("response_mode"),
+		ClientID:       p.get("client_id"),
+		RedirectURI:    p.get("redirect_uri"),
+		Nonce:          p.get("nonce"),
+		State:          p.get("state"),
+		Prompt:         p.get("prompt"),
+		LTIMessageHint: p.get("lti_message_hint"),
+	}
+	if _, _, _, err := service.ParseLTIMessageHint(req.LTIMessageHint); err != nil {
 		return responses.BadRequest(c, "Invalid lti_message_hint")
 	}
-
-	// Look up the tool configuration by developer key ID
-	toolConfig, err := h.configRepo.FindByDeveloperKeyID(c.Context(), devKeyID)
-	if err != nil {
-		return responses.BadRequest(c, "LTI tool configuration not found")
+	for _, f := range []struct{ name, val string }{
+		{"client_id", req.ClientID},
+		{"redirect_uri", req.RedirectURI},
+		{"nonce", req.Nonce},
+		{"scope", req.Scope},
+		{"response_type", req.ResponseType},
+	} {
+		if f.val == "" {
+			return responses.BadRequest(c, f.name+" is required")
+		}
 	}
 
-	// Build the signed LTI launch token
-	idToken, err := h.ltiService.BuildLaunchToken(
-		c.Context(),
-		userID,
-		courseID,
-		resourceLinkID,
-		toolConfig,
-	)
+	req.AccountID = callerAccountID(c)
+	req.IsAdmin = h.callerIsTenantAdmin(c, userID, req.AccountID)
+
+	authResp, err := h.ltiService.AuthorizeLaunch(c.Context(), req)
 	if err != nil {
-		return responses.InternalError(c, "Could not build launch token")
+		switch {
+		case errors.Is(err, service.ErrLTILaunchInvalid):
+			return responses.BadRequest(c, err.Error())
+		case errors.Is(err, service.ErrLTILaunchNotFound):
+			return responses.NotFound(c, "LTI launch")
+		default:
+			return responses.InternalError(c, "Could not build launch token")
+		}
 	}
 
-	// SECURITY (F-056): redirect_uri is always the tool config's
-	// registered TargetLinkURI. The pre-fix path read it from the request
-	// body and HTML-injected it into the action= attribute via Sprintf,
-	// letting an attacker craft `"><script>...</script>` payloads.
+	var nonceBytes [16]byte
+	if _, err := rand.Read(nonceBytes[:]); err != nil {
+		return responses.InternalError(c, "Could not build launch page")
+	}
+	// URL-safe alphabet (valid CSP base64-value): html/template would
+	// entity-escape a '+' in the nonce attribute, leaving the page's
+	// literal nonce different from the header's.
+	cspNonce := base64.RawURLEncoding.EncodeToString(nonceBytes[:])
+
+	// SECURITY (F-056): redirect_uri was validated against the tool's
+	// registered URIs in the service; html/template escapes it anyway.
 	c.Set("Content-Type", "text/html; charset=utf-8")
-	return ltiLaunchTemplate.Execute(c.Response().BodyWriter(), struct {
-		RedirectURI string
-		IDToken     string
-	}{RedirectURI: toolConfig.TargetLinkURI, IDToken: idToken})
-}
-
-// parseExtendedMessageHint parses a message hint string in the format
-// "courseID:resourceLinkID:developerKeyID".
-func parseExtendedMessageHint(hint string) (courseID uint, resourceLinkID string, devKeyID uint, err error) {
-	if hint == "" {
-		return 0, "", 0, fmt.Errorf("empty message hint")
-	}
-
-	// Split on colons
-	parts := splitOnColons(hint, 3)
-
-	if len(parts) < 1 {
-		return 0, "", 0, fmt.Errorf("invalid message hint format")
-	}
-
-	// Parse course ID
-	cid, parseErr := strconv.ParseUint(parts[0], 10, 64)
-	if parseErr != nil {
-		return 0, "", 0, fmt.Errorf("invalid course ID in message hint")
-	}
-	courseID = uint(cid)
-
-	// Parse resource link ID (optional)
-	if len(parts) >= 2 {
-		resourceLinkID = parts[1]
-	}
-
-	// Parse developer key ID (optional but needed for tool config lookup)
-	if len(parts) >= 3 && parts[2] != "" {
-		dkid, parseErr := strconv.ParseUint(parts[2], 10, 64)
-		if parseErr != nil {
-			return 0, "", 0, fmt.Errorf("invalid developer key ID in message hint")
-		}
-		devKeyID = uint(dkid)
-	}
-
-	return courseID, resourceLinkID, devKeyID, nil
-}
-
-// splitOnColons splits a string on colon characters, returning up to maxParts parts.
-func splitOnColons(s string, maxParts int) []string {
-	var parts []string
-	start := 0
-	for i, ch := range s {
-		if ch == ':' && len(parts) < maxParts-1 {
-			parts = append(parts, s[start:i])
-			start = i + 1
-		}
-	}
-	parts = append(parts, s[start:])
-	return parts
+	c.Set("Content-Security-Policy", ltiLaunchCSP(authResp.RedirectURI, cspNonce))
+	c.Set("X-Frame-Options", "SAMEORIGIN")
+	c.Set("Cache-Control", "no-store")
+	return ltiLaunchTemplate.Execute(c.Response().BodyWriter(), ltiLaunchPage{
+		RedirectURI: authResp.RedirectURI,
+		IDToken:     authResp.IDToken,
+		State:       authResp.State,
+		Nonce:       cspNonce,
+	})
 }
 
 // --------------------------------------------------------------------------
 // AGS (Assignment and Grade Services) Endpoints
 // --------------------------------------------------------------------------
 
-// lineItemToJSON serializes an LTI line item for API responses.
+// lineItemsBaseURL returns the absolute URL of the course's line item
+// container, whatever endpoint (list, item, item/scores, ...) the request
+// hit. B187: the item `id` used to be built from c.Path() of an item
+// request, which already ends in /line_items/:id, so it came out
+// ".../line_items/7/7".
+func lineItemsBaseURL(c *fiber.Ctx) string {
+	path := c.Path()
+	const marker = "/line_items"
+	if i := strings.Index(path, marker); i >= 0 {
+		path = path[:i+len(marker)]
+	}
+	return c.BaseURL() + path
+}
+
+// lineItemToJSON serializes an LTI line item for API responses. baseURL is
+// the line item container URL (see lineItemsBaseURL).
 func lineItemToJSON(item *models.LTILineItem, baseURL string) fiber.Map {
 	result := fiber.Map{
 		"id":           fmt.Sprintf("%s/%d", baseURL, item.ID),
@@ -420,7 +473,7 @@ func (h *LTIHandler) ListLineItems(c *fiber.Ctx) error {
 
 	responses.SetPaginationHeaders(c, result.TotalCount, result.Page, result.PerPage)
 
-	baseURL := c.BaseURL() + c.Path()
+	baseURL := lineItemsBaseURL(c)
 	items := make([]fiber.Map, len(result.Items))
 	for i, item := range result.Items {
 		items[i] = lineItemToJSON(&item, baseURL)
@@ -468,13 +521,16 @@ func (h *LTIHandler) CreateLineItem(c *fiber.Ctx) error {
 		AssignmentID:      input.AssignmentID,
 	}
 
-	if err := h.agsService.CreateLineItem(c.Context(), uint(courseID), item); err != nil {
-		return responses.BadRequest(c, err.Error())
+	// B077: the service ties assignmentId to this course + tenant.
+	if err := h.agsService.CreateLineItem(c.Context(), uint(courseID), callerAccountID(c), item); err != nil {
+		if errors.Is(err, service.ErrAGSInvalid) {
+			return responses.BadRequest(c, err.Error())
+		}
+		return responses.InternalError(c, "Could not create line item")
 	}
 
-	baseURL := c.BaseURL() + c.Path()
 	c.Set("Content-Type", "application/vnd.ims.lis.v2.lineitem+json")
-	return c.Status(fiber.StatusCreated).JSON(lineItemToJSON(item, baseURL))
+	return c.Status(fiber.StatusCreated).JSON(lineItemToJSON(item, lineItemsBaseURL(c)))
 }
 
 // requireLineItemInCourse loads an LTI line item and enforces the F-012/F-013
@@ -517,9 +573,8 @@ func (h *LTIHandler) GetLineItem(c *fiber.Ctx) error {
 		return nil
 	}
 
-	baseURL := fmt.Sprintf("%s%s", c.BaseURL(), c.Path())
 	c.Set("Content-Type", "application/vnd.ims.lis.v2.lineitem+json")
-	return c.JSON(lineItemToJSON(item, baseURL))
+	return c.JSON(lineItemToJSON(item, lineItemsBaseURL(c)))
 }
 
 // UpdateLineItem updates an existing LTI line item.
@@ -562,9 +617,8 @@ func (h *LTIHandler) UpdateLineItem(c *fiber.Ctx) error {
 		return responses.BadRequest(c, err.Error())
 	}
 
-	baseURL := fmt.Sprintf("%s%s", c.BaseURL(), c.Path())
 	c.Set("Content-Type", "application/vnd.ims.lis.v2.lineitem+json")
-	return c.JSON(lineItemToJSON(item, baseURL))
+	return c.JSON(lineItemToJSON(item, lineItemsBaseURL(c)))
 }
 
 // DeleteLineItem deletes an LTI line item.
@@ -604,14 +658,38 @@ func (h *LTIHandler) DeleteLineItem(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
+// ltiUserID accepts the AGS score userId as a JSON string (what the LTI
+// spec and Paper's own launch `sub` claim use) or a JSON number. B081.
+type ltiUserID uint
+
+func (u *ltiUserID) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if bytes.Equal(b, []byte("null")) {
+		*u = 0
+		return nil
+	}
+	s := string(b)
+	if len(b) > 0 && b[0] == '"' {
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+	}
+	n, err := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
+	if err != nil {
+		return fmt.Errorf("userId must be a numeric user id, got %q", s)
+	}
+	*u = ltiUserID(n)
+	return nil
+}
+
 type postScoreRequest struct {
-	UserID           uint     `json:"userId"`
-	ScoreGiven       *float64 `json:"scoreGiven"`
-	ScoreMaximum     *float64 `json:"scoreMaximum"`
-	ActivityProgress string   `json:"activityProgress"`
-	GradingProgress  string   `json:"gradingProgress"`
-	Timestamp        string   `json:"timestamp"`
-	Comment          string   `json:"comment"`
+	UserID           ltiUserID `json:"userId"`
+	ScoreGiven       *float64  `json:"scoreGiven"`
+	ScoreMaximum     *float64  `json:"scoreMaximum"`
+	ActivityProgress string    `json:"activityProgress"`
+	GradingProgress  string    `json:"gradingProgress"`
+	Timestamp        string    `json:"timestamp"`
+	Comment          string    `json:"comment"`
 }
 
 // PostScore posts a score (result) to an LTI line item.
@@ -638,7 +716,7 @@ func (h *LTIHandler) PostScore(c *fiber.Ctx) error {
 	}
 
 	result := &models.LTIResult{
-		UserID:           input.UserID,
+		UserID:           uint(input.UserID),
 		ResultScore:      input.ScoreGiven,
 		ResultMaximum:    input.ScoreMaximum,
 		ActivityProgress: input.ActivityProgress,
@@ -655,8 +733,18 @@ func (h *LTIHandler) PostScore(c *fiber.Ctx) error {
 		result.Timestamp = &t
 	}
 
-	if err := h.agsService.PostScore(c.Context(), item.ID, result); err != nil {
-		return responses.BadRequest(c, err.Error())
+	graderID, _ := c.Locals("user_id").(uint)
+	if err := h.agsService.PostScore(c.Context(), item, callerAccountID(c), graderID, result); err != nil {
+		switch {
+		case errors.Is(err, service.ErrAGSInvalid):
+			return responses.BadRequest(c, err.Error())
+		case errors.Is(err, service.ErrAGSUserNotInCourse), errors.Is(err, service.ErrAGSGradeRefused):
+			return responses.Error(c, fiber.StatusUnprocessableEntity, err.Error())
+		case errors.Is(err, service.ErrAGSNotFound):
+			return responses.NotFound(c, "line item")
+		default:
+			return responses.InternalError(c, "Could not save score")
+		}
 	}
 
 	return c.SendStatus(fiber.StatusNoContent)
@@ -683,17 +771,38 @@ func ltiResultToJSON(result *models.LTIResult) fiber.Map {
 	return r
 }
 
-// GetResults returns all results (scores) for an LTI line item.
+// GetResults returns the results (scores) for an LTI line item.
 // GET /api/v1/lti/courses/:course_id/line_items/:id/results
+//
+// B079: only course staff see the whole class. Anyone else (the route is
+// `enrolled`) sees only their own result, whatever ?user_id they pass.
+// Staff may narrow to one learner with the AGS ?user_id filter.
 func (h *LTIHandler) GetResults(c *fiber.Ctx) error {
 	item, wrote := h.requireLineItemInCourse(c)
 	if wrote {
 		return nil
 	}
 
+	var filterUserID uint
+	if callerIsCourseStaff(c) {
+		if raw := c.Query("user_id"); raw != "" {
+			n, err := strconv.ParseUint(raw, 10, 64)
+			if err != nil {
+				return responses.BadRequest(c, "Invalid user_id")
+			}
+			filterUserID = uint(n)
+		}
+	} else {
+		self, _ := c.Locals("user_id").(uint)
+		if self == 0 {
+			return responses.Unauthorized(c)
+		}
+		filterUserID = self
+	}
+
 	params := middleware.GetPagination(c)
 
-	resultSet, err := h.agsService.GetResults(c.Context(), item.ID, params)
+	resultSet, err := h.agsService.GetResults(c.Context(), item.ID, filterUserID, params)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
@@ -713,8 +822,15 @@ func (h *LTIHandler) GetResults(c *fiber.Ctx) error {
 // NRPS (Names and Role Provisioning Services) Endpoint
 // --------------------------------------------------------------------------
 
+// nrpsMaxLimit caps the NRPS `limit` page size.
+const nrpsMaxLimit = 100
+
 // GetMemberships returns course memberships in LTI NRPS format.
 // GET /api/v1/lti/courses/:course_id/memberships
+//
+// B188: the response is paged and carries a Link header (rel="next" while
+// more members remain), which is how NRPS clients discover the rest of
+// the roster. The NRPS `limit` query parameter sets the page size.
 func (h *LTIHandler) GetMemberships(c *fiber.Ctx) error {
 	courseID, err := strconv.Atoi(c.Params("course_id"))
 	if err != nil {
@@ -729,11 +845,23 @@ func (h *LTIHandler) GetMemberships(c *fiber.Ctx) error {
 	}
 
 	params := middleware.GetPagination(c)
+	if raw := c.Query("limit"); raw != "" {
+		limit, convErr := strconv.Atoi(raw)
+		if convErr != nil || limit < 1 {
+			return responses.BadRequest(c, "Invalid limit")
+		}
+		if limit > nrpsMaxLimit {
+			limit = nrpsMaxLimit
+		}
+		params.PerPage = limit
+	}
 
-	members, err := h.nrpsService.GetMemberships(c.Context(), uint(courseID), callerAccountID(c), params)
+	members, total, err := h.nrpsService.GetMemberships(c.Context(), uint(courseID), callerAccountID(c), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch memberships")
 	}
+
+	responses.SetPaginationHeaders(c, total, params.Page, params.PerPage)
 
 	c.Set("Content-Type", "application/vnd.ims.lti-nrps.v2.membershipcontainer+json")
 	return c.JSON(fiber.Map{

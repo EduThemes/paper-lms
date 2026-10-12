@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -12,8 +15,45 @@ import (
 // CriterionAssessment represents the assessment data for a single criterion.
 // Data format: {"criterion_1": {"points": 5, "comments": "Good"}, "criterion_2": {"points": 3, "comments": ""}}
 type CriterionAssessment struct {
-	Points   float64 `json:"points"`
-	Comments string  `json:"comments"`
+	Points   RubricPoints `json:"points"`
+	Comments string       `json:"comments"`
+}
+
+// RubricPoints is a criterion's points value. It accepts a JSON number, a
+// numeric string ("4" — what a typed-in criterion box produces), an empty
+// string or null (no points). B120: a string value used to make the whole
+// assessment fail to parse, leaving RubricAssessment.Score nil or stale.
+type RubricPoints float64
+
+func (p *RubricPoints) UnmarshalJSON(b []byte) error {
+	str := strings.TrimSpace(string(b))
+	if str == "null" || str == `""` {
+		*p = 0
+		return nil
+	}
+	if strings.HasPrefix(str, `"`) {
+		var raw string
+		if err := json.Unmarshal(b, &raw); err != nil {
+			return err
+		}
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			*p = 0
+			return nil
+		}
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return fmt.Errorf("invalid rubric points %q", raw)
+		}
+		*p = RubricPoints(v)
+		return nil
+	}
+	var v float64
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	*p = RubricPoints(v)
+	return nil
 }
 
 // RubricAssessmentCreatedCallback fires (asynchronously) after a rubric
@@ -189,7 +229,10 @@ func (s *RubricService) UpdateAssessment(ctx context.Context, assessment *models
 	// Recalculate total score from data JSON if data is present
 	if assessment.Data != "" {
 		score, err := calculateRubricScore(assessment.Data)
-		if err == nil {
+		if err != nil {
+			// Never keep a stale total next to data it no longer matches.
+			assessment.Score = nil
+		} else {
 			assessment.Score = &score
 		}
 	}
@@ -211,7 +254,7 @@ func calculateRubricScore(data string) (float64, error) {
 
 	var total float64
 	for _, c := range criteria {
-		total += c.Points
+		total += float64(c.Points)
 	}
 	return total, nil
 }

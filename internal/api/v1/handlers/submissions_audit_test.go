@@ -70,6 +70,9 @@ func TestGetSubmission_FiresLogPIIAccess(t *testing.T) {
 		WorkflowState:  "submitted",
 	}
 	submissionRepo.On("FindByAssignmentAndUser", mock.Anything, uint(1), uint(123), uint(1)).Return(submission, nil)
+	// F-013 parent-tie: assignment 1 lives in course 1 of tenant 1.
+	assignmentRepo.On("FindByID", mock.Anything, uint(1), uint(1)).
+		Return(&models.Assignment{ID: 1, CourseID: 1, WorkflowState: models.AssignmentPublished}, nil)
 
 	// The audit lock: the handler must Create exactly one PIIAccessLog
 	// with accessor=7 (the caller) and student=123 (the submission's

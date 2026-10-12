@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -90,7 +91,7 @@ func (h *ContentImportHandler) ImportPackage(c *fiber.Ctx) error {
 
 	if err := h.contentMigrationService.CreateMigration(c.Context(), migration); err != nil {
 		// Clean up the uploaded file on failure
-		os.Remove(zipPath)
+		_ = os.Remove(zipPath)
 		return responses.InternalError(c, "Could not create content migration record")
 	}
 
@@ -111,7 +112,9 @@ func (h *ContentImportHandler) ImportPackage(c *fiber.Ctx) error {
 		migration.WorkflowState = models.ContentMigrationFailed
 		migration.ErrorMessage = parseErr.Error()
 		migration.Progress = 0
-		h.contentMigrationService.UpdateMigration(c.Context(), migration)
+		if err := h.contentMigrationService.UpdateMigration(c.Context(), migration); err != nil {
+			slog.Error("content import: update failed migration record", "migration_id", migration.ID, "error", err)
+		}
 
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"errors": []fiber.Map{
@@ -135,7 +138,9 @@ func (h *ContentImportHandler) ImportPackage(c *fiber.Ctx) error {
 		migration.Progress = 100
 	}
 
-	h.contentMigrationService.UpdateMigration(c.Context(), migration)
+	if err := h.contentMigrationService.UpdateMigration(c.Context(), migration); err != nil {
+		slog.Error("content import: update migration record", "migration_id", migration.ID, "error", err)
+	}
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"migration_id":       migration.ID,

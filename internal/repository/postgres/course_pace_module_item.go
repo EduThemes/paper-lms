@@ -46,11 +46,22 @@ func (r *coursePaceModuleItemRepo) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(&models.CoursePaceModuleItem{}, id).Error
 }
 
+// ListByPaceID returns the pace's items in COURSE order — module
+// position, then item position within the module — which is the order
+// the pacing schedule accumulates durations in (B143). The pre-fix
+// ORDER BY module_item_id scheduled items by creation order, so an item
+// added to Module 1 late (higher id) or a reordered item landed after
+// everything in later modules. Items whose module item or module was
+// deleted drop out of the schedule.
 func (r *coursePaceModuleItemRepo) ListByPaceID(ctx context.Context, paceID uint) ([]models.CoursePaceModuleItem, error) {
 	var items []models.CoursePaceModuleItem
 	if err := r.db.WithContext(ctx).
-		Where("course_pace_id = ?", paceID).
-		Order("module_item_id ASC").
+		Select("course_pace_module_items.*").
+		Joins("JOIN content_tags ON content_tags.id = course_pace_module_items.module_item_id").
+		Joins("JOIN context_modules ON context_modules.id = content_tags.context_module_id").
+		Where("course_pace_module_items.course_pace_id = ?", paceID).
+		Where("content_tags.workflow_state <> ? AND context_modules.workflow_state <> ?", "deleted", "deleted").
+		Order("context_modules.position ASC, context_modules.id ASC, content_tags.position ASC, content_tags.id ASC").
 		Find(&items).Error; err != nil {
 		return nil, err
 	}

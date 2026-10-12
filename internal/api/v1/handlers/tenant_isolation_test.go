@@ -322,6 +322,11 @@ func TestTenantIsolation_GetSubmission(t *testing.T) {
 				Return(nil, errors.New("record not found"))
 		}
 
+		// B009/F-013: the parent assignment is loaded under the caller's
+		// tenant first; a cross-tenant id is already a 404 there.
+		expectAccountIDPassThrough(&assignmentRepo.Mock, "FindByID", resourceID, ownerOf(resourceID),
+			&models.Assignment{ID: resourceID, CourseID: 1, WorkflowState: models.AssignmentPublished})
+
 		svc := service.NewSubmissionService(submissionRepo, assignmentRepo, enrollmentRepo, latePolicyRepo, courseRepo, gpgRepo, gpRepo, nil)
 		h := handlers.NewSubmissionHandler(svc, commentRepo, attachmentRepo, userRepo, assignmentRepo, nil, nil, nil, nil, nil)
 
@@ -544,13 +549,15 @@ func TestTenantIsolation_GetCalendarEvent(t *testing.T) {
 		enrollRepo := new(mocks.MockEnrollmentRepository)
 		userRepo := new(mocks.MockUserRepository)
 
+		// A personal (User-context) event is readable only by its owner,
+		// so the in-tenant row belongs to the caller.
 		row := &models.CalendarEvent{
-			ID: resourceID, ContextType: "User", ContextID: 1, Title: "E",
+			ID: resourceID, ContextType: "User", ContextID: callerFor(callerAccount), Title: "E",
 		}
 		expectAccountIDPassThrough(&calRepo.Mock, "FindByID", resourceID, ownerOf(resourceID), row)
 
 		svc := service.NewCalendarService(calRepo)
-		authz := handlers.NewResourceAuthorizer(enrollRepo, userRepo)
+		authz := handlers.NewResourceAuthorizer(enrollRepo, userRepo, new(mocks.MockCourseRepository))
 		h := handlers.NewCalendarEventHandler(svc, authz)
 
 		app := testutil.SetupTestApp()
@@ -583,7 +590,7 @@ func TestTenantIsolation_GetFolder(t *testing.T) {
 		expectAccountIDPassThrough(&folderRepo.Mock, "FindByID", resourceID, ownerOf(resourceID), row)
 
 		fileSvc := service.NewFileService(folderRepo, attachmentRepo, "")
-		authz := handlers.NewResourceAuthorizer(enrollRepo, userRepo)
+		authz := handlers.NewResourceAuthorizer(enrollRepo, userRepo, new(mocks.MockCourseRepository))
 		h := handlers.NewFolderHandler(fileSvc, authz)
 
 		app := testutil.SetupTestApp()
@@ -966,9 +973,13 @@ func TestTenantIsolation_GetPortfolio(t *testing.T) {
 			Title: "P", Slug: "p", WorkflowState: "published", IsPublic: true,
 		}
 		expectAccountIDPassThrough(&portfolioRepo.Mock, "FindByID", resourceID, ownerOf(resourceID), row)
+		// GetPortfolio now returns sections + artifacts (B098).
+		sectionRepo.On("ListByPortfolioID", mock.Anything, resourceID).Return([]models.PortfolioSection{}, nil).Maybe()
+		artifactRepo.On("ListByPortfolioID", mock.Anything, resourceID, mock.Anything).
+			Return(&repository.PaginatedResult[models.PortfolioArtifact]{}, nil).Maybe()
 
 		svc := service.NewPortfolioService(portfolioRepo, sectionRepo, artifactRepo, reflectionRepo, templateRepo, commentRepo, submissionRepo, assignmentRepo)
-		authz := handlers.NewResourceAuthorizer(enrollRepo, userRepo)
+		authz := handlers.NewResourceAuthorizer(enrollRepo, userRepo, new(mocks.MockCourseRepository))
 		h := handlers.NewPortfolioHandler(svc, authz)
 
 		app := testutil.SetupTestApp()
@@ -1175,7 +1186,7 @@ func TestTenantIsolation_AwardBadge_CrossTenant_Returns404(t *testing.T) {
 		app.Post("/api/v1/users/:user_id/badges", h.AwardBadgeToUser)
 
 		resp := testutil.MakeRequest(app, "POST",
-			fmt.Sprintf("/api/v1/users/42/badges"),
+			"/api/v1/users/42/badges",
 			stringsReader(fmt.Sprintf(`{"badge_id":%d}`, resourceID)))
 		return resp.StatusCode
 	}

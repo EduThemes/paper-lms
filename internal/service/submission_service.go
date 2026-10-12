@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -39,23 +41,119 @@ type SubmissionService struct {
 	gradingPeriodRepo      repository.GradingPeriodRepository
 	groupMembershipRepo    repository.GroupMembershipRepository
 
+	// Optional collaborators wired after construction (see Set* below).
+	// All are nil-safe: without them the assignment's own dates apply and
+	// grade changes are not audited.
+	overrideService      *OverrideService
+	accommodationService *AccommodationService
+	gradeChangeLogger    GradeChangeLogger
+
 	// onGradedCallbacks fire (in goroutines) after a successful Grade(...).
 	// Registered via OnGraded; never invoked in tests unless explicitly wired.
 	onGradedCallbacks []SubmissionGradedCallback
 }
 
-// OnGraded registers a callback to fire after a successful grade write. The
-// callback runs in a fresh goroutine with a detached context.Background(), so
-// it MUST be self-contained (don't rely on the request's context.Cancel).
-// Multiple registrations stack; order is registration order.
+// OnGraded registers a callback to fire once a grade is visible to the
+// student: after a grade write on a posted submission (automatic post
+// policy, or an already-posted one), and when hidden grades are posted
+// (FirePosted). A grade still hidden by a manual post policy never fires —
+// mastery paths, gamification and outcome results would otherwise let the
+// student infer it before release. The callback runs in a fresh goroutine
+// with a detached context.Background(), so it MUST be self-contained
+// (don't rely on the request's context.Cancel). Multiple registrations
+// stack; order is registration order.
 func (s *SubmissionService) OnGraded(cb SubmissionGradedCallback) {
 	s.onGradedCallbacks = append(s.onGradedCallbacks, cb)
+}
+
+// GradeChange describes one grade mutation for the grade-change audit log.
+type GradeChange struct {
+	CourseID     uint
+	AssignmentID uint
+	StudentID    uint
+	GraderID     uint
+	SubmissionID uint
+	OldGrade     string
+	NewGrade     string
+	OldScore     *float64
+	NewScore     *float64
+	Excused      bool
+}
+
+// GradeChangeLogger records a grade change (grade_change_log + audit log).
+// Errors are the logger's responsibility; grading never fails on them.
+type GradeChangeLogger func(ctx context.Context, change GradeChange)
+
+// SetOverrideService wires assignment overrides into lock/unlock/late
+// resolution so per-student and per-section dates are honored.
+func (s *SubmissionService) SetOverrideService(o *OverrideService) { s.overrideService = o }
+
+// SetAccommodationService wires per-student extra-day accommodations
+// into the effective due/lock dates.
+func (s *SubmissionService) SetAccommodationService(a *AccommodationService) {
+	s.accommodationService = a
+}
+
+// SetGradeChangeLogger registers the grade-change audit sink.
+func (s *SubmissionService) SetGradeChangeLogger(l GradeChangeLogger) { s.gradeChangeLogger = l }
+
+func (s *SubmissionService) logGradeChange(ctx context.Context, assignment *models.Assignment, sub *models.Submission, graderID uint, oldGrade *string, oldScore *float64) {
+	if s.gradeChangeLogger == nil || assignment == nil || sub == nil {
+		return
+	}
+	deref := func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return *p
+	}
+	s.gradeChangeLogger(ctx, GradeChange{
+		CourseID:     assignment.CourseID,
+		AssignmentID: assignment.ID,
+		StudentID:    sub.UserID,
+		GraderID:     graderID,
+		SubmissionID: sub.ID,
+		OldGrade:     deref(oldGrade),
+		NewGrade:     deref(sub.Grade),
+		OldScore:     oldScore,
+		NewScore:     sub.Score,
+		Excused:      sub.Excused,
+	})
+}
+
+// EffectiveDates returns the due/unlock/lock dates that apply to userID
+// on assignment: the assignment's dates, replaced by the most lenient
+// applicable override, then extended by the student's extra-days
+// accommodation (if any).
+func (s *SubmissionService) EffectiveDates(ctx context.Context, assignment *models.Assignment, userID uint) (dueAt, unlockAt, lockAt *time.Time) {
+	if assignment == nil {
+		return nil, nil, nil
+	}
+	if s.overrideService != nil {
+		dueAt, unlockAt, lockAt = s.overrideService.EffectiveDatesFor(ctx, assignment, userID)
+	} else {
+		dueAt, unlockAt, lockAt = assignment.DueAt, assignment.UnlockAt, assignment.LockAt
+	}
+	if s.accommodationService != nil && dueAt != nil {
+		courseID := assignment.CourseID
+		if adj, err := s.accommodationService.ApplyAccommodationsToAssignment(ctx, userID, &courseID, dueAt); err == nil && adj != nil && adj.ExtraDays > 0 {
+			dueAt = adj.AdjustedDueAt
+			if lockAt != nil {
+				extended := lockAt.AddDate(0, 0, adj.ExtraDays)
+				lockAt = &extended
+			}
+		}
+	}
+	return dueAt, unlockAt, lockAt
 }
 
 // fireOnGraded runs all registered callbacks in goroutines with a detached
 // context. Panics are recovered. Errors from callbacks (if any) are the
 // callback's responsibility to log — the signature returns no error.
 func (s *SubmissionService) fireOnGraded(submissionID uint) {
+	if submissionID == 0 {
+		return
+	}
 	for _, cb := range s.onGradedCallbacks {
 		go func(cb SubmissionGradedCallback) {
 			defer recoverFromPanic("submission OnGraded callback")
@@ -98,42 +196,126 @@ var ErrSubmissionLocked = errors.New("assignment is locked")
 // failure mode so the UI can distinguish "not yet" from "too late".
 var ErrSubmissionNotYetUnlocked = errors.New("assignment is not yet available")
 
+// ErrAssignmentUnavailable is returned by Submit when the assignment does
+// not exist in the caller's tenant, belongs to a different course than
+// the URL, or is not published. Handlers map it to 404 (existence-leak
+// contract: an unpublished draft is indistinguishable from a missing one).
+var ErrAssignmentUnavailable = errors.New("assignment not found")
+
+// ErrSubmissionTypeNotAllowed is returned when the requested
+// submission_type is not one the assignment accepts online.
+var ErrSubmissionTypeNotAllowed = errors.New("submission type not allowed for this assignment")
+
+// onlineSubmissionTypes are the submission types a student can create
+// through the submissions API. Everything else (on_paper, none,
+// external_tool, online_quiz, discussion_topic, not_graded, ...) is
+// either not submittable online or produced by its own subsystem.
+var onlineSubmissionTypes = map[string]bool{
+	"online_text_entry":  true,
+	"online_url":         true,
+	"online_upload":      true,
+	"media_recording":    true,
+	"student_annotation": true,
+}
+
+// SubmissionTypeAllowed reports whether subType may be submitted online
+// to assignment.
+func SubmissionTypeAllowed(assignment *models.Assignment, subType string) bool {
+	if assignment == nil || !onlineSubmissionTypes[subType] {
+		return false
+	}
+	for _, t := range strings.Split(assignment.SubmissionTypes, ",") {
+		if strings.TrimSpace(t) == subType {
+			return true
+		}
+	}
+	return false
+}
+
+// Submit is the student-facing create path. It loads the assignment
+// under the caller's tenant, ties it to the URL's course, requires it to
+// be published and to accept the requested submission type, and then
+// applies the per-student lock/unlock/late rules.
+func (s *SubmissionService) Submit(ctx context.Context, submission *models.Submission, courseID, accountID uint) error {
+	assignment, err := s.assignmentRepo.FindByID(ctx, submission.AssignmentID, accountID)
+	if err != nil || assignment.CourseID != courseID || !assignment.IsPublished() {
+		return ErrAssignmentUnavailable
+	}
+	if submission.SubmissionType == nil || *submission.SubmissionType == "" {
+		return errors.New("submission_type is required")
+	}
+	if !SubmissionTypeAllowed(assignment, *submission.SubmissionType) {
+		return ErrSubmissionTypeNotAllowed
+	}
+	switch *submission.SubmissionType {
+	case "online_text_entry":
+		if submission.Body == nil || strings.TrimSpace(*submission.Body) == "" {
+			return errors.New("body is required for a text entry submission")
+		}
+	case "online_url":
+		if submission.URL == nil || strings.TrimSpace(*submission.URL) == "" {
+			return errors.New("url is required for a website URL submission")
+		}
+		// The URL is rendered as a link in SpeedGrader, the student's
+		// page and the peer-review view; a javascript:/data: URL would run
+		// in the grader's session when clicked.
+		u, err := url.Parse(strings.TrimSpace(*submission.URL))
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return errors.New("url must be an http or https link")
+		}
+		clean := u.String()
+		submission.URL = &clean
+	case "online_upload":
+		if submission.Attachments == nil || *submission.Attachments == "" {
+			return errors.New("at least one file is required for a file upload submission")
+		}
+	}
+	return s.createForAssignment(ctx, assignment, submission)
+}
+
+// Create is the internal (non-HTTP) create path; the assignment is
+// loaded without tenant scope because internal callers have already
+// verified it. HTTP handlers MUST use Submit.
 func (s *SubmissionService) Create(ctx context.Context, submission *models.Submission) error {
-	// Validate assignment exists
 	assignment, err := s.assignmentRepo.FindByID(ctx, submission.AssignmentID, 0)
 	if err != nil {
 		return errors.New("assignment not found")
 	}
-
 	if submission.SubmissionType == nil || *submission.SubmissionType == "" {
 		return errors.New("submission_type is required")
+	}
+	return s.createForAssignment(ctx, assignment, submission)
+}
+
+func (s *SubmissionService) createForAssignment(ctx context.Context, assignment *models.Assignment, submission *models.Submission) error {
+	// B002: online_text_entry bodies are HTML rendered in SpeedGrader and on
+	// the assignment page, so sanitize at the single submit chokepoint (also
+	// covers the copies made for group members below).
+	if submission.Body != nil && *submission.Body != "" {
+		clean := SanitizeHTML(*submission.Body)
+		submission.Body = &clean
 	}
 
 	now := time.Now()
 
-	// F-047: unlock_at / lock_at windows. The pre-fix path flagged
-	// submissions past due_at as Late=true but accepted them; it never
-	// looked at lock_at, so students could submit indefinitely after
-	// the assignment closed. Now: reject before any DB write.
-	if assignment.UnlockAt != nil && now.Before(*assignment.UnlockAt) {
+	// F-047 / B022: unlock_at / lock_at windows, resolved per student so
+	// assignment overrides and extra-day accommodations are honored.
+	dueAt, unlockAt, lockAt := s.EffectiveDates(ctx, assignment, submission.UserID)
+	if unlockAt != nil && now.Before(*unlockAt) {
 		return ErrSubmissionNotYetUnlocked
 	}
-	if assignment.LockAt != nil && now.After(*assignment.LockAt) {
+	if lockAt != nil && now.After(*lockAt) {
 		return ErrSubmissionLocked
 	}
 
 	submission.SubmittedAt = &now
 	submission.Attempt = 1
-	submission.WorkflowState = "submitted"
+	submission.WorkflowState = models.SubmissionSubmitted
+	submission.Late = dueAt != nil && now.After(*dueAt)
 
-	// Check if late
-	if assignment.DueAt != nil && now.After(*assignment.DueAt) {
-		submission.Late = true
-	}
-
-	// Check for existing submission and increment attempt
-	// accountID=0: tenant verification already happened upstream in the
-	// handler when it loaded the assignment.
+	// Check for existing submission and increment attempt.
+	// accountID=0: the assignment was already loaded (tenant-scoped on the
+	// HTTP path) and (assignment_id, user_id) identifies the row.
 	existing, _ := s.submissionRepo.FindByAssignmentAndUser(ctx, submission.AssignmentID, submission.UserID, 0)
 	if existing != nil {
 		existing.SubmissionType = submission.SubmissionType
@@ -170,19 +352,65 @@ func (s *SubmissionService) GetByAssignmentAndUser(ctx context.Context, assignme
 	return s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, accountID)
 }
 
-// SetExcused flips the excused flag on a submission and persists the change.
-// Mirrors the Grade(...) Find + assign + Update pattern so PATCH excused is
-// actually durable. accountID==0 is acceptable from internal callers where
-// the (assignment, user) pair was already tenant-verified upstream.
-func (s *SubmissionService) SetExcused(ctx context.Context, assignmentID, userID, accountID uint, excused bool) (*models.Submission, error) {
-	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, accountID)
+// ErrSubmissionNotFound is returned when an operation needs an existing
+// submission row and there is none.
+var ErrSubmissionNotFound = errors.New("submission not found")
+
+// IsCourseStudent reports whether userID holds an active StudentEnrollment
+// in courseID (tenant-scoped by accountID). Grading endpoints use it so a
+// grade can't be minted for a user who isn't in the course.
+func (s *SubmissionService) IsCourseStudent(ctx context.Context, courseID, userID, accountID uint) bool {
+	if s.enrollmentRepo == nil {
+		return false
+	}
+	e, err := s.enrollmentRepo.FindByUserAndCourse(ctx, userID, courseID, accountID)
+	return err == nil && e != nil && e.Type == "StudentEnrollment"
+}
+
+// SetExcused flips the excused flag on a submission and persists the
+// change, creating the submission row when an instructor excuses a
+// student who never submitted (Canvas allows this). The assignment is
+// loaded under accountID so a cross-tenant id returns ErrGradeCrossTenant.
+func (s *SubmissionService) SetExcused(ctx context.Context, assignmentID, userID, graderID, accountID uint, excused bool) (*models.Submission, error) {
+	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, accountID)
 	if err != nil {
-		return nil, err
+		return nil, ErrGradeCrossTenant
 	}
+	if closed, periodTitle := s.isGradingPeriodClosed(ctx, assignment); closed {
+		return nil, fmt.Errorf("grading period %q is closed — grades cannot be modified", periodTitle)
+	}
+	now := time.Now()
+
+	submission, findErr := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, accountID)
+	isNew := findErr != nil || submission == nil
+	if isNew {
+		if !excused {
+			// Nothing to un-excuse.
+			return nil, ErrSubmissionNotFound
+		}
+		submission = &models.Submission{
+			AssignmentID:  assignmentID,
+			UserID:        userID,
+			WorkflowState: models.SubmissionUnsubmitted,
+		}
+	}
+	oldGrade, oldScore := submission.Grade, submission.Score
+
 	submission.Excused = excused
-	if err := s.submissionRepo.Update(ctx, submission); err != nil {
+	submission.GraderID = &graderID
+	submission.GradedAt = &now
+	if excused && !assignment.UsesManualPostPolicy() && submission.PostedAt == nil {
+		submission.PostedAt = &now
+	}
+
+	if isNew {
+		if err := s.submissionRepo.Create(ctx, submission); err != nil {
+			return nil, err
+		}
+	} else if err := s.submissionRepo.Update(ctx, submission); err != nil {
 		return nil, err
 	}
+	s.logGradeChange(ctx, assignment, submission, graderID, oldGrade, oldScore)
 	return submission, nil
 }
 
@@ -194,8 +422,45 @@ func (s *SubmissionService) BulkListByCourse(ctx context.Context, courseID uint,
 	return s.submissionRepo.BulkListByCourse(ctx, courseID, params)
 }
 
+// ListByUserAndCourse returns one student's submissions across the course
+// (bounded by the number of assignments). Used by the course submissions
+// endpoint when the caller asks for a single student, so the filter runs in
+// SQL rather than after paginating the whole class.
+func (s *SubmissionService) ListByUserAndCourse(ctx context.Context, userID, courseID uint) ([]models.Submission, error) {
+	return s.submissionRepo.ListByUserAndCourse(ctx, userID, courseID)
+}
+
 func (s *SubmissionService) PostGradesByAssignment(ctx context.Context, assignmentID uint, postedAt *time.Time) error {
 	return s.submissionRepo.PostGradesByAssignment(ctx, assignmentID, postedAt)
+}
+
+// fireIfPosted fires the OnGraded callbacks for a graded submission the
+// student can see. Hidden (unposted) grades fire later, from FirePosted.
+func (s *SubmissionService) fireIfPosted(sub *models.Submission) {
+	if sub != nil && sub.PostedAt != nil {
+		s.fireOnGraded(sub.ID)
+	}
+}
+
+// FirePosted fires the OnGraded callbacks for submissions whose grades were
+// just released by posting (PostGrades), so everything that reacts to a
+// visible grade runs at release time.
+func (s *SubmissionService) FirePosted(submissionIDs ...uint) {
+	for _, id := range submissionIDs {
+		s.fireOnGraded(id)
+	}
+}
+
+// MarkPosted posts a single submission (sets posted_at) if it is not
+// already posted. Used when an instructor comments on a submission of an
+// automatically-posted assignment: Canvas posts the submission then.
+func (s *SubmissionService) MarkPosted(ctx context.Context, submission *models.Submission) error {
+	if submission == nil || submission.PostedAt != nil {
+		return nil
+	}
+	now := time.Now()
+	submission.PostedAt = &now
+	return s.submissionRepo.Update(ctx, submission)
 }
 
 // ErrGradeCrossTenant is returned when a Grade call attempts to score
@@ -205,19 +470,37 @@ var ErrGradeCrossTenant = errors.New("assignment not in grader's tenant")
 
 // Grade scores an existing submission (or creates a graded submission
 // for a student who hadn't submitted yet, the "teacher grades a missing
-// student" path).
+// student" path). An empty postedGrade clears the grade.
+//
+// postedGrade is the ENTERED score. The course late policy is applied to
+// it to produce the final Score; the entered value is kept in
+// EnteredScore so re-saving, curving or re-importing a grade never
+// compounds the late penalty (Canvas entered_score semantics).
+//
+// Post policy: on an automatically-posted assignment the graded
+// submission is posted (posted_at set) immediately; on a manual one it
+// stays hidden from the student until an instructor posts grades.
 //
 // SECURITY (F-016): callerAccountID gates both the assignment and the
 // existing-submission lookups. The pre-fix path passed accountID=0
 // through every repo call, which let a teacher in course A submit:
-//   PUT /courses/A/assignments/<id from tenant B>/submissions/<user>
+//
+//	PUT /courses/A/assignments/<id from tenant B>/submissions/<user>
+//
 // and rewrite (or CREATE) a graded submission for any student in any
 // tenant. The fix loads the assignment under the caller's tenant; an
-// assignment in a different tenant returns ErrGradeCrossTenant.
+// assignment in a different tenant returns ErrGradeCrossTenant. The
+// course parent-tie and student-enrollment checks live in the handler.
 func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, graderID, callerAccountID uint, postedGrade string) (*models.Submission, error) {
-	score, err := strconv.ParseFloat(postedGrade, 64)
-	if err != nil {
-		return nil, fmt.Errorf("invalid grade value: %s", postedGrade)
+	postedGrade = strings.TrimSpace(postedGrade)
+	clearing := postedGrade == ""
+	var entered float64
+	if !clearing {
+		v, err := strconv.ParseFloat(postedGrade, 64)
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+			return nil, fmt.Errorf("invalid grade value: %s", postedGrade)
+		}
+		entered = v
 	}
 
 	// Tenant gate — assignment lookup MUST scope to the caller's
@@ -234,49 +517,125 @@ func (s *SubmissionService) Grade(ctx context.Context, assignmentID, userID, gra
 
 	now := time.Now()
 
-	// Apply late policy deductions if applicable
-	score = s.applyLateDeduction(ctx, assignmentID, userID, callerAccountID, score)
+	submission, findErr := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, callerAccountID)
+	isNew := findErr != nil || submission == nil
 
-	gradeStr := strconv.FormatFloat(score, 'f', -1, 64)
-
-	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, callerAccountID)
-	if err != nil {
-		// No existing submission — create one (teacher grading without student submission)
-		submission = &models.Submission{
-			AssignmentID:  assignmentID,
-			UserID:        userID,
-			Score:         &score,
-			Grade:         &gradeStr,
-			GradedAt:      &now,
-			GraderID:      &graderID,
-			WorkflowState: models.SubmissionGraded,
+	if clearing {
+		if isNew {
+			// Nothing graded yet — clearing is a no-op.
+			return &models.Submission{AssignmentID: assignmentID, UserID: userID, WorkflowState: models.SubmissionUnsubmitted}, nil
 		}
-		if createErr := s.submissionRepo.Create(ctx, submission); createErr != nil {
-			return nil, createErr
-		}
-	} else {
-		submission.Score = &score
-		submission.Grade = &gradeStr
-		submission.GradedAt = &now
-		submission.GraderID = &graderID
-		submission.WorkflowState = "graded"
-
+		oldGrade, oldScore := submission.Grade, submission.Score
+		clearGrade(submission, graderID)
 		if err := s.submissionRepo.Update(ctx, submission); err != nil {
 			return nil, err
 		}
+		s.logGradeChange(ctx, assignment, submission, graderID, oldGrade, oldScore)
+		// A group grade was applied to every member, so clearing it
+		// clears it for every member too.
+		if assignment.GroupCategoryID != nil && *assignment.GroupCategoryID > 0 {
+			for _, memberID := range s.getGroupMemberIDs(ctx, userID, *assignment.GroupCategoryID) {
+				member, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, memberID, callerAccountID)
+				if err != nil || member == nil || (member.Score == nil && member.Grade == nil) {
+					continue
+				}
+				mOldGrade, mOldScore := member.Grade, member.Score
+				clearGrade(member, graderID)
+				if err := s.submissionRepo.Update(ctx, member); err == nil {
+					s.logGradeChange(ctx, assignment, member, graderID, mOldGrade, mOldScore)
+				}
+			}
+		}
+		return submission, nil
 	}
+
+	var oldGrade *string
+	var oldScore *float64
+	if isNew {
+		// No existing submission — create one (teacher grading without student submission)
+		submission = &models.Submission{
+			AssignmentID: assignmentID,
+			UserID:       userID,
+		}
+	} else {
+		oldGrade, oldScore = submission.Grade, submission.Score
+	}
+
+	s.applyGrade(ctx, assignment, submission, entered, graderID, now)
+
+	if isNew {
+		if createErr := s.submissionRepo.Create(ctx, submission); createErr != nil {
+			return nil, createErr
+		}
+	} else if err := s.submissionRepo.Update(ctx, submission); err != nil {
+		return nil, err
+	}
+	s.logGradeChange(ctx, assignment, submission, graderID, oldGrade, oldScore)
 
 	// For group assignments, apply the same grade to all other group members.
 	// Tenant is already enforced via the assignment load above.
 	if assignment.GroupCategoryID != nil && *assignment.GroupCategoryID > 0 {
-		s.gradeGroupMembers(ctx, assignment, userID, graderID, score, gradeStr, &now)
+		s.gradeGroupMembers(ctx, assignment, userID, graderID, entered, now)
 	}
 
-	// Fire post-grade callbacks (mastery paths, etc.) asynchronously. Failures
-	// in callbacks must never block grading or surface as errors here.
-	s.fireOnGraded(submission.ID)
+	// Fire post-grade callbacks (mastery paths, etc.) asynchronously, but
+	// only once the grade is visible to the student (see OnGraded).
+	// Failures in callbacks must never block grading or surface here.
+	s.fireIfPosted(submission)
 
 	return submission, nil
+}
+
+// clearGrade removes a submission's grade (B113): score, grade, entered
+// score and deduction are nulled and the state falls back to submitted
+// or unsubmitted.
+func clearGrade(sub *models.Submission, graderID uint) {
+	grader := graderID
+	sub.Score = nil
+	sub.Grade = nil
+	sub.EnteredScore = nil
+	sub.EnteredGrade = nil
+	sub.PointsDeducted = nil
+	sub.GradedAt = nil
+	sub.GraderID = &grader
+	if sub.SubmittedAt != nil {
+		sub.WorkflowState = models.SubmissionSubmitted
+	} else {
+		sub.WorkflowState = models.SubmissionUnsubmitted
+	}
+}
+
+// applyGrade writes an entered score onto sub: the late-policy deduction
+// is computed from the entered value (never from a previously deducted
+// score), and the submission is posted when the assignment posts
+// automatically.
+func (s *SubmissionService) applyGrade(ctx context.Context, assignment *models.Assignment, sub *models.Submission, entered float64, graderID uint, now time.Time) {
+	deducted := s.latePointsDeducted(ctx, assignment, sub, entered)
+	final := entered - deducted
+	enteredScore := entered
+	enteredGrade := strconv.FormatFloat(entered, 'f', -1, 64)
+	finalGrade := strconv.FormatFloat(final, 'f', -1, 64)
+	gradedAt := now
+	grader := graderID
+
+	sub.EnteredScore = &enteredScore
+	sub.EnteredGrade = &enteredGrade
+	if deducted > 0 {
+		sub.PointsDeducted = &deducted
+	} else {
+		sub.PointsDeducted = nil
+	}
+	sub.Score = &final
+	sub.Grade = &finalGrade
+	sub.GradedAt = &gradedAt
+	sub.GraderID = &grader
+	sub.WorkflowState = models.SubmissionGraded
+	// Canvas: entering a grade on an excused submission un-excuses it.
+	sub.Excused = false
+	if !assignment.UsesManualPostPolicy() && sub.PostedAt == nil {
+		postedAt := now
+		sub.PostedAt = &postedAt
+	}
 }
 
 // getGroupMemberIDs returns the user IDs of all members in the same group as the given user
@@ -341,12 +700,12 @@ func (s *SubmissionService) createGroupSubmissions(ctx context.Context, assignme
 	}
 }
 
-// gradeGroupMembers applies the same grade to all other group members
-// when grading a group assignment submission. The caller has already
-// loaded the assignment under its tenant scope, so the assignment
-// itself is safe to use directly; the per-member lookups use
-// assignment.AccountID as the tenant.
-func (s *SubmissionService) gradeGroupMembers(ctx context.Context, assignment *models.Assignment, gradedUserID, graderID uint, score float64, gradeStr string, gradedAt *time.Time) {
+// gradeGroupMembers applies the same entered grade to all other group
+// members when grading a group assignment submission. The caller has
+// already loaded the assignment under its tenant scope; the per-member
+// late deduction is computed from each member's own submission (their
+// lateness can differ when overrides or accommodations apply).
+func (s *SubmissionService) gradeGroupMembers(ctx context.Context, assignment *models.Assignment, gradedUserID, graderID uint, entered float64, gradedAt time.Time) {
 	memberIDs := s.getGroupMemberIDs(ctx, gradedUserID, *assignment.GroupCategoryID)
 	// Resolve the assignment's tenant scope from its course (assignment
 	// rows don't carry account_id directly).
@@ -355,101 +714,98 @@ func (s *SubmissionService) gradeGroupMembers(ctx context.Context, assignment *m
 		tenantScope = course.AccountID
 	}
 	for _, memberID := range memberIDs {
-		// Apply per-member late deduction (each member's lateness may differ if overrides exist)
-		memberScore := s.applyLateDeduction(ctx, assignment.ID, memberID, tenantScope, score)
-		memberGradeStr := strconv.FormatFloat(memberScore, 'f', -1, 64)
-
 		existing, _ := s.submissionRepo.FindByAssignmentAndUser(ctx, assignment.ID, memberID, tenantScope)
 		if existing != nil {
-			existing.Score = &memberScore
-			existing.Grade = &memberGradeStr
-			existing.GradedAt = gradedAt
-			existing.GraderID = &graderID
-			existing.WorkflowState = models.SubmissionGraded
-			_ = s.submissionRepo.Update(ctx, existing)
+			oldGrade, oldScore := existing.Grade, existing.Score
+			s.applyGrade(ctx, assignment, existing, entered, graderID, gradedAt)
+			if err := s.submissionRepo.Update(ctx, existing); err == nil {
+				s.logGradeChange(ctx, assignment, existing, graderID, oldGrade, oldScore)
+				s.fireIfPosted(existing)
+			}
 		} else {
 			memberSubmission := &models.Submission{
-				AssignmentID:  assignment.ID,
-				UserID:        memberID,
-				Score:         &memberScore,
-				Grade:         &memberGradeStr,
-				GradedAt:      gradedAt,
-				GraderID:      &graderID,
-				WorkflowState: models.SubmissionGraded,
+				AssignmentID: assignment.ID,
+				UserID:       memberID,
 			}
-			_ = s.submissionRepo.Create(ctx, memberSubmission)
+			s.applyGrade(ctx, assignment, memberSubmission, entered, graderID, gradedAt)
+			if err := s.submissionRepo.Create(ctx, memberSubmission); err == nil {
+				s.logGradeChange(ctx, assignment, memberSubmission, graderID, nil, nil)
+				s.fireIfPosted(memberSubmission)
+			}
 		}
 	}
 }
 
-// applyLateDeduction applies late submission deduction based on the course's late policy.
-// Returns the adjusted score (or original score if no deduction applies).
+// pointDeductibleGradingTypes mirrors Canvas LatePolicy::POINT_DEDUCTIBLE_GRADING_TYPES:
+// pass/fail and not-graded assignments never take a late deduction.
+var pointDeductibleGradingTypes = map[string]bool{
+	"points":       true,
+	"percent":      true,
+	"letter_grade": true,
+	"gpa_scale":    true,
+}
+
+// LatePointsDeducted is Canvas's LatePolicy#points_deducted:
 //
-// SECURITY (F-016): tenant-scope is threaded through. The pre-fix
-// path used accountID=0 here, which was harmless on its own (this
-// helper is only called from Grade, which now refuses cross-tenant
-// at the outer FindByID gate) but inconsistent — the mocks would
-// see two different accountID values for the same Grade call.
-func (s *SubmissionService) applyLateDeduction(ctx context.Context, assignmentID, userID, callerAccountID uint, score float64) float64 {
-	// Get the submission to check if it's late
-	submission, err := s.submissionRepo.FindByAssignmentAndUser(ctx, assignmentID, userID, callerAccountID)
-	if err != nil || !submission.Late {
-		return score
+//	intervals      = ceil(late_for / interval)
+//	raw_percent    = score / possible * 100
+//	maximum_deduct = max(raw_percent - minimum_percent, 0)
+//	deduction      = possible * min(deduction_per_interval * intervals, maximum_deduct) / 100
+//
+// The deduction is a percentage of points POSSIBLE (not of the earned
+// score), and the minimum-percent floor only caps the deduction; it never
+// raises a low raw score.
+func LatePointsDeducted(policy *models.LatePolicy, score, possible float64, lateFor time.Duration) float64 {
+	if policy == nil || !policy.LateSubmissionDeductionEnabled || possible <= 0 || lateFor <= 0 {
+		return 0
 	}
-
-	// Get the assignment to determine course and due date
-	assignment, err := s.assignmentRepo.FindByID(ctx, assignmentID, callerAccountID)
-	if err != nil || assignment.DueAt == nil {
-		return score
+	interval := 24 * time.Hour
+	if policy.LateSubmissionInterval == "hour" {
+		interval = time.Hour
 	}
+	intervals := math.Ceil(float64(lateFor) / float64(interval))
+	minimumPercent := 0.0
+	if policy.LateSubmissionMinimumPercentEnabled {
+		minimumPercent = policy.LateSubmissionMinimumPercent
+	}
+	rawScorePercent := score * 100.0 / possible
+	maximumDeduct := math.Max(rawScorePercent-minimumPercent, 0)
+	latePercentDeduct := policy.LateSubmissionDeduction * intervals
+	deducted := possible * math.Min(latePercentDeduct, maximumDeduct) / 100
+	// Strip float noise (e.g. 1.0000000000000002) without losing real precision.
+	return math.Round(deducted*1e6) / 1e6
+}
 
-	// Get the course's late policy
+// latePointsDeducted returns how many points the course late policy takes
+// off an entered score for this submission. Lateness is measured against
+// the student's effective due date (overrides + accommodations).
+func (s *SubmissionService) latePointsDeducted(ctx context.Context, assignment *models.Assignment, sub *models.Submission, entered float64) float64 {
+	if assignment == nil || sub == nil || sub.SubmittedAt == nil || s.latePolicyRepo == nil {
+		return 0
+	}
+	gradingType := assignment.GradingType
+	if gradingType == "" {
+		gradingType = "points"
+	}
+	if !pointDeductibleGradingTypes[gradingType] {
+		return 0
+	}
+	if assignment.PointsPossible == nil || *assignment.PointsPossible <= 0 {
+		return 0
+	}
+	dueAt, _, _ := s.EffectiveDates(ctx, assignment, sub.UserID)
+	if dueAt == nil {
+		return 0
+	}
+	lateFor := sub.SubmittedAt.Sub(*dueAt)
+	if lateFor <= 0 {
+		return 0
+	}
 	policy, err := s.latePolicyRepo.FindByCourseID(ctx, assignment.CourseID)
-	if err != nil || !policy.LateSubmissionDeductionEnabled {
-		return score
+	if err != nil || policy == nil {
+		return 0
 	}
-
-	// Calculate how many intervals late
-	submittedAt := submission.SubmittedAt
-	if submittedAt == nil {
-		return score
-	}
-
-	lateDuration := submittedAt.Sub(*assignment.DueAt)
-	if lateDuration <= 0 {
-		return score
-	}
-
-	var intervals float64
-	switch policy.LateSubmissionInterval {
-	case "hour":
-		intervals = math.Ceil(lateDuration.Hours())
-	default: // "day"
-		intervals = math.Ceil(lateDuration.Hours() / 24)
-	}
-
-	// Apply deduction: deduction is a percentage per interval
-	totalDeductionPct := intervals * policy.LateSubmissionDeduction
-	if totalDeductionPct > 100 {
-		totalDeductionPct = 100
-	}
-
-	adjustedScore := score * (1 - totalDeductionPct/100)
-
-	// Apply minimum percent floor if enabled
-	if policy.LateSubmissionMinimumPercentEnabled && assignment.PointsPossible != nil && *assignment.PointsPossible > 0 {
-		minScore := *assignment.PointsPossible * (policy.LateSubmissionMinimumPercent / 100)
-		if adjustedScore < minScore {
-			adjustedScore = minScore
-		}
-	}
-
-	// Never go below 0
-	if adjustedScore < 0 {
-		adjustedScore = 0
-	}
-
-	return adjustedScore
+	return LatePointsDeducted(policy, entered, *assignment.PointsPossible, lateFor)
 }
 
 // isGradingPeriodClosed checks whether the given assignment falls

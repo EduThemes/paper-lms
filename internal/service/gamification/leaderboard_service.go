@@ -110,13 +110,6 @@ type CourseLeaderboardInput struct {
 	Offset       int
 }
 
-// ViewerRoleResolution returns the resolved role.
-type viewerRoleResolution struct {
-	role ViewerRole
-	// notEnrolled signals a 403 condition (caller-facing).
-	notEnrolled bool
-}
-
 // resolveViewerRoleInCourse decides whether the viewer is admin, teacher/TA,
 // or student in the course. Mirrors the handler's prior helper. Returns
 // ErrCourseLeaderboardNotEnrolled when the viewer is neither admin nor an
@@ -279,11 +272,9 @@ func (s *LeaderboardService) GetCourseLeaderboard(ctx context.Context, in Course
 		if end > len(ranked) {
 			end = len(ranked)
 		}
-		page := ranked
+		var page []repository.RankRow
 		if offset <= len(ranked) {
 			page = ranked[offset:end]
-		} else {
-			page = nil
 		}
 		out.Rows = s.BuildRows(ctx, page, enrollmentByUser, policy, in.ViewerID, in.TenantID)
 	}

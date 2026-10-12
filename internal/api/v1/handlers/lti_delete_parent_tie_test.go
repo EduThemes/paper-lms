@@ -37,14 +37,14 @@ func ltiParentTieAuthStub(callerAccountID uint, enrollmentType string) fiber.Han
 }
 
 // newAGSServiceForTest builds an LTIAGSService with only the
-// line-item path wired. Submission + assignment repos are passed as
+// line-item path wired. Assignment + enrollment repos are passed as
 // fresh mocks; they don't fire on the Delete path because
 // DeleteLineItem never calls them.
 func newAGSServiceForTest(lineItemRepo *mocks.MockLTILineItemRepository) *service.LTIAGSService {
 	resultRepo := new(mocks.MockLTIResultRepository)
-	submissionRepo := new(mocks.MockSubmissionRepository)
 	assignmentRepo := new(mocks.MockAssignmentRepository)
-	return service.NewLTIAGSService(lineItemRepo, resultRepo, submissionRepo, assignmentRepo)
+	enrollmentRepo := new(mocks.MockEnrollmentRepository)
+	return service.NewLTIAGSService(lineItemRepo, resultRepo, assignmentRepo, enrollmentRepo, nil)
 }
 
 // newLTIHandlerForTest builds a minimal LTIHandler. Only the

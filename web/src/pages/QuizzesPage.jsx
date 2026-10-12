@@ -8,6 +8,7 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import QuizzesSubNav from '../components/quiz/QuizzesSubNav';
 import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
+import { clearRceDraft } from '../components/rce/rceDrafts';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -83,6 +84,7 @@ const QuizzesPage = () => {
         time_limit: newQuiz.time_limit ? Number(newQuiz.time_limit) : null,
         published: false,
       });
+      clearRceDraft(`quiz-${courseId}-new-description`);
       setQuizzes((prev) => [...prev, created]);
       setNewQuiz({ title: '', description: '', quiz_type: 'assignment', points_possible: 0, time_limit: '' });
       setShowCreate(false);

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"sort"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
@@ -117,6 +116,7 @@ func (s *MasteryGradebookService) GetMasteryGradebook(ctx context.Context, cours
 	// Load all outcomes for the course.
 	outcomes := []MasteryOutcome{}
 	outcomeIDs := []uint{}
+	outcomeByID := map[uint]models.LearningOutcome{}
 	page = 1
 	for {
 		res, err := s.outcomeRepo.ListByContext(ctx, "Course", courseID, accountID, repository.PaginationParams{Page: page, PerPage: 100})
@@ -132,6 +132,7 @@ func (s *MasteryGradebookService) GetMasteryGradebook(ctx context.Context, cours
 				PointsPossible: o.PointsPossible,
 			})
 			outcomeIDs = append(outcomeIDs, o.ID)
+			outcomeByID[o.ID] = o
 		}
 		if int64(page*100) >= res.TotalCount || len(res.Items) == 0 {
 			break
@@ -139,47 +140,27 @@ func (s *MasteryGradebookService) GetMasteryGradebook(ctx context.Context, cours
 		page++
 	}
 
-	// For each student, fetch their results in this course context and pick the
-	// latest score per outcome.
+	// For each student, fetch their results in this course context and roll
+	// them up per outcome (using the outcome's calculation method), on the
+	// proficiency scale's point range.
 	cells := []MasteryCell{}
 	for _, st := range students {
 		results, err := s.resultRepo.ListByUserAndContext(ctx, st.ID, "Course", courseID)
 		if err != nil {
 			continue
 		}
-		// pick latest result per outcome
-		sort.Slice(results, func(i, j int) bool {
-			ai := results[i].AssessedAt
-			aj := results[j].AssessedAt
-			if ai == nil && aj == nil {
-				return results[i].UpdatedAt.After(results[j].UpdatedAt)
-			}
-			if ai == nil {
-				return false
-			}
-			if aj == nil {
-				return true
-			}
-			return ai.After(*aj)
-		})
-		seen := map[uint]bool{}
+		byOutcome := map[uint][]models.LearningOutcomeResult{}
 		for _, r := range results {
-			if seen[r.LearningOutcomeID] {
-				continue
-			}
-			seen[r.LearningOutcomeID] = true
-			cell := MasteryCell{UserID: st.ID, OutcomeID: r.LearningOutcomeID, Score: r.Score, Possible: r.Possible}
-			if r.Score != nil {
-				cell.Rating = s.proficiency.LevelFor(*r.Score, scale)
-			}
-			cells = append(cells, cell)
+			byOutcome[r.LearningOutcomeID] = append(byOutcome[r.LearningOutcomeID], r)
 		}
-		// also emit empty cells for outcomes the student has no result for, so
-		// the frontend can render the full grid without extra logic.
 		for _, oid := range outcomeIDs {
-			if !seen[oid] {
-				cells = append(cells, MasteryCell{UserID: st.ID, OutcomeID: oid})
+			cell := MasteryCell{UserID: st.ID, OutcomeID: oid}
+			if rs := byOutcome[oid]; len(rs) > 0 {
+				cell.Score, cell.Possible, cell.Rating = s.masteryCellScore(rs, outcomeByID[oid], scale)
 			}
+			// Empty cells are emitted too so the frontend can render the
+			// full grid without extra logic.
+			cells = append(cells, cell)
 		}
 	}
 
@@ -190,4 +171,62 @@ func (s *MasteryGradebookService) GetMasteryGradebook(ctx context.Context, cours
 		Outcomes:    outcomes,
 		Cells:       cells,
 	}, nil
+}
+
+// masteryCellScore rolls a student's results for one outcome up into a
+// single score on the proficiency scale's point range and rates it.
+//
+// B091: results store raw asset points (e.g. 12/100) while proficiency
+// ratings are on the scale's own range (e.g. 0-4). Rating the raw score made
+// any score above the top threshold "Exceeds Mastery". Like Canvas (whose
+// account mastery scales define the outcome's points_possible and
+// mastery_points), each result is converted to a fraction of its possible
+// points and re-expressed on the scale before the calculation method runs.
+func (s *MasteryGradebookService) masteryCellScore(results []models.LearningOutcomeResult, outcome models.LearningOutcome, scale *models.OutcomeProficiency) (*float64, *float64, *models.OutcomeProficiencyRating) {
+	onScale := outcome
+	var possible *float64
+	if scale != nil && len(scale.Ratings) > 0 {
+		var maxPts float64
+		mastery := -1.0
+		for _, r := range scale.Ratings {
+			if r.Points > maxPts {
+				maxPts = r.Points
+			}
+			if r.Mastery {
+				mastery = r.Points
+			}
+		}
+		if maxPts > 0 {
+			onScale.PointsPossible = maxPts
+			if mastery >= 0 {
+				onScale.MasteryPoints = mastery
+			}
+			possible = &maxPts
+		}
+	}
+
+	normalized := make([]models.LearningOutcomeResult, 0, len(results))
+	for _, r := range results {
+		if r.Score == nil {
+			continue
+		}
+		// A result without score/possible is already on the outcome's own
+		// scale; express it as a fraction of that so it re-scales too.
+		if _, ok := resultPercent(&r); !ok && outcome.PointsPossible > 0 {
+			pct := *r.Score / outcome.PointsPossible
+			r.Percent = &pct
+		}
+		normalized = append(normalized, r)
+	}
+
+	score, ok := RollupOutcomeScore(normalized, &onScale)
+	if !ok {
+		return nil, possible, nil
+	}
+	if possible == nil && onScale.PointsPossible > 0 {
+		pp := onScale.PointsPossible
+		possible = &pp
+	}
+	// LevelFor reads only its arguments, so a nil proficiency service is safe.
+	return &score, possible, s.proficiency.LevelFor(score, scale)
 }

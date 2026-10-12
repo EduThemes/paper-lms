@@ -1,3 +1,5 @@
+import { getCurrentAccountId } from './currentAccount';
+
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
 export function getCSRFToken() {
@@ -63,6 +65,18 @@ export class ApiError extends Error {
  * `auth:session-expired` event dispatch, and `ApiError` extraction
  * from `{errors: [{code, message}]}` bodies.
  */
+// readJsonBody parses a successful response body. A 204 No Content (or any
+// empty body) is null rather than a SyntaxError — several DELETE handlers
+// answer 204, and a successful delete must not surface as a failure.
+async function readJsonBody(response) {
+  if (response.status === 204 || response.status === 205) return null;
+  if (response.headers?.get?.('Content-Length') === '0') return null;
+  if (typeof response.text !== 'function') return response.json();
+  const text = await response.text();
+  if (!text || !text.trim()) return null;
+  return JSON.parse(text);
+}
+
 async function fetchApi(path, { parse = 'json', ...options } = {}) {
   let fetchOptions;
   if (parse === 'multipart') {
@@ -96,11 +110,11 @@ async function fetchApi(path, { parse = 'json', ...options } = {}) {
     return response;
   }
   if (parse === 'multipart') {
-    return response.json();
+    return readJsonBody(response);
   }
   // 'json' path: parse JSON + extract pagination from Link header so
   // callers don't have to.
-  const data = await response.json();
+  const data = await readJsonBody(response);
   const linkHeader = response.headers.get('Link');
   const pagination = parseLinkHeader(linkHeader);
   return { data, pagination };
@@ -110,6 +124,36 @@ async function fetchApi(path, { parse = 'json', ...options } = {}) {
 // one-liner that forwards to `fetchApi` with the right `parse` mode.
 function request(path, options = {}) {
   return fetchApi(path, { ...options, parse: 'json' });
+}
+
+// The API caps per_page at 100 (Canvas parity; see
+// internal/api/v1/middleware/pagination.go). A caller that asks for more
+// than one server page in a single call (e.g. a gradebook loading every
+// enrollment) would otherwise silently get only the first 100 rows. This
+// helper walks the pages for them, following the Link header's rel="next",
+// and returns the concatenated array.
+export const API_MAX_PER_PAGE = 100;
+const MAX_AUTO_PAGES = 200;
+
+function withPaging(path, page, perPage) {
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}page=${page}&per_page=${perPage}`;
+}
+
+export async function requestPaged(path, page = 1, perPage = 10) {
+  if (perPage <= API_MAX_PER_PAGE || page !== 1) {
+    return request(withPaging(path, page, Math.min(perPage, API_MAX_PER_PAGE)));
+  }
+  const items = [];
+  let pagination = {};
+  for (let p = 1; p <= MAX_AUTO_PAGES && items.length < perPage; p += 1) {
+    const res = await request(withPaging(path, p, API_MAX_PER_PAGE));
+    const batch = Array.isArray(res.data) ? res.data : [];
+    items.push(...batch);
+    pagination = res.pagination || {};
+    if (!pagination.next || batch.length === 0) break;
+  }
+  return { data: items.slice(0, perPage), pagination: {} };
 }
 
 function requestRaw(path, options = {}) {
@@ -304,7 +348,34 @@ export const api = {
 
   // Enrollments
   getEnrollments: async (courseId, page = 1, perPage = 10) => {
-    return request(`/courses/${courseId}/enrollments?page=${page}&per_page=${perPage}`);
+    return requestPaged(`/courses/${courseId}/enrollments`, page, perPage);
+  },
+
+  // The whole roster. The server caps per_page at 100, so a single
+  // per_page=200 request silently truncated large courses (B072).
+  getAllEnrollments: async (courseId) => {
+    const all = [];
+    for (let page = 1; page <= 200; page += 1) {
+      const { data, pagination } = await request(`/courses/${courseId}/enrollments?page=${page}&per_page=100`);
+      const rows = data || [];
+      all.push(...rows);
+      if (rows.length === 0) break;
+      if (pagination?.next) continue;
+      if (rows.length < 100) break;
+    }
+    return { data: all };
+  },
+
+  // The caller's own enrollments in a course + whether they act as admin.
+  getMyCourseEnrollments: async (courseId) => {
+    const { data } = await request(`/courses/${courseId}/enrollments/self`);
+    return data;
+  },
+
+  // Exact email / login ID / SIS ID lookup for the course Add People form.
+  searchEnrollableUsers: async (courseId, searchTerm) => {
+    const { data } = await request(`/courses/${courseId}/enrollable_users?search_term=${encodeURIComponent(searchTerm)}`);
+    return data || [];
   },
 
   createEnrollment: async (courseId, enrollment) => {
@@ -437,7 +508,7 @@ export const api = {
 
   // Assignments
   getAssignments: async (courseId, page = 1, perPage = 10) => {
-    return request(`/courses/${courseId}/assignments?page=${page}&per_page=${perPage}`);
+    return requestPaged(`/courses/${courseId}/assignments`, page, perPage);
   },
 
   getAssignment: async (courseId, assignmentId) => {
@@ -491,6 +562,13 @@ export const api = {
     });
     return data;
   },
+  // Students upload submission files to their own space (the course files
+  // route is instructor-only); the returned id goes in file_ids.
+  uploadSubmissionFile: async (courseId, assignmentId, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return uploadFile(`/courses/${courseId}/assignments/${assignmentId}/submissions/self/files`, formData);
+  },
   gradeSubmission: async (courseId, assignmentId, userId, submission) => {
     const { data } = await request(`/courses/${courseId}/assignments/${assignmentId}/submissions/${userId}`, {
       method: 'PUT', body: JSON.stringify({ submission }),
@@ -532,8 +610,8 @@ export const api = {
 
   // Course Submissions (bulk)
   getCourseSubmissions: async (courseId, page = 1, perPage = 10000, userId = null) => {
-    const userFilter = userId ? `&user_id=${userId}` : '';
-    return request(`/courses/${courseId}/submissions?page=${page}&per_page=${perPage}${userFilter}`);
+    const userFilter = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+    return requestPaged(`/courses/${courseId}/submissions${userFilter}`, page, perPage);
   },
 
   // Gradebook
@@ -569,10 +647,10 @@ export const api = {
   },
 
   // Developer Keys
-  getDeveloperKeys: async (accountId = 1, page = 1, perPage = 10) => {
+  getDeveloperKeys: async (accountId = getCurrentAccountId(), page = 1, perPage = 10) => {
     return request(`/accounts/${accountId}/developer_keys?page=${page}&per_page=${perPage}`);
   },
-  createDeveloperKey: async (accountId = 1, developerKey) => {
+  createDeveloperKey: async (accountId = getCurrentAccountId(), developerKey) => {
     const { data } = await request(`/accounts/${accountId}/developer_keys`, {
       method: 'POST', body: JSON.stringify({ developer_key: developerKey }),
     });
@@ -586,6 +664,18 @@ export const api = {
   },
   deleteDeveloperKey: async (accountId, keyId) => {
     const { data } = await request(`/accounts/${accountId}/developer_keys/${keyId}`, { method: 'DELETE' });
+    return data;
+  },
+
+  // OAuth2 consent screen (B076): info for the screen, then the decision.
+  getOAuthAuthorizeInfo: async (params) => {
+    const { data } = await request(`/login/oauth2/auth/info?${new URLSearchParams(params).toString()}`);
+    return data;
+  },
+  submitOAuthConsent: async (consent) => {
+    const { data } = await request('/login/oauth2/auth', {
+      method: 'POST', body: JSON.stringify(consent),
+    });
     return data;
   },
 
@@ -694,10 +784,15 @@ export const api = {
   getCourseFiles: async (courseId, page = 1, perPage = 20) => {
     return request(`/courses/${courseId}/files?page=${page}&per_page=${perPage}`);
   },
-  uploadCourseFile: async (courseId, file) => {
+  uploadCourseFile: async (courseId, file, folderId = null) => {
     const formData = new FormData();
     formData.append('file', file);
+    if (folderId) formData.append('folder_id', String(folderId));
     return uploadFile(`/courses/${courseId}/files`, formData);
+  },
+  getCourseFrontPage: async (courseId) => {
+    const { data } = await request(`/courses/${courseId}/front_page`);
+    return data;
   },
   getFile: async (courseId, fileId) => {
     const { data } = await request(`/courses/${courseId}/files/${fileId}`);
@@ -777,7 +872,7 @@ export const api = {
     formData.append('attachment', file);
     return uploadFile(`/accounts/${accountId}/sis_imports`, formData);
   },
-  getSISImports: async (accountId = 1, page = 1, perPage = 20) => {
+  getSISImports: async (accountId = getCurrentAccountId(), page = 1, perPage = 20) => {
     return request(`/accounts/${accountId}/sis_imports?page=${page}&per_page=${perPage}`);
   },
   getSISImport: async (accountId, importId) => {
@@ -792,7 +887,7 @@ export const api = {
 
   // Quizzes
   getQuizzes: async (courseId, page = 1, perPage = 10) => {
-    return request(`/courses/${courseId}/quizzes?page=${page}&per_page=${perPage}`);
+    return requestPaged(`/courses/${courseId}/quizzes`, page, perPage);
   },
   getQuiz: async (courseId, quizId) => {
     const { data } = await request(`/courses/${courseId}/quizzes/${quizId}`);
@@ -817,7 +912,7 @@ export const api = {
 
   // Quiz Questions
   getQuizQuestions: async (courseId, quizId, page = 1, perPage = 50) => {
-    return request(`/courses/${courseId}/quizzes/${quizId}/questions?page=${page}&per_page=${perPage}`);
+    return requestPaged(`/courses/${courseId}/quizzes/${quizId}/questions`, page, perPage);
   },
   getQuizQuestion: async (courseId, quizId, questionId) => {
     const { data } = await request(`/courses/${courseId}/quizzes/${quizId}/questions/${questionId}`);
@@ -882,13 +977,27 @@ export const api = {
     return data?.quiz_submissions?.[0] || data;
   },
   getQuizSubmissions: async (courseId, quizId, page = 1, perPage = 50) => {
-    const { data } = await request(`/courses/${courseId}/quizzes/${quizId}/submissions?page=${page}&per_page=${perPage}`);
+    const { data } = await requestPaged(`/courses/${courseId}/quizzes/${quizId}/submissions`, page, perPage);
     return { data: data?.quiz_submissions || data || [] };
   },
   getQuizSubmissionAnswers: async (courseId, quizId, submissionId) => {
     const { data } = await request(`/courses/${courseId}/quizzes/${quizId}/submissions/${submissionId}/answers`);
     return data?.quiz_submission_answers || data || [];
   },
+  // The attempt's own (personalized) question set. Students get answer keys
+  // redacted until the attempt is over and the quiz allows showing them.
+  getQuizSubmissionQuestions: async (courseId, quizId, submissionId) => {
+    const { data } = await request(`/courses/${courseId}/quizzes/${quizId}/submissions/${submissionId}/questions`);
+    return Array.isArray(data) ? data : [];
+  },
+  // File-upload question: stores the file and records it as the answer.
+  uploadQuizAnswerFile: async (courseId, quizId, submissionId, questionId, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return uploadFile(`/courses/${courseId}/quizzes/${quizId}/submissions/${submissionId}/questions/${questionId}/file`, formData);
+  },
+  getQuizAnswerFileUrl: (courseId, quizId, submissionId, questionId) =>
+    `${API_URL}/courses/${courseId}/quizzes/${quizId}/submissions/${submissionId}/questions/${questionId}/file`,
 
   // Quiz Statistics (instructor only)
   getQuizStatistics: async (courseId, quizId) => {
@@ -933,7 +1042,7 @@ export const api = {
 
   // Rubric Assessments
   getRubricAssessments: async (courseId, associationId, page = 1, perPage = 50) => {
-    return request(`/courses/${courseId}/rubric_associations/${associationId}/rubric_assessments?page=${page}&per_page=${perPage}`);
+    return requestPaged(`/courses/${courseId}/rubric_associations/${associationId}/rubric_assessments`, page, perPage);
   },
   getRubricAssessment: async (courseId, associationId, assessmentId) => {
     const { data } = await request(`/courses/${courseId}/rubric_associations/${associationId}/rubric_assessments/${assessmentId}`);
@@ -953,7 +1062,7 @@ export const api = {
   },
 
   // Grading Period Groups
-  getGradingPeriodGroups: async (accountId = 1, page = 1, perPage = 20) => {
+  getGradingPeriodGroups: async (accountId = getCurrentAccountId(), page = 1, perPage = 20) => {
     return request(`/accounts/${accountId}/grading_period_groups?page=${page}&per_page=${perPage}`);
   },
   getGradingPeriodGroup: async (accountId, groupId) => {
@@ -1099,6 +1208,11 @@ export const api = {
       method: 'PUT', body: JSON.stringify({ conversation }),
     });
     return data;
+  },
+  // Inbox recipient picker: users who share a course with the caller
+  // (GET /users is admin-only).
+  searchRecipients: async (searchTerm, perPage = 10) => {
+    return request(`/search/recipients?search=${encodeURIComponent(searchTerm)}&per_page=${perPage}`);
   },
   getConversationMessages: async (conversationId, page = 1, perPage = 50) => {
     return request(`/conversations/${conversationId}/messages?page=${page}&per_page=${perPage}`);
@@ -1265,8 +1379,8 @@ export const api = {
     });
     return data;
   },
-  getOutcomeRollups: async (courseId) => {
-    const { data } = await request(`/courses/${courseId}/outcome_rollups`);
+  getOutcomeRollups: async (courseId, page = 1, perPage = 100) => {
+    const { data } = await request(`/courses/${courseId}/outcome_rollups?page=${page}&per_page=${perPage}`);
     return data;
   },
 
@@ -1489,6 +1603,10 @@ export const api = {
     const { data } = await request(`/conferences/${id}`, { method: 'DELETE' });
     return data;
   },
+  startConference: async (id) => {
+    const { data } = await request(`/conferences/${id}/start`, { method: 'POST' });
+    return data;
+  },
   joinConference: async (id) => {
     const { data } = await request(`/conferences/${id}/join`, { method: 'POST' });
     return data;
@@ -1527,15 +1645,15 @@ export const api = {
     const { data } = await request(`/courses/${courseId}/analytics/users/${userId}/assignments`);
     return data;
   },
-  getDepartmentAnalyticsActivity: async (accountId = 1) => {
+  getDepartmentAnalyticsActivity: async (accountId = getCurrentAccountId()) => {
     const { data } = await request(`/accounts/${accountId}/analytics/current/activity`);
     return data;
   },
-  getDepartmentAnalyticsGrades: async (accountId = 1) => {
+  getDepartmentAnalyticsGrades: async (accountId = getCurrentAccountId()) => {
     const { data } = await request(`/accounts/${accountId}/analytics/current/grades`);
     return data;
   },
-  getDepartmentAnalyticsStatistics: async (accountId = 1) => {
+  getDepartmentAnalyticsStatistics: async (accountId = getCurrentAccountId()) => {
     const { data } = await request(`/accounts/${accountId}/analytics/current/statistics`);
     return data;
   },
@@ -1593,7 +1711,7 @@ export const api = {
   },
 
   // Authentication Providers
-  getAuthProviders: async (accountId = 1, page = 1, perPage = 20) => {
+  getAuthProviders: async (accountId = getCurrentAccountId(), page = 1, perPage = 20) => {
     return request(`/accounts/${accountId}/authentication_providers?page=${page}&per_page=${perPage}`);
   },
   getAuthProvider: async (accountId, providerId) => {
@@ -1663,7 +1781,7 @@ export const api = {
   },
 
   // Batch Operations
-  cloneCourse: async (sourceCourseId, name, accountId = 1, include = {}) => {
+  cloneCourse: async (sourceCourseId, name, accountId = getCurrentAccountId(), include = {}) => {
     const { data } = await request('/courses/clone', {
       method: 'POST', body: JSON.stringify({ source_course_id: sourceCourseId, name, account_id: accountId, include }),
     });
@@ -1729,7 +1847,7 @@ export const api = {
   getAnnouncementReadReceipts: async (id, page = 1, perPage = 50) => {
     return request(`/announcements/${id}/read_receipts?page=${page}&per_page=${perPage}`);
   },
-  getAccountAnnouncements: async (accountId = 1, page = 1, perPage = 20) => {
+  getAccountAnnouncements: async (accountId = getCurrentAccountId(), page = 1, perPage = 20) => {
     return request(`/accounts/${accountId}/announcements?page=${page}&per_page=${perPage}`);
   },
   createAccountAnnouncement: async (accountId, announcement) => {
@@ -1740,7 +1858,7 @@ export const api = {
   },
 
   // Enrollment Terms
-  getEnrollmentTerms: async (accountId = 1, page = 1, perPage = 20) => {
+  getEnrollmentTerms: async (accountId = getCurrentAccountId(), page = 1, perPage = 20) => {
     return request(`/accounts/${accountId}/terms?page=${page}&per_page=${perPage}`);
   },
   createEnrollmentTerm: async (accountId, term) => {
@@ -1763,7 +1881,7 @@ export const api = {
     const { data } = await request(`/accounts/${accountId}/terms/${termId}`, { method: 'DELETE' });
     return data;
   },
-  getCurrentEnrollmentTerm: async (accountId = 1) => {
+  getCurrentEnrollmentTerm: async (accountId = getCurrentAccountId()) => {
     const { data } = await request(`/accounts/${accountId}/terms/current`);
     return data;
   },
@@ -1804,6 +1922,12 @@ export const api = {
     const { data } = await request(`/users/self/communication_channels/${id}`, { method: 'DELETE' });
     return data;
   },
+  confirmCommunicationChannel: async (id, code) => {
+    const { data } = await request(`/users/self/communication_channels/${id}/confirm`, {
+      method: 'POST', body: JSON.stringify({ code }),
+    });
+    return data;
+  },
 
   // Audit Logs
   getCourseAuditLog: async (courseId, page = 1, perPage = 20, filters = {}) => {
@@ -1823,7 +1947,7 @@ export const api = {
     if (filters.date_to) params.append('date_to', filters.date_to);
     return request(`/courses/${courseId}/grade_change_log?${params.toString()}`);
   },
-  getAccountAuditLog: async (accountId = 1, page = 1, perPage = 20, filters = {}) => {
+  getAccountAuditLog: async (accountId = getCurrentAccountId(), page = 1, perPage = 20, filters = {}) => {
     const params = new URLSearchParams({ page, per_page: perPage });
     if (filters.event_type) params.append('event_type', filters.event_type);
     if (filters.user_id) params.append('user_id', filters.user_id);
@@ -1842,7 +1966,7 @@ export const api = {
   exportCourseGradeChangeLogCSV: (courseId) => `${API_URL}/courses/${courseId}/grade_change_log.csv`,
 
   // Custom Roles
-  getCustomRoles: async (accountId = 1, page = 1, perPage = 20) => {
+  getCustomRoles: async (accountId = getCurrentAccountId(), page = 1, perPage = 20) => {
     return request(`/accounts/${accountId}/roles?page=${page}&per_page=${perPage}`);
   },
   createCustomRole: async (accountId, role) => {
@@ -1871,7 +1995,7 @@ export const api = {
     });
     return data;
   },
-  getPermissionPresets: async (accountId = 1) => {
+  getPermissionPresets: async (accountId = getCurrentAccountId()) => {
     const { data } = await request(`/accounts/${accountId}/roles/presets`);
     return data;
   },
@@ -1891,7 +2015,7 @@ export const api = {
   },
 
   // OneRoster
-  getOneRosterConnections: async (accountId = 1, page = 1, perPage = 20) => {
+  getOneRosterConnections: async (accountId = getCurrentAccountId(), page = 1, perPage = 20) => {
     return request(`/accounts/${accountId}/oneroster_connections?page=${page}&per_page=${perPage}`);
   },
   createOneRosterConnection: async (accountId, connection) => {
@@ -1974,14 +2098,15 @@ export const api = {
   },
 
   // COPPA / Parental Consent
-  requestConsent: async (userId) => {
-    const { data } = await request('/consent/request', {
-      method: 'POST', body: JSON.stringify({ user_id: userId }),
+  requestConsent: async (userId, parentEmail, consentType = 'data_collection') => {
+    const { data } = await request(`/users/${userId}/parental_consent`, {
+      method: 'POST', body: JSON.stringify({ parent_email: parentEmail, consent_type: consentType }),
     });
     return data;
   },
-  listConsents: async (page = 1, perPage = 20) => {
-    return request(`/consent?page=${page}&per_page=${perPage}`);
+  listConsents: async (userId) => {
+    const { data } = await request(`/users/${userId}/parental_consent`);
+    return data;
   },
   verifyConsent: async (token, granted) => {
     const { data } = await request(`/consent/verify/${token}`, {
@@ -2147,6 +2272,16 @@ export const api = {
     });
     return data;
   },
+  // multipart: file + title, description, tags, section_id, is_featured
+  uploadPortfolioArtifact: async (id, formData) => {
+    return uploadFile(`/portfolios/${id}/artifacts/upload`, formData);
+  },
+  reorderPortfolioSections: async (id, order) => {
+    const { data } = await request(`/portfolios/${id}/sections/reorder`, {
+      method: 'PUT', body: JSON.stringify({ order }),
+    });
+    return data;
+  },
   updatePortfolioArtifact: async (id, artifactId, artifact) => {
     const { data } = await request(`/portfolios/${id}/artifacts/${artifactId}`, {
       method: 'PUT', body: JSON.stringify({ artifact }),
@@ -2163,9 +2298,13 @@ export const api = {
     });
     return data;
   },
-  importPortfolioFromCourse: async (id, courseId) => {
+  // courseId alone imports all of the owner's submitted work in the course;
+  // submissionIds narrows it to specific submissions.
+  importPortfolioFromCourse: async (id, courseId, submissionIds) => {
+    const body = { course_id: courseId || 0 };
+    if (submissionIds?.length) body.submission_ids = submissionIds;
     const { data } = await request(`/portfolios/${id}/import`, {
-      method: 'POST', body: JSON.stringify({ course_id: courseId }),
+      method: 'POST', body: JSON.stringify(body),
     });
     return data;
   },
@@ -2197,14 +2336,8 @@ export const api = {
     const { data } = await request(`/portfolios/public/${slug}`);
     return data;
   },
-  recordPortfolioView: async (slug) => {
-    const { data } = await request(`/portfolios/public/${slug}`, { method: 'POST' });
-    return data;
-  },
   duplicatePortfolio: async (id) => {
-    const { data } = await request(`/portfolios/${id}/import`, {
-      method: 'POST', body: JSON.stringify({ duplicate: true }),
-    });
+    const { data } = await request(`/portfolios/${id}/duplicate`, { method: 'POST' });
     return data;
   },
 
@@ -2374,22 +2507,23 @@ export const api = {
     const { data } = await request(`/courses/${courseId}/quiz_item_banks/${bankId}`, { method: 'DELETE' });
     return data;
   },
-  listQuizItemBankItems: async (bankId) => {
-    const { data } = await request(`/quiz_item_banks/${bankId}/items`);
+  // Item routes are course-scoped and instructor-only (items carry answer keys).
+  listQuizItemBankItems: async (courseId, bankId) => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks/${bankId}/items`);
     return data || [];
   },
 
   // Add a single bank item to a quiz.
-  addBankItemToQuiz: async (bankId, itemId, quizId) => {
-    const { data } = await request(`/quiz_item_banks/${bankId}/items/${itemId}/add_to_quiz/${quizId}`, {
+  addBankItemToQuiz: async (courseId, bankId, itemId, quizId) => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks/${bankId}/items/${itemId}/add_to_quiz/${quizId}`, {
       method: 'POST',
     });
     return data;
   },
-  // Random draw: copy N random items from a bank into a quiz.
-  randomDrawFromBank: async (bankId, quizId, count) => {
-    const { data } = await request(`/quiz_item_banks/${bankId}/random_draw`, {
-      method: 'POST', body: JSON.stringify({ quiz_id: quizId, count }),
+  // Random draw: copy N random items from a bank into a quiz (persisted server-side).
+  randomDrawFromBank: async (courseId, bankId, quizId, count) => {
+    const { data } = await request(`/courses/${courseId}/quiz_item_banks/${bankId}/random_draw`, {
+      method: 'POST', body: JSON.stringify({ quiz_id: Number(quizId), count: Number(count) }),
     });
     return data;
   },
@@ -2419,8 +2553,8 @@ export const api = {
     const { data } = await request(`/courses/${courseId}/quiz_stimuli/${stimulusId}`, { method: 'DELETE' });
     return data;
   },
-  getStimulusQuestions: async (stimulusId) => {
-    const { data } = await request(`/quiz_stimuli/${stimulusId}/questions`);
+  getStimulusQuestions: async (courseId, stimulusId) => {
+    const { data } = await request(`/courses/${courseId}/quiz_stimuli/${stimulusId}/questions`);
     return data || [];
   },
 
@@ -2545,7 +2679,7 @@ export const api = {
   cancelAppointmentReservation: (id, slotId, reservationId) =>
     request(`/appointment_groups/${id}/appointments/${slotId}/reservations/${reservationId}`, { method: 'DELETE' }),
   listMyAppointmentReservations: () =>
-    request(`/users/self/appointments`).catch(() => ({ data: [] })),
+    request(`/users/self/appointments`),
 
   // ==========================================================================
   // P3 Features: Outcome Proficiency + Learning Mastery Gradebook
@@ -2605,7 +2739,7 @@ export const api = {
   toggleCommonsFavorite: (id) =>
     request(`/commons/${id}/favorite`, { method: 'POST' }),
   importCommons: (id, courseId) =>
-    request(`/commons/${id}/import?course_id=${courseId}`, { method: 'POST' }),
+    request(`/courses/${courseId}/commons/${id}/import`, { method: 'POST' }),
   publishCommons: (courseId, body) =>
     request(`/courses/${courseId}/commons/publish`, {
       method: 'POST',

@@ -79,8 +79,11 @@ func (r *peerReviewRepo) FindByAssignmentAndReviewerAndReviewee(ctx context.Cont
 	return &pr, nil
 }
 
-func (r *peerReviewRepo) DeleteByAssignment(ctx context.Context, assignmentID, accountID uint) error {
-	q := r.db.WithContext(ctx).Where("assignment_id = ?", assignmentID)
+// DeleteIncompleteByAssignment removes the not-yet-completed peer reviews
+// of an assignment. Completed reviews are student work and survive a
+// reassignment.
+func (r *peerReviewRepo) DeleteIncompleteByAssignment(ctx context.Context, assignmentID, accountID uint) error {
+	q := r.db.WithContext(ctx).Where("assignment_id = ? AND workflow_state <> ?", assignmentID, "completed")
 	if accountID != 0 {
 		q = q.Where(assignmentTenantScope, accountID)
 	}

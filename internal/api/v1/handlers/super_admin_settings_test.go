@@ -364,7 +364,7 @@ func jsonMapFromString(t *testing.T, raw string) map[string]interface{} {
 // for accidental plaintext leaks across the entire serialized
 // response, not just inspectable fields.
 func readBody(resp *http.Response) string {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	buf := make([]byte, 0, 4096)
 	tmp := make([]byte, 1024)
 	for {

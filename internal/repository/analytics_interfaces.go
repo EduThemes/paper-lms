@@ -16,4 +16,7 @@ type PageViewRepository interface {
 	ListByUserID(ctx context.Context, userID, accountID uint, params PaginationParams) (*PaginatedResult[models.PageView], error)
 	CountByContextGrouped(ctx context.Context, contextType string, contextID uint) ([]map[string]interface{}, error)
 	SumInteractionByUserAndContext(ctx context.Context, userID uint, contextType string, contextID uint) (int64, error)
+	// CountByUserAndContext counts one user's page views in one context
+	// (e.g. a course) — the per-course "page views" analytics column.
+	CountByUserAndContext(ctx context.Context, userID uint, contextType string, contextID uint) (int64, error)
 }

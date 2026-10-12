@@ -332,10 +332,12 @@ func (e *IMSCCExporter) ExportCourse(ctx context.Context, courseID uint, outputD
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create zip file: %w", err)
 	}
-	defer zipFile.Close()
+	defer func() { _ = zipFile.Close() }()
 
 	zipWriter := zip.NewWriter(zipFile)
-	defer zipWriter.Close()
+	// Safety net for early returns; the success path closes explicitly
+	// below so a failed central-directory write is reported, not ignored.
+	defer func() { _ = zipWriter.Close() }()
 
 	// Collect all resources and organization items
 	var resources []exportManifestResource
@@ -624,6 +626,13 @@ func (e *IMSCCExporter) ExportCourse(ctx context.Context, courseID uint, outputD
 		return "", result, fmt.Errorf("failed to write manifest: %w", err)
 	}
 
+	if err := zipWriter.Close(); err != nil {
+		return "", result, fmt.Errorf("failed to finalize zip: %w", err)
+	}
+	if err := zipFile.Close(); err != nil {
+		return "", result, fmt.Errorf("failed to close zip file: %w", err)
+	}
+
 	return zipPath, result, nil
 }
 
@@ -662,6 +671,8 @@ func (e *IMSCCExporter) buildQTIForQuiz(
 	if err != nil {
 		return nil, fmt.Errorf("failed to list questions: %w", err)
 	}
+	// Per-attempt bank-draw copies are not part of the authored quiz.
+	questions.Items = models.AuthoredQuizQuestions(questions.Items)
 
 	// Build metadata fields
 	metaFields := []exportQTIMetaDataField{

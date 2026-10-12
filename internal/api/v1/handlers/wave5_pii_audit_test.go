@@ -192,7 +192,7 @@ func TestListUserAccommodations_FiresLogPIIAccess(t *testing.T) {
 	sink := newPIISink()
 	accomService := service.NewAccommodationService(accomRepo, &fakeAccommodationAppRepo{})
 	assignmentSvc := service.NewAssignmentService(nil)
-	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), new(mocks.MockUserRepository))
+	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), new(mocks.MockUserRepository), new(mocks.MockCourseRepository))
 	auditService := service.NewAuditService(nil, nil, sink)
 	h := handlers.NewAccommodationHandler(accomService, assignmentSvc, authz, auditService)
 
@@ -215,7 +215,7 @@ func TestListUserAccommodations_SelfReadDoesNotLog(t *testing.T) {
 	sink := newPIISink()
 	accomService := service.NewAccommodationService(accomRepo, &fakeAccommodationAppRepo{})
 	assignmentSvc := service.NewAssignmentService(nil)
-	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), new(mocks.MockUserRepository))
+	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), new(mocks.MockUserRepository), new(mocks.MockCourseRepository))
 	auditService := service.NewAuditService(nil, nil, sink)
 	h := handlers.NewAccommodationHandler(accomService, assignmentSvc, authz, auditService)
 
@@ -242,8 +242,11 @@ func TestGetAccommodation_FiresLogPIIAccess(t *testing.T) {
 	assignmentSvc := service.NewAssignmentService(nil)
 	userMock := new(mocks.MockUserRepository)
 	// caller 7 is an admin so RequireOwnerOrAdmin passes (caller != student).
-	userMock.On("FindByID", mock.Anything, uint(7), mock.AnythingOfType("uint")).Return(&models.User{ID: 7, Role: "admin"}, nil)
-	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), userMock)
+	userMock.On("FindByID", mock.Anything, uint(7), mock.AnythingOfType("uint")).Return(&models.User{ID: 7, AccountID: 1, Role: "admin"}, nil)
+	// The admin bypass is tenant-scoped: the owner must be in the
+	// caller's account.
+	userMock.On("FindByID", mock.Anything, studentID, uint(1)).Return(&models.User{ID: studentID, AccountID: 1, Role: "user"}, nil)
+	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), userMock, new(mocks.MockCourseRepository))
 	auditService := service.NewAuditService(nil, nil, sink)
 	h := handlers.NewAccommodationHandler(accomService, assignmentSvc, authz, auditService)
 
@@ -265,7 +268,7 @@ func TestListCourseAccommodations_FiresBulkLogPIIAccess(t *testing.T) {
 	sink := newPIISink()
 	accomService := service.NewAccommodationService(accomRepo, &fakeAccommodationAppRepo{})
 	assignmentSvc := service.NewAssignmentService(nil)
-	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), new(mocks.MockUserRepository))
+	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), new(mocks.MockUserRepository), new(mocks.MockCourseRepository))
 	auditService := service.NewAuditService(nil, nil, sink)
 	h := handlers.NewAccommodationHandler(accomService, assignmentSvc, authz, auditService)
 
@@ -369,13 +372,17 @@ func (f *fakeAnnouncementRepo) ListGlobal(ctx context.Context, params repository
 func (f *fakeAnnouncementRepo) ListScheduledReady(ctx context.Context) ([]models.Announcement, error) {
 	return nil, nil
 }
+func (f *fakeAnnouncementRepo) ListForViewer(ctx context.Context, courseID uint, viewer postgres.AnnouncementViewer, params repository.PaginationParams) (*repository.PaginatedResult[models.Announcement], error) {
+	return &repository.PaginatedResult[models.Announcement]{}, nil
+}
 
 var _ postgres.AnnouncementRepository = (*fakeAnnouncementRepo)(nil)
 var _ postgres.AnnouncementReadReceiptRepository = (*fakeReceiptRepo)(nil)
 
 func TestGetReadReceipts_FiresLogPIIAccess(t *testing.T) {
 	annRepo := newFakeAnnouncementRepo()
-	annRepo.byID[10] = &models.Announcement{ID: 10, Title: "t", Message: "m"}
+	acct := uint(1)
+	annRepo.byID[10] = &models.Announcement{ID: 10, AccountID: &acct, Title: "t", Message: "m", WorkflowState: "published"}
 
 	receiptRepo := newFakeReceiptRepo()
 	receiptRepo.byAnn[10] = []models.AnnouncementReadReceipt{
@@ -385,7 +392,11 @@ func TestGetReadReceipts_FiresLogPIIAccess(t *testing.T) {
 
 	sink := newPIISink()
 	announcementService := service.NewAnnouncementService(annRepo, receiptRepo, new(mocks.MockEnrollmentRepository))
-	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), new(mocks.MockUserRepository))
+	// Read receipts of an account announcement require an admin of the
+	// owning tenant (caller 7 is an admin in account 1).
+	userRepo := new(mocks.MockUserRepository)
+	userRepo.On("FindByID", mock.Anything, uint(7), mock.AnythingOfType("uint")).Return(&models.User{ID: 7, Role: "admin", AccountID: 1}, nil)
+	authz := handlers.NewResourceAuthorizer(new(mocks.MockEnrollmentRepository), userRepo, new(mocks.MockCourseRepository))
 	auditService := service.NewAuditService(nil, nil, sink)
 	h := handlers.NewAnnouncementHandler(announcementService, authz, auditService)
 
@@ -419,12 +430,14 @@ func TestListReservations_FiresBulkLogPIIAccess(t *testing.T) {
 		{ID: 2, SlotID: 20, GroupID: 5, UserID: 88},
 	}, nil)
 
-	// Caller is an admin so RequireCourseInstructor passes without an
-	// enrollment lookup.
-	userRepo.On("FindByID", mock.Anything, uint(7), mock.AnythingOfType("uint")).Return(&models.User{ID: 7, Role: "admin"}, nil)
+	// Caller is an admin of the course's tenant so RequireCourseInstructor
+	// passes without an enrollment lookup.
+	userRepo.On("FindByID", mock.Anything, uint(7), mock.AnythingOfType("uint")).Return(&models.User{ID: 7, AccountID: 1, Role: "admin"}, nil)
+	courseRepo := new(mocks.MockCourseRepository)
+	courseRepo.On("FindByID", mock.Anything, uint(101), uint(1)).Return(&models.Course{ID: 101, AccountID: 1, WorkflowState: models.CourseAvailable}, nil)
 
 	appointmentService := service.NewAppointmentGroupService(groupRepo, slotRepo, resRepo, nil)
-	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo)
+	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo, courseRepo)
 	sink := newPIISink()
 	auditService := service.NewAuditService(nil, nil, sink)
 	h := handlers.NewAppointmentGroupHandler(appointmentService, authz, auditService)
@@ -556,6 +569,8 @@ func TestListOutcomeResults_PerUser_FiresLogPIIAccess(t *testing.T) {
 
 	app := testutil.SetupTestApp()
 	installAuthAndPagination(app, 7)
+	// B087: only course staff may read another student's results.
+	app.Use(func(c *fiber.Ctx) error { c.Locals("enrollment_type", "TeacherEnrollment"); return c.Next() })
 	app.Get("/api/v1/courses/:course_id/outcome_results", h.ListResults)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/courses/101/outcome_results?user_id=42", nil)
@@ -575,6 +590,7 @@ func TestGetMasteryGradebook_FiresBulkLogPIIAccess(t *testing.T) {
 
 	app := testutil.SetupTestApp()
 	installAuthAndPagination(app, 7)
+	app.Use(func(c *fiber.Ctx) error { c.Locals("enrollment_type", "TeacherEnrollment"); return c.Next() })
 	app.Get("/api/v1/courses/:course_id/outcome_rollups", h.GetMasteryGradebook)
 
 	resp := testutil.MakeRequest(app, http.MethodGet, "/api/v1/courses/101/outcome_rollups", nil)
@@ -609,8 +625,12 @@ func TestListGroupMemberships_FiresBulkLogPIIAccess(t *testing.T) {
 		PerPage:    25,
 	}, nil)
 
+	// The caller is a same-tenant admin (DB role): only staff and admins
+	// get members' email/login_id, so only their reads are PII accesses.
+	userRepo.On("FindByID", mock.Anything, uint(7), uint(0)).Return(&models.User{ID: 7, AccountID: 1, Role: "admin"}, nil)
+
 	groupSvc := service.NewGroupService(catRepo, groupRepo, membershipRepo, enrollmentRepo)
-	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo)
+	authz := handlers.NewResourceAuthorizer(enrollmentRepo, userRepo, new(mocks.MockCourseRepository))
 	sink := newPIISink()
 	auditService := service.NewAuditService(nil, nil, sink)
 	h := handlers.NewGroupHandler(groupSvc, authz, auditService)

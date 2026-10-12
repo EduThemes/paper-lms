@@ -32,6 +32,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { normalizePortfolio } from '../utils/portfolio';
 
 /* ═══════════════════════════════════════════════════════
    THEME DEFINITIONS
@@ -254,7 +255,7 @@ const PortfolioPublicPage = () => {
   useEffect(() => {
     const fetchPortfolio = async () => {
       try {
-        const data = await api.getPublicPortfolio(slug);
+        const data = normalizePortfolio(await api.getPublicPortfolio(slug));
         setPortfolio(data);
         if (data.sections?.length > 0) {
           const visible = data.sections.filter((s) => s.visible !== false).sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -269,12 +270,7 @@ const PortfolioPublicPage = () => {
     fetchPortfolio();
   }, [slug]);
 
-  /* Ping view counter */
-  useEffect(() => {
-    if (portfolio?.id) {
-      api.recordPortfolioView(portfolio.id).catch(() => {});
-    }
-  }, [portfolio?.id]);
+  /* The view counter is incremented server-side by GET /portfolios/public/:slug. */
 
   /* Fetch comments */
   useEffect(() => {
@@ -353,7 +349,9 @@ const PortfolioPublicPage = () => {
     if (!commentText.trim()) return;
     setSubmittingComment(true);
     try {
-      const comment = await api.addPortfolioComment(portfolio.id, { content: commentText.trim() });
+      // addPortfolioComment wraps the text as {comment: {content}} itself;
+      // passing an object nested it twice and the API rejected it (B199).
+      const comment = await api.addPortfolioComment(portfolio.id, commentText.trim());
       setComments((prev) => [...prev, comment]);
       setCommentText('');
     } catch (err) {

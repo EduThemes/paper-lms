@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -81,7 +82,58 @@ func (s *AuditService) LogEvent(ctx context.Context, eventType string, userID ui
 		IPAddress:   ipAddress,
 		UserAgent:   userAgent,
 	}
+	prepareAuditLog(ctx, log)
 	return s.auditLogRepo.Create(ctx, log)
+}
+
+// masqueraderKey is the typed context key WithMasquerader uses.
+type masqueraderKey struct{}
+
+// WithMasquerader returns a context that carries the id of the real user
+// behind a masquerade session, so audit rows written with it record who
+// actually acted.
+func WithMasquerader(ctx context.Context, realUserID uint) context.Context {
+	if realUserID == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, masqueraderKey{}, realUserID)
+}
+
+// MasqueraderFromContext returns the real (masquerading) user id carried by
+// ctx, or 0. Besides WithMasquerader it understands a Fiber request context
+// directly: Fiber stores Locals as fasthttp user values, which
+// (*fasthttp.RequestCtx).Value exposes, so every handler that passes
+// c.Context() to the audit service gets masquerade attribution for free.
+func MasqueraderFromContext(ctx context.Context) uint {
+	if ctx == nil {
+		return 0
+	}
+	if v, ok := ctx.Value(masqueraderKey{}).(uint); ok && v != 0 {
+		return v
+	}
+	if v, ok := ctx.Value("masquerade_by").(uint); ok && v != 0 {
+		return v
+	}
+	return 0
+}
+
+// prepareAuditLog fills the masquerade attribution and makes sure the
+// payload is valid JSON. audit_logs.payload is jsonb: a plain-text payload
+// (or an empty one) made the INSERT fail, and every caller treats audit
+// writes as fire-and-forget, so those events silently never reached the
+// log. Non-JSON text is wrapped as {"message": "..."}.
+func prepareAuditLog(ctx context.Context, log *models.AuditLog) {
+	if log.RealUserID == nil {
+		if real := MasqueraderFromContext(ctx); real != 0 && real != log.UserID {
+			log.RealUserID = &real
+		}
+	}
+	if log.Payload == "" {
+		log.Payload = "{}"
+	} else if !json.Valid([]byte(log.Payload)) {
+		b, _ := json.Marshal(map[string]string{"message": log.Payload})
+		log.Payload = string(b)
+	}
 }
 
 // LogGradeChange creates both an AuditLog entry (event_type=grade_change) and a GradeChangeLog entry.
@@ -115,8 +167,15 @@ func (s *AuditService) LogGradeChange(ctx context.Context, courseID, assignmentI
 		newScoreStr = fmt.Sprintf("%.2f", *newScore)
 	}
 
-	payload := fmt.Sprintf(`{"old_grade":"%s","new_grade":"%s","old_score":"%s","new_score":"%s","grading_method":"%s","excused":%t}`,
-		oldGrade, newGrade, oldScoreStr, newScoreStr, gradingMethod, excused)
+	payloadBytes, _ := json.Marshal(map[string]interface{}{
+		"old_grade":      oldGrade,
+		"new_grade":      newGrade,
+		"old_score":      oldScoreStr,
+		"new_score":      newScoreStr,
+		"grading_method": gradingMethod,
+		"excused":        excused,
+	})
+	payload := string(payloadBytes)
 
 	auditLog := &models.AuditLog{
 		EventType:   "grade_change",
@@ -127,6 +186,7 @@ func (s *AuditService) LogGradeChange(ctx context.Context, courseID, assignmentI
 		Action:      "graded",
 		Payload:     payload,
 	}
+	prepareAuditLog(ctx, auditLog)
 
 	return s.auditLogRepo.Create(ctx, auditLog)
 }
@@ -147,12 +207,17 @@ func (s *AuditService) GetCourseAuditLog(ctx context.Context, courseID uint, par
 }
 
 // GetActivitySummary returns event type counts within a date range for the admin dashboard.
-func (s *AuditService) GetActivitySummary(ctx context.Context, dateFrom, dateTo *time.Time) ([]postgres.EventTypeCount, error) {
-	return s.auditLogRepo.CountByEventType(ctx, dateFrom, dateTo)
+// accountID != nil scopes the summary to one tenant.
+func (s *AuditService) GetActivitySummary(ctx context.Context, accountID *uint, dateFrom, dateTo *time.Time) ([]postgres.EventTypeCount, error) {
+	return s.auditLogRepo.CountByEventType(ctx, accountID, dateFrom, dateTo)
 }
 
 // ExportAuditLogCSV exports audit log entries matching the filter as CSV bytes.
-func (s *AuditService) ExportAuditLogCSV(ctx context.Context, filter postgres.AuditLogFilter) ([]byte, error) {
+// ExportAuditLogCSV renders the filtered audit log as CSV. includeNetwork
+// gates the IP Address / User Agent columns' values: they identify
+// individual users' devices and are only for admins (Canvas restricts
+// audit data to admins); for anyone else the cells are left blank.
+func (s *AuditService) ExportAuditLogCSV(ctx context.Context, filter postgres.AuditLogFilter, includeNetwork bool) ([]byte, error) {
 	logs, err := s.auditLogRepo.ListAllByFilter(ctx, filter)
 	if err != nil {
 		return nil, err
@@ -162,7 +227,7 @@ func (s *AuditService) ExportAuditLogCSV(ctx context.Context, filter postgres.Au
 	writer := csv.NewWriter(&buf)
 
 	// Write header
-	header := []string{"ID", "Event Type", "User ID", "Course ID", "Account ID", "Context Type", "Context ID", "Action", "Payload", "IP Address", "User Agent", "Created At"}
+	header := []string{"ID", "Event Type", "User ID", "Real User ID", "Course ID", "Account ID", "Context Type", "Context ID", "Action", "Payload", "IP Address", "User Agent", "Created At"}
 	if err := writer.Write(header); err != nil {
 		return nil, err
 	}
@@ -177,19 +242,28 @@ func (s *AuditService) ExportAuditLogCSV(ctx context.Context, filter postgres.Au
 		if log.AccountID != nil {
 			accountID = fmt.Sprintf("%d", *log.AccountID)
 		}
+		realUserID := ""
+		if log.RealUserID != nil {
+			realUserID = fmt.Sprintf("%d", *log.RealUserID)
+		}
+		ipAddress, userAgent := log.IPAddress, log.UserAgent
+		if !includeNetwork {
+			ipAddress, userAgent = "", ""
+		}
 
 		row := []string{
 			fmt.Sprintf("%d", log.ID),
 			log.EventType,
 			fmt.Sprintf("%d", log.UserID),
+			realUserID,
 			courseID,
 			accountID,
 			log.ContextType,
 			fmt.Sprintf("%d", log.ContextID),
 			log.Action,
 			log.Payload,
-			log.IPAddress,
-			log.UserAgent,
+			ipAddress,
+			userAgent,
 			log.CreatedAt.Format(time.RFC3339),
 		}
 		if err := writeCSVRow(writer, row); err != nil {

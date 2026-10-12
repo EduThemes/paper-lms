@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Globe, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import Layout from '../components/Layout';
+import { api } from '../services/api';
+import { useOptionalAuth } from '../contexts/AuthContext';
 
 // LanguagePreferencesPage is the user-personal home for the locale
 // choice. It replaces the globe icon that used to live in the main
@@ -26,11 +28,21 @@ const isActive = (current, code) =>
 export default function LanguagePreferencesPage() {
   const { t, i18n } = useTranslation();
   const [savedAt, setSavedAt] = useState(null);
+  const auth = useOptionalAuth();
 
   const handleSelect = (code) => {
     try { localStorage.setItem('paperlms_locale', code); } catch (_) { /* ignore */ }
     i18n.changeLanguage(code);
     setSavedAt(Date.now());
+    // B210: the profile locale is applied on every sign-in and wins over
+    // this device's choice, so save the choice to the profile too.
+    const user = auth?.user;
+    if (user?.id && user.locale !== code) {
+      Promise.resolve()
+        .then(() => api.updateSelf(user.id, { locale: code }))
+        .then(() => auth.setUser?.((prev) => (prev ? { ...prev, locale: code } : prev)))
+        .catch(() => { /* device choice still applies */ });
+    }
   };
 
   return (

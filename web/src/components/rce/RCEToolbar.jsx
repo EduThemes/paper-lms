@@ -9,7 +9,6 @@ import {
   Undo, Redo, Sigma, Film, FolderSearch,
 } from 'lucide-react';
 import { Button } from '../ui/button';
-import { sanitizeHTML } from '../RichContentViewer';
 import ContentPicker from './ContentPicker';
 import MathInputDialog from './MathInputDialog';
 import EmbedMediaDialog from './EmbedMediaDialog';
@@ -99,20 +98,29 @@ export default function RCEToolbar({ editor, courseId }) {
 
   const insertMath = useCallback((latex) => {
     if (!latex) return;
-    const html = `<span class="math-tex" data-latex="${latex.replace(/"/g, '&quot;')}">\\(${latex}\\)</span>`;
-    editor.chain().focus().insertContent(sanitizeHTML(html)).run();
+    // Insert as a text node, never as an HTML string: building
+    // `\(${latex}\)` into markup let "<" / "&" in the LaTeX (x<y, matrix
+    // column separators) be parsed as tags/entities and corrupt the equation
+    // (B101). The viewers render \( \) text with KaTeX.
+    editor.chain().focus().insertContent({ type: 'text', text: `\\(${latex}\\)` }).run();
     setShowMath(false);
   }, [editor]);
 
-  const insertEmbed = useCallback((iframeHTML) => {
-    if (!iframeHTML) return;
-    editor.chain().focus().insertContent(sanitizeHTML(iframeHTML)).run();
+  const insertEmbed = useCallback((attrs) => {
+    if (!attrs?.src) return;
+    editor.chain().focus().setIframe(attrs).run();
     setShowEmbed(false);
   }, [editor]);
 
   const insertContentLink = useCallback((href, label) => {
     if (!href) return;
-    editor.chain().focus().insertContent(`<a href="${href}">${label || href}</a>`).run();
+    // Text node + link mark: the label is a title and must not be parsed as
+    // HTML ("Grades <Unit 2>" used to lose "<Unit 2>") (B106).
+    editor.chain().focus().insertContent({
+      type: 'text',
+      text: label || href,
+      marks: [{ type: 'link', attrs: { href } }],
+    }).run();
     setShowPicker(false);
   }, [editor]);
 

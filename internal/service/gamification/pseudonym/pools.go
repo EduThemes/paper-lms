@@ -105,7 +105,7 @@ func GenerateForEnrollment(pool Pool, enrollmentID uint, attempt int) string {
 		return "Anonymous Learner"
 	}
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(fmt.Sprintf("paper-lms.pseudonym.v1|%s|%d|%d", pool.Code, enrollmentID, attempt)))
+	_, _ = fmt.Fprintf(h, "paper-lms.pseudonym.v1|%s|%d|%d", pool.Code, enrollmentID, attempt)
 	seed := h.Sum64()
 	adj := pool.Adjectives[seed%uint64(len(pool.Adjectives))]
 	noun := pool.Nouns[(seed/uint64(len(pool.Adjectives)))%uint64(len(pool.Nouns))]

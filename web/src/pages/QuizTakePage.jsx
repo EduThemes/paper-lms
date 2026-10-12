@@ -15,7 +15,8 @@ import {
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
-import RichContentViewer, { sanitizeHTML } from '../components/RichContentViewer';
+import RichContentViewer from '../components/RichContentViewer';
+import SafeHTML from '../components/SafeHTML';
 import { useLiveRegion } from '../components/LiveRegion';
 import QuizTimer from '../components/quiz/QuizTimer';
 import QuestionPalette from '../components/quiz/QuestionPalette';
@@ -23,6 +24,8 @@ import AutoSaveIndicator from '../components/quiz/AutoSaveIndicator';
 import RestoreAnswersDialog from '../components/quiz/RestoreAnswersDialog';
 import ShortcutsDialog from '../components/quiz/ShortcutsDialog';
 import ItemPlayer from '../components/quiz/itemTypes/ItemPlayer';
+import { normalizeQuestionType } from '../components/quiz/itemTypes/types';
+import { extractBlankIds } from '../components/quiz/itemTypes/MultipleDropdownEditor';
 
 // Question types that are essentially answer-set-driven and use the legacy
 // inline render path. Newer types delegate to ItemPlayer.
@@ -77,12 +80,16 @@ const QuizTakePage = () => {
         const quizData = await api.getQuiz(courseId, quizId);
         setQuiz(quizData);
         try {
+          // Students get their own attempts back from this endpoint.
           const subResult = await api.getQuizSubmissions(courseId, quizId);
           const subs = subResult.data || [];
           if (subs.length > 0) {
             subs.sort((a, b) => (b.attempt || 0) - (a.attempt || 0));
             const latest = subs[0];
-            setPreviousAttempts(subs.filter(s => s.workflow_state === 'complete').length);
+            // Every finished attempt counts — including ones awaiting
+            // manual review.
+            const finished = subs.filter(s => s.workflow_state !== 'untaken').length;
+            setPreviousAttempts(finished);
             setLastSubmission(latest);
             if (latest.workflow_state === 'untaken' || latest.workflow_state === 'pending') {
               setSubmission(latest);
@@ -90,13 +97,13 @@ const QuizTakePage = () => {
                 const endAt = new Date(latest.end_at);
                 setTimeLeft(Math.max(0, Math.floor((endAt - new Date()) / 1000)));
               }
-              const { data: qs } = await api.getQuizQuestions(courseId, quizId, 1, 100);
+              const qs = await api.getQuizSubmissionQuestions(courseId, quizId, latest.id);
               setQuestions(qs);
               setStarted(true);
               checkLocalBackup(latest);
-            } else if (latest.workflow_state === 'complete') {
+            } else {
               const allowed = quizData.allowed_attempts || -1;
-              if (allowed !== -1 && subs.filter(s => s.workflow_state === 'complete').length >= allowed) {
+              if (allowed !== -1 && finished >= allowed) {
                 setCompleted(true);
                 setSubmission(latest);
               }
@@ -147,7 +154,9 @@ const QuizTakePage = () => {
         const endAt = new Date(sub.end_at);
         setTimeLeft(Math.max(0, Math.floor((endAt - new Date()) / 1000)));
       }
-      const { data: qs } = await api.getQuizQuestions(courseId, quizId, 1, 100);
+      // The attempt's personalized question set (group draws), with the
+      // answer key redacted server-side.
+      const qs = await api.getQuizSubmissionQuestions(courseId, quizId, sub.id);
       setQuestions(qs);
       setStarted(true);
       checkLocalBackup(sub);
@@ -303,11 +312,23 @@ const QuizTakePage = () => {
     setRestorePrompt(null);
   };
 
+  // File-upload questions: upload the file against this attempt; the
+  // returned reference becomes the answer value.
+  const uploadAnswerFile = useCallback(async (questionId, file) => {
+    const sub = submissionRef.current;
+    if (!sub) throw new Error('Quiz attempt not started');
+    const res = await api.uploadQuizAnswerFile(courseId, quizId, sub.id, questionId, file);
+    return { attachment_id: res?.attachment_id, filename: res?.filename || file.name };
+  }, [courseId, quizId]);
+
   const renderQuestion = (q, idx) => {
     const stimulus = q.stimulus || null;
-    // multiple_dropdown renders its own inline question text with embedded
-    // <select>s, so suppress the default stem rendering for it.
-    const suppressStem = q.question_type === 'multiple_dropdown';
+    // multiple_dropdown (and fill-in-multiple-blanks with [tokens]) render
+    // their own inline question text with embedded inputs, so suppress the
+    // default stem rendering for them.
+    const qType = normalizeQuestionType(q.question_type);
+    const suppressStem = qType === 'multiple_dropdown' ||
+      (qType === 'fill_in_multiple_blanks' && extractBlankIds(q.question_text).length > 0);
     return (
       <div
         key={q.id}
@@ -331,15 +352,15 @@ const QuizTakePage = () => {
             <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-text-secondary">
               Passage: {stimulus.title || 'Reading'}
             </summary>
-            <div className="px-3 pb-3 prose prose-sm max-w-prose text-text-primary"
-                 dangerouslySetInnerHTML={{ __html: sanitizeHTML(stimulus.content || '') }} />
+            <SafeHTML className="px-3 pb-3 prose prose-sm max-w-prose text-text-primary"
+                      html={stimulus.content || ''} />
           </details>
         )}
 
         {!suppressStem && (
-          <div
+          <SafeHTML
             className="prose prose-sm max-w-prose mb-5 text-text-primary"
-            dangerouslySetInnerHTML={{ __html: sanitizeHTML(q.question_text) }}
+            html={q.question_text}
           />
         )}
 
@@ -347,6 +368,7 @@ const QuizTakePage = () => {
           question={q}
           value={answers[q.id]}
           onChange={(v) => handleAnswer(q.id, v)}
+          onFileUpload={(file) => uploadAnswerFile(q.id, file)}
         />
       </div>
     );

@@ -411,16 +411,16 @@ func TestGradingRegression_Numerical(t *testing.T) {
 			wantWorkflow: "complete",
 		},
 		{
-			// REGRESSION: current behavior — see Wave A planning notes
-			// Numerical grader does an exact STRING match. "42" != "42.0".
-			name:         "string_match_no_numeric_normalization_42_vs_42_0",
+			// B130 (Canvas parity): numerical answers compare numerically,
+			// so "42.0" matches a key of "42".
+			name:         "numeric_normalization_42_vs_42_0",
 			questionType: "numerical_question",
 			points:       3.0,
 			answersJSON:  `[{"id":"n1","text":"42","weight":100}]`,
 			submitted:    "42.0",
-			wantScore:    0.0,
+			wantScore:    3.0,
 			wantWorkflow: "complete",
-			note:         "QUIRK: numerical grader is string-equality; 42 != 42.0",
+			note:         "numeric compare: 42 == 42.0",
 		},
 		{
 			// CHANGED IN WAVE A1: Was previously routed to pending_review (bug). Now auto-grades per-pair. See PATCH.md.
@@ -437,17 +437,75 @@ func TestGradingRegression_Numerical(t *testing.T) {
 			note:         "FIXED IN WAVE A1: margin tolerance is now respected",
 		},
 		{
-			// Legacy preservation: when `margin` is empty/missing the grader
-			// falls back to string equality, matching pre-Wave-A1 behavior so
-			// existing quizzes are not silently re-scored.
-			name:         "no_margin_falls_back_to_string_equality",
+			// B130: with no margin the comparison is still numeric (exact
+			// value), so equivalent spellings match.
+			name:         "no_margin_numeric_equality",
 			questionType: "numerical_question",
 			points:       3.0,
-			answersJSON:  `[{"id":"n1","text":"42","weight":100}]`,
-			submitted:    "42.0",
+			answersJSON:  `[{"id":"n1","text":"3.5","weight":100}]`,
+			submitted:    "+3.50",
+			wantScore:    3.0,
+			wantWorkflow: "complete",
+			note:         "3.5 == +3.50",
+		},
+		{
+			name:         "no_margin_different_value_still_wrong",
+			questionType: "numerical_question",
+			points:       3.0,
+			answersJSON:  `[{"id":"n1","text":"3.5","weight":100}]`,
+			submitted:    "3.51",
 			wantScore:    0.0,
 			wantWorkflow: "complete",
-			note:         "Legacy behavior preserved: no margin → exact string match",
+		},
+		{
+			// B035: Canvas imports serialize margin as a JSON number and use
+			// the exact/numerical_answer_type shape.
+			name:         "canvas_exact_answer_numeric_margin",
+			questionType: "numerical_question",
+			points:       2.0,
+			answersJSON:  `[{"id":"exact_42","text":"42.0","weight":100,"numerical_answer_type":"exact_answer","exact":42,"margin":0.5}]`,
+			submitted:    "42.4",
+			wantScore:    2.0,
+			wantWorkflow: "complete",
+		},
+		{
+			// B124: Canvas range answers.
+			name:         "canvas_range_answer",
+			questionType: "numerical_question",
+			points:       2.0,
+			answersJSON:  `[{"id":"r","weight":100,"numerical_answer_type":"range_answer","start":1,"end":2}]`,
+			submitted:    "1.5",
+			wantScore:    2.0,
+			wantWorkflow: "complete",
+		},
+		{
+			name:         "canvas_range_answer_outside",
+			questionType: "numerical_question",
+			points:       2.0,
+			answersJSON:  `[{"id":"r","weight":100,"numerical_answer_type":"range_answer","start":1,"end":2}]`,
+			submitted:    "2.01",
+			wantScore:    0.0,
+			wantWorkflow: "complete",
+		},
+		{
+			// Canvas precision_answer: 13.4 with 3 significant digits.
+			name:         "canvas_precision_answer",
+			questionType: "numerical_question",
+			points:       2.0,
+			answersJSON:  `[{"id":"p","weight":100,"numerical_answer_type":"precision_answer","approximate":13.4,"precision":3}]`,
+			submitted:    "13.45",
+			wantScore:    2.0,
+			wantWorkflow: "complete",
+		},
+		{
+			name:         "margin_boundary_is_exact_not_float_rounded",
+			questionType: "numerical_question",
+			points:       2.0,
+			answersJSON:  `[{"id":"n","text":"-11.7","margin":"0.02","weight":100}]`,
+			submitted:    "-11.72",
+			wantScore:    2.0,
+			wantWorkflow: "complete",
+			note:         "BigDecimal-style inclusive margin edge (Canvas parity)",
 		},
 		{
 			// Percent-margin semantics: "5%" of 200 = ±10, so 205 is accepted.

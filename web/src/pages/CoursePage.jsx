@@ -34,7 +34,8 @@ import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 import HomeEngine from '../components/home/HomeEngine';
 import K2Layout from '../components/home/K2Layout';
-import { sanitizeHTML } from '../components/RichContentViewer';
+import SafeHTML from '../components/SafeHTML';
+import { CourseFrontPageView, CourseAnnouncementsView } from '../components/home/CourseHomeViews';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -865,6 +866,12 @@ const CoursePage = () => {
     switch (defaultView) {
       case 'home_engine':
         return <HomeEngine />;
+      // B147: "Front Page" and "Announcements" home settings render their
+      // own content instead of silently falling back to modules.
+      case 'wiki':
+        return <CourseFrontPageView courseId={courseId} />;
+      case 'announcements':
+        return <CourseAnnouncementsView courseId={courseId} />;
       case 'syllabus':
         return course.syllabus_body ? (
           <Card>
@@ -874,9 +881,9 @@ const CoursePage = () => {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div
+              <SafeHTML
                 className="prose max-w-none text-text-primary"
-                dangerouslySetInnerHTML={{ __html: sanitizeHTML(course.syllabus_body) }}
+                html={course.syllabus_body}
               />
             </CardContent>
           </Card>
@@ -899,9 +906,9 @@ const CoursePage = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div
+                  <SafeHTML
                     className="prose max-w-none text-text-primary"
-                    dangerouslySetInnerHTML={{ __html: sanitizeHTML(course.syllabus_body) }}
+                    html={course.syllabus_body}
                   />
                 </CardContent>
               </Card>

@@ -133,30 +133,57 @@ type replaceRuleRequest struct {
 	ScoringRanges []service.RangeInput `json:"scoring_ranges"`
 }
 
-// PUT /courses/:course_id/mastery_paths/rules/:rule_id
-func (h *MasteryPathHandler) ReplaceRule(c *fiber.Ctx) error {
+// requireRuleInCourse loads :rule_id and verifies it belongs to the URL's
+// :course_id (F-013 parent-tie; the instructor middleware has already
+// tied :course_id to the caller and tenant). Writes a 404 and returns
+// wrote=true on any miss — the caller must `return nil`.
+//
+// B141: pre-fix ReplaceRule/DeleteRule acted on any rule id, so a
+// teacher of any course could rewrite or delete another course's (or
+// tenant's) conditional-release rules.
+func (h *MasteryPathHandler) requireRuleInCourse(c *fiber.Ctx) (*models.ConditionalReleaseRule, bool) {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil || courseID <= 0 {
+		_ = responses.BadRequest(c, "Invalid course ID")
+		return nil, true
+	}
 	ruleID, err := c.ParamsInt("rule_id")
 	if err != nil || ruleID <= 0 {
-		return responses.BadRequest(c, "Invalid rule ID")
+		_ = responses.BadRequest(c, "Invalid rule ID")
+		return nil, true
+	}
+	rule, err := h.svc.GetRule(c.Context(), uint(ruleID))
+	if err != nil || rule == nil || rule.CourseID != uint(courseID) {
+		_ = responses.NotFound(c, "mastery path rule")
+		return nil, true
+	}
+	return rule, false
+}
+
+// PUT /courses/:course_id/mastery_paths/rules/:rule_id
+func (h *MasteryPathHandler) ReplaceRule(c *fiber.Ctx) error {
+	rule, wrote := h.requireRuleInCourse(c)
+	if wrote {
+		return nil
 	}
 	var req replaceRuleRequest
 	if err := c.BodyParser(&req); err != nil {
 		return responses.BadRequest(c, "Invalid JSON body")
 	}
-	rule, err := h.svc.ReplaceRule(c.Context(), uint(ruleID), req.ScoringRanges)
+	updated, err := h.svc.ReplaceRule(c.Context(), rule.ID, req.ScoringRanges)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
-	return c.JSON(ruleToJSON(rule))
+	return c.JSON(ruleToJSON(updated))
 }
 
 // DELETE /courses/:course_id/mastery_paths/rules/:rule_id
 func (h *MasteryPathHandler) DeleteRule(c *fiber.Ctx) error {
-	ruleID, err := c.ParamsInt("rule_id")
-	if err != nil || ruleID <= 0 {
-		return responses.BadRequest(c, "Invalid rule ID")
+	rule, wrote := h.requireRuleInCourse(c)
+	if wrote {
+		return nil
 	}
-	if err := h.svc.DeleteRule(c.Context(), uint(ruleID)); err != nil {
+	if err := h.svc.DeleteRule(c.Context(), rule.ID); err != nil {
 		return responses.InternalError(c, "Could not delete rule")
 	}
 	return c.SendStatus(fiber.StatusNoContent)

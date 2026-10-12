@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
@@ -10,6 +12,16 @@ import (
 
 type DiscussionEntryHandler struct {
 	discussionService *service.DiscussionService
+	// v2 records edit history (UpdateEntryWithHistory); without it V1
+	// edits overwrite the message with no version kept.
+	v2 *service.DiscussionV2Service
+}
+
+// SetVersionHistory routes V1 entry edits through the versioned update the
+// /v2 edit route uses, so API edits keep the same history as UI edits.
+func (h *DiscussionEntryHandler) SetVersionHistory(v2 *service.DiscussionV2Service) *DiscussionEntryHandler {
+	h.v2 = v2
+	return h
 }
 
 func NewDiscussionEntryHandler(discussionService *service.DiscussionService) *DiscussionEntryHandler {
@@ -32,14 +44,14 @@ func entryToJSON(e *models.DiscussionEntry) fiber.Map {
 }
 
 func (h *DiscussionEntryHandler) ListEntries(c *fiber.Ctx) error {
-	topicID, err := c.ParamsInt("topic_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid topic ID")
+	topic, wrote := requireTopicInCourse(c, h.discussionService)
+	if wrote {
+		return nil
 	}
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.discussionService.ListEntries(c.Context(), uint(topicID), params)
+	result, err := h.discussionService.ListEntries(c.Context(), topic.ID, callerAccountID(c), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch discussion entries")
 	}
@@ -55,9 +67,14 @@ func (h *DiscussionEntryHandler) ListEntries(c *fiber.Ctx) error {
 }
 
 func (h *DiscussionEntryHandler) CreateEntry(c *fiber.Ctx) error {
-	topicID, err := c.ParamsInt("topic_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid topic ID")
+	// The topic must be in this course and tenant, visible to the caller
+	// (not deleted / unpublished / delayed) and not locked for them.
+	topic, wrote := requireTopicInCourse(c, h.discussionService)
+	if wrote {
+		return nil
+	}
+	if requireTopicOpenForCaller(c, topic) {
+		return nil
 	}
 
 	var input struct {
@@ -71,7 +88,7 @@ func (h *DiscussionEntryHandler) CreateEntry(c *fiber.Ctx) error {
 	userID, _ := c.Locals("user_id").(uint)
 
 	entry := &models.DiscussionEntry{
-		DiscussionTopicID: uint(topicID),
+		DiscussionTopicID: topic.ID,
 		UserID:            userID,
 		Message:           service.SanitizeHTML(input.Message),
 	}
@@ -83,15 +100,18 @@ func (h *DiscussionEntryHandler) CreateEntry(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(entryToJSON(entry))
 }
 
+// UpdateEntry — PUT /courses/:course_id/discussion_topics/:topic_id/entries/:id
 func (h *DiscussionEntryHandler) UpdateEntry(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("entry_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid entry ID")
+	topic, wrote := requireTopicInCourse(c, h.discussionService)
+	if wrote {
+		return nil
 	}
-
-	entry, err := h.discussionService.GetEntry(c.Context(), uint(id))
-	if err != nil {
-		return responses.NotFound(c, "discussion entry")
+	entry, wrote := requireEntryInTopic(c, h.discussionService, topic.ID, "id")
+	if wrote {
+		return nil
+	}
+	if requireEntryModerator(c, topic, entry) {
+		return nil
 	}
 
 	var input struct {
@@ -103,7 +123,15 @@ func (h *DiscussionEntryHandler) UpdateEntry(c *fiber.Ctx) error {
 	}
 
 	if input.Message != "" {
-		entry.Message = service.SanitizeHTML(input.Message)
+		msg := service.SanitizeHTML(input.Message)
+		if h.v2 != nil {
+			editorID, _ := c.Locals("user_id").(uint)
+			if err := h.v2.UpdateEntryWithHistory(c.Context(), entry, editorID, msg); err != nil {
+				return responses.InternalError(c, "Could not update discussion entry")
+			}
+			return c.JSON(entryToJSON(entry))
+		}
+		entry.Message = msg
 	}
 
 	if err := h.discussionService.UpdateEntry(c.Context(), entry); err != nil {
@@ -113,13 +141,23 @@ func (h *DiscussionEntryHandler) UpdateEntry(c *fiber.Ctx) error {
 	return c.JSON(entryToJSON(entry))
 }
 
+// DeleteEntry — DELETE /courses/:course_id/discussion_topics/:topic_id/entries/:id
+// The author may delete their own post (while the topic is open for
+// them); course staff may delete any post.
 func (h *DiscussionEntryHandler) DeleteEntry(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("entry_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid entry ID")
+	topic, wrote := requireTopicInCourse(c, h.discussionService)
+	if wrote {
+		return nil
+	}
+	entry, wrote := requireEntryInTopic(c, h.discussionService, topic.ID, "id")
+	if wrote {
+		return nil
+	}
+	if requireEntryModerator(c, topic, entry) {
+		return nil
 	}
 
-	if err := h.discussionService.DeleteEntry(c.Context(), uint(id)); err != nil {
+	if err := h.discussionService.DeleteEntry(c.Context(), entry.ID); err != nil {
 		return responses.InternalError(c, "Could not delete discussion entry")
 	}
 
@@ -127,14 +165,18 @@ func (h *DiscussionEntryHandler) DeleteEntry(c *fiber.Ctx) error {
 }
 
 func (h *DiscussionEntryHandler) ListReplies(c *fiber.Ctx) error {
-	entryID, err := c.ParamsInt("entry_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid entry ID")
+	topic, wrote := requireTopicInCourse(c, h.discussionService)
+	if wrote {
+		return nil
+	}
+	parent, wrote := requireEntryInTopic(c, h.discussionService, topic.ID, "entry_id")
+	if wrote {
+		return nil
 	}
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.discussionService.ListReplies(c.Context(), uint(entryID), params)
+	result, err := h.discussionService.ListReplies(c.Context(), parent.ID, callerAccountID(c), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch replies")
 	}
@@ -150,14 +192,18 @@ func (h *DiscussionEntryHandler) ListReplies(c *fiber.Ctx) error {
 }
 
 func (h *DiscussionEntryHandler) CreateReply(c *fiber.Ctx) error {
-	topicID, err := c.ParamsInt("topic_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid topic ID")
+	topic, wrote := requireTopicInCourse(c, h.discussionService)
+	if wrote {
+		return nil
 	}
-
-	entryID, err := c.ParamsInt("entry_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid entry ID")
+	if requireTopicOpenForCaller(c, topic) {
+		return nil
+	}
+	// The parent must be a live entry on this same topic; a parent from
+	// another topic would otherwise be orphaned into a root post.
+	parent, wrote := requireEntryInTopic(c, h.discussionService, topic.ID, "entry_id")
+	if wrote {
+		return nil
 	}
 
 	var input struct {
@@ -169,10 +215,10 @@ func (h *DiscussionEntryHandler) CreateReply(c *fiber.Ctx) error {
 	}
 
 	userID, _ := c.Locals("user_id").(uint)
-	parentID := uint(entryID)
+	parentID := parent.ID
 
 	entry := &models.DiscussionEntry{
-		DiscussionTopicID: uint(topicID),
+		DiscussionTopicID: topic.ID,
 		UserID:            userID,
 		ParentID:          &parentID,
 		Message:           service.SanitizeHTML(input.Message),
@@ -185,31 +231,50 @@ func (h *DiscussionEntryHandler) CreateReply(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(entryToJSON(entry))
 }
 
+// RateEntry — POST .../entries/:entry_id/rating with {"rating": 0|1}.
+// Matches Canvas rate_entry: 1 likes, 0 removes the like; any other
+// value is rejected. Only allowed when the topic allows rating, and only
+// for graders when only_graders_can_rate is set.
 func (h *DiscussionEntryHandler) RateEntry(c *fiber.Ctx) error {
-	entryID, err := c.ParamsInt("entry_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid entry ID")
+	topic, wrote := requireTopicInCourse(c, h.discussionService)
+	if wrote {
+		return nil
+	}
+	entry, wrote := requireEntryInTopic(c, h.discussionService, topic.ID, "entry_id")
+	if wrote {
+		return nil
+	}
+	if !discussionCallerMayRate(c, topic) {
+		return responses.Forbidden(c, "Rating is not allowed on this discussion")
 	}
 
 	var input struct {
-		Rating int `json:"rating"`
+		Rating *int `json:"rating"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
 	}
+	if input.Rating == nil || (*input.Rating != 0 && *input.Rating != 1) {
+		return responses.BadRequest(c, "rating must be 0 or 1")
+	}
 
 	userID, _ := c.Locals("user_id").(uint)
 
-	if err := h.discussionService.RateEntry(c.Context(), uint(entryID), userID, input.Rating); err != nil {
+	if err := h.discussionService.RateEntry(c.Context(), entry.ID, userID, *input.Rating); err != nil {
+		if errors.Is(err, service.ErrDiscussionInvalidRating) {
+			return responses.BadRequest(c, err.Error())
+		}
 		return responses.InternalError(c, "Could not rate entry")
 	}
 
 	// Return the updated entry
-	entry, err := h.discussionService.GetEntry(c.Context(), uint(entryID))
+	updated, err := h.discussionService.GetEntry(c.Context(), entry.ID, callerAccountID(c))
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch updated entry")
 	}
 
-	return c.JSON(entryToJSON(entry))
+	out := entryToJSON(updated)
+	out["rating"] = *input.Rating
+	return c.JSON(out)
 }

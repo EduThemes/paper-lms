@@ -1,26 +1,10 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { Link, useParams, useLocation } from 'react-router-dom';
 import { ChevronDown, Home, CheckSquare, BarChart2 } from 'lucide-react';
 import { useCourseUI } from '../contexts/CourseUIContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useClickOutside } from '../hooks/useClickOutside';
-import { api } from '../services/api';
-
-const isInstructorOrAdmin = (user, enrollments) => {
-  if (!user) return false;
-  if (user.role === 'admin') return true;
-  if (enrollments) {
-    // Only check the current user's enrollment, not all enrollments in the course
-    const myEnrollment = enrollments.find(e =>
-      e.user_id === user.id || e.user?.id === user.id
-    );
-    if (myEnrollment) {
-      return myEnrollment.type === 'TeacherEnrollment' || myEnrollment.type === 'TaEnrollment' ||
-        myEnrollment.role === 'TeacherEnrollment' || myEnrollment.role === 'TaEnrollment';
-    }
-  }
-  return false;
-};
+import useCourseStaffRole from '../hooks/useCourseStaffRole';
 
 // Complete map of tab id -> path/label for all available tabs
 const TAB_REGISTRY = {
@@ -63,6 +47,10 @@ const TEACHER_ONLY_TAB_IDS = new Set([
   'analytics', 'audit_log', 'content_import', 'external_tools', 'settings',
 ]);
 
+// Tabs whose routes exclude TAs (RequireCourseRole("TeacherEnrollment"),
+// B179): shown to teachers and admins only.
+const TEACHER_EXCLUSIVE_TAB_IDS = new Set(['audit_log']);
+
 // Default tab order (used when no customization exists)
 const DEFAULT_PRIMARY_IDS = ['home', 'announcements', 'assignments', 'modules', 'grades', 'people'];
 const DEFAULT_MORE_IDS = [
@@ -85,18 +73,13 @@ const CourseNav = () => {
   const { courseId } = useParams();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
-  const [enrollments, setEnrollments] = useState(null);
   const moreRef = useRef(null);
   const { course, isK2, is35 } = useCourseUI();
   const { user } = useAuth();
-
-  useEffect(() => {
-    if (!courseId || !user) return;
-    // Fetch enrollments to determine role; cache in state
-    api.getEnrollments(courseId, 1, 10)
-      .then(result => setEnrollments(result.data || []))
-      .catch(() => setEnrollments([]));
-  }, [courseId, user]);
+  // The caller's own course role (B072). This used to scan the first 10
+  // roster rows for the caller, so teacher tabs vanished in any course
+  // where the teacher's enrollment was not among the first ten.
+  const staffRole = useCourseStaffRole(courseId);
 
   // Close the "More" dropdown on outside click / Escape. Hook must sit above
   // the conditional `return null` paths below to keep hook order stable.
@@ -108,7 +91,13 @@ const CourseNav = () => {
   // K-2 mode: no course navigation at all
   if (isK2) return null;
 
-  const isTeacher = isInstructorOrAdmin(user, enrollments);
+  const isTeacher = Boolean(user) && staffRole?.staff === true;
+  const isCourseTeacher = Boolean(user) && staffRole?.teacher === true;
+  const tabAllowed = (id) => {
+    if (!isTeacher && TEACHER_ONLY_TAB_IDS.has(id)) return false;
+    if (!isCourseTeacher && TEACHER_EXCLUSIVE_TAB_IDS.has(id)) return false;
+    return true;
+  };
   const gradesPath = isTeacher ? '/gradebook' : '/grades';
   const simplifiedTabs = getSimplifiedTabs(gradesPath);
 
@@ -122,7 +111,7 @@ const CourseNav = () => {
       .sort((a, b) => a.position - b.position)
       .filter(t => {
         if (t.hidden) return false;
-        if (!isTeacher && TEACHER_ONLY_TAB_IDS.has(t.id)) return false;
+        if (!tabAllowed(t.id)) return false;
         return TAB_REGISTRY[t.id] != null;
       })
       .map(t => {
@@ -135,7 +124,7 @@ const CourseNav = () => {
     const allDefaultIds = [...DEFAULT_PRIMARY_IDS, ...DEFAULT_MORE_IDS];
     visibleTabs = allDefaultIds
       .filter(id => {
-        if (!isTeacher && TEACHER_ONLY_TAB_IDS.has(id)) return false;
+        if (!tabAllowed(id)) return false;
         return TAB_REGISTRY[id] != null;
       })
       .map(id => {

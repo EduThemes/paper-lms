@@ -52,7 +52,7 @@ func openIMSCC(zipPath string) (*imsccBundle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open imscc zip: %w", err)
 	}
-	defer zr.Close()
+	defer func() { _ = zr.Close() }()
 
 	b := &imsccBundle{files: make(map[string][]byte)}
 
@@ -66,7 +66,7 @@ func openIMSCC(zipPath string) (*imsccBundle, error) {
 			return nil, fmt.Errorf("open %q in zip: %w", f.Name, err)
 		}
 		data, err := io.ReadAll(rc)
-		rc.Close()
+		_ = rc.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read %q from zip: %w", f.Name, err)
 		}

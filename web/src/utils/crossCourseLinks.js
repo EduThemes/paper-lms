@@ -3,8 +3,12 @@ const COURSE_URL_PATTERN = /(?:api\/v1\/)?courses\/(\d+)/;
 export function detectCrossCourseLinks(html, currentCourseId) {
   if (!html || !currentCourseId) return [];
 
-  const container = document.createElement('div');
-  container.innerHTML = html;
+  // Parse into an inert document. A <div> made with document.createElement
+  // belongs to the live document, so assigning it unsaved editor HTML (or a
+  // legacy stored body) loads its images and runs <img onerror> handlers on
+  // every save, even though the element is never attached.
+  const container = new DOMParser()
+    .parseFromString(`<!DOCTYPE html><body>${html}</body>`, 'text/html').body;
   const issues = [];
   const currentId = String(currentCourseId);
 

@@ -80,7 +80,10 @@ func (h *FolderHandler) CreateCourseFolder(c *fiber.Ctx) error {
 	}
 
 	parent, err := h.fileService.GetFolder(c.Context(), *parentFolderID, callerAccountID(c))
-	if err != nil {
+	// The parent must be a live folder of THIS course. The tenant-scoped
+	// load alone let a teacher of course A hang a folder under course B's
+	// tree (it then showed up in B's subfolder listing).
+	if err != nil || parent == nil || parent.ContextType != "Course" || parent.ContextID != uint(courseID) || parent.WorkflowState == "deleted" {
 		return responses.NotFound(c, "parent folder")
 	}
 
@@ -137,6 +140,8 @@ func (h *FolderHandler) UpdateFolder(c *fiber.Ctx) error {
 		if err := h.authz.RequireCourseInstructor(c, folder.ContextID); err != nil {
 			return err
 		}
+	} else if !h.canManageNonCourseFolder(c, folder) {
+		return responses.NotFound(c, "folder")
 	}
 
 	var input struct {
@@ -177,6 +182,8 @@ func (h *FolderHandler) DeleteFolder(c *fiber.Ctx) error {
 		if err := h.authz.RequireCourseInstructor(c, folder.ContextID); err != nil {
 			return err
 		}
+	} else if !h.canManageNonCourseFolder(c, folder) {
+		return responses.NotFound(c, "folder")
 	}
 
 	if err := h.fileService.DeleteFolder(c.Context(), uint(id)); err != nil {
@@ -218,4 +225,19 @@ func (h *FolderHandler) ListSubfolders(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(folders)
+}
+
+// canManageNonCourseFolder is the write rule for folders outside a
+// course: a personal (User) folder may be changed by its owner, anything
+// else (Group, Account, unknown) only by a same-tenant admin (the folder
+// was already loaded under the caller's tenant). Pre-fix UpdateFolder and
+// DeleteFolder checked only Course folders, so any authenticated user in
+// the tenant could rename or delete another user's or a group's folder.
+func (h *FolderHandler) canManageNonCourseFolder(c *fiber.Ctx, folder *models.Folder) bool {
+	// DB-backed role (masquerade-capped), not the JWT is_admin hint.
+	if callerIsAdmin(c, h.authz) {
+		return true
+	}
+	userID, _ := c.Locals("user_id").(uint)
+	return folder.ContextType == "User" && userID != 0 && folder.ContextID == userID
 }

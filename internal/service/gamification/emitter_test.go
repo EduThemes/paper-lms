@@ -17,7 +17,6 @@ import (
 	"github.com/EduThemes/paper-lms/internal/service/gamification"
 	"github.com/EduThemes/paper-lms/internal/service/gamification/effects"
 	"github.com/EduThemes/paper-lms/internal/service/gamification/predicates"
-	"github.com/lib/pq"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -703,11 +702,5 @@ func TestEmit_EffectFailure_StopOnError(t *testing.T) {
 	if !evals[0].Result {
 		t.Fatalf("expected eval.Result=true (predicate matched), got %+v", evals[0])
 	}
-}
-
-// pqStringArray constructs a pq.StringArray inline so test cases can
-// stay terse. Equivalent to pq.StringArray{...} but conveys intent.
-func pqStringArray(flags ...string) pq.StringArray {
-	return pq.StringArray(flags)
 }
 

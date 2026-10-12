@@ -7,6 +7,7 @@ import (
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type accessTokenRepo struct {
@@ -31,7 +32,10 @@ func (r *accessTokenRepo) FindByID(ctx context.Context, id uint) (*models.Access
 
 func (r *accessTokenRepo) FindByToken(ctx context.Context, tokenHash string) (*models.AccessToken, error) {
 	var token models.AccessToken
-	if err := r.db.WithContext(ctx).Where("token = ? AND workflow_state != ?", tokenHash, "deleted").First(&token).Error; err != nil {
+	// Preload the developer key so ValidateToken can refuse tokens whose
+	// key was deactivated/deleted (B183) and enforce require_scopes (B085)
+	// without a second round-trip from the auth middleware.
+	if err := r.db.WithContext(ctx).Preload("DeveloperKey").Where("token = ? AND workflow_state != ?", tokenHash, "deleted").First(&token).Error; err != nil {
 		return nil, err
 	}
 	return &token, nil
@@ -46,7 +50,18 @@ func (r *accessTokenRepo) FindByRefreshToken(ctx context.Context, refreshToken s
 }
 
 func (r *accessTokenRepo) Update(ctx context.Context, token *models.AccessToken) error {
-	return r.db.WithContext(ctx).Save(token).Error
+	// Omit associations: FindByToken preloads DeveloperKey, and Save would
+	// otherwise try to upsert it on every LastUsedAt bump.
+	return r.db.WithContext(ctx).Omit(clause.Associations).Save(token).Error
+}
+
+// TouchLastUsed records a token use by writing ONLY last_used_at. The auth
+// middleware calls this on every request; a full-row Save there would
+// write back the token hash / expiry / workflow_state it read at the start
+// of the request, undoing a concurrent refresh (new access token hash) or
+// revocation (workflow_state='deleted').
+func (r *accessTokenRepo) TouchLastUsed(ctx context.Context, id uint, at time.Time) error {
+	return r.db.WithContext(ctx).Model(&models.AccessToken{}).Where("id = ?", id).UpdateColumn("last_used_at", at).Error
 }
 
 func (r *accessTokenRepo) Delete(ctx context.Context, id uint) error {

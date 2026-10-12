@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Mail, CheckCircle, Clock, AlertTriangle, XCircle, RefreshCw, Plus, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
+import { getCSRFToken } from '../services/api';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -9,7 +10,9 @@ async function apiFetch(path, options = {}) {
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    // CSRF header: the protected API rejects cookie-authenticated
+    // POST/DELETE without it.
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCSRFToken(), ...options.headers },
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -41,7 +44,6 @@ const StatusBadge = ({ status }) => {
 const CHANNEL_ICONS = {
   email: Mail,
   webhook: RefreshCw,
-  push: CheckCircle,
 };
 
 const NotificationDeliveryPage = () => {
@@ -63,6 +65,8 @@ const NotificationDeliveryPage = () => {
   const [newChannelType, setNewChannelType] = useState('email');
   const [newChannelAddress, setNewChannelAddress] = useState('');
   const [addingChannel, setAddingChannel] = useState(false);
+  const [confirmCodes, setConfirmCodes] = useState({});
+  const [confirmingId, setConfirmingId] = useState(null);
 
   const perPage = 20;
 
@@ -132,13 +136,36 @@ const NotificationDeliveryPage = () => {
       });
       setNewChannelAddress('');
       setShowAddChannel(false);
-      setSuccess('Communication channel added successfully.');
+      setSuccess(newChannelType === 'email'
+        ? 'Channel added. Enter the confirmation code we emailed to that address to start receiving notifications there.'
+        : 'Communication channel added successfully.');
       setTimeout(() => setSuccess(null), 3000);
       fetchChannels();
     } catch (err) {
       setError(err.message);
     } finally {
       setAddingChannel(false);
+    }
+  };
+
+  const handleConfirmChannel = async (channelId) => {
+    const code = (confirmCodes[channelId] || '').trim();
+    if (!code) return;
+    setConfirmingId(channelId);
+    setError(null);
+    try {
+      await apiFetch(`/users/self/communication_channels/${channelId}/confirm`, {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+      });
+      setConfirmCodes((prev) => ({ ...prev, [channelId]: '' }));
+      setSuccess('Channel confirmed.');
+      setTimeout(() => setSuccess(null), 3000);
+      fetchChannels();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setConfirmingId(null);
     }
   };
 
@@ -307,10 +334,33 @@ const NotificationDeliveryPage = () => {
                       <p className="text-sm font-medium text-text-primary">{ch.address}</p>
                       <p className="text-xs text-text-tertiary capitalize">{ch.channel_type} &middot; Position {ch.position}</p>
                     </div>
-                    {ch.confirmed && (
+                    {ch.confirmed ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-accent-success/20 text-accent-success">
                         <CheckCircle className="w-3 h-3" />
                         Confirmed
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-accent-warning/20 text-accent-warning">
+                          <Clock className="w-3 h-3" />
+                          Awaiting confirmation
+                        </span>
+                        <input
+                          type="text"
+                          value={confirmCodes[ch.id] || ''}
+                          onChange={(e) => setConfirmCodes((prev) => ({ ...prev, [ch.id]: e.target.value }))}
+                          placeholder="Code"
+                          aria-label={`Confirmation code for ${ch.address}`}
+                          className="w-28 rounded-md border border-border-strong px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleConfirmChannel(ch.id)}
+                          disabled={confirmingId === ch.id || !(confirmCodes[ch.id] || '').trim()}
+                          className="text-xs font-medium text-brand-600 hover:text-brand-800 disabled:opacity-50"
+                        >
+                          {confirmingId === ch.id ? 'Confirming...' : 'Confirm'}
+                        </button>
                       </span>
                     )}
                   </div>

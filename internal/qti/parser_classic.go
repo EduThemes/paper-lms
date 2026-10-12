@@ -87,8 +87,9 @@ type classicItemMeta struct {
 
 type classicPresentation struct {
 	// Question prompt is in `<material><mattext>`. Canvas wraps it in
-	// CDATA or escaped HTML. We treat it as raw bytes — the renderer
-	// downstream handles sanitization.
+	// CDATA or escaped HTML. We treat it as raw bytes here; the question
+	// models' BeforeSave hooks (models/rich_content_sanitize.go) sanitize
+	// it when the imported question is persisted.
 	Material   []classicMaterial   `xml:"material"`
 	ResponseLid []classicResponseLid `xml:"response_lid"`
 	ResponseStr []classicResponseStr `xml:"response_str"`
@@ -107,8 +108,11 @@ type classicMatText struct {
 }
 
 type classicResponseLid struct {
-	Ident       string             `xml:"ident,attr"`
-	RCardinality string            `xml:"rcardinality,attr"`
+	Ident        string              `xml:"ident,attr"`
+	RCardinality string              `xml:"rcardinality,attr"`
+	// Material carries the per-response prompt: the left-hand label of a
+	// matching pair, or the blank name of a dropdown / FIMB blank.
+	Material     []classicMaterial   `xml:"material"`
 	RenderChoice classicRenderChoice `xml:"render_choice"`
 }
 
@@ -166,8 +170,14 @@ type classicConditionVar struct {
 	// every shape — the Canvas exports include lots of irrelevant
 	// matchers we don't care about.
 	VarEquals []classicVarEqual `xml:"varequal"`
-	And       *classicConditionVar `xml:"and"`
-	Or        *classicConditionVar `xml:"or"`
+	// Numeric bounds: Canvas encodes exact±margin as
+	// <or><varequal/><and><vargte/><varlte/></and></or>, a range answer as
+	// bare <vargte/><varlte/>, and a precision answer with <vargt/>.
+	VarGte []classicVarEqual    `xml:"vargte"`
+	VarGt  []classicVarEqual    `xml:"vargt"`
+	VarLte []classicVarEqual    `xml:"varlte"`
+	And    *classicConditionVar `xml:"and"`
+	Or     *classicConditionVar `xml:"or"`
 }
 
 type classicVarEqual struct {
@@ -465,12 +475,10 @@ func buildShortAnswerAnswers(item classicItem) (string, []ImportWarning, error) 
 	return string(b), nil, err
 }
 
+
 func buildNumericalAnswers(item classicItem) (string, []ImportWarning, error) {
-	// Canvas emits either a single <varequal> (exact) or a vargte+varlte
-	// pair (range). Range → midpoint + half-range margin. We don't
-	// fully parse vargte/varlte because numerical_question metadata
-	// also carries explicit answer_exact / answer_error_margin pairs
-	// in some Canvas exports — check the metadata first.
+	// Paper's own exporter (and some Canvas exports) carry an explicit
+	// answer_exact / answer_error_margin pair in item metadata — prefer it.
 	answers := []map[string]interface{}{}
 	exact := ""
 	margin := ""
@@ -492,52 +500,142 @@ func buildNumericalAnswers(item classicItem) (string, []ImportWarning, error) {
 			entry["margin"] = margin
 		}
 		answers = append(answers, entry)
-	} else {
-		// Fall back to varequal values.
-		for i, v := range classicVarEqualValues(item.RespProcessing.RespConditions) {
-			answers = append(answers, map[string]interface{}{
-				"id":     fmt.Sprintf("a%d", i+1),
-				"text":   v,
-				"weight": 100.0,
-			})
+		b, err := json.Marshal(answers)
+		return string(b), nil, err
+	}
+
+	// Otherwise decode Canvas's resprocessing (lib/cc/qti/qti_items.rb
+	// numerical_resprocessing), one scoring respcondition per answer:
+	//   exact ± margin: <or><varequal>v</varequal><and><vargte>v-m</vargte><varlte>v+m</varlte></and></or>
+	//   precision:      <or><varequal>v</varequal><and><vargt>lo</vargt><varlte>hi</varlte></and></or>
+	//   range:          <vargte>lo</vargte><varlte>hi</varlte>
+	//   bare exact:     <varequal>v</varequal>
+	var warnings []ImportWarning
+	n := 0
+	for _, rc := range item.RespProcessing.RespConditions {
+		if classicRespConditionScore(rc) <= 0 {
+			continue
 		}
+		cv := rc.ConditionVar
+		if entry, ok := numericalAnswerFromCondition(cv); ok {
+			n++
+			entry["id"] = fmt.Sprintf("a%d", n)
+			entry["weight"] = 100.0
+			answers = append(answers, entry)
+			continue
+		}
+		warnings = append(warnings, ImportWarning{
+			Source:  item.Ident,
+			Code:    "numerical_condition_unrecognized",
+			Message: "a scoring numerical condition could not be decoded",
+		})
 	}
 	b, err := json.Marshal(answers)
-	return string(b), nil, err
+	return string(b), warnings, err
+}
+
+// numericalAnswerFromCondition decodes one Canvas numerical conditionvar.
+func numericalAnswerFromCondition(cv classicConditionVar) (map[string]interface{}, bool) {
+	// Exact (± margin / precision band) wrapped in <or>.
+	if cv.Or != nil && len(cv.Or.VarEquals) > 0 {
+		exact := strings.TrimSpace(cv.Or.VarEquals[0].Value)
+		entry := map[string]interface{}{"text": exact, "numerical_answer_type": "exact_answer", "exact": exact}
+		if band := cv.Or.And; band != nil {
+			lo, okLo := firstBound(band.VarGte, band.VarGt)
+			hi, okHi := firstBound(band.VarLte, nil)
+			if okLo && okHi {
+				if len(band.VarGte) == 0 && len(band.VarGt) > 0 {
+					// precision band: exclusive lower bound — import as a
+					// range so the accepted interval is preserved.
+					return map[string]interface{}{
+						"text":                  exact,
+						"numerical_answer_type": "range_answer",
+						"start":                 formatNum(lo),
+						"end":                   formatNum(hi),
+					}, true
+				}
+				m := (hi - lo) / 2
+				if m < 0 {
+					m = -m
+				}
+				entry["margin"] = formatNum(m)
+			}
+		}
+		return entry, exact != ""
+	}
+	// Range: bare or <and>-wrapped vargte + varlte.
+	gte, lte := cv.VarGte, cv.VarLte
+	if cv.And != nil {
+		gte = append(append([]classicVarEqual{}, gte...), cv.And.VarGte...)
+		lte = append(append([]classicVarEqual{}, lte...), cv.And.VarLte...)
+	}
+	if lo, okLo := firstBound(gte, nil); okLo {
+		if hi, okHi := firstBound(lte, nil); okHi {
+			return map[string]interface{}{
+				"text":                  formatNum(lo) + ".." + formatNum(hi),
+				"numerical_answer_type": "range_answer",
+				"start":                 formatNum(lo),
+				"end":                   formatNum(hi),
+			}, true
+		}
+	}
+	// Bare exact.
+	if len(cv.VarEquals) > 0 {
+		exact := strings.TrimSpace(cv.VarEquals[0].Value)
+		return map[string]interface{}{"text": exact, "numerical_answer_type": "exact_answer", "exact": exact}, exact != ""
+	}
+	return nil, false
+}
+
+func firstBound(primary, secondary []classicVarEqual) (float64, bool) {
+	for _, list := range [][]classicVarEqual{primary, secondary} {
+		for _, v := range list {
+			if f, err := strconv.ParseFloat(strings.TrimSpace(v.Value), 64); err == nil {
+				return f, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func formatNum(f float64) string {
+	return strconv.FormatFloat(f, 'f', -1, 64)
+}
+
+// canvasBlankID turns a Canvas response ident ("response_<blank>") or the
+// response's material text into the blank name used in the question text
+// ("[blank]"). Canvas puts the bare blank name in the material.
+func canvasBlankID(lid classicResponseLid) string {
+	if t := firstMatText(lid.Material); t != "" {
+		return t
+	}
+	return strings.TrimPrefix(lid.Ident, "response_")
 }
 
 func buildMatchingAnswers(item classicItem) (string, []ImportWarning, error) {
-	// Each <response_lid> = one left-side item, render_choice =
-	// possible right-side ids. The correct right-side id for each
-	// left is held in a respcondition with respident matching the
-	// left's response_lid ident.
-	answers := []map[string]interface{}{}
+	// Canvas emits one <response_lid ident="response_<answer_id>"> per left
+	// item, carrying the left prompt in its material and the full pool of
+	// right-hand matches in render_choice. The correct match_id for each
+	// left is a varequal (respident = the lid ident) in resprocessing —
+	// scored with action="Add" partial points, so any positive score counts.
+	answers := []interface{}{}
+	poolSeen := map[string]bool{}
+	pool := []map[string]interface{}{}
 	for _, lid := range item.Presentation.ResponseLid {
-		leftLabel := ""
-		for _, m := range item.Presentation.Material {
-			// Left labels are sometimes embedded directly in the
-			// response_lid's material via a sibling — Canvas does
-			// this inconsistently. Fall back to lid.Ident.
-			_ = m
-		}
+		answerID := strings.TrimPrefix(lid.Ident, "response_")
+		leftLabel := firstMatText(lid.Material)
 		if leftLabel == "" {
-			leftLabel = lid.Ident
+			leftLabel = answerID
 		}
-		// Use the leftmost mattext inside response_lid if present.
-		// (Canvas wraps the left label inside the response_lid in
-		// some flavors.) We checked at parse time but not exposed
-		// it — for the importer the lid.Ident is sufficient because
-		// the matching grader keys on left label which is fine.
 
 		correctRight := ""
 		for _, rc := range item.RespProcessing.RespConditions {
-			score := classicRespConditionScore(rc)
-			if score <= 0 {
+			if classicRespConditionScore(rc) <= 0 {
 				continue
 			}
 			for _, ve := range rc.ConditionVar.VarEquals {
 				if ve.Respident == lid.Ident {
-					correctRight = ve.Value
+					correctRight = strings.TrimSpace(ve.Value)
 					break
 				}
 			}
@@ -546,11 +644,27 @@ func buildMatchingAnswers(item classicItem) (string, []ImportWarning, error) {
 			}
 		}
 		answers = append(answers, map[string]interface{}{
+			"id":       answerID,
 			"left":     leftLabel,
+			"text":     leftLabel,
 			"right_id": correctRight,
-			"id":       lid.Ident,
 			"weight":   100.0,
 		})
+		for _, rl := range lid.RenderChoice.ResponseLabels {
+			text := firstMatText(rl.Material)
+			if rl.Ident == "" || text == "" || poolSeen[rl.Ident] {
+				continue
+			}
+			poolSeen[rl.Ident] = true
+			pool = append(pool, map[string]interface{}{
+				"id":       rl.Ident,
+				"text":     text,
+				"blank_id": "_match_options_",
+			})
+		}
+	}
+	for _, p := range pool {
+		answers = append(answers, p)
 	}
 	b, err := json.Marshal(answers)
 	return string(b), nil, err
@@ -558,31 +672,73 @@ func buildMatchingAnswers(item classicItem) (string, []ImportWarning, error) {
 
 func buildFillInMultipleBlanksAnswers(item classicItem) (string, []ImportWarning, error) {
 	// Result shape: map[blank_id] -> []accepted_string.
+	//
+	// Canvas emits one <response_lid ident="response_<blank>"> per blank
+	// whose render_choice lists EVERY accepted answer for that blank (all
+	// fill-in-multiple-blanks answers are correct alternatives); the
+	// resprocessing varequal references one of those answers by its label
+	// ident, not by its text. Paper's own exporter instead emits
+	// <response_str ident="<blank>"> and varequal values that ARE the
+	// accepted text. Both are handled here.
 	accepted := map[string][]string{}
+	seen := map[string]map[string]bool{}
+	add := func(blank, text string) {
+		text = strings.TrimSpace(text)
+		if blank == "" || text == "" {
+			return
+		}
+		if seen[blank] == nil {
+			seen[blank] = map[string]bool{}
+		}
+		if seen[blank][text] {
+			return
+		}
+		seen[blank][text] = true
+		accepted[blank] = append(accepted[blank], text)
+	}
+
+	blankByRespident := map[string]string{}
+	labelText := map[string]map[string]string{} // respident → label ident → text
+	for _, lid := range item.Presentation.ResponseLid {
+		blank := canvasBlankID(lid)
+		blankByRespident[lid.Ident] = blank
+		labelText[lid.Ident] = map[string]string{}
+		for _, rl := range lid.RenderChoice.ResponseLabels {
+			text := firstMatText(rl.Material)
+			labelText[lid.Ident][rl.Ident] = text
+			add(blank, text)
+		}
+	}
+	for _, rs := range item.Presentation.ResponseStr {
+		blankByRespident[rs.Ident] = strings.TrimPrefix(rs.Ident, "response_")
+	}
+
+	collect := func(ves []classicVarEqual) {
+		for _, ve := range ves {
+			if ve.Respident == "" {
+				continue
+			}
+			blank, ok := blankByRespident[ve.Respident]
+			if !ok {
+				blank = strings.TrimPrefix(ve.Respident, "response_")
+			}
+			value := ve.Value
+			if t, isLabel := labelText[ve.Respident][strings.TrimSpace(ve.Value)]; isLabel && t != "" {
+				value = t
+			}
+			add(blank, value)
+		}
+	}
 	for _, rc := range item.RespProcessing.RespConditions {
 		if classicRespConditionScore(rc) <= 0 {
 			continue
 		}
-		for _, ve := range rc.ConditionVar.VarEquals {
-			if ve.Respident == "" {
-				continue
-			}
-			accepted[ve.Respident] = append(accepted[ve.Respident], ve.Value)
-		}
-		// Also walk into <and>/<or> nested condition vars.
+		collect(rc.ConditionVar.VarEquals)
 		if rc.ConditionVar.And != nil {
-			for _, ve := range rc.ConditionVar.And.VarEquals {
-				if ve.Respident != "" {
-					accepted[ve.Respident] = append(accepted[ve.Respident], ve.Value)
-				}
-			}
+			collect(rc.ConditionVar.And.VarEquals)
 		}
 		if rc.ConditionVar.Or != nil {
-			for _, ve := range rc.ConditionVar.Or.VarEquals {
-				if ve.Respident != "" {
-					accepted[ve.Respident] = append(accepted[ve.Respident], ve.Value)
-				}
-			}
+			collect(rc.ConditionVar.Or.VarEquals)
 		}
 	}
 	// Sort blank keys for deterministic output (test stability).
@@ -600,13 +756,14 @@ func buildFillInMultipleBlanksAnswers(item classicItem) (string, []ImportWarning
 }
 
 func buildMultipleDropdownAnswers(item classicItem) (string, []ImportWarning, error) {
-	// Each <response_lid> corresponds to one dropdown / blank. The
-	// response_lid's ident is the blank_id. The render_choice's
-	// response_labels are the possible options. The correct option
-	// id for each blank is in a respcondition with respident matching
-	// the blank.
+	// Each <response_lid> corresponds to one dropdown / blank. Canvas uses
+	// ident "response_<blank>" with the bare blank name in the material;
+	// the question text references "[blank]", so the stored blank_id must
+	// be the bare name. The correct option id for each blank is in a
+	// respcondition with respident matching the lid ident.
 	answers := []map[string]interface{}{}
 	for _, lid := range item.Presentation.ResponseLid {
+		blankID := canvasBlankID(lid)
 		correct := map[string]bool{}
 		for _, rc := range item.RespProcessing.RespConditions {
 			if classicRespConditionScore(rc) <= 0 {
@@ -614,7 +771,7 @@ func buildMultipleDropdownAnswers(item classicItem) (string, []ImportWarning, er
 			}
 			for _, ve := range rc.ConditionVar.VarEquals {
 				if ve.Respident == lid.Ident {
-					correct[ve.Value] = true
+					correct[strings.TrimSpace(ve.Value)] = true
 				}
 			}
 		}
@@ -628,7 +785,7 @@ func buildMultipleDropdownAnswers(item classicItem) (string, []ImportWarning, er
 				"id":       rl.Ident,
 				"text":     text,
 				"weight":   weight,
-				"blank_id": lid.Ident,
+				"blank_id": blankID,
 			})
 		}
 	}

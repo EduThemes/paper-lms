@@ -37,20 +37,39 @@ func (s *AuthProviderService) CreateProvider(ctx context.Context, provider *mode
 	return s.repo.Create(ctx, provider)
 }
 
-// GetProvider retrieves an authentication provider by ID.
-func (s *AuthProviderService) GetProvider(ctx context.Context, id uint) (*models.AuthenticationProvider, error) {
+// ErrAuthProviderNotFound is returned when a provider does not exist or
+// lives in a different account than the one the caller is scoped to.
+// The two cases are deliberately indistinguishable (existence-leak
+// contract: cross-tenant reads 404, never 403).
+var ErrAuthProviderNotFound = errors.New("authentication provider not found")
+
+// findScoped loads a provider by id and ties it to accountID. Every
+// by-id operation goes through here so an admin of one tenant can never
+// read, rewrite or delete another tenant's SSO configuration.
+// accountID==0 is the auth-internal escape hatch (no tenant filter);
+// the admin API never passes 0.
+func (s *AuthProviderService) findScoped(ctx context.Context, id, accountID uint) (*models.AuthenticationProvider, error) {
 	provider, err := s.repo.FindByID(ctx, id)
-	if err != nil {
-		return nil, errors.New("authentication provider not found")
+	if err != nil || provider == nil {
+		return nil, ErrAuthProviderNotFound
+	}
+	if accountID != 0 && provider.AccountID != accountID {
+		return nil, ErrAuthProviderNotFound
 	}
 	return provider, nil
 }
 
-// UpdateProvider finds an existing provider by ID, applies updates, and saves.
-func (s *AuthProviderService) UpdateProvider(ctx context.Context, id uint, updates *models.AuthenticationProvider) (*models.AuthenticationProvider, error) {
-	existing, err := s.repo.FindByID(ctx, id)
+// GetProvider retrieves an authentication provider by ID within accountID.
+func (s *AuthProviderService) GetProvider(ctx context.Context, id, accountID uint) (*models.AuthenticationProvider, error) {
+	return s.findScoped(ctx, id, accountID)
+}
+
+// UpdateProvider finds an existing provider by ID (within accountID),
+// applies updates, and saves.
+func (s *AuthProviderService) UpdateProvider(ctx context.Context, id, accountID uint, updates *models.AuthenticationProvider) (*models.AuthenticationProvider, error) {
+	existing, err := s.findScoped(ctx, id, accountID)
 	if err != nil {
-		return nil, errors.New("authentication provider not found")
+		return nil, err
 	}
 
 	// Apply updates selectively
@@ -164,11 +183,11 @@ func (s *AuthProviderService) UpdateProvider(ctx context.Context, id uint, updat
 	return existing, nil
 }
 
-// DeleteProvider performs a soft delete on an authentication provider.
-func (s *AuthProviderService) DeleteProvider(ctx context.Context, id uint) error {
-	_, err := s.repo.FindByID(ctx, id)
-	if err != nil {
-		return errors.New("authentication provider not found")
+// DeleteProvider performs a soft delete on an authentication provider
+// within accountID.
+func (s *AuthProviderService) DeleteProvider(ctx context.Context, id, accountID uint) error {
+	if _, err := s.findScoped(ctx, id, accountID); err != nil {
+		return err
 	}
 
 	return s.repo.Delete(ctx, id)
@@ -182,10 +201,10 @@ func (s *AuthProviderService) ListProviders(ctx context.Context, accountID uint,
 // TestLDAPConnection validates that the LDAP provider has the required configuration
 // fields set. This is a stub that checks configuration completeness without actually
 // connecting to the LDAP server.
-func (s *AuthProviderService) TestLDAPConnection(ctx context.Context, id uint) (*LDAPTestResult, error) {
-	provider, err := s.repo.FindByID(ctx, id)
+func (s *AuthProviderService) TestLDAPConnection(ctx context.Context, id, accountID uint) (*LDAPTestResult, error) {
+	provider, err := s.findScoped(ctx, id, accountID)
 	if err != nil {
-		return nil, errors.New("authentication provider not found")
+		return nil, err
 	}
 
 	if provider.AuthType != "ldap" {

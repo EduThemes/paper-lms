@@ -81,6 +81,7 @@ func allAutoMigrateModels() []interface{} {
 		&models.Course{},
 		&models.CourseSection{},
 		&models.Enrollment{},
+		&models.ObserverLink{},
 		&models.ContextModule{},
 		&models.ContentTag{},
 		&models.WikiPage{},
@@ -99,6 +100,8 @@ func allAutoMigrateModels() []interface{} {
 		&models.LTILineItem{},
 		&models.LTIResult{},
 		&models.Nonce{},
+		&models.OAuthAuthorizationCode{},
+		&models.LTIPlatformKey{},
 		// Discussions, Files, SIS
 		&models.DiscussionTopic{},
 		&models.DiscussionEntry{},
@@ -139,6 +142,7 @@ func allAutoMigrateModels() []interface{} {
 		&models.BlueprintTemplate{},
 		&models.BlueprintSubscription{},
 		&models.BlueprintMigration{},
+		&models.BlueprintContentTag{},
 		&models.CoursePace{},
 		&models.CoursePaceModuleItem{},
 		// Collaborations, Conferences, Analytics

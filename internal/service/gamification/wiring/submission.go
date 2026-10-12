@@ -65,6 +65,11 @@ func GradedSubmissionEmitCallback(
 				"submission_id", submissionID, "error", err)
 			return
 		}
+		if submission.PostedAt == nil {
+			// Hidden by a manual post policy: score-based rules would
+			// reveal it. SubmissionService fires again when it is posted.
+			return
+		}
 		assignment, err := assignmentRepo.FindByID(ctx, submission.AssignmentID, 0)
 		if err != nil {
 			slog.Error("graded submission emit: load assignment",

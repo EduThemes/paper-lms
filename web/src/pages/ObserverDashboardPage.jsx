@@ -75,6 +75,12 @@ const scoreColor = (score, possible) => {
   return 'text-accent-danger';
 };
 
+// B204: a child's course opens that course's grades page for the child.
+// The old link passed ?as_child, which nothing read, so the parent saw
+// their own (empty) grades; StudentGradesPage reads observee_id.
+const childCoursePath = (courseId, childId) =>
+  `/courses/${courseId}/grades?observee_id=${childId}`;
+
 // Pill-style child switcher for <= 5 kids; native select for more.
 const ChildSwitcher = ({ kids, selectedId, onSelect }) => {
   if (!kids || kids.length === 0) return null;
@@ -468,7 +474,7 @@ const ObserverDashboardPage = () => {
                     {overview.courses.map((c, idx) => (
                       <li key={c.course_id} className={idx === 0 ? 'pb-3' : 'py-3'}>
                         <Link
-                          to={`/courses/${c.course_id}?as_child=${selectedChildId}`}
+                          to={childCoursePath(c.course_id, selectedChildId)}
                           className="flex items-center justify-between hover:bg-surface-1 rounded-md -mx-2 px-2 py-1 transition"
                         >
                           <div className="min-w-0 flex-1">

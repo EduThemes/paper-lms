@@ -18,6 +18,7 @@ import ThemeToggle from './ThemeToggle';
 import CurrencyPills from './gamification/CurrencyPills';
 import BrandLogo from './brand/BrandLogo';
 import UserMenu from './UserMenu';
+import useHasObservees from '../hooks/useHasObservees';
 
 // Nav items are built inside the component so labels translate when the
 // active language changes (useTranslation only runs in the render tree).
@@ -146,7 +147,11 @@ const Layout = ({ children }) => {
   const adminLeadNav = buildAdminLeadNav(t);
   const adminTrailNav = buildAdminTrailNav(t);
   const simplifiedNav = buildSimplifiedNav(t);
-  const primaryNav = isAdmin ? [...adminLeadNav, ...baseNav, ...adminTrailNav] : baseNav;
+  // B099: parents (observers) need the /observer link too, not just admins.
+  const hasObservees = useHasObservees(user);
+  const primaryNav = isAdmin
+    ? [...adminLeadNav, ...baseNav, ...adminTrailNav]
+    : hasObservees ? [...baseNav, ...adminTrailNav] : baseNav;
 
   // Banner stack: masquerade goes on top (40px), preview sits below it.
   const bannerCount = (isMasquerading ? 1 : 0) + (isPreview ? 1 : 0);

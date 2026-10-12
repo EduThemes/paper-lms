@@ -22,7 +22,11 @@ func (r *attachmentRepo) Create(ctx context.Context, attachment *models.Attachme
 
 func (r *attachmentRepo) FindByID(ctx context.Context, id, accountID uint) (*models.Attachment, error) {
 	var attachment models.Attachment
-	q := r.db.WithContext(ctx)
+	// B139: a deleted attachment is gone for every reader — metadata,
+	// download, presigned URL and submission attach all resolve through
+	// here, so an old /files/:id/download link stops working once the
+	// file is deleted.
+	q := r.db.WithContext(ctx).Where("workflow_state <> ?", models.AttachmentDeleted)
 	if accountID != 0 {
 		// Attachments are polymorphic on (context_type, context_id) AND
 		// optionally chained to a folder. We tenant-filter by the same

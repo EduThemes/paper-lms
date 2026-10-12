@@ -135,6 +135,12 @@ func (s *COPPAService) RevokeConsent(ctx context.Context, consentID uint, revoke
 	return s.consentRepo.Update(ctx, consent)
 }
 
+// GetConsent returns a consent record by id (unscoped; callers tie it to the
+// caller's tenant through the student).
+func (s *COPPAService) GetConsent(ctx context.Context, id uint) (*models.ParentalConsent, error) {
+	return s.consentRepo.FindByID(ctx, id)
+}
+
 // CheckConsentStatus returns whether consent is granted for a specific student and consent type.
 func (s *COPPAService) CheckConsentStatus(ctx context.Context, studentID uint, consentType string) (bool, error) {
 	consents, err := s.consentRepo.FindByStudentID(ctx, studentID)

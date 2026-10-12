@@ -6,6 +6,18 @@ import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
 
+// Only absolute http(s) links are ever rendered as clickable hrefs — a
+// stored javascript:/data: URL must not run in the viewer's session.
+export const safeExternalUrl = (url) => {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : null;
+  } catch {
+    return null;
+  }
+};
+
 const CollaborationsPage = () => {
   const { courseId } = useParams();
   const { user } = useAuth();
@@ -67,7 +79,7 @@ const CollaborationsPage = () => {
     setSubmitting(true);
     try {
       if (editingId) {
-        await api.updateCollaboration(courseId, editingId, formData);
+        await api.updateCollaboration(editingId, formData);
       } else {
         await api.createCollaboration(courseId, formData);
       }
@@ -84,7 +96,7 @@ const CollaborationsPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this collaboration?')) return;
     try {
-      await api.deleteCollaboration(courseId, id);
+      await api.deleteCollaboration(id);
       setLoading(true);
       await fetchCollaborations();
     } catch (err) {
@@ -236,9 +248,9 @@ const CollaborationsPage = () => {
                   </div>
                 </div>
                 <div className="flex items-center space-x-2 flex-shrink-0 ml-4">
-                  {collab.url && (
+                  {safeExternalUrl(collab.url) && (
                     <a
-                      href={collab.url}
+                      href={safeExternalUrl(collab.url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="p-1.5 text-brand-600 hover:bg-brand-50 rounded"

@@ -10,6 +10,10 @@ import (
 
 // DiscussionV2Handler provides enhanced discussion endpoints with read/unread tracking,
 // user profile resolution, and edit history.
+//
+// Every endpoint resolves :topic_id with requireTopicInCourse (tenant +
+// F-013 course tie + visibility) and any entry id with
+// requireEntryInTopic before touching the service.
 type DiscussionV2Handler struct {
 	discussionV2Service *service.DiscussionV2Service
 }
@@ -34,6 +38,7 @@ func entryViewV2ToJSON(e *service.EntryViewV2) fiber.Map {
 		"message":             e.Message,
 		"rating_count":        e.RatingCount,
 		"rating_sum":          e.RatingSum,
+		"rating":              e.Rating,
 		"read_state":          e.ReadState,
 		"edited_at":           e.EditedAt,
 		"version_count":       e.VersionCount,
@@ -45,18 +50,18 @@ func entryViewV2ToJSON(e *service.EntryViewV2) fiber.Map {
 }
 
 // GetFullViewV2 returns the topic + tree with read states and user info.
-// GET /topics/:topic_id/view
+// GET /courses/:course_id/discussion_topics/:topic_id/view_v2
 func (h *DiscussionV2Handler) GetFullViewV2(c *fiber.Ctx) error {
-	topicID, err := c.ParamsInt("topic_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid topic ID")
+	topic, wrote := requireTopicInCourse(c, h.discussionV2Service)
+	if wrote {
+		return nil
 	}
 
 	userID, _ := c.Locals("user_id").(uint)
 
-	view, err := h.discussionV2Service.GetFullViewWithReadState(c.Context(), uint(topicID), userID)
+	view, err := h.discussionV2Service.GetFullViewWithReadState(c.Context(), topic, userID, callerAccountID(c))
 	if err != nil {
-		return responses.NotFound(c, "discussion topic")
+		return responses.InternalError(c, "Could not load discussion")
 	}
 
 	entries := make([]fiber.Map, len(view.Entries))
@@ -65,6 +70,9 @@ func (h *DiscussionV2Handler) GetFullViewV2(c *fiber.Ctx) error {
 	}
 
 	topicJSON := topicToJSON(view.Topic)
+	topicJSON["subscribed"] = view.Subscribed
+	topicJSON["can_rate"] = discussionCallerMayRate(c, view.Topic)
+	topicJSON["locked_for_user"] = discussionTopicLockedForCaller(c, view.Topic)
 	// Resolve topic author name
 	if view.Topic.UserID > 0 {
 		userInfoMap := h.discussionV2Service.ResolveUserInfo(c.Context(), []uint{view.Topic.UserID})
@@ -81,16 +89,20 @@ func (h *DiscussionV2Handler) GetFullViewV2(c *fiber.Ctx) error {
 }
 
 // MarkEntryRead marks a single entry as read.
-// POST /entries/:entry_id/read
+// POST .../entries/:entry_id/read
 func (h *DiscussionV2Handler) MarkEntryRead(c *fiber.Ctx) error {
-	entryID, err := c.ParamsInt("entry_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid entry ID")
+	topic, wrote := requireTopicInCourse(c, h.discussionV2Service)
+	if wrote {
+		return nil
+	}
+	entry, wrote := requireEntryInTopic(c, h.discussionV2Service, topic.ID, "entry_id")
+	if wrote {
+		return nil
 	}
 
 	userID, _ := c.Locals("user_id").(uint)
 
-	if err := h.discussionV2Service.MarkEntryAsRead(c.Context(), uint(entryID), userID); err != nil {
+	if err := h.discussionV2Service.MarkEntryAsRead(c.Context(), entry.ID, userID); err != nil {
 		return responses.InternalError(c, "Could not mark entry as read")
 	}
 
@@ -98,16 +110,16 @@ func (h *DiscussionV2Handler) MarkEntryRead(c *fiber.Ctx) error {
 }
 
 // MarkTopicRead marks all entries in the topic as read.
-// POST /topics/:topic_id/mark_all_read
+// POST .../discussion_topics/:topic_id/mark_all_read
 func (h *DiscussionV2Handler) MarkTopicRead(c *fiber.Ctx) error {
-	topicID, err := c.ParamsInt("topic_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid topic ID")
+	topic, wrote := requireTopicInCourse(c, h.discussionV2Service)
+	if wrote {
+		return nil
 	}
 
 	userID, _ := c.Locals("user_id").(uint)
 
-	if err := h.discussionV2Service.MarkTopicAsRead(c.Context(), uint(topicID), userID); err != nil {
+	if err := h.discussionV2Service.MarkTopicAsRead(c.Context(), topic, userID); err != nil {
 		return responses.InternalError(c, "Could not mark topic as read")
 	}
 
@@ -115,16 +127,16 @@ func (h *DiscussionV2Handler) MarkTopicRead(c *fiber.Ctx) error {
 }
 
 // GetUnreadCount returns the unread entry count for a topic.
-// GET /topics/:topic_id/unread_count
+// GET .../discussion_topics/:topic_id/unread_count
 func (h *DiscussionV2Handler) GetUnreadCount(c *fiber.Ctx) error {
-	topicID, err := c.ParamsInt("topic_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid topic ID")
+	topic, wrote := requireTopicInCourse(c, h.discussionV2Service)
+	if wrote {
+		return nil
 	}
 
 	userID, _ := c.Locals("user_id").(uint)
 
-	count, err := h.discussionV2Service.GetUnreadCount(c.Context(), uint(topicID), userID)
+	count, err := h.discussionV2Service.GetUnreadCount(c.Context(), topic.ID, userID)
 	if err != nil {
 		return responses.InternalError(c, "Could not get unread count")
 	}
@@ -133,11 +145,11 @@ func (h *DiscussionV2Handler) GetUnreadCount(c *fiber.Ctx) error {
 }
 
 // ToggleSubscription sets subscription for the topic.
-// PUT /topics/:topic_id/subscription
+// PUT .../discussion_topics/:topic_id/subscription
 func (h *DiscussionV2Handler) ToggleSubscription(c *fiber.Ctx) error {
-	topicID, err := c.ParamsInt("topic_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid topic ID")
+	topic, wrote := requireTopicInCourse(c, h.discussionV2Service)
+	if wrote {
+		return nil
 	}
 
 	var input struct {
@@ -150,7 +162,7 @@ func (h *DiscussionV2Handler) ToggleSubscription(c *fiber.Ctx) error {
 
 	userID, _ := c.Locals("user_id").(uint)
 
-	if err := h.discussionV2Service.ToggleSubscription(c.Context(), uint(topicID), userID, input.Subscribed); err != nil {
+	if err := h.discussionV2Service.ToggleSubscription(c.Context(), topic.ID, userID, input.Subscribed); err != nil {
 		return responses.InternalError(c, "Could not update subscription")
 	}
 
@@ -158,14 +170,18 @@ func (h *DiscussionV2Handler) ToggleSubscription(c *fiber.Ctx) error {
 }
 
 // GetEntryVersions returns the edit history for a discussion entry.
-// GET /entries/:entry_id/versions
+// GET .../entries/:entry_id/versions
 func (h *DiscussionV2Handler) GetEntryVersions(c *fiber.Ctx) error {
-	entryID, err := c.ParamsInt("entry_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid entry ID")
+	topic, wrote := requireTopicInCourse(c, h.discussionV2Service)
+	if wrote {
+		return nil
+	}
+	entry, wrote := requireEntryInTopic(c, h.discussionV2Service, topic.ID, "entry_id")
+	if wrote {
+		return nil
 	}
 
-	versions, err := h.discussionV2Service.GetEntryVersions(c.Context(), uint(entryID))
+	versions, err := h.discussionV2Service.GetEntryVersions(c.Context(), entry.ID)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch entry versions")
 	}
@@ -185,12 +201,22 @@ func (h *DiscussionV2Handler) GetEntryVersions(c *fiber.Ctx) error {
 	return c.JSON(result)
 }
 
-// UpdateEntryV2 updates a discussion entry, saving the old version to history.
-// PUT /entries/:entry_id
+// UpdateEntryV2 updates a discussion entry, recording the edit history.
+// PUT .../entries/:entry_id/v2
+//
+// Only the entry's author (while the topic is open for them) or course
+// staff may edit; the entry must belong to this topic, course and tenant.
 func (h *DiscussionV2Handler) UpdateEntryV2(c *fiber.Ctx) error {
-	entryID, err := c.ParamsInt("entry_id")
-	if err != nil {
-		return responses.BadRequest(c, "Invalid entry ID")
+	topic, wrote := requireTopicInCourse(c, h.discussionV2Service)
+	if wrote {
+		return nil
+	}
+	entry, wrote := requireEntryInTopic(c, h.discussionV2Service, topic.ID, "entry_id")
+	if wrote {
+		return nil
+	}
+	if requireEntryModerator(c, topic, entry) {
+		return nil
 	}
 
 	var input struct {
@@ -207,22 +233,16 @@ func (h *DiscussionV2Handler) UpdateEntryV2(c *fiber.Ctx) error {
 
 	userID, _ := c.Locals("user_id").(uint)
 
-	if err := h.discussionV2Service.UpdateEntryWithHistory(c.Context(), uint(entryID), userID, service.SanitizeHTML(input.Message)); err != nil {
+	if err := h.discussionV2Service.UpdateEntryWithHistory(c.Context(), entry, userID, service.SanitizeHTML(input.Message)); err != nil {
 		return responses.InternalError(c, "Could not update entry")
 	}
 
-	// Return the updated entry with V2 fields
-	entry, err := h.discussionV2Service.GetEntry(c.Context(), uint(entryID))
-	if err != nil {
-		return responses.InternalError(c, "Could not fetch updated entry")
-	}
-
-	versionCount, _ := h.discussionV2Service.GetEntryVersions(c.Context(), uint(entryID))
+	versions, _ := h.discussionV2Service.GetEntryVersions(c.Context(), entry.ID)
 	userInfo := h.discussionV2Service.ResolveUserInfo(c.Context(), []uint{entry.UserID})
 	info := userInfo[entry.UserID]
 
 	var editedAt *time.Time
-	if len(versionCount) > 0 {
+	if len(versions) > 0 {
 		editedAt = &entry.UpdatedAt
 	}
 
@@ -237,7 +257,7 @@ func (h *DiscussionV2Handler) UpdateEntryV2(c *fiber.Ctx) error {
 		"rating_count":        entry.RatingCount,
 		"rating_sum":          entry.RatingSum,
 		"edited_at":           editedAt,
-		"version_count":       len(versionCount),
+		"version_count":       len(versions),
 		"workflow_state":      entry.WorkflowState,
 		"created_at":          entry.CreatedAt,
 		"updated_at":          entry.UpdatedAt,

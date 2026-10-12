@@ -21,7 +21,7 @@ const QuizSubmissionsPage = () => {
         const [quizResult, subsResult, enrollResult] = await Promise.allSettled([
           api.getQuiz(courseId, quizId),
           api.getQuizSubmissions(courseId, quizId, 1, 100),
-          api.getEnrollments(courseId, 1, 200),
+          api.getAllEnrollments(courseId),
         ]);
         if (quizResult.status === 'rejected') throw new Error(quizResult.reason?.message || 'Failed to load quiz');
         setQuiz(quizResult.value);

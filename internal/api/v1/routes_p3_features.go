@@ -57,6 +57,7 @@ func (r *Router) registerP3FeatureRoutes(protected fiber.Router, admin, enrolled
 	protected.Get("/appointment_groups/:id/appointments/:slot_id/reservations", r.AppointmentGroupHandler.ListReservations)
 	protected.Post("/appointment_groups/:id/appointments/:slot_id/reservations", r.AppointmentGroupHandler.Reserve)
 	protected.Delete("/appointment_groups/:id/appointments/:slot_id/reservations/:reservation_id", r.AppointmentGroupHandler.CancelReservation)
+	protected.Get("/users/self/appointments", r.AppointmentGroupHandler.ListMyReservations)
 
 	// Outcome Proficiency — Account scope
 	protected.Get("/accounts/:id/outcome_proficiency", admin, r.OutcomeProficiencyHandler.GetForAccount)
@@ -86,7 +87,7 @@ func (r *Router) registerP3FeatureRoutes(protected fiber.Router, admin, enrolled
 	protected.Get("/commons", r.CommonsHandler.Browse)
 	protected.Get("/commons/:id", r.CommonsHandler.Get)
 	protected.Post("/commons/:id/favorite", r.CommonsHandler.Favorite)
-	protected.Post("/commons/:id/import", r.CommonsHandler.Import)
+	protected.Post("/courses/:course_id/commons/:id/import", instructor, r.CommonsHandler.Import)
 	protected.Post("/courses/:course_id/commons/publish", instructor, r.CommonsHandler.Publish)
 
 	// AI Assist proxy for RCE V2 toolbar (Anthropic Messages API).

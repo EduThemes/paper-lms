@@ -36,7 +36,7 @@ func (e *Exporter) ExportQuiz(quiz *models.Quiz, questions []models.QuizQuestion
 	// 1. Assessment XML.
 	assessmentXML, err := buildAssessmentXML(quiz, questions)
 	if err != nil {
-		zw.Close()
+		_ = zw.Close()
 		return nil, err
 	}
 	assessmentPath := fmt.Sprintf("non_cc_assessments/%d.xml.qti", quiz.ID)
@@ -49,7 +49,7 @@ func (e *Exporter) ExportQuiz(quiz *models.Quiz, questions []models.QuizQuestion
 	for _, bank := range banks {
 		bankXML, err := buildBankXML(bank)
 		if err != nil {
-			zw.Close()
+			_ = zw.Close()
 			return nil, err
 		}
 		bankPath := fmt.Sprintf("non_cc_assessments/assessment_question_banks/%s.xml", bank.Identifier)
@@ -247,6 +247,9 @@ func writeMatchingLikePresentation(buf *bytes.Buffer, q models.QuizQuestion) err
 		return err
 	}
 	for _, opt := range opts {
+		if opt.BlankID == "_match_options_" {
+			continue // right-hand match pool, not a left item
+		}
 		ident := opt.ID
 		if ident == "" {
 			ident = opt.Left

@@ -1,7 +1,12 @@
 package handlers
 
 import (
+	"errors"
+	"net/mail"
+	"strings"
+
 	"github.com/gofiber/fiber/v2"
+	"github.com/EduThemes/paper-lms/internal/security"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -167,13 +172,26 @@ func (h *NotificationDeliveryHandler) CreateChannel(c *fiber.Ctx) error {
 	channelType := input.CommunicationChannel.ChannelType
 	address := input.CommunicationChannel.Address
 
+	address = strings.TrimSpace(address)
 	if channelType == "" || address == "" {
 		return responses.BadRequest(c, "channel_type and address are required")
 	}
 
-	validTypes := map[string]bool{"email": true, "webhook": true, "push": true}
-	if !validTypes[channelType] {
-		return responses.BadRequest(c, "channel_type must be one of: email, webhook, push")
+	// Only channel types the delivery engine can actually send to. There
+	// is no push transport: a "push" channel used to be accepted and then
+	// fail every delivery queued for it.
+	switch channelType {
+	case "email":
+		parsed, perr := mail.ParseAddress(address)
+		if perr != nil || parsed.Address != address {
+			return responses.BadRequest(c, "address must be a valid email address")
+		}
+	case "webhook":
+		if err := security.ValidateExternalURL(c.Context(), address); err != nil {
+			return responses.BadRequest(c, "webhook address must be a public http(s) URL")
+		}
+	default:
+		return responses.BadRequest(c, "channel_type must be one of: email, webhook")
 	}
 
 	// Determine position (next available)
@@ -185,15 +203,61 @@ func (h *NotificationDeliveryHandler) CreateChannel(c *fiber.Ctx) error {
 		ChannelType:   channelType,
 		Address:       address,
 		Position:      position,
-		Confirmed:     false,
 		WorkflowState: "active",
+	}
+
+	// Email channels stay unconfirmed (and receive nothing) until the
+	// owner enters the code mailed to the address.
+	code, err := h.deliveryService.BeginChannelConfirmation(channel)
+	if err != nil {
+		return responses.InternalError(c, "Could not create communication channel")
 	}
 
 	if err := h.channelRepo.Create(c.Context(), channel); err != nil {
 		return responses.InternalError(c, "Could not create communication channel")
 	}
 
+	if code != "" {
+		_ = h.deliveryService.SendChannelConfirmation(c.Context(), channel, code)
+	}
+
 	return c.Status(fiber.StatusCreated).JSON(channelToJSON(channel))
+}
+
+// ConfirmChannel confirms an email channel with the code mailed to it.
+// POST /api/v1/users/self/communication_channels/:id/confirm  {code}
+func (h *NotificationDeliveryHandler) ConfirmChannel(c *fiber.Ctx) error {
+	userID, err := getUserID(c)
+	if err != nil {
+		return err
+	}
+
+	channelID, err := c.ParamsInt("id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid channel ID")
+	}
+
+	channel, err := h.channelRepo.FindByID(c.Context(), uint(channelID))
+	// 404 (not 403) for another user's channel: existence-leak contract.
+	if err != nil || channel.UserID != userID || channel.WorkflowState != "active" {
+		return responses.NotFound(c, "communication channel")
+	}
+
+	var input struct {
+		Code string `json:"code"`
+	}
+	if err := c.BodyParser(&input); err != nil {
+		return responses.BadRequest(c, "Invalid input")
+	}
+
+	if err := h.deliveryService.ConfirmChannel(c.Context(), channel, input.Code); err != nil {
+		if errors.Is(err, service.ErrInvalidConfirmationCode) {
+			return responses.BadRequest(c, "Invalid confirmation code")
+		}
+		return responses.InternalError(c, "Could not confirm communication channel")
+	}
+
+	return c.JSON(channelToJSON(channel))
 }
 
 // DeleteChannel removes a communication channel for the current user (soft-delete via workflow_state).

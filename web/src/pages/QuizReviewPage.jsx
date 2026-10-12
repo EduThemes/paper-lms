@@ -4,7 +4,7 @@ import { CheckCircle, XCircle, MinusCircle, HelpCircle } from 'lucide-react';
 import { api } from '../services/api';
 import Layout from '../components/Layout';
 import CourseNav from '../components/CourseNav';
-import { sanitizeHTML } from '../components/RichContentViewer';
+import SafeHTML from '../components/SafeHTML';
 
 const QuizReviewPage = () => {
   const { courseId, quizId, submissionId } = useParams();
@@ -22,14 +22,17 @@ const QuizReviewPage = () => {
           api.getQuiz(courseId, quizId),
           api.getQuizSubmission(courseId, quizId, submissionId),
           api.getQuizSubmissionAnswers(courseId, quizId, submissionId),
-          api.getQuizQuestions(courseId, quizId, 1, 100),
+          // The questions THIS attempt saw (group draws included). Answer
+          // keys come back only when the viewer may see them (staff, or a
+          // finished attempt on a quiz that shows correct answers).
+          api.getQuizSubmissionQuestions(courseId, quizId, submissionId),
         ]);
         if (quizResult.status === 'rejected') throw new Error(quizResult.reason?.message || 'Failed to load quiz');
         if (subResult.status === 'rejected') throw new Error(subResult.reason?.message || 'Failed to load submission');
         setQuiz(quizResult.value);
         setSubmission(subResult.value);
         setAnswers(answersResult.status === 'fulfilled' ? (answersResult.value || []) : []);
-        setQuestions(questionsResult.status === 'fulfilled' ? (questionsResult.value.data || []) : []);
+        setQuestions(questionsResult.status === 'fulfilled' ? (questionsResult.value || []) : []);
       } catch (err) {
         setError(err.message);
       } finally {
@@ -144,9 +147,9 @@ const QuizReviewPage = () => {
                   </span>
                 </div>
 
-                <div
+                <SafeHTML
                   className="text-text-primary mb-4 prose max-w-none"
-                  dangerouslySetInnerHTML={{ __html: sanitizeHTML(question.question_text) }}
+                  html={question.question_text}
                 />
 
                 {/* Show answer options for MC/TF with highlighting */}
@@ -187,6 +190,27 @@ const QuizReviewPage = () => {
                           </div>
                         );
                       })}
+                    </div>
+                  );
+                })()}
+
+                {/* File-upload answers: download through the attempt-scoped endpoint */}
+                {question.question_type === 'file_upload' && (() => {
+                  let file = null;
+                  try { file = answer?.answer ? JSON.parse(answer.answer) : null; } catch { file = null; }
+                  return (
+                    <div className="mb-3 text-sm">
+                      <p className="font-medium text-text-tertiary mb-1">Uploaded file:</p>
+                      {file?.attachment_id ? (
+                        <a
+                          href={api.getQuizAnswerFileUrl(courseId, quizId, submissionId, question.id)}
+                          className="text-brand-600 hover:underline"
+                        >
+                          {file.filename || 'Download file'}
+                        </a>
+                      ) : (
+                        <span className="text-text-tertiary">No file uploaded</span>
+                      )}
                     </div>
                   );
                 })()}

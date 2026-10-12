@@ -42,18 +42,9 @@ func (s *BlueprintService) GetUnsyncedChanges(ctx context.Context, templateID ui
 	}
 	courseid := template.CourseID
 
-	// Find the last completed migration to get its completed_at timestamp
-	var since time.Time
-	migrations, err := s.migRepo.ListByTemplateID(ctx, templateID, repository.PaginationParams{Page: 1, PerPage: 1})
-	if err == nil && len(migrations.Items) > 0 {
-		// Migrations are returned newest first; find last completed one
-		for _, m := range migrations.Items {
-			if m.WorkflowState == "completed" && m.CompletedAt != nil {
-				since = *m.CompletedAt
-				break
-			}
-		}
-	}
+	// Baseline: the most recent COMPLETED migration (a newer failed or
+	// running one must not reset the report to "everything").
+	since := s.lastCompletedSync(ctx, templateID)
 	// If since is zero, all content is "unsynced" (first sync scenario).
 	// We still return it so the UI can show what will be pushed.
 
@@ -107,13 +98,16 @@ func (s *BlueprintService) GetUnsyncedChanges(ctx context.Context, templateID ui
 	// Check quizzes
 	quizzes, err := s.quizRepo.ListByCourseID(ctx, courseid, bigPage)
 	if err == nil {
-		for _, q := range quizzes.Items {
-			if since.IsZero() || q.UpdatedAt.After(since) {
+		for i := range quizzes.Items {
+			q := &quizzes.Items[i]
+			// A question edit is a quiz edit (sync pushes questions too).
+			changedAt := s.quizChangedAt(ctx, q)
+			if since.IsZero() || changedAt.After(since) {
 				changes = append(changes, UnsyncedChange{
 					AssetType: "quiz",
 					AssetID:   q.ID,
 					AssetName: q.Title,
-					ChangeAt:  q.UpdatedAt,
+					ChangeAt:  changedAt,
 				})
 			}
 		}

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Send, Clock, CheckCircle, Upload, Link as LinkIcon, FileText, Download, Paperclip } from 'lucide-react';
-import { sanitizeHTML } from './RichContentViewer';
+import { SubmissionBody } from './SafeHTML';
+import { plainTextToHtml } from '../utils/html';
 
 const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, submissionTypes = ['online_text_entry'] }) => {
   const types = Array.isArray(submissionTypes)
@@ -28,7 +29,10 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
     try {
       if (activeTab === 'text') {
         if (!body.trim()) return;
-        await onSubmit({ submission_type: 'online_text_entry', body });
+        // The body is stored and rendered as HTML (as in Canvas). Convert the
+        // typed text to escaped paragraphs so line breaks survive and text
+        // such as "x<y and y>z" is not parsed as a tag (B003).
+        await onSubmit({ submission_type: 'online_text_entry', body: plainTextToHtml(body) });
         setBody('');
       } else if (activeTab === 'url') {
         if (!url.trim()) return;
@@ -85,9 +89,9 @@ const SubmissionForm = ({ courseId, assignmentId, existingSubmission, onSubmit, 
             </div>
           )}
           {existingSubmission.body && (
-            <div
+            <SubmissionBody
               className="text-sm text-text-secondary prose max-w-none bg-surface-0 p-3 rounded border"
-              dangerouslySetInnerHTML={{ __html: sanitizeHTML(existingSubmission.body) }}
+              body={existingSubmission.body}
             />
           )}
           {existingSubmission.url && (

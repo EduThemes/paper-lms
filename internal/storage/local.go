@@ -30,10 +30,13 @@ func (l *LocalBackend) Put(_ context.Context, key string, r io.Reader, _ string)
 	if err != nil {
 		return fmt.Errorf("storage: could not create file %s: %w", fullPath, err)
 	}
-	defer f.Close()
-
 	if _, err := io.Copy(f, r); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("storage: could not write file %s: %w", fullPath, err)
+	}
+
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("storage: could not close file %s: %w", fullPath, err)
 	}
 
 	return nil

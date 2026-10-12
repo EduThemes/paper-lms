@@ -85,7 +85,7 @@ func run() int {
 		return 2
 	}
 	sqlDB, _ := db.DB()
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 
 	// Wire repos + service.
 	enrollmentRepo := pgRepo.NewEnrollmentRepository(db)

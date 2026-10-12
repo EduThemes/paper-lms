@@ -3,14 +3,21 @@ package models
 import "time"
 
 type Submission struct {
-	ID             uint               `json:"id" gorm:"column:id;primaryKey"`
-	AssignmentID   uint               `json:"assignment_id" gorm:"not null;uniqueIndex:idx_submission_assignment_user"`
-	UserID         uint               `json:"user_id" gorm:"not null;uniqueIndex:idx_submission_assignment_user;index"`
-	SubmissionType *string            `json:"submission_type"`
-	Body           *string            `json:"body" gorm:"type:text"`
-	URL            *string            `json:"url" gorm:"column:url"`
-	Score          *float64           `json:"score"`
-	Grade          *string            `json:"grade"`
+	ID             uint     `json:"id" gorm:"column:id;primaryKey"`
+	AssignmentID   uint     `json:"assignment_id" gorm:"not null;uniqueIndex:idx_submission_assignment_user"`
+	UserID         uint     `json:"user_id" gorm:"not null;uniqueIndex:idx_submission_assignment_user;index"`
+	SubmissionType *string  `json:"submission_type"`
+	Body           *string  `json:"body" gorm:"type:text"`
+	URL            *string  `json:"url" gorm:"column:url"`
+	Score          *float64 `json:"score"`
+	Grade          *string  `json:"grade"`
+	// EnteredScore / EnteredGrade hold the value the grader typed, before
+	// any late-policy deduction; Score / Grade are the final (deducted)
+	// values. Mirrors Canvas submissions.entered_score / entered_grade /
+	// points_deducted so re-saving a grade never compounds the penalty.
+	EnteredScore   *float64           `json:"entered_score"`
+	EnteredGrade   *string            `json:"entered_grade"`
+	PointsDeducted *float64           `json:"points_deducted"`
 	GradedAt       *time.Time         `json:"graded_at"`
 	GraderID       *uint              `json:"grader_id"`
 	SubmittedAt    *time.Time         `json:"submitted_at"`

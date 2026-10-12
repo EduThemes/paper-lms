@@ -56,6 +56,11 @@ func (h *CustomRoleHandler) ListRoles(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.BadRequest(c, "Invalid account ID")
 	}
+	// The URL :account_id is caller-controlled; never list another
+	// tenant's roles (404 on mismatch, super_admin excepted).
+	if assertSameTenant(c, uint(accountID)) {
+		return nil
+	}
 
 	params := middleware.GetPagination(c)
 
@@ -79,6 +84,11 @@ func (h *CustomRoleHandler) CreateRole(c *fiber.Ctx) error {
 	accountID, err := c.ParamsInt("account_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid account ID")
+	}
+	// Never create a role in another tenant (B070 made this reachable
+	// from every tenant's admin UI via a hardcoded account 1).
+	if assertSameTenant(c, uint(accountID)) {
+		return nil
 	}
 
 	userID, err := getUserID(c)
@@ -276,6 +286,12 @@ func (h *CustomRoleHandler) ListOverrides(c *fiber.Ctx) error {
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid role ID")
+	}
+
+	// GetRoleOverrides reads by bare role id; tie the role to the caller's
+	// tenant first so another tenant's role overrides can't be listed.
+	if _, err := h.customRoleService.GetRole(c.Context(), uint(id), callerAccountID(c)); err != nil {
+		return responses.NotFound(c, "role")
 	}
 
 	overrides, err := h.customRoleService.GetRoleOverrides(c.Context(), uint(id))

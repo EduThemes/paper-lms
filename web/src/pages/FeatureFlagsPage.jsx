@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Flag, Lock, RefreshCw, AlertCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
+import useAccountId from '../hooks/useAccountId';
 import { api } from '../services/api';
 
 /**
@@ -71,7 +72,7 @@ const FeatureFlagsPage = () => {
   const [search, setSearch] = useState('');
   const [busyFeature, setBusyFeature] = useState(null);
 
-  const accountId = 1; // single-tenant default
+  const accountId = useAccountId();
 
   const load = async () => {
     setLoading(true);
@@ -89,8 +90,9 @@ const FeatureFlagsPage = () => {
   };
 
   useEffect(() => {
-    load();
-  }, []);
+    if (accountId) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]);
 
   const setState = async (feature, state) => {
     setBusyFeature(feature);

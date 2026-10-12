@@ -83,7 +83,12 @@ func (h *PageHandler) ListPages(c *fiber.Ctx) error {
 
 	params := middleware.GetPagination(c)
 
-	result, err := h.pageService.ListByCourse(c.Context(), uint(courseID), params)
+	// B045: students and observers only ever see published pages.
+	list := h.pageService.ListPublishedByCourse
+	if canViewUnpublishedContent(c) {
+		list = h.pageService.ListByCourse
+	}
+	result, err := list(c.Context(), uint(courseID), params)
 	if err != nil {
 		return responses.InternalError(c, "Could not fetch pages")
 	}
@@ -106,22 +111,47 @@ func (h *PageHandler) GetPage(c *fiber.Ctx) error {
 
 	urlOrID := c.Params("url_or_id")
 
-	// Try as numeric ID first
-	if id, err := strconv.Atoi(urlOrID); err == nil {
-		page, err := h.pageService.GetByID(c.Context(), uint(id), callerAccountID(c))
-		if err != nil {
+	var page *models.WikiPage
+	if id, convErr := strconv.Atoi(urlOrID); convErr == nil {
+		// Numeric id. B137: FindByID is tenant-scoped but neither
+		// course-scoped nor deleted-filtered, so tie it to :course_id
+		// (F-013) and drop deleted rows — otherwise a student in course
+		// A could read any same-tenant page of course B by id.
+		page, err = h.pageService.GetByID(c.Context(), uint(id), callerAccountID(c))
+		if err != nil || page == nil || page.CourseID != uint(courseID) || page.WorkflowState == "deleted" {
 			return responses.NotFound(c, "page")
 		}
-		h.recordPageView(c, page)
-		return c.JSON(pageToJSON(page))
+	} else {
+		page, err = h.pageService.GetByURL(c.Context(), uint(courseID), urlOrID)
+		if err != nil || page == nil {
+			return responses.NotFound(c, "page")
+		}
 	}
 
-	// Try as URL slug
-	page, err := h.pageService.GetByURL(c.Context(), uint(courseID), urlOrID)
-	if err != nil {
+	// B045: a draft page is invisible to students/observers.
+	if page.WorkflowState != "active" && !canViewUnpublishedContent(c) {
 		return responses.NotFound(c, "page")
 	}
 
+	h.recordPageView(c, page)
+	return c.JSON(pageToJSON(page))
+}
+
+// GetFrontPage handles GET /courses/:course_id/front_page — the page a
+// course with default_view "wiki" shows on its home (B147). Students
+// only get it while it is published.
+func (h *PageHandler) GetFrontPage(c *fiber.Ctx) error {
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
+	page, err := h.pageService.GetFrontPage(c.Context(), uint(courseID))
+	if err != nil || page == nil {
+		return responses.NotFound(c, "front page")
+	}
+	if page.WorkflowState != "active" && !canViewUnpublishedContent(c) {
+		return responses.NotFound(c, "front page")
+	}
 	h.recordPageView(c, page)
 	return c.JSON(pageToJSON(page))
 }
@@ -175,6 +205,9 @@ func (h *PageHandler) CreatePage(c *fiber.Ctx) error {
 	if err := h.pageService.Create(c.Context(), page); err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
+	if err := h.pageService.EnsureSingleFrontPage(c.Context(), page); err != nil {
+		return responses.InternalError(c, "Could not set front page")
+	}
 
 	return c.Status(fiber.StatusCreated).JSON(pageToJSON(page))
 }
@@ -198,7 +231,10 @@ func (h *PageHandler) UpdatePage(c *fiber.Ctx) error {
 		// IDOR, but a teacher in course A could PUT a page id from
 		// course B in the SAME tenant. The slug branch is safe
 		// because GetByURL filters by courseID. 404 on mismatch.
-		if page.CourseID != uint(courseID) {
+		// A deleted page is gone: the numeric branch must not let a PUT
+		// with published=true revive it (its slug may already be reused
+		// by a newer page, which would bring back duplicate slugs).
+		if page.CourseID != uint(courseID) || page.WorkflowState == "deleted" {
 			return responses.NotFound(c, "page")
 		}
 	} else {
@@ -252,6 +288,11 @@ func (h *PageHandler) UpdatePage(c *fiber.Ctx) error {
 
 	if err := h.pageService.Update(c.Context(), page); err != nil {
 		return responses.InternalError(c, "Could not update page")
+	}
+	if input.WikiPage.FrontPage != nil && *input.WikiPage.FrontPage {
+		if err := h.pageService.EnsureSingleFrontPage(c.Context(), page); err != nil {
+			return responses.InternalError(c, "Could not set front page")
+		}
 	}
 
 	return c.JSON(pageToJSON(page))

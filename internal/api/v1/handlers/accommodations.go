@@ -106,12 +106,27 @@ func (h *AccommodationHandler) CreateAccommodation(c *fiber.Ctx) error {
 			EffectiveFrom     *time.Time `json:"effective_from"`
 			EffectiveUntil    *time.Time `json:"effective_until"`
 			Notes             string     `json:"notes"`
-			CreatedByID       uint       `json:"created_by_id"`
 		} `json:"accommodation"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
 		return responses.BadRequest(c, "Invalid input")
+	}
+
+	// The `admin` gate checks the tenant only on /accounts/:account_id
+	// paths: the target student (and any course) must be in the caller's
+	// tenant, or this is a 404.
+	if err := h.authz.RequireUserInTenant(c, uint(userID)); err != nil {
+		return err
+	}
+	if cid := input.Accommodation.CourseID; cid != nil && *cid != 0 {
+		if err := h.authz.RequireCourseInTenant(c, *cid); err != nil {
+			return err
+		}
+	}
+	callerID, err := getUserID(c)
+	if err != nil {
+		return err
 	}
 
 	effectiveFrom := time.Now()
@@ -123,7 +138,7 @@ func (h *AccommodationHandler) CreateAccommodation(c *fiber.Ctx) error {
 		UserID:            uint(userID),
 		CourseID:          input.Accommodation.CourseID,
 		AccommodationType: input.Accommodation.AccommodationType,
-		Description:       service.SanitizeHTML(input.Accommodation.Description),
+		Description:       service.SanitizePlainText(input.Accommodation.Description),
 		TimeMultiplier:    input.Accommodation.TimeMultiplier,
 		ExtraDays:         input.Accommodation.ExtraDays,
 		PlanType:          input.Accommodation.PlanType,
@@ -131,7 +146,8 @@ func (h *AccommodationHandler) CreateAccommodation(c *fiber.Ctx) error {
 		EffectiveFrom:     effectiveFrom,
 		EffectiveUntil:    input.Accommodation.EffectiveUntil,
 		Notes:             input.Accommodation.Notes,
-		CreatedByID:       input.Accommodation.CreatedByID,
+		// The creator is the authenticated caller, never a body field.
+		CreatedByID: callerID,
 	}
 
 	if err := h.accommodationService.CreateAccommodation(c.Context(), accommodation); err != nil {
@@ -179,6 +195,10 @@ func (h *AccommodationHandler) UpdateAccommodation(c *fiber.Ctx) error {
 	if err != nil {
 		return responses.NotFound(c, "accommodation")
 	}
+	// Cross-tenant rows are a 404 (the `admin` gate has no tenant on this path).
+	if err := h.authz.RequireUserInTenant(c, accommodation.UserID); err != nil {
+		return authzNotFound("accommodation")
+	}
 
 	var input struct {
 		Accommodation struct {
@@ -202,13 +222,18 @@ func (h *AccommodationHandler) UpdateAccommodation(c *fiber.Ctx) error {
 	}
 
 	if input.Accommodation.CourseID != nil {
+		if *input.Accommodation.CourseID != 0 {
+			if err := h.authz.RequireCourseInTenant(c, *input.Accommodation.CourseID); err != nil {
+				return err
+			}
+		}
 		accommodation.CourseID = input.Accommodation.CourseID
 	}
 	if input.Accommodation.AccommodationType != nil {
 		accommodation.AccommodationType = *input.Accommodation.AccommodationType
 	}
 	if input.Accommodation.Description != nil {
-		accommodation.Description = service.SanitizeHTML(*input.Accommodation.Description)
+		accommodation.Description = service.SanitizePlainText(*input.Accommodation.Description)
 	}
 	if input.Accommodation.TimeMultiplier != nil {
 		accommodation.TimeMultiplier = input.Accommodation.TimeMultiplier
@@ -226,6 +251,9 @@ func (h *AccommodationHandler) UpdateAccommodation(c *fiber.Ctx) error {
 		accommodation.PlanExternalID = *input.Accommodation.PlanExternalID
 	}
 	if input.Accommodation.ApprovedByID != nil {
+		if err := h.authz.RequireUserInTenant(c, *input.Accommodation.ApprovedByID); err != nil {
+			return err
+		}
 		accommodation.ApprovedByID = input.Accommodation.ApprovedByID
 		now := time.Now()
 		accommodation.ApprovedAt = &now
@@ -252,6 +280,15 @@ func (h *AccommodationHandler) DeleteAccommodation(c *fiber.Ctx) error {
 	id, err := c.ParamsInt("id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid accommodation ID")
+	}
+
+	accommodation, err := h.accommodationService.GetAccommodation(c.Context(), uint(id))
+	if err != nil {
+		return responses.NotFound(c, "accommodation")
+	}
+	// Cross-tenant rows are a 404 (the `admin` gate has no tenant on this path).
+	if err := h.authz.RequireUserInTenant(c, accommodation.UserID); err != nil {
+		return authzNotFound("accommodation")
 	}
 
 	if err := h.accommodationService.DeactivateAccommodation(c.Context(), uint(id)); err != nil {
@@ -299,13 +336,20 @@ func (h *AccommodationHandler) ListCourseAccommodations(c *fiber.Ctx) error {
 // ApplyAccommodationsToAssignment handles POST /api/v1/assignments/:id/apply_accommodations
 // This previews what accommodations would be applied to an assignment for specified users.
 func (h *AccommodationHandler) ApplyAccommodationsToAssignment(c *fiber.Ctx) error {
-	assignmentID, err := c.ParamsInt("id")
+	courseID, err := c.ParamsInt("course_id")
+	if err != nil {
+		return responses.BadRequest(c, "Invalid course ID")
+	}
+	// B122: the route declares :assignment_id (reading "id" made every
+	// call a 400).
+	assignmentID, err := c.ParamsInt("assignment_id")
 	if err != nil {
 		return responses.BadRequest(c, "Invalid assignment ID")
 	}
 
 	assignment, err := h.assignmentService.GetByID(c.Context(), uint(assignmentID), callerAccountID(c))
-	if err != nil {
+	if err != nil || assignment.CourseID != uint(courseID) {
+		// F-013 parent-tie: an assignment of another course is a 404.
 		return responses.NotFound(c, "assignment")
 	}
 
@@ -322,10 +366,10 @@ func (h *AccommodationHandler) ApplyAccommodationsToAssignment(c *fiber.Ctx) err
 	}
 
 	adjustments := make([]fiber.Map, 0)
-	courseID := assignment.CourseID
+	assignmentCourseID := assignment.CourseID
 
 	for _, userID := range input.UserIDs {
-		adjustment, err := h.accommodationService.ApplyAccommodationsToAssignment(c.Context(), userID, &courseID, assignment.DueAt)
+		adjustment, err := h.accommodationService.ApplyAccommodationsToAssignment(c.Context(), userID, &assignmentCourseID, assignment.DueAt)
 		if err != nil {
 			continue
 		}

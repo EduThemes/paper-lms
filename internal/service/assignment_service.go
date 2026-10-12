@@ -42,3 +42,43 @@ func (s *AssignmentService) Delete(ctx context.Context, id uint) error {
 func (s *AssignmentService) ListByCourse(ctx context.Context, courseID uint, params repository.PaginationParams) (*repository.PaginatedResult[models.Assignment], error) {
 	return s.repo.ListByCourseID(ctx, courseID, params)
 }
+
+// ListVisibleByCourse lists a course's assignments for a caller. Staff see
+// every non-deleted assignment; anyone else sees only published ones, and
+// pagination is applied after that filter so counts don't leak drafts.
+func (s *AssignmentService) ListVisibleByCourse(ctx context.Context, courseID uint, params repository.PaginationParams, includeUnpublished bool) (*repository.PaginatedResult[models.Assignment], error) {
+	if includeUnpublished {
+		return s.ListByCourse(ctx, courseID, params)
+	}
+	all, err := s.ListByCourse(ctx, courseID, repository.PaginationParams{Page: 1, PerPage: 100000})
+	if err != nil {
+		return nil, err
+	}
+	published := make([]models.Assignment, 0, len(all.Items))
+	for i := range all.Items {
+		if all.Items[i].IsPublished() {
+			published = append(published, all.Items[i])
+		}
+	}
+	page, perPage := params.Page, params.PerPage
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = len(published)
+	}
+	start := (page - 1) * perPage
+	if start > len(published) {
+		start = len(published)
+	}
+	end := start + perPage
+	if end > len(published) {
+		end = len(published)
+	}
+	return &repository.PaginatedResult[models.Assignment]{
+		Items:      published[start:end],
+		TotalCount: int64(len(published)),
+		Page:       page,
+		PerPage:    perPage,
+	}, nil
+}

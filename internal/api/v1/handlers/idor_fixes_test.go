@@ -99,8 +99,9 @@ func TestQuizQuestion_WrongQuiz_Returns404(t *testing.T) {
 // quiz) still succeeds — the fix is a tie, not a blanket deny.
 func TestQuizQuestion_HappyPath_Returns200(t *testing.T) {
 	app, quizRepo, questionRepo := setupQuizQuestionHandler(1)
+	// Published: non-staff callers only reach published quizzes (B128).
 	quizRepo.On("FindByID", mock.Anything, uint(5), uint(1)).
-		Return(&models.Quiz{CourseID: 7}, nil)
+		Return(&models.Quiz{CourseID: 7, Published: true, WorkflowState: "published"}, nil)
 	questionRepo.On("FindByID", mock.Anything, uint(100)).
 		Return(&models.QuizQuestion{QuizID: 5}, nil)
 

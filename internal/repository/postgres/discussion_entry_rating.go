@@ -37,3 +37,21 @@ func (r *DiscussionEntryRatingRepo) SumByEntryID(ctx context.Context, entryID ui
 		Scan(&result).Error
 	return result.Count, result.Sum, err
 }
+
+// ListUserRatingsByTopic returns the viewer's own rating per entry on a
+// topic (entry_id -> rating), so the thread view can show whether the
+// viewer already liked a post and let them unlike it.
+func (r *DiscussionEntryRatingRepo) ListUserRatingsByTopic(ctx context.Context, topicID, userID uint) (map[uint]int, error) {
+	var rows []models.DiscussionEntryRating
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND discussion_entry_id IN (SELECT id FROM discussion_entries WHERE discussion_topic_id = ?)", userID, topicID).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uint]int, len(rows))
+	for _, row := range rows {
+		out[row.DiscussionEntryID] = row.Rating
+	}
+	return out, nil
+}

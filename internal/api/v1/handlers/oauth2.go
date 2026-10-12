@@ -1,12 +1,14 @@
 package handlers
 
 import (
-	"fmt"
+	"errors"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
+	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/service"
 )
 
@@ -15,6 +17,10 @@ type OAuth2Handler struct {
 	devKeyService *service.DeveloperKeyService
 	tokenService  *service.AccessTokenService
 	userService   *service.UserService
+	// frontendURL is the SPA origin (cfg.FrontendURL). The GET
+	// authorization endpoint redirects the browser to the SPA consent
+	// page there. Empty means same-origin (relative redirect).
+	frontendURL string
 }
 
 func NewOAuth2Handler(
@@ -31,19 +37,33 @@ func NewOAuth2Handler(
 	}
 }
 
-// Authorize handles the OAuth2 authorization endpoint.
-// GET /api/v1/login/oauth2/auth
+// SetFrontendURL configures the SPA origin used for the consent redirect.
+func (h *OAuth2Handler) SetFrontendURL(frontendURL string) {
+	h.frontendURL = strings.TrimSuffix(frontendURL, "/")
+}
+
+// oauthConsentPath is the SPA route that renders the consent screen.
+const oauthConsentPath = "/login/oauth2/confirm"
+
+func splitScopes(scope string) []string {
+	return strings.Fields(scope)
+}
+
+// Authorize is the OAuth2 authorization endpoint.
+// GET /api/v1/login/oauth2/auth (PUBLIC)
 //
-// If the user is already authenticated (has a valid Bearer token), this
-// generates an authorization code and redirects to the client's redirect_uri.
-// If the user is not authenticated, it returns a JSON response describing the
-// authorization request so the frontend can display a consent screen.
+// B076: this endpoint NEVER issues a code. A GET is reachable cross-site
+// with the Lax session cookie attached and is CSRF-exempt, so issuing a
+// code here let any page that linked a logged-in user to it harvest an
+// API token for that user. Instead the request is validated (client
+// exists, is active, the redirect_uri is registered — never redirect to
+// an unvalidated URI) and the browser is sent to the SPA consent screen,
+// which requires a session, shows the app + scopes, and posts the user's
+// explicit decision to AuthorizePost (CSRF-protected).
 func (h *OAuth2Handler) Authorize(c *fiber.Ctx) error {
 	clientID := c.Query("client_id")
 	responseType := c.Query("response_type")
 	redirectURI := c.Query("redirect_uri")
-	scope := c.Query("scope")
-	state := c.Query("state")
 
 	if clientID == "" {
 		return responses.BadRequest(c, "client_id is required")
@@ -55,75 +75,71 @@ func (h *OAuth2Handler) Authorize(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "redirect_uri is required")
 	}
 
-	// Validate that the developer key exists and is active
 	devKey, err := h.devKeyService.GetByClientID(c.Context(), clientID)
-	if err != nil {
+	if err != nil || devKey.WorkflowState != "active" {
 		return responses.BadRequest(c, "Invalid client_id")
 	}
-	if devKey.WorkflowState != "active" {
-		return responses.BadRequest(c, "Developer key is not active")
-	}
-
-	// Validate redirect URI
 	if !h.devKeyService.ValidateRedirectURI(devKey, redirectURI) {
 		return responses.BadRequest(c, "Invalid redirect_uri")
 	}
 
-	// Parse scopes
-	var scopes []string
-	if scope != "" {
-		scopes = strings.Split(scope, " ")
+	q := url.Values{}
+	q.Set("client_id", clientID)
+	q.Set("response_type", "code")
+	q.Set("redirect_uri", redirectURI)
+	if scope := c.Query("scope"); scope != "" {
+		q.Set("scope", scope)
 	}
-
-	// Check if the user is authenticated
-	userID, ok := c.Locals("user_id").(uint)
-	if !ok || userID == 0 {
-		// User is not authenticated; return authorization info for the frontend
-		return c.JSON(fiber.Map{
-			"authorize_url": fmt.Sprintf("/api/v1/login/oauth2/auth?client_id=%s&response_type=code&redirect_uri=%s&scope=%s&state=%s",
-				url.QueryEscape(clientID),
-				url.QueryEscape(redirectURI),
-				url.QueryEscape(scope),
-				url.QueryEscape(state),
-			),
-			"client_name": devKey.Name,
-			"scopes":      scopes,
-		})
+	if state := c.Query("state"); state != "" {
+		q.Set("state", state)
 	}
-
-	// User is authenticated; generate auth code and redirect
-	code, err := h.oauth2Service.GenerateAuthorizationCode(
-		c.Context(),
-		userID,
-		clientID,
-		redirectURI,
-		scopes,
-		state,
-	)
-	if err != nil {
-		return responses.BadRequest(c, err.Error())
-	}
-
-	// Build the redirect URL with code and state
-	redirectURL, err := buildRedirectURL(redirectURI, code, state)
-	if err != nil {
-		return responses.InternalError(c, "Could not build redirect URL")
-	}
-
-	return c.Redirect(redirectURL, fiber.StatusFound)
+	return c.Redirect(h.frontendURL+oauthConsentPath+"?"+q.Encode(), fiber.StatusFound)
 }
 
-// AuthorizePost handles explicit user consent in the OAuth2 flow.
-// POST /api/v1/login/oauth2/auth
+// AuthorizeInfo returns what the consent screen needs to show.
+// GET /api/v1/login/oauth2/auth/info (authenticated)
 //
-// The user has explicitly consented to the authorization. This endpoint
-// generates an authorization code and redirects to the client's redirect_uri.
+// The client must belong to the caller's tenant; anything else is the
+// existence-leak 404.
+func (h *OAuth2Handler) AuthorizeInfo(c *fiber.Ctx) error {
+	clientID := c.Query("client_id")
+	redirectURI := c.Query("redirect_uri")
+	if clientID == "" || redirectURI == "" {
+		return responses.BadRequest(c, "client_id and redirect_uri are required")
+	}
+
+	devKey, err := h.oauth2Service.ResolveClientForUser(c.Context(), clientID, redirectURI, callerAccountID(c))
+	if err != nil {
+		if errors.Is(err, service.ErrOAuthClientNotFound) {
+			return responses.NotFound(c, "developer key")
+		}
+		return responses.BadRequest(c, "Invalid redirect_uri")
+	}
+
+	return c.JSON(fiber.Map{
+		"client_id":    clientID,
+		"client_name":  devKey.Name,
+		"icon_url":     devKey.Icon,
+		"redirect_uri": redirectURI,
+		"scopes":       splitScopes(c.Query("scope")),
+		"state":        c.Query("state"),
+	})
+}
+
+// AuthorizePost records the user's explicit consent decision.
+// POST /api/v1/login/oauth2/auth (authenticated + CSRF)
+//
+// Body: {client_id, redirect_uri, scope, state, approve}. approve=false
+// (deny) sends the client back with error=access_denied. The response is
+// JSON {redirect_url} so the SPA can navigate the top-level window: a
+// fetch cannot usefully follow a cross-origin 302.
 func (h *OAuth2Handler) AuthorizePost(c *fiber.Ctx) error {
 	var input struct {
 		ClientID    string `json:"client_id"`
 		RedirectURI string `json:"redirect_uri"`
 		Scope       string `json:"scope"`
 		State       string `json:"state"`
+		Approve     *bool  `json:"approve"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
@@ -137,38 +153,40 @@ func (h *OAuth2Handler) AuthorizePost(c *fiber.Ctx) error {
 		return responses.BadRequest(c, "redirect_uri is required")
 	}
 
-	// Validate that the developer key exists and is active
-	devKey, err := h.devKeyService.GetByClientID(c.Context(), input.ClientID)
-	if err != nil {
-		return responses.BadRequest(c, "Invalid client_id")
-	}
-	if devKey.WorkflowState != "active" {
-		return responses.BadRequest(c, "Developer key is not active")
-	}
-
-	// Validate redirect URI
-	if !h.devKeyService.ValidateRedirectURI(devKey, input.RedirectURI) {
-		return responses.BadRequest(c, "Invalid redirect_uri")
-	}
-
 	// The user must be authenticated for the POST consent flow
 	userID, ok := c.Locals("user_id").(uint)
 	if !ok || userID == 0 {
 		return responses.Unauthorized(c)
 	}
+	accountID := callerAccountID(c)
 
-	var scopes []string
-	if input.Scope != "" {
-		scopes = strings.Split(input.Scope, " ")
+	// Validate the client for this user's tenant BEFORE building any
+	// redirect, so a deny can never bounce to an unvalidated URI.
+	if _, err := h.oauth2Service.ResolveClientForUser(c.Context(), input.ClientID, input.RedirectURI, accountID); err != nil {
+		if errors.Is(err, service.ErrOAuthClientNotFound) {
+			return responses.NotFound(c, "developer key")
+		}
+		return responses.BadRequest(c, "Invalid redirect_uri")
+	}
+
+	if input.Approve != nil && !*input.Approve {
+		redirectURL, err := buildRedirectURLWithParams(input.RedirectURI, map[string]string{
+			"error": "access_denied",
+			"state": input.State,
+		})
+		if err != nil {
+			return responses.InternalError(c, "Could not build redirect URL")
+		}
+		return c.JSON(fiber.Map{"redirect_url": redirectURL})
 	}
 
 	code, err := h.oauth2Service.GenerateAuthorizationCode(
 		c.Context(),
 		userID,
+		accountID,
 		input.ClientID,
 		input.RedirectURI,
-		scopes,
-		input.State,
+		splitScopes(input.Scope),
 	)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
@@ -179,7 +197,7 @@ func (h *OAuth2Handler) AuthorizePost(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not build redirect URL")
 	}
 
-	return c.Redirect(redirectURL, fiber.StatusFound)
+	return c.JSON(fiber.Map{"redirect_url": redirectURL})
 }
 
 // Token exchanges an authorization code or refresh token for access tokens.
@@ -187,7 +205,7 @@ func (h *OAuth2Handler) AuthorizePost(c *fiber.Ctx) error {
 //
 // Supports two grant types:
 //   - authorization_code: exchange a code for access_token + refresh_token
-//   - refresh_token: rotate tokens using a valid refresh_token
+//   - refresh_token: mint a new access_token (the refresh token is kept)
 func (h *OAuth2Handler) Token(c *fiber.Ctx) error {
 	grantType := c.FormValue("grant_type")
 	if grantType == "" {
@@ -230,6 +248,33 @@ func (h *OAuth2Handler) Token(c *fiber.Ctx) error {
 	}
 }
 
+// tokenExpiresIn returns the remaining lifetime of an access token in
+// seconds (defaulting to the standard TTL).
+func tokenExpiresIn(token *models.AccessToken) int {
+	if token.ExpiresAt != nil {
+		if remaining := int(time.Until(*token.ExpiresAt).Seconds()); remaining > 0 {
+			return remaining
+		}
+	}
+	return int(service.OAuthAccessTokenTTL.Seconds())
+}
+
+// tokenUserInfo builds the Canvas-style "user" object of a token response.
+func (h *OAuth2Handler) tokenUserInfo(c *fiber.Ctx, userID uint) fiber.Map {
+	userInfo := fiber.Map{"id": userID}
+	if h.userService != nil {
+		// AUTH-INTERNAL: OAuth2 token-grant response. The token row IS
+		// the identity binding; the OAuth2 endpoint runs without a
+		// session cookie / account_id Locals. accountID=0 is correct.
+		user, userErr := h.userService.GetByID(c.Context(), userID, 0)
+		if userErr == nil {
+			userInfo["id"] = user.ID
+			userInfo["name"] = user.Name
+		}
+	}
+	return userInfo
+}
+
 // handleAuthorizationCodeGrant exchanges an authorization code for tokens.
 func (h *OAuth2Handler) handleAuthorizationCodeGrant(c *fiber.Ctx, code, clientID, clientSecret, redirectURI string) error {
 	if code == "" {
@@ -256,38 +301,20 @@ func (h *OAuth2Handler) handleAuthorizationCodeGrant(c *fiber.Ctx, code, clientI
 		return responses.BadRequest(c, err.Error())
 	}
 
-	// Calculate expires_in from the token's ExpiresAt
-	expiresIn := 3600
-	if token.ExpiresAt != nil {
-		remaining := int(token.ExpiresAt.Sub(token.CreatedAt).Seconds())
-		if remaining > 0 {
-			expiresIn = remaining
-		}
-	}
-
-	// Look up user info
-	userInfo := fiber.Map{"id": token.UserID}
-	if h.userService != nil {
-		// AUTH-INTERNAL: OAuth2 token-grant response. The token row IS
-		// the identity binding; the OAuth2 endpoint runs without a
-		// session cookie / account_id Locals. accountID=0 is correct.
-		user, userErr := h.userService.GetByID(c.Context(), token.UserID, 0)
-		if userErr == nil {
-			userInfo["id"] = user.ID
-			userInfo["name"] = user.Name
-		}
-	}
-
 	return c.JSON(fiber.Map{
 		"access_token":  rawAccessToken,
 		"token_type":    "Bearer",
 		"refresh_token": rawRefreshToken,
-		"expires_in":    expiresIn,
-		"user":          userInfo,
+		"expires_in":    tokenExpiresIn(token),
+		"user":          h.tokenUserInfo(c, token.UserID),
 	})
 }
 
-// handleRefreshTokenGrant rotates tokens using a refresh token.
+// handleRefreshTokenGrant mints a new access token from a refresh token.
+//
+// B184: the refresh token must belong to the authenticating client.
+// B193: Canvas parity — the refresh token is not rotated, and the response
+// carries no refresh_token (clients keep using the original one).
 func (h *OAuth2Handler) handleRefreshTokenGrant(c *fiber.Ctx, refreshToken, clientID, clientSecret string) error {
 	if refreshToken == "" {
 		return responses.BadRequest(c, "refresh_token is required")
@@ -299,66 +326,50 @@ func (h *OAuth2Handler) handleRefreshTokenGrant(c *fiber.Ctx, refreshToken, clie
 		return responses.BadRequest(c, "client_secret is required")
 	}
 
-	// Validate client credentials
+	// Validate client credentials (constant-time; hashed at rest, B191)
 	devKey, err := h.devKeyService.GetByClientID(c.Context(), clientID)
 	if err != nil {
 		return responses.BadRequest(c, "Invalid client_id")
 	}
-	if devKey.ClientSecret != clientSecret {
+	if !h.devKeyService.VerifyClientSecret(devKey, clientSecret) {
 		return responses.BadRequest(c, "Invalid client_secret")
 	}
 	if devKey.WorkflowState != "active" {
 		return responses.BadRequest(c, "Developer key is not active")
 	}
 
-	token, rawAccessToken, rawRefreshToken, err := h.tokenService.RefreshOAuthToken(c.Context(), refreshToken)
+	token, rawAccessToken, err := h.tokenService.RefreshOAuthToken(c.Context(), refreshToken, devKey.ID)
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
 
-	// Calculate expires_in
-	expiresIn := 3600
-	if token.ExpiresAt != nil {
-		remaining := int(token.ExpiresAt.Sub(token.CreatedAt).Seconds())
-		if remaining > 0 {
-			expiresIn = remaining
-		}
-	}
-
-	// Look up user info
-	userInfo := fiber.Map{"id": token.UserID}
-	if h.userService != nil {
-		// AUTH-INTERNAL: OAuth2 token-grant response. The token row IS
-		// the identity binding; the OAuth2 endpoint runs without a
-		// session cookie / account_id Locals. accountID=0 is correct.
-		user, userErr := h.userService.GetByID(c.Context(), token.UserID, 0)
-		if userErr == nil {
-			userInfo["id"] = user.ID
-			userInfo["name"] = user.Name
-		}
-	}
-
 	return c.JSON(fiber.Map{
-		"access_token":  rawAccessToken,
-		"token_type":    "Bearer",
-		"refresh_token": rawRefreshToken,
-		"expires_in":    expiresIn,
-		"user":          userInfo,
+		"access_token": rawAccessToken,
+		"token_type":   "Bearer",
+		"expires_in":   tokenExpiresIn(token),
+		"user":         h.tokenUserInfo(c, token.UserID),
 	})
 }
 
 // buildRedirectURL appends the authorization code and optional state to the
 // client's redirect URI.
 func buildRedirectURL(redirectURI, code, state string) (string, error) {
+	return buildRedirectURLWithParams(redirectURI, map[string]string{"code": code, "state": state})
+}
+
+// buildRedirectURLWithParams appends the non-empty params to redirectURI's
+// query string.
+func buildRedirectURLWithParams(redirectURI string, params map[string]string) (string, error) {
 	u, err := url.Parse(redirectURI)
 	if err != nil {
 		return "", err
 	}
 
 	q := u.Query()
-	q.Set("code", code)
-	if state != "" {
-		q.Set("state", state)
+	for k, v := range params {
+		if v != "" {
+			q.Set(k, v)
+		}
 	}
 	u.RawQuery = q.Encode()
 

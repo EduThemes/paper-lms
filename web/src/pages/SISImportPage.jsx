@@ -2,9 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Upload, Download, AlertCircle, CheckCircle, Clock, RefreshCw, X, ChevronDown, FileText } from 'lucide-react';
 import Layout from '../components/Layout';
 import { getCSRFToken } from '../services/api';
+import useAccountId from '../hooks/useAccountId';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
-const ACCOUNT_ID = 1;
+// The tenant comes from the signed-in user (useAccountId), never a constant.
 
 const apiFetch = (url, options = {}) => fetch(url, {
   ...options,
@@ -13,6 +14,7 @@ const apiFetch = (url, options = {}) => fetch(url, {
 });
 
 const SISImportPage = () => {
+  const ACCOUNT_ID = useAccountId();
   const [activeTab, setActiveTab] = useState('import');
   const [importType, setImportType] = useState('users');
   const [file, setFile] = useState(null);
@@ -36,11 +38,11 @@ const SISImportPage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [ACCOUNT_ID]);
 
   useEffect(() => {
-    fetchBatches();
-  }, [fetchBatches]);
+    if (ACCOUNT_ID) fetchBatches();
+  }, [ACCOUNT_ID, fetchBatches]);
 
   const handleUpload = async (e) => {
     e.preventDefault();
