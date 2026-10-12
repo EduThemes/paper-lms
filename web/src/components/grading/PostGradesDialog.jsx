@@ -70,6 +70,8 @@ const PostGradesDialog = ({ open, onOpenChange, courseId, assignment, mode = 'po
               ? 'Students will see their grades and comments for'
               : 'Students will no longer see their grades for'}{' '}
             {assignment ? `"${assignment.name}"` : 'this assignment'}.
+            {mode === 'hide' &&
+              ' The assignment switches to manual posting: grades and comments added later stay hidden until you post them.'}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 text-sm">

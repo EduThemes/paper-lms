@@ -226,7 +226,11 @@ const CurveDialog = ({ open, onOpenChange, assignment, students, getCellData, on
       if (isNaN(target)) throw new Error('Target average must be a number');
       if (stats.max > 0 && (target < 0 || target > 100)) throw new Error('Target average must be between 0 and 100%');
       const { grades } = curveGrades({ entries, pointsPossible: stats.max, targetPercent: target });
-      await onApply(grades.map((g) => ({ ...g, assignment_id: assignment.id })));
+      // Curved values are points: send them as `score` (not a typed
+      // posted_grade, which a percent / GPA assignment would misread).
+      await onApply(
+        grades.map((g) => ({ assignment_id: assignment.id, user_id: g.user_id, score: parseFloat(g.posted_grade) }))
+      );
       onOpenChange(false);
     } catch (e) {
       setError(e.message);
@@ -1657,6 +1661,10 @@ const GradebookPage = () => {
           prev.map((a) => (a.id === assignmentId ? { ...a, gradesPosted: mode === 'post' } : a))
         );
       }
+      if (mode === 'hide') {
+        // Hiding switches the assignment to manual posting (Canvas).
+        setAssignments((prev) => prev.map((a) => (a.id === assignmentId ? { ...a, post_policy: 'manual' } : a)));
+      }
       refreshServerGrades();
     },
     [refreshServerGrades]
@@ -1683,7 +1691,9 @@ const GradebookPage = () => {
         } else {
           // TODO: replace with real bulk endpoint when available
           for (const g of grades) {
-            await api.gradeSubmission(courseId, g.assignment_id, g.user_id, { posted_grade: g.posted_grade });
+            await api.gradeSubmission(courseId, g.assignment_id, g.user_id, {
+              posted_grade: g.score != null ? String(g.score) : g.posted_grade,
+            });
           }
         }
         // Optimistically merge into local state
@@ -1701,7 +1711,7 @@ const GradebookPage = () => {
             if (r && r.error) continue;
             const sid = String(g.user_id);
             const aid = String(g.assignment_id);
-            const num = parseFloat(g.posted_grade);
+            const num = g.score != null ? Number(g.score) : parseFloat(g.posted_grade);
             const oldStudent = newSubs[sid] || {};
             const finalScore = r && r.score != null ? r.score : isNaN(num) ? null : num;
             newSubs[sid] = {
@@ -1709,7 +1719,7 @@ const GradebookPage = () => {
               [aid]: {
                 ...(oldStudent[aid] || {}),
                 score: finalScore,
-                grade: r && r.grade != null ? r.grade : g.posted_grade,
+                grade: r && r.grade != null ? r.grade : g.posted_grade ?? (isNaN(num) ? null : String(num)),
                 entered_score: isNaN(num) ? null : num,
                 points_deducted: finalScore != null && !isNaN(num) && num - finalScore > 0 ? num - finalScore : null,
                 workflow_state: 'graded',
@@ -1965,7 +1975,10 @@ const GradebookPage = () => {
         // the late penalty (B021).
         const current = getCellData(studentId, assignmentId);
         if (current && (parseFloat(current.score) === score || parseFloat(enteredScore(current)) === score)) continue;
-        gradeData.push({ assignment_id: assignmentId, user_id: studentId, posted_grade: String(score) });
+        // CSV cells are scores in points: send them as `score` so the API
+        // never reads them as a typed grade (85 on a percent assignment
+        // would otherwise mean 85%).
+        gradeData.push({ assignment_id: assignmentId, user_id: studentId, score });
       }
       const errors = [];
       let updated = 0;
