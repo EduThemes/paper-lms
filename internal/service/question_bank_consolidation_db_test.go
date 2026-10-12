@@ -2,7 +2,8 @@ package service_test
 
 // G060 — one question-bank system, on real Postgres:
 //   - migration 000091 copies quiz_item_banks/items into question_banks /
-//     question_bank_entries and remaps quiz_questions.bank_item_id;
+//     question_bank_entries and remaps quiz_questions.bank_item_id (clearing
+//     ids whose legacy item was deleted);
 //   - the /quiz_item_banks repositories read and write question_banks;
 //   - a bank shared with the account is usable (list, group draw, pull,
 //     copy) by other courses in the account, never by another tenant.
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/EduThemes/paper-lms/internal/db"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/repository/postgres"
@@ -40,12 +42,33 @@ func TestQuestionBankConsolidationDB_MigrationCopiesItemBanks(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A question whose legacy item was deleted keeps a stale id. Make that
+	// id collide with an unrelated entry in another tenant's bank: the remap
+	// must clear it, not leave it pointing at the foreign entry.
+	decoy := f.bank(t, f.other, 1)
+	var decoyEntry models.QuestionBankEntry
+	if err := g.Where("question_bank_id = ?", decoy.ID).First(&decoyEntry).Error; err != nil {
+		t.Fatal(err)
+	}
+	if decoyEntry.ID == legacyItem {
+		t.Fatalf("decoy entry id %d collides with the live legacy item", decoyEntry.ID)
+	}
+	staleItem := decoyEntry.ID
+	orphan := &models.QuizQuestion{QuizID: quiz.ID, QuestionType: "multiple_choice", QuestionText: "orphan", Answers: "[]", WorkflowState: "active", BankItemID: &staleItem}
+	if err := g.Create(orphan).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// Apply 000091 the way production does: from the version before it.
+	if err := db.MigrateTo(g, 90); err != nil {
+		t.Fatalf("migrate to 90: %v", err)
+	}
+	if err := db.MigrateUp(g); err != nil {
+		t.Fatalf("apply 000091 and later: %v", err)
+	}
 	sqlText, err := os.ReadFile(filepath.Join("..", "db", "migrations", "000091_question_bank_consolidation.up.sql"))
 	if err != nil {
 		t.Fatal(err)
-	}
-	if err := g.Exec(string(sqlText)).Error; err != nil {
-		t.Fatalf("apply 000091: %v", err)
 	}
 
 	var bank models.QuestionBank
@@ -67,10 +90,21 @@ func TestQuestionBankConsolidationDB_MigrationCopiesItemBanks(t *testing.T) {
 	if reloaded.BankItemID == nil || *reloaded.BankItemID != entry.ID {
 		t.Fatalf("bank_item_id not remapped: %v", reloaded.BankItemID)
 	}
+	var orphaned models.QuizQuestion
+	g.First(&orphaned, orphan.ID)
+	if orphaned.BankItemID != nil {
+		t.Fatalf("deleted legacy item: bank_item_id = %d, want NULL (decoy entry %d)", *orphaned.BankItemID, decoyEntry.ID)
+	}
 
-	// Idempotent: re-running copies nothing twice.
+	// Idempotent: re-running copies nothing twice and leaves the remapped
+	// ids alone (they are entry ids now, not legacy item ids).
 	if err := g.Exec(string(sqlText)).Error; err != nil {
 		t.Fatal(err)
+	}
+	reloaded = models.QuizQuestion{}
+	g.First(&reloaded, q.ID)
+	if reloaded.BankItemID == nil || *reloaded.BankItemID != entry.ID {
+		t.Fatalf("re-run changed the remapped bank_item_id: %v", reloaded.BankItemID)
 	}
 	var n int64
 	g.Model(&models.QuestionBank{}).Where("legacy_quiz_item_bank_id = ?", 900).Count(&n)

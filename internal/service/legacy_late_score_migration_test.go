@@ -42,9 +42,40 @@ func TestMigration000077_RecoversEnteredScoreOfLegacyLateGrades(t *testing.T) {
 		GradedAt: &graded, PostedAt: &graded, WorkflowState: models.SubmissionGraded}
 	require.NoError(t, g.Create(sub).Error)
 
+	// The same legacy shape on letter-grade and percent assignments: the
+	// score is recovered, but the grade string is the grader's display value
+	// ("B-", "80%") and must not be replaced by the raw recovered number.
+	legacyNonPoints := func(gradingType, grade string) *models.Submission {
+		t.Helper()
+		asg := &models.Assignment{CourseID: course.ID, Name: "Essay " + gradingType, PointsPossible: &pts, DueAt: &due, GradingType: gradingType, WorkflowState: models.AssignmentPublished, Published: true}
+		require.NoError(t, g.Create(asg).Error)
+		score, gradeCopy := 8.0, grade
+		s := &models.Submission{AssignmentID: asg.ID, UserID: student.ID, SubmittedAt: &submitted, Late: true,
+			Score: &score, Grade: &gradeCopy, EnteredScore: &score, EnteredGrade: &gradeCopy,
+			GradedAt: &graded, PostedAt: &graded, WorkflowState: models.SubmissionGraded}
+		require.NoError(t, g.Create(s).Error)
+		return s
+	}
+	letterSub := legacyNonPoints("letter_grade", "B-")
+	percentSub := legacyNonPoints("percent", "80%")
+
 	// Re-apply 000077 on top of the row (whatever migrations follow it).
 	require.NoError(t, db.MigrateTo(g, 76))
 	require.NoError(t, db.MigrateUp(g))
+
+	for _, tc := range []struct {
+		id    uint
+		grade string
+	}{{letterSub.ID, "B-"}, {percentSub.ID, "80%"}} {
+		var row models.Submission
+		require.NoError(t, g.First(&row, tc.id).Error)
+		require.NotNil(t, row.EnteredScore)
+		assert.InDelta(t, 10.0, *row.EnteredScore, 1e-9, "entered score recovered for %s", tc.grade)
+		require.NotNil(t, row.EnteredGrade)
+		assert.Equal(t, tc.grade, *row.EnteredGrade, "non-points entered_grade left as the grader's value")
+		require.NotNil(t, row.PointsDeducted)
+		assert.InDelta(t, 2.0, *row.PointsDeducted, 1e-9)
+	}
 
 	var got models.Submission
 	require.NoError(t, g.First(&got, sub.ID).Error)

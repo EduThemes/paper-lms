@@ -1,6 +1,8 @@
 -- Point quiz questions back at the original item-bank items, then remove
 -- the copied rows and the added columns. Banks/entries created after the
--- consolidation (no legacy id) are kept.
+-- consolidation (no legacy id) are kept. bank_item_id values the up
+-- migration cleared (their legacy item had been deleted) stay NULL: the old
+-- id referenced nothing.
 UPDATE quiz_questions q
    SET bank_item_id = e.legacy_quiz_item_bank_item_id
   FROM question_bank_entries e

@@ -30,4 +30,15 @@ CREATE INDEX IF NOT EXISTS idx_lti_line_items_developer_key_id ON public.lti_lin
 
 ALTER TABLE context_external_tools ADD COLUMN IF NOT EXISTS privacy_level text DEFAULT 'anonymous';
 
+-- LTI 1.3 launches and NRPS now filter name / email / SIS id through
+-- lti_tool_configurations.privacy_level. Before this release that column
+-- could not be set (every row holds its 000001 default 'anonymous') and
+-- PII was always sent, so tools installed before now keep sending it.
+-- Tools registered from here on keep the column default ('anonymous').
+-- The down migration leaves these rows alone: the column predates this
+-- migration and the code before it never read it.
+UPDATE lti_tool_configurations
+   SET privacy_level = 'public'
+ WHERE privacy_level IS DISTINCT FROM 'public';
+
 COMMIT;

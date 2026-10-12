@@ -14,9 +14,25 @@
 --      (legacy_* columns record the source id so the copy is idempotent).
 --   3. quiz_questions.bank_item_id is remapped onto the copied entry ids,
 --      since the /quiz_item_banks API now reads and writes these tables.
+--      A question whose legacy item was deleted gets NULL: its stale id
+--      would otherwise match an unrelated (possibly cross-tenant)
+--      question_bank_entries row.
 --
 -- quiz_item_banks / quiz_item_bank_items are left in place (Wave A of the
 -- copy-then-drop pattern); a later migration drops them.
+
+-- The bank_item_id remap (step 3) may only run once: afterwards the column
+-- holds question_bank_entries ids, which a second pass would misread as
+-- legacy item ids. Record whether this is the first application (the
+-- legacy columns don't exist yet) before they are added below.
+DROP TABLE IF EXISTS pg_temp.qbc_first_run;
+CREATE TEMP TABLE qbc_first_run AS
+SELECT NOT EXISTS (
+           SELECT 1
+             FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'question_bank_entries'
+              AND column_name = 'legacy_quiz_item_bank_item_id') AS first_run;
 
 ALTER TABLE question_banks ADD COLUMN IF NOT EXISTS description text;
 ALTER TABLE question_banks ADD COLUMN IF NOT EXISTS created_by_user_id bigint;
@@ -68,9 +84,16 @@ SELECT qb.id, '', it.question_type, it.question_text, COALESCE(it.points_possibl
  WHERE NOT EXISTS (
        SELECT 1 FROM question_bank_entries e WHERE e.legacy_quiz_item_bank_item_id = it.id);
 
--- Questions added from an item bank now point at the copied entry.
+-- Questions added from an item bank now point at the copied entry. One
+-- statement maps or clears: when the legacy item no longer exists the
+-- subquery yields NULL (uniq_question_bank_entries_legacy_item_id keeps it
+-- to at most one row).
 UPDATE quiz_questions q
-   SET bank_item_id = e.id
-  FROM question_bank_entries e
- WHERE e.legacy_quiz_item_bank_item_id = q.bank_item_id
-   AND q.bank_item_id IS NOT NULL;
+   SET bank_item_id = (
+           SELECT e.id
+             FROM question_bank_entries e
+            WHERE e.legacy_quiz_item_bank_item_id = q.bank_item_id)
+ WHERE q.bank_item_id IS NOT NULL
+   AND (SELECT first_run FROM qbc_first_run);
+
+DROP TABLE IF EXISTS pg_temp.qbc_first_run;
