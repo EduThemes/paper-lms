@@ -64,6 +64,28 @@ func (r *mediaObjectRepo) ListByUser(ctx context.Context, userID, accountID uint
 	return &repository.PaginatedResult[models.MediaObject]{Items: items, TotalCount: count, Page: params.Page, PerPage: params.PerPage}, nil
 }
 
+func (r *mediaObjectRepo) CoursesTaughtToViewer(ctx context.Context, instructorID, viewerID, accountID uint, limit int) ([]uint, error) {
+	if instructorID == 0 || viewerID == 0 || accountID == 0 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	var ids []uint
+	err := r.db.WithContext(ctx).Table("enrollments AS ie").
+		Distinct("ie.course_id").
+		Joins("JOIN enrollments ve ON ve.course_id = ie.course_id").
+		Joins("JOIN courses c ON c.id = ie.course_id").
+		Where("ie.user_id = ? AND ie.workflow_state = ? AND ie.type IN ?", instructorID, models.EnrollmentActive,
+			[]string{"TeacherEnrollment", "TaEnrollment", "DesignerEnrollment"}).
+		Where("ve.user_id = ? AND ve.workflow_state = ?", viewerID, models.EnrollmentActive).
+		Where("c.account_id = ? AND c.workflow_state <> ?", accountID, models.CourseDeleted).
+		Order("ie.course_id").
+		Limit(limit).
+		Pluck("ie.course_id", &ids).Error
+	return ids, err
+}
+
 type mediaTrackRepo struct {
 	db *gorm.DB
 }

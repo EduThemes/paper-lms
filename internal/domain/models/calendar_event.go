@@ -39,6 +39,11 @@ type CalendarEvent struct {
 	RRule      string  `json:"rrule" gorm:"column:rrule;type:text"`
 	SeriesHead bool    `json:"series_head" gorm:"default:false"`
 
+	// TimeZone is the IANA zone the event was created in (migration
+	// 000134). An all-day event's date is read in it; NULL (older rows)
+	// falls back to the viewer's profile zone.
+	TimeZone *string `json:"time_zone" gorm:"column:time_zone;type:text"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

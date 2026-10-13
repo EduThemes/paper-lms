@@ -10,10 +10,12 @@ import (
 // uploaded or recorded from the editor, playback, and caption tracks.
 //
 // None of these routes carry :course_id, so the handler authorizes: media
-// is loaded under the caller's tenant (404 otherwise); playback needs only
-// the unguessable media id; title and caption changes need the owner, a
-// tenant admin or an instructor of the course the media was uploaded in;
-// deleting needs the owner or a tenant admin.
+// is loaded under the caller's tenant and must be readable by the caller
+// (owner, tenant admin, a reader of the course it was uploaded in, or a
+// reader of a course its owner teaches); anything else is a 404. Title
+// and caption changes need the owner, a tenant admin or an instructor of
+// the course the media was uploaded in; deleting needs the owner or a
+// tenant admin.
 func (r *Router) registerRCEMediaRoutes(protected fiber.Router) {
 	if r.MediaObjectHandler == nil {
 		return

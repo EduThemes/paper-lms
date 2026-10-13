@@ -63,4 +63,48 @@ func TestRenderICSIn_AllDayDatesInOwnerZone(t *testing.T) {
 	assert.Equal(t, "20261011", icsValue(icsLines(out), "DTEND;VALUE=DATE:"))
 }
 
+// An all-day event with its own time_zone is dated in that zone, whoever
+// reads the feed; one without (rows from before migration 000134) keeps
+// the reader's zone.
+func TestRenderICSIn_AllDayUsesEventZone(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	require.NoError(t, err)
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	// Midnight of Oct 10 in New York is already Oct 10 13:00 in Tokyo;
+	// Tokyo midnight of Oct 10 is Oct 9 in New York.
+	nyMidnight := time.Date(2026, 10, 10, 0, 0, 0, 0, ny)
+	tokyoMidnight := time.Date(2026, 10, 10, 0, 0, 0, 0, tokyo)
+
+	out := RenderICSIn([]CalendarItem{{ID: "event_1", Type: CalendarItemEvent, Title: "Fair", StartAt: tokyoMidnight, AllDay: true, TimeZone: "Asia/Tokyo"}},
+		"Cal", "", now, ny)
+	assert.Equal(t, "20261010", icsValue(icsLines(out), "DTSTART;VALUE=DATE:"), "dated in the event's zone, not the reader's")
+	assert.Equal(t, "20261011", icsValue(icsLines(out), "DTEND;VALUE=DATE:"))
+
+	out = RenderICSIn([]CalendarItem{{ID: "event_2", Type: CalendarItemEvent, Title: "Fair", StartAt: tokyoMidnight, AllDay: true}},
+		"Cal", "", now, ny)
+	assert.Equal(t, "20261009", icsValue(icsLines(out), "DTSTART;VALUE=DATE:"), "no event zone: the reader's zone, as before")
+
+	// An unknown zone name falls back to the reader's zone.
+	out = RenderICSIn([]CalendarItem{{ID: "event_3", Type: CalendarItemEvent, Title: "Fair", StartAt: nyMidnight, AllDay: true, TimeZone: "Not/AZone"}},
+		"Cal", "", now, ny)
+	assert.Equal(t, "20261010", icsValue(icsLines(out), "DTSTART;VALUE=DATE:"))
+}
+
+func TestEventLocationAndValidZone(t *testing.T) {
+	assert.True(t, ValidCalendarTimeZone("America/Chicago"))
+	assert.True(t, ValidCalendarTimeZone("UTC"))
+	for _, bad := range []string{"", "Local", "Mars/Olympus", "../../etc/passwd"} {
+		assert.False(t, ValidCalendarTimeZone(bad), bad)
+	}
+	tz := "Asia/Tokyo"
+	assert.Equal(t, "Asia/Tokyo", EventLocation(&tz, time.UTC).String())
+	assert.Equal(t, time.UTC, EventLocation(nil, nil))
+	bad := "Local"
+	ny, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	assert.Equal(t, ny, EventLocation(&bad, ny))
+}
+
 func ptrTime(t time.Time) *time.Time { return &t }

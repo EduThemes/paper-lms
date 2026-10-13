@@ -15,6 +15,12 @@ type MediaObjectRepository interface {
 	Update(ctx context.Context, m *models.MediaObject) error
 	// ListByUser lists a user's active media objects, newest first.
 	ListByUser(ctx context.Context, userID, accountID uint, params PaginationParams) (*PaginatedResult[models.MediaObject], error)
+	// CoursesTaughtToViewer lists up to limit course ids of the tenant in
+	// which instructorID has an active teacher/TA/designer enrollment and
+	// viewerID has an active enrollment of any type. Media a teacher
+	// reuses in another course they teach (or that course copy carried
+	// over) is readable there through these courses.
+	CoursesTaughtToViewer(ctx context.Context, instructorID, viewerID, accountID uint, limit int) ([]uint, error)
 }
 
 // MediaTrackRepository persists caption/subtitle tracks of media objects.

@@ -1,6 +1,6 @@
 import {
   viewRange, shiftDate, buildRRule, parseRRule, describeRRule, itemsByDay, dayKey, emptyRepeat,
-  dayKeysIn, daysIn, addDays, startOfDay, formatDayKey,
+  dayKeysIn, daysIn, addDays, startOfDay, formatDayKey, itemZone,
 } from '../calendarView';
 import { browserTimeZone, setUserTimeZone, zonedWallClockToISO } from '../../lib/userTimeZone';
 
@@ -125,6 +125,18 @@ describe('calendarView in the profile time zone', () => {
     expect(dayKey(shiftDate('month', anchor, -1))).toBe('2029-12-01');
     expect(dayKey(shiftDate('week', anchor, 1))).toBe('2030-02-07');
     expect(startOfDay(anchor).toISOString()).toBe(at('2030-01-31'));
+  });
+
+  test('an all-day event sits on its date in its own time_zone', () => {
+    // Midnight of Jan 2 in Tokyo is still Jan 1 in either US profile zone.
+    const tokyoDay = zonedWallClockToISO('2030-01-02', 'Asia/Tokyo');
+    const pinned = { id: 'pinned', start_at: tokyoDay, all_day: true, time_zone: 'Asia/Tokyo' };
+    const legacy = { id: 'legacy', start_at: tokyoDay, all_day: true, time_zone: null };
+    const timed = { id: 'timed', start_at: tokyoDay, all_day: false, time_zone: 'Asia/Tokyo' };
+    const byDay = itemsByDay([pinned, legacy, timed]);
+    expect(byDay['2030-01-02'].map((i) => i.id)).toEqual(['pinned']);
+    expect(byDay['2030-01-01'].map((i) => i.id).sort()).toEqual(['legacy', 'timed']);
+    expect(itemZone({ all_day: true, time_zone: 'Not/AZone' })).toBe(profile);
   });
 
   test('day labels come from the key, not a zone', () => {

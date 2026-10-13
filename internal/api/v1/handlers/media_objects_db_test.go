@@ -38,13 +38,15 @@ func fakeMP4() []byte {
 }
 
 type mediaFixture struct {
-	g       *gorm.DB
-	app     *fiber.App
-	course  *models.Course
-	teacher uint
-	student uint
-	other   uint // a student of another course in the same tenant
-	foreign uint // a user of another tenant
+	g           *gorm.DB
+	app         *fiber.App
+	course      *models.Course
+	otherCourse *models.Course
+	teacher     uint
+	student     uint
+	other       uint // a student of another course in the same tenant
+	foreign     uint // a user of another tenant
+	admin       uint // an admin of the first tenant
 }
 
 func newMediaFixture(t *testing.T) *mediaFixture {
@@ -60,6 +62,7 @@ func newMediaFixture(t *testing.T) *mediaFixture {
 		{ID: 12, AccountID: 1, Name: "Jane Doe", LoginID: "jane@example.test", Email: "jane@example.test", PasswordHash: "x", Role: "user"},
 		{ID: 13, AccountID: 1, Name: "John Doe", LoginID: "john@example.test", Email: "john@example.test", PasswordHash: "x", Role: "user"},
 		{ID: 14, AccountID: 2, Name: "Other Tenant", LoginID: "other@example.test", Email: "other@example.test", PasswordHash: "x", Role: "user"},
+		{ID: 15, AccountID: 1, Name: "Admin Example", LoginID: "admin@example.test", Email: "admin@example.test", PasswordHash: "x", Role: "admin"},
 	} {
 		require.NoError(t, users.Create(context.Background(), u))
 	}
@@ -101,7 +104,7 @@ func newMediaFixture(t *testing.T) *mediaFixture {
 	app.Get("/media_objects/:media_id/media_tracks/:track_id/content", h.TrackContent)
 	app.Delete("/media_objects/:media_id/media_tracks/:track_id", h.DeleteTrack)
 
-	return &mediaFixture{g: g, app: app, course: course, teacher: 11, student: 12, other: 13, foreign: 14}
+	return &mediaFixture{g: g, app: app, course: course, otherCourse: otherCourse, teacher: 11, student: 12, other: 13, foreign: 14, admin: 15}
 }
 
 func (f *mediaFixture) do(t *testing.T, user uint, method, path string, body io.Reader, contentType string, headers ...string) *http.Response {
@@ -211,17 +214,17 @@ func TestMediaObjects_UploadStreamAndCaptions(t *testing.T) {
 	assert.Equal(t, "subtitles", tracks[0].(map[string]any)["kind"])
 	assert.Equal(t, true, detail["can_edit"])
 
-	// A student of another course can play the clip (they were shown the
-	// link) but cannot change its captions.
+	// A student of another course in the same tenant gets a 404 for
+	// everything: the clip lives in a course they cannot read.
 	resp = f.do(t, f.other, http.MethodGet, "/media_objects/"+mediaID+"/stream", nil, "")
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	resp = f.do(t, f.other, http.MethodGet, "/media_objects/"+mediaID, nil, "")
-	assert.Equal(t, false, decodeMap(t, resp)["can_edit"])
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	resp = f.do(t, f.other, http.MethodPost, "/media_objects/"+mediaID+"/media_tracks", strings.NewReader(
 		`{"locale":"fr","content":`+jsonString(vtt)+`}`), "application/json")
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	resp = f.do(t, f.other, http.MethodDelete, "/media_objects/"+mediaID, nil, "")
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 
 	// Another tenant gets 404 for the media, its stream and its captions.
 	for _, p := range []string{"/media_objects/" + mediaID, "/media_objects/" + mediaID + "/stream", trackPath} {
@@ -334,4 +337,84 @@ func TestMediaObjects_LongMultibyteTitleIsTruncatedSafely(t *testing.T) {
 	label := decodeMap(t, resp)["label"].(string)
 	assert.True(t, utf8.ValidString(label))
 	assert.LessOrEqual(t, len(label), 100)
+}
+
+// Media is scoped to its context (Canvas parity): course media plays for
+// readers of that course, user media for its owner (and tenant admins),
+// and everyone else gets a 404 rather than a 403.
+func TestMediaObjects_ContextScopedAccess(t *testing.T) {
+	f := newMediaFixture(t)
+	vtt := func(text string) string {
+		return `{"locale":"en","content":` + jsonString("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n"+text+"\n") + `}`
+	}
+
+	// The teacher uploads a lecture clip into the course and captions it.
+	resp := f.upload(t, f.teacher, "lecture.mp4", "video/mp4", fakeMP4(), map[string]string{
+		"title": "Week 1", "context_type": "Course", "context_id": fmt.Sprint(f.course.ID),
+	})
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	courseMedia := decodeMap(t, resp)["media_id"].(string)
+	resp = f.do(t, f.teacher, http.MethodPost, "/media_objects/"+courseMedia+"/media_tracks", strings.NewReader(vtt("Welcome")), "application/json")
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	trackPath := strings.TrimPrefix(decodeMap(t, resp)["url"].(string), "/api/v1")
+	readPaths := []string{
+		"/media_objects/" + courseMedia,
+		"/media_objects/" + courseMedia + "/stream",
+		"/media_objects/" + courseMedia + "/media_tracks",
+		trackPath,
+	}
+
+	// A student of the same course reads all of it.
+	for _, p := range readPaths {
+		resp = f.do(t, f.student, http.MethodGet, p, nil, "")
+		assert.Equal(t, http.StatusOK, resp.StatusCode, "same-course student: %s", p)
+	}
+	// A student of another course in the tenant, and a user of another
+	// tenant, get 404s.
+	for _, u := range []uint{f.other, f.foreign} {
+		for _, p := range readPaths {
+			resp = f.do(t, u, http.MethodGet, p, nil, "")
+			assert.Equal(t, http.StatusNotFound, resp.StatusCode, "user %d: %s", u, p)
+		}
+	}
+	// A tenant admin reads it without an enrollment.
+	resp = f.do(t, f.admin, http.MethodGet, "/media_objects/"+courseMedia+"/stream", nil, "")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Once the teacher also teaches the other course (library reuse, or a
+	// course copy into a course they teach), its students can play it ...
+	require.NoError(t, f.g.Create(&models.Enrollment{UserID: f.teacher, CourseID: f.otherCourse.ID, Type: "TeacherEnrollment",
+		Role: "TeacherEnrollment", WorkflowState: "active", PseudonymPoolCode: "animals_v1"}).Error)
+	resp = f.do(t, f.other, http.MethodGet, "/media_objects/"+courseMedia+"/stream", nil, "")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	// ... but not change it: captions belong to the course it was uploaded in.
+	resp = f.do(t, f.other, http.MethodPost, "/media_objects/"+courseMedia+"/media_tracks", strings.NewReader(vtt("Bienvenue")), "application/json")
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp = f.do(t, f.foreign, http.MethodGet, "/media_objects/"+courseMedia+"/stream", nil, "")
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	// A student's recording in their own (user) context: the owner and an
+	// admin read it; their teacher and other students get 404s.
+	resp = f.upload(t, f.student, "note.mp4", "video/mp4", fakeMP4(), map[string]string{"title": "Private note"})
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	created := decodeMap(t, resp)
+	require.Equal(t, "User", created["context_type"])
+	userMedia := created["media_id"].(string)
+	for _, p := range []string{"/media_objects/" + userMedia, "/media_objects/" + userMedia + "/stream"} {
+		resp = f.do(t, f.student, http.MethodGet, p, nil, "")
+		assert.Equal(t, http.StatusOK, resp.StatusCode, "owner: %s", p)
+		resp = f.do(t, f.admin, http.MethodGet, p, nil, "")
+		assert.Equal(t, http.StatusOK, resp.StatusCode, "admin: %s", p)
+		for _, u := range []uint{f.teacher, f.other, f.foreign} {
+			resp = f.do(t, u, http.MethodGet, p, nil, "")
+			assert.Equal(t, http.StatusNotFound, resp.StatusCode, "user %d: %s", u, p)
+		}
+	}
+
+	// Students are refused while the course is unpublished; its teacher is not.
+	require.NoError(t, f.g.Model(&models.Course{}).Where("id = ?", f.course.ID).Update("workflow_state", models.CourseUnpublished).Error)
+	resp = f.do(t, f.student, http.MethodGet, "/media_objects/"+courseMedia+"/stream", nil, "")
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp = f.do(t, f.teacher, http.MethodGet, "/media_objects/"+courseMedia+"/stream", nil, "")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
