@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Bell, Check, CheckCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
+import { notificationLink } from '../utils/notificationLinks';
 import Layout from '../components/Layout';
 
 const NOTIFICATION_ICONS = {
@@ -58,17 +59,7 @@ const NotificationsPage = () => {
     }
   };
 
-  const getNotificationLink = (n) => {
-    if (n.context_type === 'Course' && n.context_id) {
-      if (n.notification_type === 'submission_grade') return `/courses/${n.context_id}/grades`;
-      if (n.notification_type === 'new_announcement') return `/courses/${n.context_id}/announcements`;
-      if (n.notification_type === 'discussion_reply') return `/courses/${n.context_id}/discussions`;
-      return `/courses/${n.context_id}`;
-    }
-    if (n.notification_type === 'new_message') return '/inbox';
-    if (n.notification_type === 'event_start') return '/calendar';
-    return null;
-  };
+  const getNotificationLink = notificationLink;
 
   const formatTime = (dateStr) => {
     if (!dateStr) return '';
