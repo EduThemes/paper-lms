@@ -53,7 +53,7 @@ func (h *HashingEmbedder) Embed(text string) ([]float32, error) {
 		// Two independent hashes: one picks the bucket, the other picks
 		// the sign. This keeps unrelated tokens from always reinforcing
 		// the same axis (a common weakness of naive hashing trick impls).
-		bucket := fnvHash32(tok) % uint32(h.D)
+		bucket := fnvHash32(tok) % uint32(h.D) // #nosec G115 -- embedding dimension is a small positive constant
 		sign := float32(1)
 		if fnvHash32("sign:"+tok)%2 == 1 {
 			sign = -1

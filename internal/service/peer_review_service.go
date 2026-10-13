@@ -108,7 +108,7 @@ func (s *PeerReviewService) AssignPeerReviews(ctx context.Context, courseID, ass
 		}
 
 		// Shuffle and pick up to `need`
-		rand.Shuffle(len(pool), func(i, j int) { pool[i], pool[j] = pool[j], pool[i] })
+		rand.Shuffle(len(pool), func(i, j int) { pool[i], pool[j] = pool[j], pool[i] }) // #nosec G404 -- reviewer assignment is not security sensitive
 		if need > len(pool) {
 			need = len(pool)
 		}

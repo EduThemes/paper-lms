@@ -96,6 +96,10 @@ const AdminSettingsPage = () => {
         const currentDisplay =
           Number.isFinite(currentMB) && currentMB > 0 ? currentMB : FALLBACK_DEFAULT_MB;
         const sourceLabel = effective?.source || 'default';
+        // The upload cap is an instance setting; only super-admins can
+        // read or change it (useEffectiveSetting maps their 403 to the
+        // catalog default with forbidden:true).
+        const readOnly = Boolean(effective?.forbidden);
 
         return (
           <Layout>
@@ -127,6 +131,8 @@ const AdminSettingsPage = () => {
                     max={FALLBACK_DEFAULT_MB}
                     value={maxUploadMB}
                     onChange={(e) => setMaxUploadMB(e.target.value)}
+                    disabled={readOnly}
+                    aria-describedby={readOnly ? 'max-upload-readonly' : undefined}
                     className="w-40 rounded-md border border-border-strong bg-surface-0 px-3 py-2 text-sm"
                   />
                   <p className="text-xs text-text-tertiary mt-2">
@@ -134,6 +140,11 @@ const AdminSettingsPage = () => {
                     <span className="font-medium text-text-secondary">{currentDisplay} MB</span>{' '}
                     <span className="text-text-tertiary">(source: {sourceLabel})</span>
                   </p>
+                  {readOnly && (
+                    <p id="max-upload-readonly" className="text-xs text-text-secondary mt-2">
+                      This is a platform-wide limit. Only a platform super-admin can change it.
+                    </p>
+                  )}
                 </fieldset>
 
                 <p className="text-xs text-text-tertiary">
@@ -158,6 +169,7 @@ const AdminSettingsPage = () => {
                   </div>
                 )}
 
+                {!readOnly && (
                 <div className="flex items-center gap-3">
                   <button
                     type="submit"
@@ -173,6 +185,7 @@ const AdminSettingsPage = () => {
                     </span>
                   )}
                 </div>
+                )}
               </form>
               <div className="mt-8">
                 <StorageQuotaSettings />

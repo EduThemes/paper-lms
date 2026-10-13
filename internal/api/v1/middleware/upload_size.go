@@ -73,7 +73,7 @@ func EnforceUploadSize(lookup UploadSizeLookupFunc) fiber.Handler {
 		// `c.Body()` may be empty before the body has streamed in, so
 		// the header check is the cheap fast-path.
 		if cl := c.Get(fiber.HeaderContentLength); cl != "" {
-			if n, err := strconv.ParseInt(cl, 10, 64); err == nil && uint64(n) > maxBytes {
+			if n, err := strconv.ParseInt(cl, 10, 64); err == nil && (n < 0 || uint64(n) > maxBytes) { // #nosec G115 -- n >= 0 here
 				return responses.Error(c, fiber.StatusRequestEntityTooLarge,
 					"File exceeds the configured upload limit ("+strconv.FormatUint(maxMB, 10)+" MB). An admin can raise this in Admin → Settings.")
 			}

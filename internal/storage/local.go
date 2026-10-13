@@ -18,15 +18,29 @@ func NewLocalBackend(basePath string) *LocalBackend {
 	return &LocalBackend{basePath: basePath}
 }
 
+// resolve maps a storage key to a path under basePath. Keys are built by
+// the services (never raw user input), but an absolute key or one with
+// ".." segments is refused so the backend can't be steered outside its
+// directory.
+func (l *LocalBackend) resolve(key string) (string, error) {
+	if !filepath.IsLocal(key) {
+		return "", fmt.Errorf("storage: invalid key %q", key)
+	}
+	return filepath.Join(l.basePath, key), nil
+}
+
 func (l *LocalBackend) Put(_ context.Context, key string, r io.Reader, _ string) error {
-	fullPath := filepath.Join(l.basePath, key)
+	fullPath, err := l.resolve(key)
+	if err != nil {
+		return err
+	}
 
 	dir := filepath.Dir(fullPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("storage: could not create directory %s: %w", dir, err)
 	}
 
-	f, err := os.Create(fullPath)
+	f, err := os.Create(fullPath) // #nosec G304 -- resolve() keeps the path under basePath
 	if err != nil {
 		return fmt.Errorf("storage: could not create file %s: %w", fullPath, err)
 	}
@@ -43,8 +57,11 @@ func (l *LocalBackend) Put(_ context.Context, key string, r io.Reader, _ string)
 }
 
 func (l *LocalBackend) Get(_ context.Context, key string) (io.ReadCloser, error) {
-	fullPath := filepath.Join(l.basePath, key)
-	f, err := os.Open(fullPath)
+	fullPath, err := l.resolve(key)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(fullPath) // #nosec G304 -- resolve() keeps the path under basePath
 	if err != nil {
 		return nil, fmt.Errorf("storage: could not open file %s: %w", fullPath, err)
 	}
@@ -52,7 +69,10 @@ func (l *LocalBackend) Get(_ context.Context, key string) (io.ReadCloser, error)
 }
 
 func (l *LocalBackend) Delete(_ context.Context, key string) error {
-	fullPath := filepath.Join(l.basePath, key)
+	fullPath, err := l.resolve(key)
+	if err != nil {
+		return err
+	}
 	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("storage: could not delete file %s: %w", fullPath, err)
 	}
@@ -60,5 +80,5 @@ func (l *LocalBackend) Delete(_ context.Context, key string) error {
 }
 
 func (l *LocalBackend) URL(_ context.Context, key string) (string, error) {
-	return filepath.Join(l.basePath, key), nil
+	return l.resolve(key)
 }

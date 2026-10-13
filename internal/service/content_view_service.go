@@ -51,7 +51,7 @@ func (s *ContentViewService) RecordView(ctx context.Context, userID uint, object
 		return err
 	}
 	for _, cb := range s.onViewedCallbacks {
-		go func(cb ContentViewedCallback) {
+		go func(cb ContentViewedCallback) { // #nosec G118 -- callbacks run after the request ends
 			defer recoverFromPanic("content view OnViewed callback")
 			cb(context.Background(), userID, objectType, objectID, durationSeconds)
 		}(cb)

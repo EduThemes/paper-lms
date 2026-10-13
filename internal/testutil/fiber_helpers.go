@@ -46,7 +46,7 @@ func MakeAuthenticatedRequest(app *fiber.App, method, path, token string, body i
 func MakeAuthenticatedCookieRequest(app *fiber.App, method, path, token string, body io.Reader) *http.Response {
 	req := httptest.NewRequest(method, path, body)
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: "paper_session", Value: token})
+	req.AddCookie(&http.Cookie{Name: "paper_session", Value: token}) // #nosec G124 -- test request cookie
 	resp, _ := app.Test(req, -1)
 	return resp
 }

@@ -32,7 +32,7 @@ const (
 	// resolved on every request. The catalog declares the env fallback
 	// (ANTHROPIC_API_KEY) so deployments that never touch the
 	// super-admin UI keep working unchanged.
-	aiAnthropicAPIKeyCatalogKey = "ai.anthropic.api_key"
+	aiAnthropicAPIKeyCatalogKey = "ai.anthropic.api_key" // #nosec G101 -- settings catalog key name, not a secret
 )
 
 // HTTPDoer is the minimal interface AIAssistService needs from an HTTP client.

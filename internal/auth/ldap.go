@@ -667,7 +667,7 @@ func ldapEscapeFilter(s string) string {
 
 func berEncodeLength(length int) []byte {
 	if length < 0x80 {
-		return []byte{byte(length)}
+		return []byte{byte(length)} // #nosec G115 -- BER length/tag bytes; values are bounded
 	}
 	// Multi-byte length
 	var lenBytes []byte
@@ -676,7 +676,7 @@ func berEncodeLength(length int) []byte {
 		lenBytes = append([]byte{byte(l & 0xff)}, lenBytes...)
 		l >>= 8
 	}
-	return append([]byte{byte(0x80 | len(lenBytes))}, lenBytes...)
+	return append([]byte{byte(0x80 | len(lenBytes))}, lenBytes...) // #nosec G115 -- BER length/tag bytes; values are bounded
 }
 
 func berEncodeSequence(content []byte) []byte {
@@ -689,7 +689,7 @@ func berEncodeInteger(val int) []byte {
 }
 
 func berEncodeEnumerated(val int) []byte {
-	content := []byte{byte(val)}
+	content := []byte{byte(val)} // #nosec G115 -- BER length/tag bytes; values are bounded
 	return append([]byte{0x0a}, append(berEncodeLength(len(content)), content...)...)
 }
 
@@ -706,12 +706,12 @@ func berEncodeOctetString(data []byte) []byte {
 }
 
 func berEncodeContextSpecific(tag int, data []byte) []byte {
-	tagByte := byte(0x80 | tag)
+	tagByte := byte(0x80 | tag) // #nosec G115 -- BER length/tag bytes; values are bounded
 	return append([]byte{tagByte}, append(berEncodeLength(len(data)), data...)...)
 }
 
 func berEncodeApplication(tag int, content []byte) []byte {
-	tagByte := byte(0x60 | tag) // CONSTRUCTED | APPLICATION
+	tagByte := byte(0x60 | tag) // #nosec G115 -- bounded tag byte (CONSTRUCTED | APPLICATION)
 	return append([]byte{tagByte}, append(berEncodeLength(len(content)), content...)...)
 }
 
@@ -814,7 +814,7 @@ func encodeLDAPCompoundFilter(tag int, filterStr string) []byte {
 		remaining = strings.TrimSpace(remaining[end:])
 	}
 
-	tagByte := byte(0xa0 | tag) // CONSTRUCTED | CONTEXT-SPECIFIC
+	tagByte := byte(0xa0 | tag) // #nosec G115 -- bounded tag byte (CONSTRUCTED | CONTEXT-SPECIFIC)
 	return append([]byte{tagByte}, append(berEncodeLength(len(children)), children...)...)
 }
 

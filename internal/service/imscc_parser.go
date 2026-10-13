@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"math"
 	"path"
 	"regexp"
 	"strconv"
@@ -54,10 +55,10 @@ type ManifestResources struct {
 
 // ManifestResource represents a single resource entry in the manifest.
 type ManifestResource struct {
-	Identifier string              `xml:"identifier,attr"`
-	Type       string              `xml:"type,attr"`
-	Href       string              `xml:"href,attr"`
-	Files      []ManifestFile      `xml:"file"`
+	Identifier   string               `xml:"identifier,attr"`
+	Type         string               `xml:"type,attr"`
+	Href         string               `xml:"href,attr"`
+	Files        []ManifestFile       `xml:"file"`
 	Dependencies []ManifestDependency `xml:"dependency"`
 }
 
@@ -158,11 +159,11 @@ type canvasQuizMeta struct {
 	AccessCode           string `xml:"access_code"`
 	IPFilter             string `xml:"ip_filter"`
 	AnonymousSubmissions string `xml:"anonymous_submissions"`
-	LockAt             string   `xml:"lock_at"`
-	UnlockAt           string   `xml:"unlock_at"`
-	DueAt              string   `xml:"due_at"`
-	Available          string   `xml:"available"`
-	Assignment         struct {
+	LockAt               string `xml:"lock_at"`
+	UnlockAt             string `xml:"unlock_at"`
+	DueAt                string `xml:"due_at"`
+	Available            string `xml:"available"`
+	Assignment           struct {
 		AssignmentGroupRef string `xml:"assignment_group_identifierref"`
 		DueAt              string `xml:"due_at"`
 		LockAt             string `xml:"lock_at"`
@@ -224,7 +225,7 @@ type ImportResult struct {
 	CreatedEntities []EntityRef `json:"-"`
 
 	// pre-1 / pre-2 working state, populated before pass-1.
-	fileURLByPath map[string]string         `json:"-"` // zip path → public file URL
+	fileURLByPath map[string]string           `json:"-"` // zip path → public file URL
 	moduleMeta    map[string]CCModuleSettings `json:"-"` // resource Identifier → module meta
 	itemMeta      map[string]CCItemSettings   `json:"-"` // resource IdentifierRef → item meta
 
@@ -333,15 +334,16 @@ func NewIMSCCParser(
 // ParsePackage is the main entry point. It opens the zip, reads the manifest, and imports all content.
 //
 // The flow is:
-//   pre-1: open zip, parse manifest, parse course_settings/module_meta.xml.
-//   pre-2: extract every binary/asset file (web_resources/**, etc.) into Attachment
-//          rows via FileService.UploadFile and build a path→URL map.
-//   pass-1: existing per-resource importers create modules, pages, assignments,
-//           quizzes, discussions, questions; each successful create appends to
-//           result.CreatedEntities and registers in entityByMigID/pageBySlug.
-//   pass-2: walk created entities and rewrite Canvas placeholder tokens
-//           ($IMS-CC-FILEBASE$, $WIKI_REFERENCE$, $CANVAS_OBJECT_REFERENCE$)
-//           in their HTML bodies using the maps built in pre-2 and pass-1.
+//
+//	pre-1: open zip, parse manifest, parse course_settings/module_meta.xml.
+//	pre-2: extract every binary/asset file (web_resources/**, etc.) into Attachment
+//	       rows via FileService.UploadFile and build a path→URL map.
+//	pass-1: existing per-resource importers create modules, pages, assignments,
+//	        quizzes, discussions, questions; each successful create appends to
+//	        result.CreatedEntities and registers in entityByMigID/pageBySlug.
+//	pass-2: walk created entities and rewrite Canvas placeholder tokens
+//	        ($IMS-CC-FILEBASE$, $WIKI_REFERENCE$, $CANVAS_OBJECT_REFERENCE$)
+//	        in their HTML bodies using the maps built in pre-2 and pass-1.
 //
 // Callers should run CleanupFailedImport(ctx, courseID, result.CreatedEntities)
 // when a non-nil error is returned (or when result.Errors is non-empty and a
@@ -388,13 +390,13 @@ func (p *IMSCCParser) ParsePackage(ctx context.Context, courseID uint, userID ui
 	}
 
 	result := &ImportResult{
-		fileURLByPath:           map[string]string{},
-		entityByMigID:           map[string]EntityRef{},
-		pageBySlug:              map[string]uint{},
-		attachmentByPath:        map[string]uint{},
-		assignmentGroupByMigID:  map[string]uint{},
-		itemTagByMigID:          map[string]uint{},
-		ownerUserID:             userID,
+		fileURLByPath:          map[string]string{},
+		entityByMigID:          map[string]EntityRef{},
+		pageBySlug:             map[string]uint{},
+		attachmentByPath:       map[string]uint{},
+		assignmentGroupByMigID: map[string]uint{},
+		itemTagByMigID:         map[string]uint{},
+		ownerUserID:            userID,
 	}
 
 	// pre-1: read course-wide metadata files. Each is independent and
@@ -1105,16 +1107,16 @@ func (p *IMSCCParser) importQuiz(
 	pointsPossible := qtiResult.PointsPossible
 
 	quiz := &models.Quiz{
-		CourseID:        courseID,
-		Title:           title,
-		Description:     qtiResult.Description,
-		QuizType:        qtiResult.QuizType,
-		TimeLimit:       qtiResult.TimeLimit,
-		AllowedAttempts: 1,
-		PointsPossible:  &pointsPossible,
-		ScoringPolicy:   "keep_highest",
+		CourseID:           courseID,
+		Title:              title,
+		Description:        qtiResult.Description,
+		QuizType:           qtiResult.QuizType,
+		TimeLimit:          qtiResult.TimeLimit,
+		AllowedAttempts:    1,
+		PointsPossible:     &pointsPossible,
+		ScoringPolicy:      "keep_highest",
 		ShowCorrectAnswers: true,
-		WorkflowState:   "unpublished",
+		WorkflowState:      "unpublished",
 	}
 
 	// assessment_meta.xml lives next to the QTI file (same resource folder)
@@ -1314,20 +1316,20 @@ func parseFloatStr(s string) (float64, error) {
 // --- module_meta.xml ---
 
 type ccModuleMetaXML struct {
-	XMLName xml.Name        `xml:"modules"`
-	Modules []ccModuleXML   `xml:"module"`
+	XMLName xml.Name      `xml:"modules"`
+	Modules []ccModuleXML `xml:"module"`
 }
 
 type ccModuleXML struct {
-	Identifier                string             `xml:"identifier,attr"`
-	Title                     string             `xml:"title"`
-	WorkflowState             string             `xml:"workflow_state"`
-	RequireSequentialProgress string             `xml:"require_sequential_progress"`
-	Items                     ccModuleItemsXML   `xml:"items"`
+	Identifier                string           `xml:"identifier,attr"`
+	Title                     string           `xml:"title"`
+	WorkflowState             string           `xml:"workflow_state"`
+	RequireSequentialProgress string           `xml:"require_sequential_progress"`
+	Items                     ccModuleItemsXML `xml:"items"`
 	// G068 (imscc_module_meta.go).
-	UnlockAt               string                     `xml:"unlock_at"`
-	RequirementCount       string                     `xml:"requirement_count"`
-	Prerequisites          ccPrerequisitesXML         `xml:"prerequisites"`
+	UnlockAt               string                      `xml:"unlock_at"`
+	RequirementCount       string                      `xml:"requirement_count"`
+	Prerequisites          ccPrerequisitesXML          `xml:"prerequisites"`
 	CompletionRequirements ccCompletionRequirementsXML `xml:"completionRequirements"`
 }
 
@@ -1467,7 +1469,10 @@ func (p *IMSCCParser) extractFiles(
 		}
 
 		base := path.Base(name)
-		size := int64(f.UncompressedSize64)
+		if f.UncompressedSize64 > math.MaxInt64 {
+			continue // corrupt or crafted header
+		}
+		size := int64(f.UncompressedSize64) // #nosec G115 -- bounded by the check above
 		folderID := folder.ID
 		// G068: keep the cartridge's folder structure (web_resources/
 		// is the course files root) instead of flattening every file.

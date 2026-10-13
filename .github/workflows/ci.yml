@@ -30,16 +30,13 @@ jobs:
       - name: Go vet
         run: go vet ./...
 
-      # golangci-lint is now BLOCKING (continue-on-error removed), but via
-      # only-new-issues: it fails the build on lint problems introduced by
-      # the PR while leaving the ~79 pre-existing baseline issues (tracked
-      # for a separate cleanup) from blocking. New code is held to the bar;
-      # the legacy debt doesn't gate. See .golangci.yml for the linter set.
+      # golangci-lint is BLOCKING on the whole tree: the old baseline was
+      # cleared, so any finding fails the build. See .golangci.yml for the
+      # linter set.
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
           version: latest
-          only-new-issues: true
 
   backend-test:
     name: Backend Test
@@ -171,8 +168,6 @@ jobs:
           username: ${{ secrets.DEMO_SSH_USER }}
           key: ${{ secrets.DEMO_SSH_KEY }}
           port: ${{ secrets.DEMO_SSH_PORT || 22 }}
-          # If any line in the script fails the whole step fails.
-          script_stop: true
           # Deploy includes a build + migrate + rolling restart + health
           # check. 15min is conservative for a backend rebuild on a small VM.
           command_timeout: 15m

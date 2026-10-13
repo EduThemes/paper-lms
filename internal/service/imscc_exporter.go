@@ -28,22 +28,22 @@ type ExportResult struct {
 
 // IMSCCExporter generates IMSCC (IMS Common Cartridge) zip packages from course content.
 type IMSCCExporter struct {
-	courseRepo            repository.CourseRepository
-	moduleRepo            repository.ModuleRepository
-	moduleItemRepo        repository.ModuleItemRepository
-	pageRepo              repository.PageRepository
-	assignmentRepo        repository.AssignmentRepository
-	quizRepo              repository.QuizRepository
-	quizQuestionRepo      repository.QuizQuestionRepository
-	discussionTopicRepo   repository.DiscussionTopicRepository
-	assignmentGroupRepo   repository.AssignmentGroupRepository
-	rubricRepo            repository.RubricRepository
-	rubricAssocRepo       repository.RubricAssociationRepository
-	outcomeGroupRepo      repository.LearningOutcomeGroupRepository
-	outcomeRepo           repository.LearningOutcomeRepository
-	calendarEventRepo     repository.CalendarEventRepository
-	attachmentRepo        repository.AttachmentRepository
-	fileService           *FileService
+	courseRepo          repository.CourseRepository
+	moduleRepo          repository.ModuleRepository
+	moduleItemRepo      repository.ModuleItemRepository
+	pageRepo            repository.PageRepository
+	assignmentRepo      repository.AssignmentRepository
+	quizRepo            repository.QuizRepository
+	quizQuestionRepo    repository.QuizQuestionRepository
+	discussionTopicRepo repository.DiscussionTopicRepository
+	assignmentGroupRepo repository.AssignmentGroupRepository
+	rubricRepo          repository.RubricRepository
+	rubricAssocRepo     repository.RubricAssociationRepository
+	outcomeGroupRepo    repository.LearningOutcomeGroupRepository
+	outcomeRepo         repository.LearningOutcomeRepository
+	calendarEventRepo   repository.CalendarEventRepository
+	attachmentRepo      repository.AttachmentRepository
+	fileService         *FileService
 }
 
 // NewIMSCCExporter creates a new IMSCC exporter with all required dependencies.
@@ -377,7 +377,7 @@ func (e *IMSCCExporter) exportCourse(ctx context.Context, courseID uint, outputD
 	result := &ExportResult{}
 
 	// Create output directory
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
+	if err := os.MkdirAll(outputDir, 0o750); err != nil {
 		return "", nil, fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -385,7 +385,7 @@ func (e *IMSCCExporter) exportCourse(ctx context.Context, courseID uint, outputD
 	zipFileName := fmt.Sprintf("course_%d_%s.imscc", courseID, exportFileSlug(course.Name))
 	zipPath := filepath.Join(outputDir, zipFileName)
 
-	zipFile, err := os.Create(zipPath)
+	zipFile, err := os.Create(zipPath) // #nosec G304 -- path inside the export work dir
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create zip file: %w", err)
 	}

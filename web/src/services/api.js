@@ -2539,13 +2539,13 @@ export const api = {
   },
   createStimulus: async (courseId, payload) => {
     const { data } = await request(`/courses/${courseId}/quiz_stimuli`, {
-      method: 'POST', body: JSON.stringify(payload),
+      method: 'POST', body: JSON.stringify({ stimulus: payload }),
     });
     return data;
   },
   updateStimulus: async (courseId, stimulusId, payload) => {
     const { data } = await request(`/courses/${courseId}/quiz_stimuli/${stimulusId}`, {
-      method: 'PUT', body: JSON.stringify(payload),
+      method: 'PUT', body: JSON.stringify({ stimulus: payload }),
     });
     return data;
   },

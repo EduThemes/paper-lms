@@ -31,6 +31,16 @@ describe('api service', () => {
     });
   }
 
+  test('stimulus create/update wrap the payload the way the API expects', async () => {
+    mockFetchSuccess({ id: 5, title: 'Passage' });
+    await api.createStimulus(3, { title: 'Passage', content: '<p>Text</p>' });
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({ stimulus: { title: 'Passage', content: '<p>Text</p>' } });
+    mockFetchSuccess({ id: 5, title: 'Renamed' });
+    await api.updateStimulus(3, 5, { title: 'Renamed' });
+    expect(global.fetch.mock.calls[1][0]).toContain('/courses/3/quiz_stimuli/5');
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({ stimulus: { title: 'Renamed' } });
+  });
+
   test('request success returns data', async () => {
     mockFetchSuccess({ token: 'abc', user: { id: 1, name: 'Test User' } });
 

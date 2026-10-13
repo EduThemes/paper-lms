@@ -12,6 +12,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -107,7 +108,7 @@ func (s *QuizService) generateSelectedQuestions(ctx context.Context, quizID uint
 		liveGroups[g.ID] = true
 	}
 
-	rng := mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
+	rng := cryptoSeededRand()
 
 	// poolEntry is either a real quiz question (questionID != 0) or a
 	// question-bank entry that still has to be materialized into this quiz
@@ -837,4 +838,13 @@ func (s *QuizService) ListSubmissionAnswers(ctx context.Context, submissionID ui
 		return nil, errors.New("quiz submission is still in progress")
 	}
 	return s.answerRepo.ListBySubmissionID(ctx, submissionID)
+}
+
+// cryptoSeededRand returns a math/rand generator seeded from crypto/rand,
+// so which bank questions an attempt draws can't be predicted from the
+// time it started.
+func cryptoSeededRand() *mathrand.Rand {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return mathrand.New(mathrand.NewSource(int64(binary.LittleEndian.Uint64(b[:])))) // #nosec G404 G115 -- crypto-seeded; the draw order is not a secret
 }

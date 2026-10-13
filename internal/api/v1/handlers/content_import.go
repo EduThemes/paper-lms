@@ -83,7 +83,7 @@ func (h *ContentImportHandler) ImportPackage(c *fiber.Ctx) error {
 
 	// Create uploads directory
 	uploadsDir := filepath.Join(h.fileStoragePath, "content_migrations", fmt.Sprintf("%d", courseID))
-	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+	if err := os.MkdirAll(uploadsDir, 0o750); err != nil {
 		return responses.InternalError(c, "Could not create upload directory")
 	}
 
@@ -104,13 +104,13 @@ func (h *ContentImportHandler) ImportPackage(c *fiber.Ctx) error {
 	// Create content migration record
 	now := time.Now()
 	migration := &models.ContentMigration{
-		CourseID:      uint(courseID),
-		UserID:        userID,
-		MigrationType: migrationType,
-		WorkflowState: models.ContentMigrationRunning,
-		Progress:      0,
-		Attachment:    zipPath,
-		StartedAt:     &now,
+		CourseID:          uint(courseID),
+		UserID:            userID,
+		MigrationType:     migrationType,
+		WorkflowState:     models.ContentMigrationRunning,
+		Progress:          0,
+		Attachment:        zipPath,
+		StartedAt:         &now,
 		MigrationSettings: datatypes.NewJSONType(settings),
 	}
 
@@ -172,16 +172,16 @@ func (h *ContentImportHandler) ImportPackage(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
-		"migration_id":       migration.ID,
-		"workflow_state":     migration.WorkflowState,
-		"modules_created":    importResult.ModulesCreated,
-		"pages_created":      importResult.PagesCreated,
-		"assignments_created": importResult.AssignmentsCreated,
-		"quizzes_created":    importResult.QuizzesCreated,
-		"questions_created":  importResult.QuestionsCreated,
-		"discussions_created": importResult.DiscussionsCreated,
+		"migration_id":         migration.ID,
+		"workflow_state":       migration.WorkflowState,
+		"modules_created":      importResult.ModulesCreated,
+		"pages_created":        importResult.PagesCreated,
+		"assignments_created":  importResult.AssignmentsCreated,
+		"quizzes_created":      importResult.QuizzesCreated,
+		"questions_created":    importResult.QuestionsCreated,
+		"discussions_created":  importResult.DiscussionsCreated,
 		"module_items_created": importResult.ModuleItemsCreated,
-		"errors":             importResult.Errors,
-		"warnings":           importResult.Warnings,
+		"errors":               importResult.Errors,
+		"warnings":             importResult.Warnings,
 	})
 }
