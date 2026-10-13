@@ -47,6 +47,7 @@ func calendarEventToJSON(e *models.CalendarEvent) fiber.Map {
 		"location_name":            e.LocationName,
 		"location_address":         e.LocationAddress,
 		"all_day":                  e.AllDay,
+		"time_zone":                e.TimeZone,
 		"created_by_user_id":       e.CreatedByUserID,
 		"workflow_state":           e.WorkflowState,
 		"parent_calendar_event_id": e.ParentCalendarEventID,
@@ -120,7 +121,7 @@ func wantsAggregatedCalendar(c *fiber.Ctx) bool {
 // type=event (default; events and the caller's appointments) or
 // type=assignment (assignment and quiz due dates).
 func (h *CalendarEventHandler) listAggregated(c *fiber.Ctx, userID uint) error {
-	q, err := parseCalendarQuery(c, userID, callerAccountID(c), callerIsAdmin(c, h.authz), h.eventLocation(c, ""))
+	q, err := parseCalendarQuery(c, userID, callerAccountID(c), callerIsAdmin(c, h.authz), h.eventLocation(c))
 	if err != nil {
 		return responses.BadRequest(c, err.Error())
 	}
@@ -455,17 +456,29 @@ func (h *CalendarEventHandler) resolveChildren(c *fiber.Ctx, courseID uint, data
 	return out, false, nil
 }
 
-// eventLocation picks the zone a recurrence expands in: the request's
-// time_zone, else the user's profile zone.
-func (h *CalendarEventHandler) eventLocation(c *fiber.Ctx, tz string) *time.Location {
-	if tz != "" {
-		return service.LoadCalendarLocation(tz)
-	}
+// eventLocation is the caller's profile zone (UTC without the
+// aggregator). Bare query dates are read in it, and it is the fallback
+// for an event with no time_zone of its own.
+func (h *CalendarEventHandler) eventLocation(c *fiber.Ctx) *time.Location {
 	if h.agg != nil {
 		userID, _ := c.Locals("user_id").(uint)
 		return h.agg.UserTimeZone(c.Context(), userID)
 	}
 	return time.UTC
+}
+
+// resolveEventZone picks the IANA zone an event is pinned to: the
+// request's time_zone when it is a valid zone name, else the profile zone
+// of userID (the event's creator). "" means neither is usable (no account
+// level default zone exists), and the event keeps a NULL time_zone.
+func (h *CalendarEventHandler) resolveEventZone(c *fiber.Ctx, requested string, userID uint) string {
+	if tz := strings.TrimSpace(requested); service.ValidCalendarTimeZone(tz) {
+		return tz
+	}
+	if h.agg != nil && userID != 0 {
+		return h.agg.UserTimeZoneName(c.Context(), userID)
+	}
+	return ""
 }
 
 // calendarServiceError maps a create/update failure: validation errors
@@ -539,6 +552,9 @@ func (h *CalendarEventHandler) CreateEvent(c *fiber.Ctx) error {
 		AllDay:          in.AllDay,
 		CreatedByUserID: userID,
 	}
+	if tz := h.resolveEventZone(c, in.TimeZone, userID); tz != "" {
+		event.TimeZone = &tz
+	}
 
 	if wrote, err := h.authorizeEventCreate(c, event); wrote {
 		return err
@@ -565,7 +581,7 @@ func (h *CalendarEventHandler) CreateEvent(c *fiber.Ctx) error {
 
 	created, err := h.calendarService.CreateWithOptions(c.Context(), event, service.CreateOptions{
 		RRule:    in.RRule,
-		Location: h.eventLocation(c, in.TimeZone),
+		Location: service.EventLocation(event.TimeZone, h.eventLocation(c)),
 		Children: children,
 	})
 	if err != nil {
@@ -649,13 +665,24 @@ func (h *CalendarEventHandler) UpdateEvent(c *fiber.Ctx) error {
 	_, endAtSet := presence.CalendarEvent["end_at"]
 
 	in := input.CalendarEvent
+	// A valid time_zone in the request re-pins the event; an event from
+	// before migration 000134 picks up its creator's profile zone.
+	zone := event.TimeZone
+	if tz := strings.TrimSpace(in.TimeZone); service.ValidCalendarTimeZone(tz) {
+		zone = &tz
+	} else if zone == nil {
+		if tz := h.resolveEventZone(c, "", event.CreatedByUserID); tz != "" {
+			zone = &tz
+		}
+	}
 	ch := service.EventChanges{
 		StartAt:        in.StartAt,
 		EndAt:          in.EndAt,
 		EndAtSet:       endAtSet,
 		AllDay:         in.AllDay,
 		RRule:          in.RRule,
-		Location:       h.eventLocation(c, in.TimeZone),
+		TimeZone:       zone,
+		Location:       service.EventLocation(zone, h.eventLocation(c)),
 		RemoveChildren: in.RemoveChildEvents,
 	}
 	ch.Title = in.Title
@@ -737,9 +764,9 @@ func (h *CalendarEventHandler) ExportAsICal(c *fiber.Ctx) error {
 	now := time.Now()
 	startDate := now.AddDate(0, 0, -30)
 	endDate := now.AddDate(0, 0, 365)
-	// Bare dates and all-day events are read in the caller's profile
-	// zone (G157).
-	loc := h.eventLocation(c, "")
+	// Bare dates are read in the caller's profile zone (G157); all-day
+	// events in their own time_zone, falling back to this one.
+	loc := h.eventLocation(c)
 
 	if sd := c.Query("start_date"); sd != "" {
 		parsed, err := time.ParseInLocation("2006-01-02", sd, loc)

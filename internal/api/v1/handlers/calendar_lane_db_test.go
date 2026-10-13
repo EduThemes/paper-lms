@@ -665,3 +665,115 @@ func TestCalendarLane_FeedAllDayInOwnerZone(t *testing.T) {
 	assert.Contains(t, ics, "DTSTART;VALUE=DATE:"+midnight.Format("20060102"), "Tokyo midnight is the previous UTC day")
 	assert.Contains(t, ics, "DTEND;VALUE=DATE:"+midnight.AddDate(0, 0, 1).Format("20060102"))
 }
+
+// icsEventDate returns the DTSTART;VALUE=DATE of the VEVENT whose SUMMARY
+// is title.
+func icsEventDate(t *testing.T, ics, title string) string {
+	t.Helper()
+	for _, block := range strings.Split(ics, "BEGIN:VEVENT") {
+		if !strings.Contains(block, "SUMMARY:"+title+"\r\n") {
+			continue
+		}
+		for _, line := range strings.Split(block, "\r\n") {
+			if v, ok := strings.CutPrefix(line, "DTSTART;VALUE=DATE:"); ok {
+				return v
+			}
+		}
+	}
+	t.Fatalf("no all-day VEVENT %q in feed", title)
+	return ""
+}
+
+// Follow-up to G157: each event keeps the zone it was created in, so an
+// all-day event created in New York stays on its New York date for a
+// viewer in Los Angeles (whose reading of that midnight is the previous
+// day), in the API, the aggregated calendar and the ICS feed.
+func TestCalendarLane_EventTimeZone(t *testing.T) {
+	f := newCalFixture(t)
+	require.NoError(t, f.g.Model(&models.User{}).Where("id = ?", calStudent).Update("time_zone", "America/Los_Angeles").Error)
+	ny, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	require.NoError(t, err)
+	day := time.Now().In(ny).AddDate(0, 0, 3)
+	nyMidnight := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, ny)
+	tokyoMidnight := time.Date(day.Year(), day.Month(), day.Day()+1, 0, 0, 0, 0, tokyo)
+
+	teacher := f.app(calTeacher, 1)
+	create := func(title string, start time.Time, tz string) map[string]interface{} {
+		t.Helper()
+		ev := map[string]interface{}{"context_code": fmt.Sprintf("course_%d", calCourse), "title": title, "start_at": start, "all_day": true}
+		if tz != "" {
+			ev["time_zone"] = tz
+		}
+		resp := testutil.MakeRequest(teacher, http.MethodPost, "/calendar_events", testutil.JSONBody(map[string]interface{}{"calendar_event": ev}))
+		require.Equal(t, http.StatusCreated, resp.StatusCode)
+		var out map[string]interface{}
+		calJSON(t, resp, &out)
+		return out
+	}
+
+	// No time_zone in the request: the creator's profile zone.
+	fair := create("Science fair", nyMidnight, "")
+	assert.Equal(t, "America/New_York", fair["time_zone"])
+	// A valid request zone wins; an invalid one falls back to the profile.
+	festival := create("Lantern festival", tokyoMidnight, "Asia/Tokyo")
+	assert.Equal(t, "Asia/Tokyo", festival["time_zone"])
+	bogus := create("Bogus zone", nyMidnight, "Mars/Olympus_Mons")
+	assert.Equal(t, "America/New_York", bogus["time_zone"])
+	local := create("Server zone", nyMidnight, "Local")
+	assert.Equal(t, "America/New_York", local["time_zone"])
+
+	// The aggregated calendar carries each event's zone.
+	student := f.app(calStudent, 1)
+	items := calItems(t, student, calRange(nyMidnight.Add(-24*time.Hour), nyMidnight.Add(72*time.Hour)))
+	zones := map[string]interface{}{}
+	for _, it := range items {
+		zones[it["title"].(string)] = it["time_zone"]
+	}
+	assert.Equal(t, "America/New_York", zones["Science fair"])
+	assert.Equal(t, "Asia/Tokyo", zones["Lantern festival"])
+
+	// A legacy row (no zone) is dated in the viewer's zone, as before.
+	legacy := &models.CalendarEvent{ContextType: "Course", ContextID: calCourse, Title: "Legacy day", StartAt: nyMidnight, AllDay: true, CreatedByUserID: calTeacher, WorkflowState: "active"}
+	require.NoError(t, f.g.Create(legacy).Error)
+
+	// The student's feed (Los Angeles) dates each all-day event in its own zone.
+	resp := testutil.MakeRequest(student, http.MethodPost, "/calendar/feed", nil)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var st map[string]interface{}
+	calJSON(t, resp, &st)
+	resp = testutil.MakeRequest(student, http.MethodGet, strings.TrimPrefix(st["feed_path"].(string), "/api/v1"), nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body, _ := io.ReadAll(resp.Body)
+	ics := string(body)
+	assert.Equal(t, nyMidnight.Format("20060102"), icsEventDate(t, ics, "Science fair"), "New York date, not the Los Angeles reading")
+	assert.Equal(t, tokyoMidnight.Format("20060102"), icsEventDate(t, ics, "Lantern festival"))
+	assert.Equal(t, nyMidnight.AddDate(0, 0, -1).Format("20060102"), icsEventDate(t, ics, "Legacy day"), "NULL zone keeps the viewer-zone reading")
+
+	// Editing a legacy event pins it to its creator's zone; a request zone re-pins.
+	resp = testutil.MakeRequest(teacher, http.MethodPut, fmt.Sprintf("/calendar_events/%d", legacy.ID), testutil.JSONBody(map[string]interface{}{
+		"calendar_event": map[string]interface{}{"title": "Legacy day (edited)"},
+	}))
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var upd map[string]interface{}
+	calJSON(t, resp, &upd)
+	assert.Equal(t, "America/New_York", upd["time_zone"])
+	resp = testutil.MakeRequest(teacher, http.MethodPut, fmt.Sprintf("/calendar_events/%v", fair["id"]), testutil.JSONBody(map[string]interface{}{
+		"calendar_event": map[string]interface{}{"time_zone": "Europe/Berlin"},
+	}))
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	calJSON(t, resp, &upd)
+	assert.Equal(t, "Europe/Berlin", upd["time_zone"])
+	var stored models.CalendarEvent
+	require.NoError(t, f.g.First(&stored, fair["id"]).Error)
+	require.NotNil(t, stored.TimeZone)
+	assert.Equal(t, "Europe/Berlin", *stored.TimeZone)
+	// An invalid zone on update leaves the stored one alone.
+	resp = testutil.MakeRequest(teacher, http.MethodPut, fmt.Sprintf("/calendar_events/%v", fair["id"]), testutil.JSONBody(map[string]interface{}{
+		"calendar_event": map[string]interface{}{"time_zone": "Nowhere/Special"},
+	}))
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	calJSON(t, resp, &upd)
+	assert.Equal(t, "Europe/Berlin", upd["time_zone"])
+}

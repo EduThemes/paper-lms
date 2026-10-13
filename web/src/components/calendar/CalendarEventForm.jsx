@@ -4,7 +4,7 @@ import { calendarApi } from '../../services/api_calendar';
 import {
   WEEKDAY_CODES, buildRRule, parseRRule, toLocalInput, fromLocalInput, dayKey,
 } from '../../utils/calendarView';
-import { getUserTimeZone, zonedWallClockToISO } from '../../lib/userTimeZone';
+import { getUserTimeZone, isValidTimeZone, isoToZonedWallClock, zonedWallClockToISO } from '../../lib/userTimeZone';
 import RichContentEditorV2 from '../rce/RichContentEditorV2';
 import { toEditorHTML, richValueOrEmpty } from '../../utils/richContent';
 
@@ -41,11 +41,14 @@ const CalendarEventForm = ({ contexts, defaultContextCode, event, initialStart, 
   const sections = context?.type === 'course' && context.is_instructor ? (context.sections || []) : [];
 
   const startDefault = initialStart ? `${dayKey(initialStart)}T09:00` : '';
+  // An existing all-day event keeps the zone it was created in: its date
+  // is shown and saved as midnight there, not in the editor's zone.
+  const eventZone = event?.all_day && isValidTimeZone(event?.time_zone) ? event.time_zone : null;
   const [form, setForm] = useState({
     title: event?.title || '',
     // Descriptions are rich content (G010); older ones are plain text.
     description: toEditorHTML(event?.description || ''),
-    start_at: event ? toLocalInput(event.start_at) : startDefault,
+    start_at: event ? (eventZone ? isoToZonedWallClock(event.start_at, eventZone) : toLocalInput(event.start_at)) : startDefault,
     end_at: event ? toLocalInput(event.end_at) : '',
     all_day: Boolean(event?.all_day),
     location_name: event?.location_name || '',
@@ -78,12 +81,16 @@ const CalendarEventForm = ({ contexts, defaultContextCode, event, initialStart, 
     byDay: r.byDay.includes(code) ? r.byDay.filter((d) => d !== code) : [...r.byDay, code],
   }));
 
+  // The zone the event is saved in: an all-day event being edited keeps
+  // its own; anything else uses the profile zone.
+  const saveZone = (form.all_day && eventZone) || getUserTimeZone();
+
   const toISO = (value) => {
     if (!value) return null;
     if (form.all_day) {
-      // An all-day event starts at midnight of its day in the profile
-      // zone (sent as time_zone below), not the browser's midnight.
-      return zonedWallClockToISO(value.substring(0, 10)) || null;
+      // An all-day event starts at midnight of its day in its zone (sent
+      // as time_zone below), not the browser's midnight.
+      return zonedWallClockToISO(value.substring(0, 10), saveZone) || null;
     }
     return fromLocalInput(value);
   };
@@ -99,7 +106,7 @@ const CalendarEventForm = ({ contexts, defaultContextCode, event, initialStart, 
         all_day: form.all_day,
         location_name: form.location_name,
         location_address: form.location_address,
-        time_zone: getUserTimeZone(),
+        time_zone: saveZone,
       };
       const sectionTimes = useSections
         ? sectionRows.filter((r) => r.enabled).map((r) => ({

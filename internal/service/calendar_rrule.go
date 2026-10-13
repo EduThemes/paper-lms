@@ -460,3 +460,36 @@ func LoadCalendarLocation(name string) *time.Location {
 	}
 	return loc
 }
+
+// ValidCalendarTimeZone reports whether name is an IANA zone name an event
+// can be pinned to. "Local" (the server's zone) and "" are refused.
+func ValidCalendarTimeZone(name string) bool {
+	if name == "" || name == "Local" || len(name) > 64 {
+		return false
+	}
+	_, err := time.LoadLocation(name)
+	return err == nil
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// EventLocation is the zone an event's all-day date is read in: the
+// event's own time_zone when it names a valid zone, else fallback (the
+// viewer's zone; nil means UTC). NULL time_zone (rows from before
+// migration 000134) keeps the viewer-zone behaviour.
+func EventLocation(tz *string, fallback *time.Location) *time.Location {
+	if tz != nil && ValidCalendarTimeZone(*tz) {
+		if loc, err := time.LoadLocation(*tz); err == nil {
+			return loc
+		}
+	}
+	if fallback == nil {
+		return time.UTC
+	}
+	return fallback
+}

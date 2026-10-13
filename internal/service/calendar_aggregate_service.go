@@ -65,6 +65,7 @@ type CalendarItem struct {
 	StartAt               time.Time  `json:"start_at"`
 	EndAt                 *time.Time `json:"end_at"`
 	AllDay                bool       `json:"all_day"`
+	TimeZone              string     `json:"time_zone,omitempty"` // an all-day event's zone; "" = the viewer's
 	ContextCode           string     `json:"context_code"`
 	ContextName           string     `json:"context_name"`
 	LocationName          string     `json:"location_name,omitempty"`
@@ -443,6 +444,7 @@ func (s *CalendarAggregateService) eventItems(ctx context.Context, q CalendarQue
 			StartAt:               e.StartAt,
 			EndAt:                 e.EndAt,
 			AllDay:                e.AllDay,
+			TimeZone:              derefString(e.TimeZone),
 			ContextCode:           code,
 			ContextName:           name,
 			LocationName:          e.LocationName,
@@ -962,6 +964,19 @@ func (s *CalendarAggregateService) IsGroupMember(ctx context.Context, groupID, u
 			OR (g.context_type = 'Course' AND g.context_id IN (SELECT id FROM courses WHERE account_id = ?))`, accountID, accountID).
 		Count(&n)
 	return n > 0
+}
+
+// UserTimeZoneName returns the user's profile zone name when it is a
+// valid IANA zone, else "".
+func (s *CalendarAggregateService) UserTimeZoneName(ctx context.Context, userID uint) string {
+	var u models.User
+	if err := s.db.WithContext(ctx).Select("id", "time_zone").Where("id = ?", userID).First(&u).Error; err != nil {
+		return ""
+	}
+	if !ValidCalendarTimeZone(u.TimeZone) {
+		return ""
+	}
+	return u.TimeZone
 }
 
 // UserTimeZone returns the user's configured time zone (UTC fallback).

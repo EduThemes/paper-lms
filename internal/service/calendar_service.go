@@ -267,6 +267,7 @@ func childFromParent(parent *models.CalendarEvent, ch ChildEventInput) *models.C
 		LocationName:          parent.LocationName,
 		LocationAddress:       parent.LocationAddress,
 		AllDay:                parent.AllDay,
+		TimeZone:              parent.TimeZone,
 		CreatedByUserID:       parent.CreatedByUserID,
 		WorkflowState:         "active",
 		ParentCalendarEventID: &pid,
@@ -285,7 +286,10 @@ type EventChanges struct {
 	LocationAddress *string
 	AllDay          *bool
 	RRule           *string
-	Location        *time.Location
+	// TimeZone, when set, re-pins the event (and the rows the edit
+	// covers) to this IANA zone; the handler validates it.
+	TimeZone *string
+	Location *time.Location
 	// Children replaces the section times when non-nil; RemoveChildren
 	// turns a sectioned event back into a plain course event.
 	Children       *[]ChildEventInput
@@ -307,6 +311,10 @@ func (ch *EventChanges) applyAttrs(e *models.CalendarEvent) {
 	}
 	if ch.AllDay != nil {
 		e.AllDay = *ch.AllDay
+	}
+	if ch.TimeZone != nil {
+		tz := *ch.TimeZone
+		e.TimeZone = &tz
 	}
 }
 
@@ -646,6 +654,7 @@ func copyParentAttrs(parent, child *models.CalendarEvent) {
 	child.LocationName = parent.LocationName
 	child.LocationAddress = parent.LocationAddress
 	child.AllDay = parent.AllDay
+	child.TimeZone = parent.TimeZone
 }
 
 // syncChildren copies the parent's shared fields onto its children after
@@ -742,6 +751,7 @@ func (s *CalendarService) ExportAsICalendar(ctx context.Context, contextType str
 			StartAt:         e.StartAt,
 			EndAt:           e.EndAt,
 			AllDay:          e.AllDay,
+			TimeZone:        derefString(e.TimeZone),
 			LocationName:    e.LocationName,
 			LocationAddress: e.LocationAddress,
 			CreatedAt:       e.CreatedAt,
@@ -756,10 +766,12 @@ func RenderICS(items []CalendarItem, calName, baseURL string, now time.Time) []b
 	return RenderICSIn(items, calName, baseURL, now, time.UTC)
 }
 
-// RenderICSIn is RenderICS with all-day events dated in loc (the
-// calendar owner's zone). An all-day event is stored as the instant of
-// its local midnight, so reading its date in UTC puts it on the previous
-// day for anyone east of UTC.
+// RenderICSIn is RenderICS with all-day events dated in their own
+// TimeZone, or in loc (the calendar owner's zone) when they have none. An
+// all-day event is stored as the instant of its local midnight, so
+// reading its date in another zone can put it on the neighbouring day.
+// Timed events are written as UTC instants (a TZID would need a matching
+// VTIMEZONE block, and the instant is already unambiguous).
 func RenderICSIn(items []CalendarItem, calName, baseURL string, now time.Time, loc *time.Location) []byte {
 	if loc == nil {
 		loc = time.UTC
@@ -793,7 +805,7 @@ func RenderICSIn(items []CalendarItem, calName, baseURL string, now time.Time, l
 			line("DESCRIPTION:" + escapeICalText(RichTextToPlain(it.Description)))
 		}
 		if it.AllDay {
-			startDay, endDay := allDayRange(it.StartAt, it.EndAt, loc)
+			startDay, endDay := allDayRange(it.StartAt, it.EndAt, EventLocation(&it.TimeZone, loc))
 			line("DTSTART;VALUE=DATE:" + startDay.Format("20060102"))
 			line("DTEND;VALUE=DATE:" + endDay.Format("20060102"))
 		} else {
