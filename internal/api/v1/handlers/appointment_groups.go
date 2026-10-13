@@ -619,9 +619,13 @@ func (h *AppointmentGroupHandler) DeleteSlot(c *fiber.Ctx) error {
 	if err != nil || slot.GroupID != g.ID {
 		return responses.NotFound(c, "slot")
 	}
+	// Read who held the slot before its reservations go with it.
+	live := h.svc.LiveReservations(c.Context(), slot.ID)
 	if err := h.svc.DeleteSlot(c.Context(), slot.ID); err != nil {
 		return responses.InternalError(c, "Could not delete slot")
 	}
+	actorID, _ := c.Locals("user_id").(uint)
+	h.svc.NotifySlotDeleted(g, slot, live, actorID)
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
@@ -753,6 +757,7 @@ func (h *AppointmentGroupHandler) Reserve(c *fiber.Ctx) error {
 			return responses.InternalError(c, "Could not reserve slot")
 		}
 	}
+	h.svc.NotifyReserved(g, res)
 	return c.Status(fiber.StatusCreated).JSON(reservationToJSON(res))
 }
 
@@ -787,8 +792,15 @@ func (h *AppointmentGroupHandler) CancelReservation(c *fiber.Ctx) error {
 			return err
 		}
 	}
+	wasLive := res.WorkflowState == "reserved"
 	if err := h.svc.Cancel(c.Context(), res); err != nil {
 		return responses.InternalError(c, "Could not cancel reservation")
+	}
+	if wasLive {
+		// The participant canceling tells the instructors; an instructor
+		// canceling tells the participant (Canvas "Appointment Deleted For
+		// User"). Queued off the request path.
+		h.svc.NotifyCanceled(g, res, userID, own)
 	}
 	return c.JSON(reservationToJSON(res))
 }

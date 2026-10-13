@@ -19,6 +19,9 @@ type AppointmentGroupService struct {
 	slotRepo        repository.AppointmentSlotRepository
 	reservationRepo repository.AppointmentReservationRepository
 	db              *gorm.DB
+	// notifier queues the scheduler notifications
+	// (appointment_notifications.go). Nil disables them.
+	notifier Notifier
 }
 
 func NewAppointmentGroupService(

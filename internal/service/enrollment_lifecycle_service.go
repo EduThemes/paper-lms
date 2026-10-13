@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"time"
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
@@ -26,7 +27,7 @@ import (
 type EnrollmentLifecycleService struct {
 	repo     repository.EnrollmentAdminRepository
 	sections repository.SectionRepository
-	notify   func(ctx context.Context, n *models.Notification) error
+	notifier Notifier
 	now      func() time.Time
 }
 
@@ -34,9 +35,11 @@ func NewEnrollmentLifecycleService(repo repository.EnrollmentAdminRepository, se
 	return &EnrollmentLifecycleService{repo: repo, sections: sections, now: time.Now}
 }
 
-// SetNotifier wires in-app notifications (course invitations). Optional.
-func (s *EnrollmentLifecycleService) SetNotifier(fn func(ctx context.Context, n *models.Notification) error) *EnrollmentLifecycleService {
-	s.notify = fn
+// SetNotifier wires course-invitation notifications through the normal
+// notification queue (in-app feed plus the invitee's delivery channels,
+// following their notification preferences). Optional.
+func (s *EnrollmentLifecycleService) SetNotifier(n Notifier) *EnrollmentLifecycleService {
+	s.notifier = n
 	return s
 }
 
@@ -238,21 +241,30 @@ func (s *EnrollmentLifecycleService) ListInvitations(ctx context.Context, userID
 	return s.repo.ListInvitedForUser(ctx, userID, accountID)
 }
 
-// NotifyInvited sends the in-app "you've been invited" notification.
-// Best effort: a notification failure never fails the enrollment.
-func (s *EnrollmentLifecycleService) NotifyInvited(ctx context.Context, e *models.Enrollment, courseName string) {
-	if s.notify == nil || e == nil {
+// NotifyInvited queues the "you've been invited" notification (Canvas
+// "Enrollment Invitation") for an enrollment created in the invited state:
+// the in-app notification plus an email (or other channel) delivery that
+// honors the invitee's preferences for the Invitation category. It runs off
+// the request path on a copy with a detached context, so a slow mail queue
+// never holds the enrolling request open; failures never fail the
+// enrollment.
+func (s *EnrollmentLifecycleService) NotifyInvited(e *models.Enrollment, courseName string) {
+	if s.notifier == nil || e == nil || e.UserID == 0 {
 		return
 	}
+	snapshot := *e
+	go func() {
+		defer recoverFromPanic("enrollment notifyInvited")
+		s.notifyInvited(context.Background(), &snapshot, courseName)
+	}()
+}
+
+func (s *EnrollmentLifecycleService) notifyInvited(ctx context.Context, e *models.Enrollment, courseName string) {
 	role := enrollmentRoleLabel(e.Type)
-	_ = s.notify(ctx, &models.Notification{
-		UserID:           e.UserID,
-		NotificationType: "enrollment_invitation",
-		Title:            fmt.Sprintf("Course invitation: %s", courseName),
-		Message:          fmt.Sprintf("You have been invited to join %s as a %s. Accept or decline the invitation from your dashboard.", courseName, role),
-		ContextType:      "Course",
-		ContextID:        e.CourseID,
-	})
+	subject := fmt.Sprintf("Course invitation: %s", courseName)
+	body := fmt.Sprintf("<p>You have been invited to join <strong>%s</strong> as a %s.</p><p>Accept or decline the invitation from your dashboard.</p>",
+		html.EscapeString(courseName), role)
+	_ = s.notifier.QueueNotification(ctx, e.UserID, NotificationEnrollmentInvitation, subject, body, "Course", e.CourseID)
 }
 
 func enrollmentRoleLabel(t string) string {

@@ -63,6 +63,18 @@ func conferenceParticipantToJSON(p *models.ConferenceParticipant) fiber.Map {
 	return result
 }
 
+// conferenceInviteInput is who to invite when creating or editing a
+// conference: specific course members (user_ids) or everyone in the course
+// (invite_all, Canvas's "Invite all course members").
+type conferenceInviteInput struct {
+	UserIDs   []uint `json:"user_ids"`
+	InviteAll bool   `json:"invite_all"`
+}
+
+func (in conferenceInviteInput) invite() service.ConferenceInvite {
+	return service.ConferenceInvite{UserIDs: in.UserIDs, All: in.InviteAll}
+}
+
 // loadConference fetches a conference in the caller's tenant and applies
 // the course-role gate (instructor for manage, enrollment otherwise). It
 // returns wrote=true after writing the refusal; the caller MUST return
@@ -158,6 +170,7 @@ func (h *ConferenceHandler) CreateConference(c *fiber.Ctx) error {
 			// JoinURL is an optional external meeting link (e.g. a Zoom
 			// link) used when no BigBlueButton server is configured.
 			JoinURL string `json:"join_url"`
+			conferenceInviteInput
 		} `json:"conference"`
 	}
 
@@ -190,6 +203,8 @@ func (h *ConferenceHandler) CreateConference(c *fiber.Ctx) error {
 
 	// Add the creator as initiator
 	_ = h.conferenceService.AddParticipant(c.Context(), conference.ID, userID, "initiator")
+	// Invitees join as participants and are notified, off the request path.
+	h.conferenceService.InviteAsync(conference, input.Conference.invite(), userID)
 
 	return c.Status(fiber.StatusCreated).JSON(conferenceToJSON(conference))
 }
@@ -222,6 +237,7 @@ func (h *ConferenceHandler) UpdateConference(c *fiber.Ctx) error {
 			JoinURL        *string `json:"join_url"`
 
 			RecordingEnabled *bool `json:"recording_enabled"`
+			conferenceInviteInput
 		} `json:"conference"`
 	}
 
@@ -267,6 +283,10 @@ func (h *ConferenceHandler) UpdateConference(c *fiber.Ctx) error {
 	if err := h.conferenceService.Update(c.Context(), conference); err != nil {
 		return responses.InternalError(c, "Could not update conference")
 	}
+	// Members added while editing are invited (only the newly added ones
+	// are notified).
+	callerID, _ := c.Locals("user_id").(uint)
+	h.conferenceService.InviteAsync(conference, input.Conference.invite(), callerID)
 
 	return c.JSON(conferenceToJSON(conference))
 }

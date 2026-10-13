@@ -166,7 +166,7 @@ func (s *EnrollmentService) Create(ctx context.Context, enrollment *models.Enrol
 	}
 
 	if enrollment.WorkflowState == models.EnrollmentInvited && s.lifecycle != nil {
-		s.lifecycle.NotifyInvited(ctx, enrollment, course.Name)
+		s.lifecycle.NotifyInvited(enrollment, course.Name)
 	}
 	s.fireOnCreated(enrollment.ID)
 	return nil

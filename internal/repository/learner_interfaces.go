@@ -60,6 +60,9 @@ type LearnerRepository interface {
 	// Observer alerts
 	ListAlertThresholds(ctx context.Context, observerID uint, studentID *uint) ([]models.ObserverAlertThreshold, error)
 	ListAllAlertThresholds(ctx context.Context) ([]models.ObserverAlertThreshold, error)
+	// ListAlertThresholdsForStudent returns every observer's thresholds of
+	// the given alert types about one student (all types when none given).
+	ListAlertThresholdsForStudent(ctx context.Context, studentID uint, alertTypes []string) ([]models.ObserverAlertThreshold, error)
 	GetAlertThreshold(ctx context.Context, id, observerID uint) (*models.ObserverAlertThreshold, error)
 	SaveAlertThreshold(ctx context.Context, t *models.ObserverAlertThreshold) error
 	DeleteAlertThreshold(ctx context.Context, id, observerID uint) error
