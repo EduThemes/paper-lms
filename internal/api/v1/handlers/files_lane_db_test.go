@@ -352,3 +352,26 @@ func TestFileVisibility_DesignerReachesUnpublishedByLink(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, testutil.MakeRequest(student, http.MethodGet, fmt.Sprintf("/files/%v/download", key["id"]), nil).StatusCode)
 	assert.Equal(t, http.StatusNotFound, testutil.MakeRequest(student, http.MethodGet, fmt.Sprintf("/folders/%v", folder["id"]), nil).StatusCode)
 }
+
+// A course file URL only describes files of that course: a personal file,
+// or another course's file, is a 404 even for someone enrolled in the
+// course in the URL.
+func TestGetFile_OnlyDescribesFilesOfTheURLCourse(t *testing.T) {
+	f := newFilesLaneFixture(t)
+	teacher := f.app(flTeacher, "TeacherEnrollment")
+	student := f.app(flStudent, "StudentEnrollment")
+
+	_, own := flUpload(t, teacher, flCourse, "syllabus.txt", "public", nil)
+	_, other := flUpload(t, teacher, flOther, "chem-key.txt", "secret", nil)
+	personal := &models.Attachment{ContextType: "User", ContextID: flTeacher, UserID: flTeacher, DisplayName: "taxes.pdf", Filename: "taxes.pdf", ContentType: "application/pdf", StoragePath: "User/40/x/taxes.pdf"}
+	require.NoError(t, f.g.Create(personal).Error)
+
+	get := func(app *fiber.App, id any) int {
+		resp, _ := flJSON(t, app, http.MethodGet, fmt.Sprintf("/courses/%d/files/%v", flCourse, id), nil)
+		return resp.StatusCode
+	}
+	assert.Equal(t, http.StatusOK, get(student, own["id"]))
+	assert.Equal(t, http.StatusNotFound, get(student, other["id"]), "another course's file")
+	assert.Equal(t, http.StatusNotFound, get(student, personal.ID), "someone's personal file")
+	assert.Equal(t, http.StatusNotFound, get(teacher, personal.ID), "not through a course URL, even for its owner")
+}
