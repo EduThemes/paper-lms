@@ -45,7 +45,7 @@ func (h *CourseHandler) applyCourseIncludes(c *fiber.Ctx, courses []models.Cours
 		Teachers:       inc["teachers"],
 		EnrollmentsFor: userID,
 	}, callerAccountID(c))
-	if err != nil {
+	if err != nil || len(rows) != len(out) {
 		return
 	}
 	isAdmin, _ := c.Locals("is_admin").(bool)

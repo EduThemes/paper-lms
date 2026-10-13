@@ -896,7 +896,7 @@ func (s *NotificationDeliveryService) wrapHTMLTemplate(subject, body string) (st
 		Body    template.HTML
 	}{
 		Subject: subject,
-		Body:    template.HTML(body),
+		Body:    template.HTML(SanitizeHTML(body)), // #nosec G203 -- sanitized here; queued bodies are already sanitized/escaped
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {

@@ -163,7 +163,7 @@ func (h *SAMLHandler) loadCertPEM(ctx context.Context) (string, error) {
 	if path == "" {
 		return "", nil
 	}
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- operator-configured certificate path
 	if err != nil {
 		return "", fmt.Errorf("read SAML cert at %q: %w", path, err)
 	}

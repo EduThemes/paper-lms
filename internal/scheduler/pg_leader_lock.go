@@ -74,5 +74,5 @@ func (l *PGLeaderLock) WithLock(ctx context.Context, jobName, window string, fn 
 func advisoryKey(s string) int64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(s))
-	return int64(h.Sum64())
+	return int64(h.Sum64()) // #nosec G115 -- advisory-lock key; wraparound is intended
 }

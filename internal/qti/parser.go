@@ -47,7 +47,7 @@ func (d *defaultImporter) ImportIMSCC(ctx context.Context, zipPath string, cours
 // ImportQTIFile reads a standalone QTI XML file (no manifest). Detects
 // dialect from the root element and routes appropriately.
 func (d *defaultImporter) ImportQTIFile(ctx context.Context, qtiPath string, courseID uint) (*ImportResult, error) {
-	data, err := os.ReadFile(qtiPath)
+	data, err := os.ReadFile(qtiPath) // #nosec G304 -- file in the importer staging dir
 	if err != nil {
 		return nil, fmt.Errorf("read qti file: %w", err)
 	}

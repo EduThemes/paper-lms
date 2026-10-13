@@ -793,7 +793,7 @@ func main() {
 	// Go's implicit conversion handles the named-type translation.
 	oidcRedirectFallback := os.Getenv("OIDC_REDIRECT_BASE")
 	if oidcRedirectFallback == "" && cfg.Environment == "development" {
-		oidcRedirectFallback = "http://localhost:3000"
+		oidcRedirectFallback = "http://localhost:3000" // #nosec G101 -- dev-only redirect base, no credentials
 	}
 	if oidcRedirectFallback == "" && cfg.Environment == "production" {
 		log.Printf("warning: OIDC_REDIRECT_BASE is unset in production; OIDC login will fail until a super-admin sets auth.oidc.redirect_base via /superadmin/settings")

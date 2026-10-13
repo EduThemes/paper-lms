@@ -88,7 +88,7 @@ func (c *Config) Validate() {
 		if len(c.JWTSecret) < 32 {
 			log.Printf("WARNING: JWT_SECRET is only %d characters; a session-signing key should be at least 32 characters of high-entropy randomness. Rotate it.", len(c.JWTSecret))
 		}
-		if c.DatabaseURL == "postgres://paper:paper@localhost:5432/paper_lms?sslmode=disable" {
+		if c.DatabaseURL == "postgres://paper:paper@localhost:5432/paper_lms?sslmode=disable" { // #nosec G101 -- refusing the well-known dev DSN in production
 			log.Fatal("FATAL: DATABASE_URL must be configured for production. Do not use the default development database URL.")
 		}
 		if c.FrontendURL == "http://localhost:5173" || c.FrontendURL == "" {

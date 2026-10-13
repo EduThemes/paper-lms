@@ -139,7 +139,7 @@ func run() int {
 
 	d := schemagen.ComputeDiff(want, got)
 	if len(d.StaleColumns) == 0 {
-		if err := os.WriteFile(*outPath, []byte(renderEmptyMarkdown()), 0o644); err != nil {
+		if err := os.WriteFile(*outPath, []byte(renderEmptyMarkdown()), 0o600); err != nil {
 			return fatal("write %s: %v", *outPath, err)
 		}
 		fmt.Fprintf(os.Stderr, "✓ no stale columns to report (wrote clean %s)\n", *outPath)
@@ -155,7 +155,7 @@ func run() int {
 
 	md := renderMarkdown(classifications, len(d.StaleColumns))
 
-	if err := os.WriteFile(*outPath, []byte(md), 0o644); err != nil {
+	if err := os.WriteFile(*outPath, []byte(md), 0o600); err != nil {
 		return fatal("write %s: %v", *outPath, err)
 	}
 	total := 0
@@ -463,7 +463,7 @@ func populateReferences(cs []classification, root string) error {
 // owns the matched column name. Matches beyond maxRefs are counted but not
 // stored, so the report shows "+N more" without unbounded memory growth.
 func scanFileForReferences(path, root string, re *regexp.Regexp, idx map[string][]int, cs []classification, maxRefs int) error {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- dev tool reading a path it was given
 	if err != nil {
 		return err
 	}

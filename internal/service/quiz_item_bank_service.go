@@ -35,7 +35,7 @@ func NewQuizItemBankService(
 		itemRepo:     itemRepo,
 		questionRepo: questionRepo,
 		now:          time.Now,
-		rand:         mathrand.New(mathrand.NewSource(time.Now().UnixNano())),
+		rand:         cryptoSeededRand(),
 	}
 }
 

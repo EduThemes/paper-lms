@@ -20,30 +20,30 @@ import (
 // dialect-specific XML parsing lives in internal/qti; this service
 // only:
 //
-//   1. Stages a multipart upload to disk.
-//   2. Delegates parsing to qti.Importer (returns an in-memory result).
-//   3. Persists the result via the existing item-bank and stimulus
-//      services PLUS the QuizRepository / QuizQuestionRepository
-//      directly. The QuizService doesn't expose CreateQuiz so we use
-//      the repo it composes — we are NOT modifying QuizService itself
-//      (per wave-B constraints) but we do depend on the same
-//      repository abstraction it depends on.
+//  1. Stages a multipart upload to disk.
+//  2. Delegates parsing to qti.Importer (returns an in-memory result).
+//  3. Persists the result via the existing item-bank and stimulus
+//     services PLUS the QuizRepository / QuizQuestionRepository
+//     directly. The QuizService doesn't expose CreateQuiz so we use
+//     the repo it composes — we are NOT modifying QuizService itself
+//     (per wave-B constraints) but we do depend on the same
+//     repository abstraction it depends on.
 //
 // Transactional semantics (v1 / sync only):
 //
-//   We deliberately do NOT wrap the persistence loop in a database
-//   transaction. Reasons:
-//     - The existing services (QuizItemBankService, QuizStimulusService)
-//       hold their own GORM scopes; they cannot enlist into an outer
-//       transaction without modification, which the wave-B constraints
-//       forbid.
-//     - Practically, Canvas QTI imports are large but bounded; partial-
-//       failure is reported in the ImportSummary's Errors/Warnings so
-//       the instructor can re-import or delete the partial quiz via
-//       existing UI.
-//   A future v2 may swap in a transaction-aware persister; the qti
-//   package itself is already transaction-agnostic (it returns an
-//   in-memory ImportResult).
+//	We deliberately do NOT wrap the persistence loop in a database
+//	transaction. Reasons:
+//	  - The existing services (QuizItemBankService, QuizStimulusService)
+//	    hold their own GORM scopes; they cannot enlist into an outer
+//	    transaction without modification, which the wave-B constraints
+//	    forbid.
+//	  - Practically, Canvas QTI imports are large but bounded; partial-
+//	    failure is reported in the ImportSummary's Errors/Warnings so
+//	    the instructor can re-import or delete the partial quiz via
+//	    existing UI.
+//	A future v2 may swap in a transaction-aware persister; the qti
+//	package itself is already transaction-agnostic (it returns an
+//	in-memory ImportResult).
 type QTIImportService struct {
 	importer        qti.Importer
 	quizRepo        repository.QuizRepository
@@ -100,7 +100,7 @@ func (s *QTIImportService) ImportMultipart(ctx context.Context, fh *multipart.Fi
 	}
 
 	dir := filepath.Join(s.uploadsRoot, "qti_imports", fmt.Sprintf("%d", courseID))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("staging dir: %w", err)
 	}
 	zipPath := filepath.Join(dir, sanitizeQTIFilename(fh.Filename))
@@ -380,7 +380,7 @@ func saveMultipart(fh *multipart.FileHeader, dst string) error {
 	}
 	defer func() { _ = src.Close() }()
 
-	out, err := os.Create(dst)
+	out, err := os.Create(dst) // #nosec G304 -- staging path built from a sanitized upload name
 	if err != nil {
 		return err
 	}

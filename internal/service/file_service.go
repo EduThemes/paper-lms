@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/md5" // #nosec G501 -- content checksum, not a security control
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -46,12 +46,12 @@ var allowedMIMETypes = map[string][]string{
 	".wav":  {"audio/wav", "audio/x-wav"},
 	".ogg":  {"audio/ogg", "video/ogg"},
 	// Media recorded or uploaded through the rich content editor (G002).
-	".m4a": {"audio/mp4", "audio/x-m4a", "audio/m4a"},
-	".m4v": {"video/mp4", "video/x-m4v"},
-	".mov": {"video/quicktime"},
-	".ogv": {"video/ogg"},
-	".oga": {"audio/ogg"},
-	".aac": {"audio/aac", "audio/x-aac"},
+	".m4a":  {"audio/mp4", "audio/x-m4a", "audio/m4a"},
+	".m4v":  {"video/mp4", "video/x-m4v"},
+	".mov":  {"video/quicktime"},
+	".ogv":  {"video/ogg"},
+	".oga":  {"audio/ogg"},
+	".aac":  {"audio/aac", "audio/x-aac"},
 	".zip":  {"application/zip", "application/x-zip"},
 	".json": {"application/json", "text/plain"},
 	".xml":  {"application/xml", "text/xml"},
@@ -285,7 +285,7 @@ func (s *FileService) uploadFile(ctx context.Context, attachment *models.Attachm
 	storageKey := filepath.Join(attachment.ContextType, fmt.Sprintf("%d", attachment.ContextID), fileUUID, attachment.Filename)
 
 	// Hash the file while uploading
-	hash := md5.New()
+	hash := md5.New() // #nosec G401 -- content checksum, not a security control
 	tee := io.TeeReader(fileData, hash)
 
 	// Wave 9: per-tenant S3 config resolution. Callers that have a caller
