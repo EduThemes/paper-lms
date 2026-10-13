@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useId } from 'react';
 import { Bell, BellOff, Check, CheckCheck, Moon, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../services/api';
+import { notificationLink } from '../utils/notificationLinks';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import FocusTrap from './FocusTrap';
 import { useLiveRegion } from './LiveRegion';
@@ -208,23 +209,7 @@ const NotificationBell = ({ position = 'sidebar' }) => {
     }
   };
 
-  const getNotificationLink = (n) => {
-    if (n.context_type === 'Course' && n.context_id) {
-      if (n.notification_type === 'submission_grade') {
-        return `/courses/${n.context_id}/grades`;
-      }
-      if (n.notification_type === 'new_announcement') {
-        return `/courses/${n.context_id}/announcements`;
-      }
-      if (n.notification_type === 'discussion_reply') {
-        return `/courses/${n.context_id}/discussions`;
-      }
-      return `/courses/${n.context_id}`;
-    }
-    if (n.notification_type === 'new_message') return '/inbox';
-    if (n.notification_type === 'event_start') return '/calendar';
-    return null;
-  };
+  const getNotificationLink = notificationLink;
 
   const formatTime = (dateStr) => {
     if (!dateStr) return '';

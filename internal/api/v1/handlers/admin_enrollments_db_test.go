@@ -46,6 +46,8 @@ const (
 type aeFixture struct {
 	g           *gorm.DB
 	enrollments map[string]uint // label -> enrollment id
+	// notifier, when set, receives course invitation notifications.
+	notifier service.Notifier
 }
 
 func newAEFixture(t *testing.T) *aeFixture {
@@ -110,6 +112,9 @@ func (f *aeFixture) app(userID, accountID uint) *fiber.App {
 	pm := middleware.NewPermissionMiddleware(enrollRepo, users, courses)
 	authz := handlers.NewResourceAuthorizer(enrollRepo, users, courses)
 	lifecycle := service.NewEnrollmentLifecycleService(adminRepo, sectionRepo)
+	if f.notifier != nil {
+		lifecycle.SetNotifier(f.notifier)
+	}
 	enrollSvc := service.NewEnrollmentService(enrollRepo).SetTenantRepos(users, courses, sectionRepo).SetLifecycle(lifecycle)
 	eh := handlers.NewEnrollmentHandler(enrollSvc).SetLifecycle(lifecycle)
 	sh := handlers.NewSectionHandler(sectionRepo, authz).

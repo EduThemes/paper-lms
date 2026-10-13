@@ -30,6 +30,7 @@ const ConferencesPage = () => {
     duration: 60,
     join_url: '',
     recording_enabled: false,
+    invite_all: true,
   });
   const [submitting, setSubmitting] = useState(false);
   const [selectedConference, setSelectedConference] = useState(null);
@@ -58,6 +59,8 @@ const ConferencesPage = () => {
       conference_type: 'BigBlueButton',
       duration: 60,
       join_url: '',
+      recording_enabled: false,
+      invite_all: true,
     });
     setEditingId(null);
     setShowForm(false);
@@ -71,6 +74,7 @@ const ConferencesPage = () => {
       duration: conf.duration || 60,
       join_url: /^https?:\/\//.test(conf.join_url || '') ? conf.join_url : '',
       recording_enabled: !!conf.recording_enabled,
+      invite_all: false,
     });
     setEditingId(conf.id);
     setShowForm(true);
@@ -284,6 +288,14 @@ const ConferencesPage = () => {
                 Allow this conference to be recorded
               </label>
             )}
+            <label className="flex items-center gap-2 text-sm text-text-secondary">
+              <input
+                type="checkbox"
+                checked={formData.invite_all}
+                onChange={(e) => setFormData({ ...formData, invite_all: e.target.checked })}
+              />
+              {editingId ? 'Invite course members who are not invited yet' : 'Invite all course members'}
+            </label>
             <div className="flex justify-end space-x-3">
               <button
                 type="button"

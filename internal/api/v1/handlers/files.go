@@ -249,19 +249,20 @@ func (h *FileHandler) GetFile(c *fiber.Ctx) error {
 		return responses.NotFound(c, "file")
 	}
 
+	// The route is /courses/:course_id/files/:id: the file must belong to
+	// that course (F-013). A personal or group file is never described
+	// through a course URL, even to someone enrolled in the course.
+	courseID, perr := c.ParamsInt("course_id")
+	if perr != nil || attachment.ContextType != "Course" || attachment.ContextID != uint(courseID) {
+		return responses.NotFound(c, "file")
+	}
+
 	// G070: an unpublished file (or one in an unpublished folder) is
 	// invisible to learners; a date-locked one is described but marked
 	// locked_for_user.
-	learner := false
-	if attachment.ContextType == "Course" {
-		// The route carries :course_id; tie the file to it (F-013).
-		if courseID, perr := c.ParamsInt("course_id"); perr == nil && attachment.ContextID != uint(courseID) {
-			return responses.NotFound(c, "file")
-		}
-		learner = !h.managesCourseFiles(c, attachment.ContextID)
-		if learner && h.learnerCannotSeeFile(c, attachment) {
-			return responses.NotFound(c, "file")
-		}
+	learner := !h.managesCourseFiles(c, attachment.ContextID)
+	if learner && h.learnerCannotSeeFile(c, attachment) {
+		return responses.NotFound(c, "file")
 	}
 
 	if callerID, _ := getUserID(c); callerID != 0 && h.auditService != nil && attachment.UserID != 0 && attachment.UserID != callerID {

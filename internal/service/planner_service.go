@@ -555,7 +555,7 @@ func calendarItem(e models.CalendarEvent, courseID *uint, name string, overrideM
 		Submissions:   false,
 		Plannable: map[string]any{
 			"id": e.ID, "title": e.Title, "start_at": e.StartAt, "end_at": e.EndAt,
-			"all_day": e.AllDay, "location_name": e.LocationName,
+			"all_day": e.AllDay, "time_zone": e.TimeZone, "location_name": e.LocationName,
 		},
 	}
 	mergeOverride(&item, overrideMap)

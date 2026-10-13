@@ -32,6 +32,10 @@ type ConferenceService struct {
 	zoomAPIBase   string
 	zoomOAuthBase string
 	zoomTokens    *zoomTokenCache
+	// Invitations (conference_invitations.go); nil disables them.
+	enrollments repository.EnrollmentRepository
+	courses     repository.CourseRepository
+	notifier    Notifier
 }
 
 // SetSettingsLookup wires the settings resolution chain used to find the

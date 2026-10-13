@@ -371,6 +371,16 @@ func (r *learnerRepo) ListAllAlertThresholds(ctx context.Context) ([]models.Obse
 	return out, err
 }
 
+func (r *learnerRepo) ListAlertThresholdsForStudent(ctx context.Context, studentID uint, alertTypes []string) ([]models.ObserverAlertThreshold, error) {
+	var out []models.ObserverAlertThreshold
+	q := r.db.WithContext(ctx).Where("student_id = ?", studentID)
+	if len(alertTypes) > 0 {
+		q = q.Where("alert_type IN ?", alertTypes)
+	}
+	err := q.Order("observer_id, id").Find(&out).Error
+	return out, err
+}
+
 func (r *learnerRepo) GetAlertThreshold(ctx context.Context, id, observerID uint) (*models.ObserverAlertThreshold, error) {
 	var t models.ObserverAlertThreshold
 	if err := r.db.WithContext(ctx).Where("id = ? AND observer_id = ?", id, observerID).First(&t).Error; err != nil {

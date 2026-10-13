@@ -24,15 +24,21 @@ type ObserverLinkChecker interface {
 // assignment grade, missing work and new course announcements.
 //
 // Alerts are raised by Evaluate, which the hourly scheduler runs for every
-// threshold and which also runs (throttled) when an observer opens their
-// alerts, so a parent never waits an hour to see a new alert.
+// threshold, which runs for the grade thresholds as soon as a grade becomes
+// visible (GradedCallback), and which also runs (throttled) when an
+// observer opens their alerts, so a parent never waits an hour to see a new
+// alert. Each new alert is also queued as a notification to the observer.
 type ObserverAlertService struct {
 	learner       repository.LearnerRepository
 	links         ObserverLinkChecker
 	dashboard     *LearnerDashboardService
 	grades        *GradeSummaryService
 	announcements PlannerAnnouncementVisibility
-	now           func() time.Time
+	// notifier queues an "observer_alert" notification to the observer for
+	// every new alert (observer_alert_notifications.go). Nil: alerts only
+	// show in the observer's alert list.
+	notifier Notifier
+	now      func() time.Time
 }
 
 func NewObserverAlertService(learner repository.LearnerRepository, links ObserverLinkChecker, dashboard *LearnerDashboardService, grades *GradeSummaryService) *ObserverAlertService {
@@ -307,12 +313,20 @@ func (s *ObserverAlertService) Evaluate(ctx context.Context, t *models.ObserverA
 		studentName = users[0].Name
 	}
 
+	// Alerts raised by this scan; the observer is notified of each one,
+	// including when the scan stops early on an error.
+	var raised []models.ObserverAlert
+	defer func() { s.notifyAlertsAsync(studentName, raised) }()
 	raise := func(contextType string, contextID uint, courseID *uint, title, link string, when time.Time) error {
-		_, err := s.learner.CreateAlertIfAbsent(ctx, &models.ObserverAlert{
+		alert := &models.ObserverAlert{
 			AccountID: t.AccountID, ThresholdID: t.ID, ObserverID: t.ObserverID, StudentID: t.StudentID,
 			AlertType: t.AlertType, ContextType: contextType, ContextID: contextID, CourseID: courseID,
 			Title: title, Link: link, ActionDate: when,
-		})
+		}
+		created, err := s.learner.CreateAlertIfAbsent(ctx, alert)
+		if created {
+			raised = append(raised, *alert)
+		}
 		return err
 	}
 

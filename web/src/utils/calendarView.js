@@ -2,7 +2,7 @@
 // simple repeat editor that writes an RFC 5545 RRULE (G095).
 
 import {
-  dayKeyInZone, getUserTimeZone, isoToZonedWallClock, zonedWallClockToISO,
+  dayKeyInZone, getUserTimeZone, isoToZonedWallClock, isValidTimeZone, zonedWallClockToISO,
 } from '../lib/userTimeZone';
 
 export const VIEWS = ['month', 'week', 'agenda'];
@@ -119,12 +119,20 @@ export function daysIn(start, end, tz = getUserTimeZone()) {
   return dayKeysIn(start, end, tz).map((key) => keyStart(key, tz));
 }
 
+// itemZone is the zone an item's calendar day is read in: an all-day
+// event's own time_zone (it is stored as midnight there, so reading it in
+// another zone can land on the neighbouring day), else tz.
+export function itemZone(item, tz = getUserTimeZone()) {
+  return item?.all_day && isValidTimeZone(item.time_zone) ? item.time_zone : tz;
+}
+
 // Groups items by the day (in tz) they start on, sorted by start time
-// (all-day items first).
+// (all-day items first). All-day events are placed on their date in
+// their own time_zone.
 export function itemsByDay(items, tz = getUserTimeZone()) {
   const map = {};
   items.forEach((item) => {
-    const key = dayKey(item.start_at, tz);
+    const key = dayKey(item.start_at, itemZone(item, tz));
     (map[key] = map[key] || []).push(item);
   });
   Object.values(map).forEach((list) => list.sort((a, b) => {

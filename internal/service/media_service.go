@@ -152,6 +152,12 @@ func newMediaID() (string, error) {
 	return "m-" + hex.EncodeToString(b), nil
 }
 
+// CoursesTaughtToViewer lists courses (up to limit) where the media's
+// owner teaches and viewerID is enrolled; see the repository method.
+func (s *MediaService) CoursesTaughtToViewer(ctx context.Context, mo *models.MediaObject, viewerID uint, limit int) ([]uint, error) {
+	return s.media.CoursesTaughtToViewer(ctx, mo.UserID, viewerID, mo.AccountID, limit)
+}
+
 // Upload stores the file and creates its media object.
 func (s *MediaService) Upload(ctx context.Context, in UploadMediaInput) (*models.MediaObject, error) {
 	br := bufio.NewReaderSize(in.Data, 512)
