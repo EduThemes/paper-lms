@@ -20,12 +20,14 @@ const (
 // adds the player-facing identity: an unguessable MediaID that rich content
 // references (/api/v1/media_objects/:media_id/stream) and the caption tracks.
 //
-// Access model (mirrors Canvas, whose media ids are effectively public
-// identifiers): any signed-in user of the same tenant who has the media id
-// can play it — they saw it in content they were allowed to read. Editing
-// the title and captions is limited to the owner, tenant admins and, for
-// media uploaded in a course, that course's instructors; deleting to the
-// owner and tenant admins.
+// Access model (Canvas scopes media to its context): the owner and tenant
+// admins can always play it; media uploaded in a course (ContextType
+// "Course") also plays for anyone who can read that course, and any media
+// plays in a course its owner teaches for those who can read that course
+// (library reuse, course copy). Everyone else gets a 404. Editing the
+// title and captions is limited to the owner, tenant admins and, for media
+// uploaded in a course, that course's instructors; deleting to the owner
+// and tenant admins.
 type MediaObject struct {
 	ID           uint   `json:"id" gorm:"column:id;primaryKey"`
 	AccountID    uint   `json:"-" gorm:"not null;index"`

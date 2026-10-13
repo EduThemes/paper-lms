@@ -72,9 +72,11 @@ func mediaObjectJSON(m *models.MediaObject, tracks []models.MediaTrack, canEdit 
 	return out
 }
 
-// loadMedia loads :media_id in the caller's tenant. It writes a 404 and
-// returns wrote=true when the media is missing, deleted or in another
-// tenant; the caller must return immediately in that case.
+// loadMedia loads :media_id in the caller's tenant and checks the caller
+// may read it. It writes a 404 and returns wrote=true when the media is
+// missing, deleted, in another tenant or not readable by the caller (404,
+// not 403, so a media id does not reveal that the clip exists); the
+// caller must return immediately in that case.
 func (h *MediaObjectHandler) loadMedia(c *fiber.Ctx) (*models.MediaObject, bool, error) {
 	mediaID := strings.TrimSpace(c.Params("media_id"))
 	if mediaID == "" || len(mediaID) > 64 {
@@ -84,7 +86,52 @@ func (h *MediaObjectHandler) loadMedia(c *fiber.Ctx) (*models.MediaObject, bool,
 	if err != nil || m == nil {
 		return nil, true, responses.NotFound(c, "media object")
 	}
+	if !h.canRead(c, m) {
+		return nil, true, responses.NotFound(c, "media object")
+	}
 	return m, false, nil
+}
+
+// maxSharedCourseChecks bounds the courses canRead tries for the
+// owner-teaches-you rule (each check is a few queries).
+const maxSharedCourseChecks = 10
+
+// canRead is Canvas's context rule for media: the owner and tenant admins
+// always; for media uploaded in a course, anyone who can read that course
+// (an enrollment the course gate accepts, or a course admin). Media in a
+// user's own context is the owner's alone, with one extension for both
+// kinds: a clip is also readable in any course its owner teaches (teacher,
+// TA or designer) that the caller can read. That covers a teacher reusing
+// a clip from their library in another course they teach, and course copy
+// carrying a clip's embed into the new term's course. The tenant was
+// already checked by the load.
+func (h *MediaObjectHandler) canRead(c *fiber.Ctx, m *models.MediaObject) bool {
+	uid, _ := c.Locals("user_id").(uint)
+	if uid == 0 {
+		return false
+	}
+	if uid == m.UserID || callerIsAdmin(c, h.authz) {
+		return true
+	}
+	if h.authz == nil {
+		return false
+	}
+	if m.ContextType == "Course" && h.authz.RequireCourseEnrolled(c, m.ContextID) == nil {
+		return true
+	}
+	courses, err := h.svc.CoursesTaughtToViewer(c.Context(), m, uid, maxSharedCourseChecks)
+	if err != nil {
+		return false
+	}
+	for _, courseID := range courses {
+		if m.ContextType == "Course" && courseID == m.ContextID {
+			continue // already refused above
+		}
+		if h.authz.RequireCourseEnrolled(c, courseID) == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // canEdit: the owner, a tenant admin, or an instructor of the course the
