@@ -648,7 +648,7 @@ func main() {
 	featureFlagService := service.NewFeatureFlagService(featureFlagRepo, courseRepo, accountRepo, userRepo)
 	customGradebookColumnService := service.NewCustomGradebookColumnService(customGradebookColumnRepo, customColumnDatumRepo)
 	masteryPathService := service.NewMasteryPathService(masteryPathRepo, submissionRepo, assignmentRepo)
-	appointmentGroupService := service.NewAppointmentGroupService(appointmentGroupRepo, appointmentSlotRepo, appointmentReservationRepo, database)
+	appointmentGroupService := service.NewAppointmentGroupService(appointmentGroupRepo, appointmentSlotRepo, appointmentReservationRepo, database).SetNotifier(notificationDeliveryService)
 	outcomeProficiencyService := service.NewOutcomeProficiencyService(outcomeProficiencyRepo)
 	masteryGradebookService := service.NewMasteryGradebookService(enrollmentRepo, outcomeRepo, outcomeResultRepo, userRepo, outcomeProficiencyService)
 	masteryGradebookService.SetOutcomeGroupRepo(outcomeGroupRepo) // student mastery view group titles (G152)
@@ -893,7 +893,7 @@ func main() {
 	// admin-enrollments lane: enrollment lifecycle + invitations, multiple
 	// enrollments per course, section management and cross-listing.
 	enrollmentAdminRepo := postgres.NewEnrollmentAdminRepository(database)
-	enrollmentLifecycleService := service.NewEnrollmentLifecycleService(enrollmentAdminRepo, sectionRepo).SetNotifier(notificationService.CreateNotification)
+	enrollmentLifecycleService := service.NewEnrollmentLifecycleService(enrollmentAdminRepo, sectionRepo).SetNotifier(notificationDeliveryService)
 	enrollmentService.SetLifecycle(enrollmentLifecycleService)
 	enrollmentHandler.SetLifecycle(enrollmentLifecycleService)
 	sectionService := service.NewSectionService(postgres.NewSectionAdminRepository(database), enrollmentAdminRepo, courseRepo)
@@ -958,6 +958,7 @@ func main() {
 	announcementService.SetExtras(postgres.NewAnnouncementExtrasRepository(database))
 	notificationDeliveryService.SetPolicyStore(postgres.NewNotificationPolicyRepository(database))
 	conferenceService.SetSettingsLookup(settingsLookup)
+	conferenceService.SetInvitations(enrollmentRepo, courseRepo, notificationDeliveryService)
 	// Discussions parity: section / group visibility, graded submissions,
 	// subscription + @mention notifications (replaces notifying only the
 	// parent post's author).
@@ -1066,7 +1067,11 @@ func main() {
 	learnerDashboardService := service.NewLearnerDashboardService(learnerRepo, enrollmentRepo).SetAnnouncementVisibility(announcementService).
 		SetDueDateResolver(gradingPolicyService)
 	gradeSummaryService := service.NewGradeSummaryService(learnerRepo, enrollmentRepo, gradingPolicyService)
-	observerAlertService := service.NewObserverAlertService(learnerRepo, observerService, learnerDashboardService, gradeSummaryService).SetAnnouncementVisibility(announcementService)
+	observerAlertService := service.NewObserverAlertService(learnerRepo, observerService, learnerDashboardService, gradeSummaryService).SetAnnouncementVisibility(announcementService).
+		SetNotifier(notificationDeliveryService)
+	// Grade alerts fire as soon as a grade is visible, not on the next
+	// hourly scan.
+	submissionService.OnGraded(observerAlertService.GradedCallback(submissionRepo))
 	learnerHandler := handlers.NewLearnerHandler(plannerService, learnerDashboardService, gradeSummaryService, observerAlertService,
 		service.NewUserProfileService(userRepo, learnerRepo, storageBackend), observerService, userRepo)
 

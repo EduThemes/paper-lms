@@ -22,6 +22,26 @@ type NotificationCategory struct {
 // NotificationCategoryOther collects notification types no category lists.
 const NotificationCategoryOther = "other"
 
+// Notification types (the notificationType argument to QueueNotification)
+// raised from more than one place, or worth a name.
+const (
+	// NotificationEnrollmentInvitation: Canvas "Enrollment Invitation".
+	NotificationEnrollmentInvitation = "enrollment_invitation"
+	// NotificationWebConferenceInvitation: Canvas "Web Conference Invitation".
+	NotificationWebConferenceInvitation = "web_conference_invitation"
+	// NotificationAppointmentReservedByUser: Canvas "Appointment Reserved
+	// By User" (to the appointment group's instructors).
+	NotificationAppointmentReservedByUser = "appointment_reserved_by_user"
+	// NotificationAppointmentCanceledByUser: Canvas "Appointment Canceled
+	// By User" (to the appointment group's instructors).
+	NotificationAppointmentCanceledByUser = "appointment_canceled_by_user"
+	// NotificationAppointmentDeletedForUser: Canvas "Appointment Deleted For
+	// User" (to the participant whose appointment an instructor canceled).
+	NotificationAppointmentDeletedForUser = "appointment_deleted_for_user"
+	// NotificationObserverAlert: an observer alert threshold was crossed.
+	NotificationObserverAlert = "observer_alert"
+)
+
 // NotificationCategories is the catalog shown on the preferences page, in
 // display order.
 var NotificationCategories = []NotificationCategory{
@@ -45,8 +65,14 @@ var NotificationCategories = []NotificationCategory{
 		Types: []string{"submission_comment"}},
 	{Key: "calendar", Name: "Calendar", Description: "Calendar events start or change.",
 		Types: []string{"event_start", "calendar_event", "calendar_event_changed"}, legacyToggle: "event_start"},
-	{Key: "invitation", Name: "Invitation", Description: "Course, group and collaboration invitations.",
-		Types: []string{"enrollment_invitation", "group_invitation", "collaboration_invitation"}},
+	{Key: "invitation", Name: "Invitation", Description: "Course, group, collaboration and web conference invitations.",
+		Types: []string{NotificationEnrollmentInvitation, "group_invitation", "collaboration_invitation", NotificationWebConferenceInvitation}},
+	{Key: "appointment_signups", Name: "Appointment Signups", Description: "Students sign up for or cancel appointments in your scheduler.",
+		Types: []string{NotificationAppointmentReservedByUser, NotificationAppointmentCanceledByUser}},
+	{Key: "appointment_cancelations", Name: "Appointment Cancelations", Description: "An instructor cancels an appointment you signed up for.",
+		Types: []string{NotificationAppointmentDeletedForUser}},
+	{Key: "observer_alert", Name: "Observer Alerts", Description: "Alerts about the students you observe (grades, missing work, announcements).",
+		Types: []string{NotificationObserverAlert}},
 	{Key: NotificationCategoryOther, Name: "Other", Description: "Everything else."},
 }
 
