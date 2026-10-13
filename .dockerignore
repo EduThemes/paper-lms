@@ -1,0 +1,15 @@
+# Build context for deployments/docker/Dockerfile.{backend,frontend}
+# (context: repo root). Keep VCS data, local dependencies, build output
+# and local secrets out of the builder stages.
+.git
+**/node_modules
+web/dist
+web/coverage
+coverage.out
+coverage.html
+.env
+.env.*
+storage
+uploads
+.claude
+*.log
