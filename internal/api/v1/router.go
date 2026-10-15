@@ -164,6 +164,9 @@ type Router struct {
 	// which is the only authorized place to attach /superadmin/*
 	// routes; that helper carries the RequireSuperAdmin gate.
 	SuperAdminSettingsHandler *handlers.SuperAdminSettingsHandler
+	// AccountSettingsHandler — the account-admin slice of the Settings
+	// Engine (routes_account_settings.go).
+	AccountSettingsHandler *handlers.AccountSettingsHandler
 
 	// Pages, files and course shell (routes_pages_files.go).
 	PagesFiles *PagesFilesRoutes
@@ -902,6 +905,7 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerGroupsConferencesRoutes(protected, enrolled)
 	r.registerAdminEnrollmentRoutes(protected, instructor)
 	r.registerAdminAccountsRoutes(protected, admin, enrolled, instructor)
+	r.registerAccountSettingsRoutes(protected, admin)
 	r.registerLTIRoutes(protected, admin, enrolled, instructor)
 	r.registerAPICompatRoutes(app, protected, authLimit, admin, enrolled, selfOrAdmin)
 	r.registerLearnerRoutes(protected, enrolled)

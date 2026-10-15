@@ -842,6 +842,27 @@
     "hide": "Hide",
     "show": "Show"
   },
+  "adminSettingsPage": {
+    "pages": {
+      "title": "Pages",
+      "description": "What teachers can do on course pages.",
+      "cssLabel": "Let teachers write their own page CSS",
+      "cssHelp": "Designed pages (Page Designer) keep their colours, dark mode and layout either way. This controls hand-written CSS: Page CSS on ordinary pages and Custom CSS in the designer's Advanced tab. Everything is sanitized and scoped to the page, so it can't change the rest of Paper.",
+      "on": "On",
+      "off": "Off",
+      "lockedByInstance": "Turned off by your Paper administrator",
+      "lockedByAccount": "Turned off by {{name}}",
+      "lockedByParent": "Turned off by a parent account",
+      "inherited": "Using the default ({{state}}).",
+      "explicit": "Set for this account.",
+      "useDefault": "Use the default",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "loadError": "Couldn't load the page settings.",
+      "retry": "Try again",
+      "loading": "Loading page settings"
+    }
+  },
   "contentImport": {
     "title": "Import Content",
     "backToCourse": "← Back to Course",

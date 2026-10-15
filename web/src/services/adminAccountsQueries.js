@@ -14,6 +14,7 @@ export const adminKeys = {
   deletedCourses: (term) => ['adminAccounts', 'deletedCourses', term],
   auditLog: (page, filters) => ['adminAccounts', 'auditLog', page, filters],
   quotaDefaults: ['adminAccounts', 'quotaDefaults'],
+  accountSettings: ['adminAccounts', 'accountSettings'],
   assignableRoles: (courseId) => ['adminAccounts', 'assignableRoles', String(courseId)],
   coursePermissions: (courseId) => ['coursePermissions', String(courseId)],
   sisImport: (id) => ['adminAccounts', 'sisImport', String(id)],
@@ -170,6 +171,38 @@ export function useAccountAuditLog(page, filters, options = {}) {
     queryKey: adminKeys.auditLog(page, filters),
     queryFn: () => adminAccountsApi.getAccountAuditLog(page, 25, filters),
     ...options,
+  });
+}
+
+// ---- Account settings ----------------------------------------------------
+
+// The account-admin editable settings: [{ key, label, description, value,
+// effective, locked, locked_by }].
+export function useAccountSettings(options = {}) {
+  return useQuery({
+    queryKey: adminKeys.accountSettings,
+    queryFn: () => adminAccountsApi.getAccountSettings(),
+    ...options,
+  });
+}
+
+// PUT one key ({ key, value }); the response (the updated item) replaces
+// it in the cached list. Course JSON carries custom_css_enabled, so course
+// queries are refreshed too.
+export function useSetAccountSetting(options = {}) {
+  const queryClient = useQueryClient();
+  const { onSuccess, ...rest } = options;
+  return useMutation({
+    mutationFn: ({ key, value }) => adminAccountsApi.setAccountSetting(key, value),
+    ...rest,
+    onSuccess: (item, ...args) => {
+      queryClient.setQueryData(adminKeys.accountSettings, (list) =>
+        Array.isArray(list) ? list.map((s) => (s.key === item?.key ? item : s)) : list,
+      );
+      queryClient.invalidateQueries({ queryKey: adminKeys.accountSettings });
+      queryClient.invalidateQueries({ queryKey: ['courses'] });
+      onSuccess?.(item, ...args);
+    },
   });
 }
 

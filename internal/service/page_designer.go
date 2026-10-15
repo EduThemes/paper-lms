@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"reflect"
 	"strconv"
 	"strings"
@@ -20,20 +21,28 @@ import (
 // service cannot import that package — settings → auth → service).
 const PagesCustomCSSEnabledKey = "pages.custom_css_enabled"
 
-// CustomCSSEnabled resolves pages.custom_css_enabled for accountID. A nil
-// lookup, a lookup error or an unparsable value fall back to the catalog
-// default (on): the setting only narrows what teachers may do, so failing
-// open keeps the behaviour pages had before the setting existed.
+// CustomCSSEnabled resolves pages.custom_css_enabled for accountID. The
+// key is "off anywhere above wins" (settings.Definition.OffLocksBelow):
+// the Settings Engine reports false when the instance or any account in
+// accountID's parent chain, the account itself included, has it off, so
+// a sub-account can narrow its parent's choice but never widen it.
+//
+// A nil lookup, a lookup error or an unparsable value fall back to the
+// catalog default (on): the setting only narrows what teachers may do, so
+// failing open keeps the behaviour pages had before the setting existed.
+// Errors are logged, since failing open hides them otherwise.
 func CustomCSSEnabled(ctx context.Context, lookup SettingsLookupFunc, accountID uint) bool {
 	if lookup == nil {
 		return true
 	}
 	v, err := lookup(settingsctx.WithAccountID(ctx, accountID), PagesCustomCSSEnabledKey)
 	if err != nil {
+		slog.Warn("pages.custom_css_enabled lookup failed; allowing page CSS", "account_id", accountID, "error", err)
 		return true
 	}
 	b, err := strconv.ParseBool(strings.TrimSpace(v))
 	if err != nil {
+		slog.Warn("pages.custom_css_enabled has an unparsable value; allowing page CSS", "account_id", accountID, "value", v)
 		return true
 	}
 	return b

@@ -44,7 +44,8 @@ tests. Everything else in `web/` stays JSX.
    output to `#paper-page-<id>`. Teachers only. Setting `pages.custom_css_enabled` (default on), resolved
    for the **course's account** (the value course show reports, not the editor's own account), turns off
    hand-written CSS: a stylesheet is then accepted only together with a design, and a page without a design
-   carries none (see "API" and "Other write paths"). Designer-generated CSS still applies.
+   carries none (see "API" and "Other write paths"). Designer-generated CSS still applies. See
+   "The custom CSS setting" for how it resolves and who can change it.
 3. **Dark mode.** Paper's dark mode is the `dark` class on `<html>`. In a page stylesheet,
    `@media (prefers-color-scheme: dark)` is rewritten to follow that class (and `light` to its absence), so
    authors write standard CSS and it tracks the user's Paper toggle, not just the OS.
@@ -102,6 +103,46 @@ func Scope(css, root string) string
   designer keeps the teacher's own source in `doc.customCss`.
 - Values use the same validator as inline styles (`htmlsanitize.CSSValueOK`): `@` only inside URLs (for
   `@2x` art), no backslash escapes, functions from an allowlist.
+
+## The custom CSS setting
+
+`pages.custom_css_enabled` (Settings Engine, `internal/service/settings/catalog.go`; bool, instance and
+account scope, default `true`) controls **hand-written** CSS: Page CSS on ordinary pages and Custom CSS in
+the designer's Advanced tab. Designed pages keep their generated colours, dark mode and layout either way.
+
+**Off anywhere above wins** (`Definition.OffLocksBelow`). For an account, the effective value is `false` if
+the instance row is `false` or any account in its chain (the account itself and every
+`parent_account_id` ancestor) has an explicit `false`; otherwise the nearest explicit `true`, else the
+default. A sub-account can turn it off under a parent that allows it, but can't turn it back on under a
+parent (or the instance) that turned it off. `settings.Service.Get` applies this, so the shared settings
+lookup, course show, the page API, every other write path and the super-admin panel agree. A failed lookup
+falls back to on (and is logged), as before.
+
+**Who sets it.** Super-admins at any scope (`/superadmin/settings`). Tenant admins for their own account,
+on **Admin → Settings → Pages** (`web/src/components/admin/PageCssSettings.jsx`), through the account-admin
+settings API:
+
+- `GET /api/v1/accounts/:account_id/settings` → one entry per key with `AccountAdminEditable` (today only
+  this one):
+
+  ```json
+  [{ "key": "pages.custom_css_enabled", "label": "Hand-written page CSS", "description": "…",
+     "value": null, "effective": false, "locked": true,
+     "locked_by": { "scope": "account", "account_id": 4, "account_name": "Example District" } }]
+  ```
+
+  `value` is this account's own row (`null` = inherits). `locked_by` is the highest level above the
+  account holding it off: `{ "scope": "instance" }` or an ancestor account; `null` when not locked (the
+  account's own `false` is not a lock).
+- `PUT /api/v1/accounts/:account_id/settings/:key` with `{ "value": true | false | null }`. `null` clears
+  the account's row (inherit). `true` while locked is 422 ("Turned off by Example District…" /
+  "…by your Paper administrator"). A key that isn't account-admin editable is 404; a value of the wrong
+  JSON type is 400. Writes emit the `setting_change` audit row with the admin's user id.
+
+Both are behind `RequireAdmin`: a tenant admin for their own account (another account is 404, a teacher 403),
+a super-admin for any existing account. Sub-account administration isn't built yet; when it is, a
+parent-account admin acting on a descendant needs only the access check in
+`AccountSettingsHandler.settingsAccount` widened.
 
 ## Data model
 
@@ -170,7 +211,7 @@ Cartridge import store a page's design and stylesheet without the page API. Each
 destination course's account, a page that ends up without a design gets no stylesheet (nor `css_source`).
 
 **Courses**: show includes `look` and `custom_css_enabled` (the resolved `pages.custom_css_enabled` setting for
-the course's account); update accepts `course[look]` (`null` clears it).
+the course's account, "off anywhere above wins"); update accepts `course[look]` (`null` clears it).
 
 **Colour schemes**: `GET/POST /api/v1/users/self/design_colour_schemes`,
 `PUT/DELETE /api/v1/users/self/design_colour_schemes/:id`. Body `{ name, palette }`; palette keys as in
