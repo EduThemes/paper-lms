@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { getDesignedPage, useSaveDesignedPage } from '@/services/api_designer';
+import { getDesignedPage, useSaveDesignedPage, useUpdateCourseLook } from '@/services/api_designer';
 import { clearDraft, isPageDoc } from '../lib/autosave';
 import { docTitle } from '../lib/course';
 import { renderForSave, wikiPagePayload } from '../lib/savePage';
@@ -17,7 +17,7 @@ import { ThumbFrame } from '../components/PreviewFrames';
 import { useDesignerModules } from '../state/useDesignerModules';
 import { useIssues, useRendered } from '../state/derived';
 import { useDesigner } from '../state/context';
-import { tintOf } from '../lib/engine';
+import { courseLook, tintOf } from '../lib/engine';
 import { useDesignerT } from '../i18n';
 
 const errText = (e) => e?.message || String(e ?? '');
@@ -43,12 +43,16 @@ export function FinishStep() {
   const [title, setTitle] = useState(() => page?.title || docTitle(doc, t(`kind.${doc?.kind ?? 'home'}`)));
   const [publish, setPublish] = useState(page?.published ?? false);
   const [frontPage, setFrontPage] = useState(page?.frontPage ?? false);
+  // A home page's look belongs in the course header too, or the header's generated gradient sits above the
+  // page's own title band. On by default unless the course already has a look.
+  const [applyLook, setApplyLook] = useState(() => !course?.look);
   const [moduleId, setModuleId] = useState('');
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const updating = !!page?.url;
   const { modules } = useDesignerModules(courseId, !updating);
   const save = useSaveDesignedPage(courseId);
+  const setLook = useUpdateCourseLook(courseId);
 
   if (!doc) return null;
 
@@ -68,7 +72,16 @@ export function FinishStep() {
       );
       if (frontPage) setPublish(true);
       clearDraft(courseId);
-      setResult({ ...res, updated: !!slug, module: modules.find((m) => m.id === moduleId) });
+      let look;
+      if (frontPage && applyLook) {
+        try {
+          await setLook.mutateAsync(courseLook(rendered.doc));
+          look = true;
+        } catch (e) {
+          look = e instanceof Error ? e : new Error(errText(e));
+        }
+      }
+      setResult({ ...res, look, updated: !!slug, module: modules.find((m) => m.id === moduleId) });
     } catch (e) {
       setError(errText(e));
     }
@@ -114,6 +127,9 @@ export function FinishStep() {
           <TextField label={t('finish.pageTitle')} value={title} onChange={setTitle} required error={!title.trim() ? t('finish.pageTitleRequired') : undefined} />
           <Switch label={t('finish.publish')} checked={publish || frontPage} disabled={frontPage} onChange={setPublish} />
           <Switch label={t('finish.frontPage')} hint={t('finish.frontPageHint')} checked={frontPage} onChange={setFrontPage} />
+          {frontPage && (
+            <Switch label={t('finish.applyLook')} hint={course?.look ? t('finish.applyLookReplaceHint') : t('finish.applyLookHint')} checked={applyLook} onChange={setApplyLook} />
+          )}
           {!updating && modules.length > 0 && (
             <SelectField
               label={t('finish.addToModule')}
@@ -156,6 +172,8 @@ export function FinishStep() {
               >
                 {result.home === true && <p>{t('finish.homeDone')}</p>}
                 {result.home instanceof Error && <p>{t('finish.homeFailed', { error: errText(result.home) })}</p>}
+                {result.look === true && <p>{t('finish.lookDone')}</p>}
+                {result.look instanceof Error && <p>{t('finish.lookFailed', { error: errText(result.look) })}</p>}
                 {result.moduleItem && !(result.moduleItem instanceof Error) && result.module && <p>{t('finish.moduleDone', { module: result.module.name })}</p>}
                 {result.moduleItem instanceof Error && <p>{t('finish.moduleFailed', { error: errText(result.moduleItem) })}</p>}
               </Notice>

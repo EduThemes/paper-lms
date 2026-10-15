@@ -90,6 +90,22 @@ describe('choose → customize → finish', () => {
     const wp = fake.current.api.createPage.mock.calls[0][1];
     expect(wp).toMatchObject({ front_page: true, published: true });
     expect(fake.current.api.updateCourse).toHaveBeenCalledWith('42', { default_view: 'wiki' });
+    // The course header takes the page's look (the course had none).
+    await screen.findByText('The course header now uses this look.');
+    const lookCall = fake.current.api.updateCourse.mock.calls.find(([, c]) => 'look' in c);
+    expect(lookCall[1].look).toMatchObject({ theme_id: expect.any(String), colors: { primary: expect.stringMatching(/^#[0-9a-f]{6}$/) } });
+  });
+
+  it('leaves the course header alone when the teacher turns the look off', async () => {
+    const user = userEvent.setup();
+    open();
+    await pickFirstTheme(user);
+    await user.click(screen.getByRole('button', { name: /Next: Finish/ }));
+    await user.click(screen.getByRole('switch', { name: 'Make it the course home page' }));
+    await user.click(screen.getByRole('switch', { name: 'Use this look for the course header' }));
+    await user.click(screen.getByRole('button', { name: 'Save page' }));
+    await screen.findByText('It’s now the course home page.');
+    expect(fake.current.api.updateCourse.mock.calls.some(([, c]) => 'look' in c)).toBe(false);
   });
 
   it('deletes a section with an undo toast, and Cmd/Ctrl+Z brings it back', async () => {

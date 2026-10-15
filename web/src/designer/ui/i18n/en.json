@@ -347,7 +347,12 @@
     "moduleDone": "Added to {{module}}.",
     "moduleFailed": "The page was saved, but we couldn’t add it to the module: {{error}}",
     "error": "We couldn’t save the page: {{error}}",
-    "newPage": "Design another page"
+    "newPage": "Design another page",
+    "applyLook": "Use this look for the course header",
+    "applyLookHint": "The banner and colours at the top of every course page match this page.",
+    "applyLookReplaceHint": "Replaces the course’s current look in the header at the top of every course page.",
+    "lookDone": "The course header now uses this look.",
+    "lookFailed": "The page was saved, but we couldn’t update the course header: {{error}}"
   },
   "edit": {
     "loading": "Opening your page…",

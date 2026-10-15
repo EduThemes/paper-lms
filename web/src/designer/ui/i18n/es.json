@@ -347,7 +347,12 @@
     "moduleDone": "Se añadió a {{module}}.",
     "moduleFailed": "La página se guardó, pero no pudimos añadirla al módulo: {{error}}",
     "error": "No pudimos guardar la página: {{error}}",
-    "newPage": "Diseñar otra página"
+    "newPage": "Diseñar otra página",
+    "applyLook": "Usar este estilo en el encabezado del curso",
+    "applyLookHint": "El banner y los colores de la parte superior de cada página del curso coinciden con esta página.",
+    "applyLookReplaceHint": "Sustituye el estilo actual del curso en el encabezado de cada página del curso.",
+    "lookDone": "El encabezado del curso ahora usa este estilo.",
+    "lookFailed": "La página se guardó, pero no pudimos actualizar el encabezado del curso: {{error}}"
   },
   "edit": {
     "loading": "Abriendo tu página…",
