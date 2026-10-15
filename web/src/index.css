@@ -374,3 +374,75 @@
   border-top: 1px solid rgb(var(--color-border-default));
   margin: 1.5em 0;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Rich-content containment (components/contentContainment.js)
+
+   Every rich-content root is a containment box (contain: layout paint;
+   isolation: isolate, set inline). Paint containment clips at the root's
+   edge, so a wide table or display equation would be cut off; let it scroll
+   sideways instead. Vertical overflow stays clipped: that is what keeps
+   absolutely positioned content from covering Paper's own interface.
+   ───────────────────────────────────────────────────────────────────────── */
+.paper-contained {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.paper-contained .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Course look (utils/courseLook.js): the course header and dashboard card
+   take the banner art and colours a teacher picked in the Page Designer.
+   The component sets --look-* custom properties inline; these rules pick the
+   light or dark colourway from Paper's own theme (the `dark` class on html),
+   so they follow the user's toggle, not just the OS.
+   ───────────────────────────────────────────────────────────────────────── */
+.course-look {
+  --look-bg: var(--look-primary);
+  --look-bg-rgb: var(--look-primary-rgb);
+  --look-fg: var(--look-on-primary);
+  --look-shadow: var(--look-text-shadow);
+  background-color: var(--look-bg);
+  color: var(--look-fg);
+}
+.dark .course-look {
+  --look-bg: var(--look-primary-dark);
+  --look-bg-rgb: var(--look-primary-dark-rgb);
+  --look-fg: var(--look-on-primary-dark);
+  --look-shadow: var(--look-text-shadow-dark);
+}
+/* Scrim between banner art and header text. On phones the text spans the
+   whole header, so the scrim is even; from sm up the text sits on the left
+   and the art shows through on the right. The scrim colour is the look's
+   primary, whose on-primary text colour the theme catalog checks for AA. */
+.course-look-scrim {
+  background: rgb(var(--look-bg-rgb) / 0.86);
+}
+@media (min-width: 640px) {
+  .course-look-scrim {
+    background: linear-gradient(
+      90deg,
+      rgb(var(--look-bg-rgb) / 0.95) 0%,
+      rgb(var(--look-bg-rgb) / 0.9) 50%,
+      rgb(var(--look-bg-rgb) / 0.55) 78%,
+      rgb(var(--look-bg-rgb) / 0.25) 100%
+    );
+  }
+}
+.course-look-text {
+  color: var(--look-fg);
+  text-shadow: var(--look-shadow);
+}
+
+/* Designed pages (components/pages/DesignedPageView.jsx) bring their own
+   typography but keep a reader's own font and spacing choices. The reading
+   font is published as --reading-font-choice only when the reader picked one
+   (ReadingPrefsContext); the designer writes headings as
+   var(--reading-font-choice, <theme font>). */
+.paper-page {
+  font-family: var(--reading-font-choice, inherit);
+  letter-spacing: var(--reading-letter-spacing, normal);
+}
