@@ -36,10 +36,15 @@ tests. Everything else in `web/` stays JSX.
    (`url()` limited to https and Paper's own files/assets, gradients, size/position/repeat), `font-weight`,
    `letter-spacing`, `text-transform`, `text-shadow`, `box-shadow`, `opacity`, `transform`, `transition`,
    `filter`, `aspect-ratio`, `object-fit`, logical properties, `calc()`/`min()`/`max()`/`clamp()`/`var()`.
-   Values are validated, not just property names. Alt text and titles keep any printable text.
+   Values are validated, not just property names. Only `background` and `background-image` may load a URL
+   (`url()`/`image-set()`); `filter`, `border-image*`, `list-style*`, `clip-path`, `shape-outside` and the
+   rest keep their non-URL values, and `cursor` takes keywords only. Alt text and titles keep any printable
+   text.
 2. **Page stylesheet** (wiki pages only, `wiki_pages.css`). Real CSS, sanitized on save and scoped on
-   output to `#paper-page-<id>`. Teachers only. Account setting `pages.custom_css_enabled` (default on) turns
-   off hand-written CSS; designer-generated CSS still applies.
+   output to `#paper-page-<id>`. Teachers only. Setting `pages.custom_css_enabled` (default on), resolved
+   for the **course's account** (the value course show reports, not the editor's own account), turns off
+   hand-written CSS: a stylesheet is then accepted only together with a design, and a page without a design
+   carries none (see "API" and "Other write paths"). Designer-generated CSS still applies.
 3. **Dark mode.** Paper's dark mode is the `dark` class on `<html>`. In a page stylesheet,
    `@media (prefers-color-scheme: dark)` is rewritten to follow that class (and `light` to its absence), so
    authors write standard CSS and it tracks the user's Paper toggle, not just the OS.
@@ -48,20 +53,38 @@ The page root is a containment box (`contain: layout paint; isolation: isolate`)
 including `position: fixed` from its stylesheet, can draw over Paper's own interface. Every rich-content
 viewer applies the same containment.
 
+**Email is different.** A mail client applies none of that containment, so outgoing email bodies
+(`htmlsanitize.SanitizeEmail`, used by every notification email) keep the same elements but only the
+conservative inline styles rich content had before the designer: typography, colour, box model and alignment.
+No `position`, offsets, `z-index`, transforms, and no URL-loading values.
+
 ### Page stylesheet rules (`csssanitize`)
 
 ```go
 // Sanitize parses author CSS and returns it normalized, keeping only what is allowed.
-// It is idempotent. ErrTooLarge when the input exceeds MaxBytes (200 KB).
+// It is idempotent. ErrTooLarge when the input exceeds MaxBytes (200 KB), or when the
+// normalized (reformatted, so larger) sheet would exceed MaxScopeBytes (400 KB).
 func Sanitize(css string) (string, error)
 
+// Resanitize re-applies the rules to a stored, already-sanitized sheet (input up to MaxScopeBytes).
+func Resanitize(css string) (string, error)
+
 // Scope rewrites sanitized CSS so it applies only inside root (e.g. "#paper-page-42").
+// Input up to MaxScopeBytes, so a sheet that grew past MaxBytes when sanitized still scopes.
 func Scope(css, root string) string
 ```
 
 - Every selector is prefixed with `root` as an ancestor. A bare `:root`, `html`, `body` or `html body`
   becomes `root` itself; a qualified one keeps its qualifier on the real element (`html.dark p` →
-  `html.dark root p`). Selectors that reach siblings of the root (`:root + p`, a leading `~`) are dropped.
+  `html.dark root p`). Those qualifiers may only be classes and `[attr]` / `[attr=value]` tests: any other
+  (`html:has(…)`, `body:not(.x)`, `html[lang^=e]`) drops the selector, since it would test Paper's document
+  outside the page (and a `:has()` on the root could look at its siblings). Selectors that reach siblings of
+  the root (`:root + p`, a leading `~`) are dropped. Write light-only rules with
+  `@media (prefers-color-scheme: light)`, not `html:not(.dark)`.
+- Inside `:is()`, `:where()` and `:not()` a selector may not use a combinator (descendant, `>`, `+`, `~`),
+  and nothing inside any selector function may name `html`, `body`, `:root` or `:scope`;
+  `:nth-child(An+B of S)` is refused. Such a selector is dropped (`p:is(html:has(a[href*=x]) *)`).
+  `:has()` elsewhere is fine (`.card:has(img)`, `li:has(> img)`).
 - Rules whose subject is the root itself may only set custom properties and properties that paint inside
   the box (colour, fonts, backgrounds, borders, padding, text and gap properties), so a stylesheet can't
   undo the containment with `position: fixed`, `display: contents` and the like.
@@ -71,6 +94,10 @@ func Scope(css, root string) string
 - Dropped: `@import`, `@font-face`, `@namespace`, `@charset`, `@page`, `@layer`, `@property`, unknown at-rules,
   `expression()`, `-moz-binding`, `behavior`, `javascript:`, and `url()` other than `https:`,
   `/api/v1/files/<id>/download`, `/api/v1/design/icons/…` and `/design-assets/…`.
+- A value may load a URL only in `background` / `background-image`, and in `content` on a rule whose
+  selectors all target `img` (the designer's `img[data-pd-icon]{content:url(…)}` dark-mode icon swap). Not in
+  `filter`, `border-image`, `list-style`, `cursor`, `mask`, `clip-path`, nor a custom property (`var()` could
+  carry it anywhere).
 - `</style` can never appear in output. Comments are removed and the sheet is reformatted, so the
   designer keeps the teacher's own source in `doc.customCss`.
 - Values use the same validator as inline styles (`htmlsanitize.CSSValueOK`): `@` only inside URLs (for
@@ -82,7 +109,7 @@ func Scope(css, root string) string
 | --- | --- | --- |
 | `wiki_pages.css` | `text NOT NULL DEFAULT ''` | Sanitized, unscoped page stylesheet. |
 | `wiki_pages.css_source` | `text NOT NULL DEFAULT ''` | The stylesheet as the teacher typed it (comments, formatting), for the editor only. Never served to readers. |
-| `wiki_pages.design` | `jsonb NULL` | The `PageDoc` a designed page was made from. `NULL` = an ordinary page. |
+| `wiki_pages.design` | `jsonb NULL` | The `PageDoc` a designed page was made from, cleaned by the server (below). `NULL` = an ordinary page. Sent to course staff only. |
 | `wiki_page_revisions.css`, `.design` | same | Snapshotted with every revision, restored with it. |
 | `courses.look` | `jsonb NULL` | The course's look (below). `NULL` = Paper's generated header. |
 | `design_colour_schemes` | table | A teacher's saved palettes: `id, account_id, user_id, name, palette jsonb, created_at, updated_at`. |
@@ -109,13 +136,38 @@ under `/design-assets/` or are `/api/v1/files/<id>/download` for a file in this 
 
 **Pages** (`/api/v1/courses/:course_id/pages…`)
 
-- Show returns `css` (stored), `scoped_css` (scoped to `#paper-page-<id>`) and `design` (object or `null`).
-  Course staff also get `css_source` while it still sanitizes to `css`.
+- Show (including the front page and the anonymous public page) returns `css` (stored), `scoped_css` (scoped
+  to `#paper-page-<id>`) and `has_design`. Course staff (who can see unpublished content) also get `design`
+  (object or `null`) and `css_source` while it still sanitizes to `css`; readers get neither, and render
+  `body` + `scoped_css`. Clients decide "is this a designed page" from `has_design`.
   List returns `has_design` and omits `css`/`design`.
+- Revisions return `has_design` and, with the body, `css`; `design` for course staff only; never `css_source`.
 - Create/Update accept `wiki_page[css]` and `wiki_page[design]` (`null` clears it, turning the page back into
   an ordinary page). Only users who can manage course content may set either; a student editor sending them
-  gets 403. With `pages.custom_css_enabled` off, `css` is accepted only together with a non-null `design`.
-- `design` must be a JSON object with `version: 1` and a string `id`, ≤ 256 KB.
+  gets 403. With `pages.custom_css_enabled` off for the course's account, `css` is accepted only together
+  with a non-null `design`, and a request that sets `design: null` also clears `css` and `css_source`
+  (hand-written CSS can't outlive the design). With it on, a detach without `css` keeps the stylesheet.
+- `design` must be a JSON object with `version: 1` and a string `id`, ≤ 256 KB (else 422). The rest is
+  cleaned, not refused (`designdoc.ValidateDesign`), against `engine/types.ts`, because the designer writes
+  some fields straight into the page:
+  - unknown section types and members, and unknown top-level members, are dropped; at most 60 sections and
+    100 entries per list;
+  - RichText (`welcome`/`callout`/`text` `body`, `instructor.bio`) keeps only `p, strong, em, a[href], ul, ol,
+    li, br`, links passing the engine's `safeHref` rule;
+  - link targets (`quick-links.links[].href`, `schedule.items[].href`, `this-week.items[].href`) are kept only
+    if `safeHref` accepts them (https, http, mailto, relative incl. `{course}`), else the field is dropped;
+  - images (`banner.customSrc`, `instructor.photoSrc`) only if `https://…`, `/api/v1/files/<id>/download…` or
+    `/design-assets/…` (no http or protocol-relative upgrade);
+  - `palette` only if it passes the colour-scheme validation;
+  - plain strings lose control characters and are cut to 200 (ids, headings, labels) or 2,000 characters;
+    `customCss` stays text (it is sanitized when it becomes `css`), cut to 200 KB.
+
+  A design the engine produced comes back with the same values, so `data-pd-hash` still matches.
+
+**Other write paths.** Revision restore, Commons import, blueprint sync, course copy, batch clone and Common
+Cartridge import store a page's design and stylesheet without the page API. Each re-cleans the design
+(`ValidateDesign`) and re-sanitizes the stylesheet, and when `pages.custom_css_enabled` is off for the
+destination course's account, a page that ends up without a design gets no stylesheet (nor `css_source`).
 
 **Courses**: show includes `look` and `custom_css_enabled` (the resolved `pages.custom_css_enabled` setting for
 the course's account); update accepts `course[look]` (`null` clears it).

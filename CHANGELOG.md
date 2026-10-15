@@ -37,6 +37,15 @@ one look. See [docs/page-designer](./docs/page-designer/README.md).
   draw over Paper's own interface.
 - **Fixed**: image alt text and titles containing `:`, `?`, `&`, quotes or
   an em dash were silently dropped on save.
+- **Security hardening** (audit follow-ups): the server cleans every stored
+  design against the engine schema (rich text, links, images, palette,
+  lengths); `design` and `css_source` go to course staff only;
+  `pages.custom_css_enabled` is enforced for the course's account on every
+  write path; a page stylesheet can't query the document outside the page
+  (`html:has(…)`, combinators inside `:is()`); only backgrounds (and
+  `content` on `img` in a stylesheet) may load a URL; outgoing emails use a
+  conservative style policy; uploads are never served with a script
+  `Content-Type`.
 - Migrations 000136 (page css/css_source/design, revision snapshots,
   course look) and 000137 (`design_colour_schemes`).
 
