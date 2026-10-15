@@ -108,7 +108,8 @@ under `/design-assets/` or are `/api/v1/files/<id>/download` for a file in this 
   gets 403. With `pages.custom_css_enabled` off, `css` is accepted only together with a non-null `design`.
 - `design` must be a JSON object with `version: 1` and a string `id`, ≤ 256 KB.
 
-**Courses**: show includes `look`; update accepts `course[look]` (`null` clears it).
+**Courses**: show includes `look` and `custom_css_enabled` (the resolved `pages.custom_css_enabled` setting for
+the course's account); update accepts `course[look]` (`null` clears it).
 
 **Colour schemes**: `GET/POST /api/v1/users/self/design_colour_schemes`,
 `PUT/DELETE /api/v1/users/self/design_colour_schemes/:id`. Body `{ name, palette }`; palette keys as in
