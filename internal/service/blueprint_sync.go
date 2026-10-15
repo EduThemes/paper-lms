@@ -777,6 +777,7 @@ func applyPageFields(dst, src *models.WikiPage) {
 	dst.WebsiteMode = src.WebsiteMode
 	// Page Designer stylesheet and design travel with the page.
 	dst.CSS = src.CSS
+	dst.CSSSource = src.CSSSource
 	dst.Design = src.Design
 }
 

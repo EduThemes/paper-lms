@@ -82,6 +82,10 @@ func (h *PageHandler) applyPageDesignInput(c *fiber.Ctx, page *models.WikiPage, 
 	}
 	if css != nil {
 		page.CSS = newCSS
+		page.CSSSource = ""
+		if newCSS != "" {
+			page.CSSSource = *css
+		}
 	}
 	return false, nil
 }

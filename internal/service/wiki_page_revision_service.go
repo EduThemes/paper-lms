@@ -37,10 +37,11 @@ func editorPtr(editedBy uint) *uint {
 // PageSnapshot is the part of a page that is versioned: title, body,
 // stylesheet and design.
 type PageSnapshot struct {
-	Title  string
-	Body   string
-	CSS    string
-	Design models.NullJSON
+	Title     string
+	Body      string
+	CSS       string
+	CSSSource string
+	Design    models.NullJSON
 }
 
 // SnapshotOf returns page's versioned content.
@@ -48,13 +49,13 @@ func SnapshotOf(page *models.WikiPage) PageSnapshot {
 	if page == nil {
 		return PageSnapshot{}
 	}
-	return PageSnapshot{Title: page.Title, Body: page.Body, CSS: page.CSS, Design: page.Design}
+	return PageSnapshot{Title: page.Title, Body: page.Body, CSS: page.CSS, CSSSource: page.CSSSource, Design: page.Design}
 }
 
 // Equal reports whether two snapshots hold the same content. Designs are
 // compared as JSON values: jsonb hands documents back re-formatted.
 func (a PageSnapshot) Equal(b PageSnapshot) bool {
-	return a.Title == b.Title && a.Body == b.Body && a.CSS == b.CSS && jsonValuesEqual(a.Design, b.Design)
+	return a.Title == b.Title && a.Body == b.Body && a.CSS == b.CSS && a.CSSSource == b.CSSSource && jsonValuesEqual(a.Design, b.Design)
 }
 
 // CreateRevision appends snap as the page's next revision.
@@ -64,6 +65,7 @@ func (s *WikiPageRevisionService) CreateRevision(ctx context.Context, pageID uin
 		Title:      snap.Title,
 		Body:       snap.Body,
 		CSS:        snap.CSS,
+		CSSSource:  snap.CSSSource,
 		Design:     snap.Design,
 		EditedBy:   editorPtr(editedBy),
 	}
@@ -156,6 +158,7 @@ func (s *WikiPageRevisionService) RevertToRevision(ctx context.Context, page *mo
 			page.CSS = css
 		}
 	}
+	page.CSSSource = target.CSSSource
 	page.Design = target.Design
 	if err := s.pageRepo.Update(ctx, page); err != nil {
 		return nil, err

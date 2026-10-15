@@ -5,13 +5,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/security/csssanitize"
 	"github.com/EduThemes/paper-lms/internal/service"
 	"github.com/EduThemes/paper-lms/internal/service/gamification"
+	"github.com/gofiber/fiber/v2"
 )
 
 type PageHandler struct {
@@ -112,14 +112,32 @@ func pageListJSON(p *models.WikiPage) fiber.Map {
 // pageDetailJSON is a single page: its stylesheet as stored (css), the
 // same stylesheet scoped to the page root #paper-page-<id> (scoped_css,
 // what readers apply), and the Page Designer document (design, or null).
-// The client wraps the body in <div id="paper-page-<id>">.
-func pageDetailJSON(p *models.WikiPage) fiber.Map {
+// Course staff also get css_source, the stylesheet as typed, for the
+// editor. The client wraps the body in <div id="paper-page-<id>">.
+func pageDetailJSON(c *fiber.Ctx, p *models.WikiPage) fiber.Map {
 	out := pageToJSON(p)
 	out["css"] = p.CSS
+	if src := pageCSSSource(p); src != "" && canViewUnpublishedContent(c) {
+		out["css_source"] = src
+	}
 	out["scoped_css"] = scopedPageCSS(p)
 	out["design"] = p.Design
 	out["has_design"] = !p.Design.IsNull()
 	return out
+}
+
+// pageCSSSource is the teacher's own text for the page stylesheet, or ""
+// when it no longer sanitizes to the stored CSS (a course copy rewrote
+// links, a sync or import replaced CSS without it): then the editor falls
+// back to css rather than showing text that isn't what the page uses.
+func pageCSSSource(p *models.WikiPage) string {
+	if p.CSSSource == "" || p.CSS == "" {
+		return ""
+	}
+	if css, err := csssanitize.Sanitize(p.CSSSource); err != nil || css != p.CSS {
+		return ""
+	}
+	return p.CSSSource
 }
 
 // pageRootID is the element id a page's stylesheet is scoped to.
@@ -193,7 +211,7 @@ func (h *PageHandler) GetPage(c *fiber.Ctx) error {
 	}
 
 	h.recordPageView(c, page)
-	out := pageDetailJSON(page)
+	out := pageDetailJSON(c, page)
 	// G074: tells the client whether to offer Edit / History.
 	out["can_edit"] = canEditPage(c, page)
 	return c.JSON(out)
@@ -215,7 +233,7 @@ func (h *PageHandler) GetFrontPage(c *fiber.Ctx) error {
 		return responses.NotFound(c, "front page")
 	}
 	h.recordPageView(c, page)
-	return c.JSON(pageDetailJSON(page))
+	return c.JSON(pageDetailJSON(c, page))
 }
 
 func (h *PageHandler) GetPublicPage(c *fiber.Ctx) error {
@@ -234,5 +252,5 @@ func (h *PageHandler) GetPublicPage(c *fiber.Ctx) error {
 		return responses.NotFound(c, "page")
 	}
 
-	return c.JSON(pageDetailJSON(page))
+	return c.JSON(pageDetailJSON(c, page))
 }

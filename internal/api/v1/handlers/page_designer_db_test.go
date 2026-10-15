@@ -27,14 +27,6 @@ import (
 	"github.com/EduThemes/paper-lms/internal/testutil"
 )
 
-// realCSSSanitizer reports whether csssanitize keeps anything yet. Until
-// the real sanitizer lands it is a placeholder that returns "", and the
-// assertions on stored CSS are skipped.
-func realCSSSanitizer() bool {
-	out, err := csssanitize.Sanitize("p{color:red}")
-	return err == nil && out != ""
-}
-
 type designFixture struct {
 	g           *gorm.DB
 	pages       *handlers.PageHandler
@@ -139,12 +131,8 @@ func TestPageDesign_CreateShowListUpdateAndRevisions(t *testing.T) {
 	assert.Equal(t, "doc-1", shown["design"].(map[string]any)["id"])
 	assert.Contains(t, shown, "css")
 	assert.Contains(t, shown, "scoped_css")
-	if realCSSSanitizer() {
-		assert.NotEmpty(t, shown["css"])
-		assert.Contains(t, shown["scoped_css"], fmt.Sprintf("#paper-page-%v", pageID))
-	} else {
-		t.Log("csssanitize is still the placeholder: stored CSS assertions skipped")
-	}
+	assert.NotEmpty(t, shown["css"])
+	assert.Contains(t, shown["scoped_css"], fmt.Sprintf("#paper-page-%v", pageID))
 
 	// The list says which pages are designed but carries neither field.
 	resp = testutil.MakeRequest(teacher, http.MethodPost, "/courses/100/pages", pageBody(map[string]any{"title": "Plain", "published": true}))
@@ -202,9 +190,42 @@ func TestPageDesign_CreateShowListUpdateAndRevisions(t *testing.T) {
 	restored := jsonMap(t, resp)
 	require.IsType(t, map[string]any{}, restored["design"])
 	assert.Equal(t, "doc-1", restored["design"].(map[string]any)["id"])
-	if realCSSSanitizer() {
-		assert.NotEmpty(t, restored["css"])
-	}
+	assert.NotEmpty(t, restored["css"])
+}
+
+// The editor gets the stylesheet back as the teacher typed it (comments and
+// formatting), readers never do, and a source that no longer sanitizes to
+// the stored CSS is not shown at all.
+func TestPageDesign_CSSSourceKeptForStaff(t *testing.T) {
+	f := newDesignFixture(t)
+	teacher := f.app(8, 1, "TeacherEnrollment")
+	student := f.app(9, 1, "StudentEnrollment")
+	typed := "/* brand colours */\np {\n  color: red;\n}\n"
+
+	resp := testutil.MakeRequest(teacher, http.MethodPost, "/courses/100/pages", pageBody(map[string]any{
+		"title": "Styled", "body": "<p>Hi</p>", "published": true, "css": typed,
+	}))
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	created := jsonMap(t, resp)
+	assert.Equal(t, typed, created["css_source"])
+	assert.NotContains(t, created["css"], "brand colours")
+
+	resp = testutil.MakeRequest(student, http.MethodGet, "/courses/100/pages/styled", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.NotContains(t, jsonMap(t, resp), "css_source")
+
+	// A copy or sync that rewrote css without the source: fall back to css.
+	require.NoError(t, f.g.Exec("UPDATE wiki_pages SET css = 'p{color:blue}' WHERE url = 'styled'").Error)
+	resp = testutil.MakeRequest(teacher, http.MethodGet, "/courses/100/pages/styled", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.NotContains(t, jsonMap(t, resp), "css_source")
+
+	// Clearing the stylesheet clears the source too.
+	resp = testutil.MakeRequest(teacher, http.MethodPut, "/courses/100/pages/styled", pageBody(map[string]any{"css": ""}))
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var source string
+	require.NoError(t, f.g.Raw("SELECT css_source FROM wiki_pages WHERE url = 'styled'").Scan(&source).Error)
+	assert.Empty(t, source)
 }
 
 // The front page and the public page render pages too, so they share the

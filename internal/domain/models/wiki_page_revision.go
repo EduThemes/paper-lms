@@ -21,8 +21,9 @@ type WikiPageRevision struct {
 
 	// CSS and Design snapshot the page stylesheet and designer document
 	// (see WikiPage). Migration 000136.
-	CSS    string   `gorm:"column:css;type:text;not null;default:''" json:"css"`
-	Design NullJSON `gorm:"column:design;type:jsonb" json:"design"`
+	CSS       string   `gorm:"column:css;type:text;not null;default:''" json:"css"`
+	CSSSource string   `gorm:"column:css_source;type:text;not null;default:''" json:"-"`
+	Design    NullJSON `gorm:"column:design;type:jsonb" json:"design"`
 }
 
 func (WikiPageRevision) TableName() string {

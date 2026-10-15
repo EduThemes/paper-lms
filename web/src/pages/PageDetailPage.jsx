@@ -18,7 +18,7 @@ import { useCourseUI } from '../contexts/CourseUIContext';
 import DesignedPageView, { PageContent } from '../components/pages/DesignedPageView';
 import PageCssPanel from '../components/pages/PageCssPanel';
 import DetachDesignDialog from '../components/pages/DetachDesignDialog';
-import { isDesignedPage, designerPath } from '../utils/pageDesign';
+import { isDesignedPage, designerPath, pageCssSource } from '../utils/pageDesign';
 
 const PageDetailPage = () => {
   const { courseId, slug } = useParams();
@@ -75,7 +75,7 @@ const PageDetailPage = () => {
       setDetachOpen(true);
       return;
     }
-    setEditForm({ ...editFormFromPage(page), css: page?.css || '' });
+    setEditForm({ ...editFormFromPage(page), css: pageCssSource(page) });
     setHtmlMode(asHtml);
     setEditing(true);
   };
@@ -96,7 +96,7 @@ const PageDetailPage = () => {
     try {
       const update = buildPageUpdate(editForm, { isTeacher });
       if (htmlMode) update.design = null;
-      if (showCssPanel && (editForm.css || '') !== (page?.css || '')) update.css = editForm.css || '';
+      if (showCssPanel && (editForm.css || '') !== pageCssSource(page)) update.css = editForm.css || '';
       const saved = await api.updatePage(courseId, slug, update);
       clearRceDraft(`page-${courseId}-${slug || 'new'}-body`);
       // Show what the server stored (it sanitizes the body), not the local

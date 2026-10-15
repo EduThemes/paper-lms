@@ -252,6 +252,7 @@ func (s *BatchService) clonePages(ctx context.Context, sourceCourseID, destCours
 			EditingRoles:  p.EditingRoles,
 			FrontPage:     p.FrontPage,
 			CSS:           p.CSS,
+			CSSSource:     p.CSSSource,
 			Design:        p.Design,
 		}
 		if err := s.pageRepo.Create(ctx, newPage); err != nil {

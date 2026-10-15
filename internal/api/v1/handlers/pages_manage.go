@@ -228,7 +228,7 @@ func (h *PageHandler) CreatePage(c *fiber.Ctx) error {
 	}
 	h.recordRevision(c, page, service.PageSnapshot{}, true)
 
-	return c.Status(fiber.StatusCreated).JSON(pageDetailJSON(page))
+	return c.Status(fiber.StatusCreated).JSON(pageDetailJSON(c, page))
 }
 
 // UpdatePage handles PUT /courses/:course_id/pages/:url_or_id. The route
@@ -344,7 +344,7 @@ func (h *PageHandler) UpdatePage(c *fiber.Ctx) error {
 	}
 	h.recordRevision(c, page, prev, false)
 
-	return c.JSON(pageDetailJSON(page))
+	return c.JSON(pageDetailJSON(c, page))
 }
 
 func (h *PageHandler) DeletePage(c *fiber.Ctx) error {
