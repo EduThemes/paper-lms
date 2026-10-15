@@ -1,17 +1,17 @@
 import { t, type StringKey } from './strings';
 import type { LayoutId, Locale, PageDoc, PageKind, QuickLink, QuickLinkSlot, Section, SectionType, Theme } from './types';
 
-/** Default Canvas destinations per slot. `{course}` is replaced with the course id at render/insert time. */
+/** Default Paper destinations per slot. `{course}` is replaced with the course id at render/insert time. */
 export const SLOT_HREFS: Record<QuickLinkSlot, string> = {
   start: '/courses/{course}/pages/start-here',
-  syllabus: '/courses/{course}/assignments/syllabus',
+  syllabus: '/courses/{course}/syllabus',
   modules: '/courses/{course}/modules',
   assignments: '/courses/{course}/assignments',
-  discussions: '/courses/{course}/discussion_topics',
+  discussions: '/courses/{course}/discussions',
   grades: '/courses/{course}/grades',
   help: '/courses/{course}/pages/getting-help',
   instructor: '/courses/{course}/pages/meet-your-instructor',
-  calendar: '/calendar?include_contexts=course_{course}',
+  calendar: '/courses/{course}/calendar',
   resources: '/courses/{course}/pages/resources',
 };
 

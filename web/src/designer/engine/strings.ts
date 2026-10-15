@@ -93,7 +93,7 @@ const en = {
   'start.steps.heading': 'Your first steps',
   'start.steps.1': 'Read the syllabus and note the key dates',
   'start.steps.2': 'Explore Modules to see how each week is organised',
-  'start.steps.3': 'Set your Canvas notification preferences',
+  'start.steps.3': 'Set your notification preferences',
   'start.steps.4': 'Introduce yourself in the welcome discussion',
   'start.steps.5': 'Check you can open and submit an assignment',
   'start.how.heading': 'How this course works',
@@ -102,7 +102,7 @@ const en = {
   'start.links.heading': 'Where to find things',
   'start.help.heading': 'Need help?',
   'start.help.body':
-    '<p>For technical problems, use the Help button in Canvas. For questions about the course, post in the Q&amp;A discussion or email me. [Add your response time, e.g. within one school day.]</p>',
+    '<p>For technical problems, use the Help menu. For questions about the course, post in the Q&amp;A discussion or email me. [Add your response time, e.g. within one school day.]</p>',
 
   // overview
   'overview.title': 'Course overview',
@@ -252,7 +252,7 @@ const es: Record<StringKey, string> = {
   'start.steps.heading': 'Tus primeros pasos',
   'start.steps.1': 'Lee el programa y anota las fechas clave',
   'start.steps.2': 'Explora Módulos para ver cómo se organiza cada semana',
-  'start.steps.3': 'Configura tus notificaciones de Canvas',
+  'start.steps.3': 'Configura tus notificaciones',
   'start.steps.4': 'Preséntate en el foro de bienvenida',
   'start.steps.5': 'Comprueba que puedes abrir y entregar una tarea',
   'start.how.heading': 'Cómo funciona este curso',
@@ -261,7 +261,7 @@ const es: Record<StringKey, string> = {
   'start.links.heading': 'Dónde encontrar cada cosa',
   'start.help.heading': '¿Necesitas ayuda?',
   'start.help.body':
-    '<p>Para problemas técnicos, usa el botón de Ayuda de Canvas. Para dudas sobre el curso, escribe en el foro de preguntas o envíame un correo. [Indica tu tiempo de respuesta, p. ej. en un día lectivo.]</p>',
+    '<p>Para problemas técnicos, usa el menú de Ayuda. Para dudas sobre el curso, escribe en el foro de preguntas o envíame un correo. [Indica tu tiempo de respuesta, p. ej. en un día lectivo.]</p>',
   'overview.title': 'Presentación del curso',
   'overview.subtitle': '[Código] · [Créditos] · [Periodo]',
   'overview.welcome.heading': 'Sobre este curso',
@@ -403,7 +403,7 @@ const pt: Record<StringKey, string> = {
   'start.steps.heading': 'Seus primeiros passos',
   'start.steps.1': 'Leia o plano de ensino e anote as datas importantes',
   'start.steps.2': 'Explore Módulos para ver como cada semana se organiza',
-  'start.steps.3': 'Ajuste suas notificações do Canvas',
+  'start.steps.3': 'Ajuste suas notificações',
   'start.steps.4': 'Apresente-se no fórum de boas-vindas',
   'start.steps.5': 'Confira se consegue abrir e entregar uma tarefa',
   'start.how.heading': 'Como este curso funciona',
@@ -412,7 +412,7 @@ const pt: Record<StringKey, string> = {
   'start.links.heading': 'Onde encontrar cada coisa',
   'start.help.heading': 'Precisa de ajuda?',
   'start.help.body':
-    '<p>Para problemas técnicos, use o botão Ajuda do Canvas. Para dúvidas sobre o curso, escreva no fórum de perguntas ou me mande um e-mail. [Informe seu prazo de resposta, por ex. em um dia letivo.]</p>',
+    '<p>Para problemas técnicos, use o menu Ajuda. Para dúvidas sobre o curso, escreva no fórum de perguntas ou me mande um e-mail. [Informe seu prazo de resposta, por ex. em um dia letivo.]</p>',
   'overview.title': 'Visão geral do curso',
   'overview.subtitle': '[Código] · [Créditos] · [Período]',
   'overview.welcome.heading': 'Sobre este curso',
