@@ -6,6 +6,40 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Page Designer
+
+Teachers design course pages (home, start here, course overview, module
+overview, meet your instructor) without HTML, and can give a whole course
+one look. See [docs/page-designer](./docs/page-designer/README.md).
+
+- **122 themes** in seven collections across six audience tiers, each with
+  three colourways and text-free artwork (`web/public/design-assets/`),
+  and **7 layouts**. Every theme has an AA-checked dark colourway that
+  follows Paper's light/dark toggle.
+- **Designer** at `/courses/:id/designer`: choose a look, edit sections in
+  place with a live desktop/tablet/phone and light/dark preview, check
+  accessibility with one-click fixes, save as a page, the course home page
+  or a module item. Designed pages reopen in the designer.
+- **Whole-course makeover** at `/courses/:id/designer/makeover`: Home,
+  Start Here, overview, instructor and module overview pages in one look,
+  linked together, plus the course look.
+- **Course look** (`courses.look`): the course header and dashboard card
+  use the theme's banner and colours.
+- **Page stylesheets** (`wiki_pages.css`): real CSS per page, sanitized and
+  scoped to the page on the server; `@media (prefers-color-scheme: dark)`
+  follows Paper's dark mode. Teachers only; account setting
+  `pages.custom_css_enabled`.
+- **Wider rich-content styling**: inline styles now keep flex, grid, gap,
+  positioning (not fixed/sticky), https backgrounds and gradients,
+  shadows, transforms, `font-weight`, `letter-spacing`, `aspect-ratio`,
+  `object-fit`, logical properties and `calc()`/`var()`, with every value
+  validated. Rich content renders in a containment box so none of it can
+  draw over Paper's own interface.
+- **Fixed**: image alt text and titles containing `:`, `?`, `&`, quotes or
+  an em dash were silently dropped on save.
+- Migrations 000136 (page css/css_source/design, revision snapshots,
+  course look) and 000137 (`design_colour_schemes`).
+
 ### Phase 6 / Wave 3 Prelude — brand logo as a swappable asset
 
 Lands the canonical Paper LMS mark and consolidates the four places it

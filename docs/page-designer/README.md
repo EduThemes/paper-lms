@@ -81,6 +81,7 @@ func Scope(css, root string) string
 | Column | Type | What |
 | --- | --- | --- |
 | `wiki_pages.css` | `text NOT NULL DEFAULT ''` | Sanitized, unscoped page stylesheet. |
+| `wiki_pages.css_source` | `text NOT NULL DEFAULT ''` | The stylesheet as the teacher typed it (comments, formatting), for the editor only. Never served to readers. |
 | `wiki_pages.design` | `jsonb NULL` | The `PageDoc` a designed page was made from. `NULL` = an ordinary page. |
 | `wiki_page_revisions.css`, `.design` | same | Snapshotted with every revision, restored with it. |
 | `courses.look` | `jsonb NULL` | The course's look (below). `NULL` = Paper's generated header. |
@@ -109,6 +110,7 @@ under `/design-assets/` or are `/api/v1/files/<id>/download` for a file in this 
 **Pages** (`/api/v1/courses/:course_id/pages…`)
 
 - Show returns `css` (stored), `scoped_css` (scoped to `#paper-page-<id>`) and `design` (object or `null`).
+  Course staff also get `css_source` while it still sanitizes to `css`.
   List returns `has_design` and omits `css`/`design`.
 - Create/Update accept `wiki_page[css]` and `wiki_page[design]` (`null` clears it, turning the page back into
   an ordinary page). Only users who can manage course content may set either; a student editor sending them
