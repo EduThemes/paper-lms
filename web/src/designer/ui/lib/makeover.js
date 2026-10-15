@@ -6,7 +6,7 @@
  * Creation order matters: Paper gives a clashing title a fresh slug ("start-here-2"), and no page is edited
  * after it's created, so a page is only created after every page it links to.
  */
-import { createPage, SLOT_HREFS } from './engine';
+import { createPage, sanitizeDoc, SLOT_HREFS } from './engine';
 import { fillCourseDetails } from './course';
 import { newId } from './ids';
 import { isPublished, itemsToWeek } from './modules';
@@ -104,7 +104,8 @@ export function planMakeover({ theme, paletteId, palette, layout, course, teache
     out.push({ role: 'overview', kind: 'overview', doc });
   }
   if (want('home')) out.push({ role: 'home', kind: 'home', doc: make('home') });
-  return out;
+  // Course, teacher and module names come from the API, the palette from a saved colour scheme.
+  return out.map((p) => ({ ...p, doc: sanitizeDoc(p.doc) }));
 }
 
 /**

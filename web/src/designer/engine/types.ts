@@ -307,6 +307,7 @@ export interface A11yIssue {
  *   derivePalette(base: { primary; secondary?; accent? }, name: string, id?: string): Palette   // AA-passing
  *   checkPalette(p: Palette): PairResult[]      fixPalette(p: Palette): Palette      sanitizePalette(x: unknown): Palette | null
  *   sanitizeRich(html: string): RichText
+ *   sanitizeDoc(doc: PageDoc): PageDoc          // input guard for stored designs, drafts and makeover plans
  *   renderIconSvg(name: IconName, o: { style: IconStyle; fg: string; bg: string; size?: number }): string
  *   iconUrl(assetBase: string, name: IconName, o: { style: IconStyle; fg: string; bg: string }): string
  *     -> `${assetBase}/icons/${style}/${name}.svg?fg=<hex no #>&bg=<hex no #>`

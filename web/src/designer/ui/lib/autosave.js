@@ -4,6 +4,7 @@
  * full quota) never breaks the editor. Also: validation of drafts and of `wiki_pages.design` docs.
  */
 import { readJson, removeKey, writeJson } from './storage';
+import { sanitizeDoc } from './engine';
 
 export const DRAFT_PREFIX = 'paper-designer:draft:v1:';
 export const draftKey = (courseId) => `${DRAFT_PREFIX}${courseId ?? 'none'}`;
@@ -38,10 +39,11 @@ export function saveDraft(courseId, doc, { pageUrl = null, now = new Date() } = 
   return writeJson(draftKey(courseId), { version: 1, savedAt: now.toISOString(), pageUrl, doc });
 }
 
+/** The draft for a course, or null. Its doc is sanitizeDoc'd: localStorage is outside the designer's control. */
 export function loadDraft(courseId) {
   const d = readJson(draftKey(courseId));
   if (!d || d.version !== 1 || !isPageDoc(d.doc)) return null;
-  return { savedAt: String(d.savedAt ?? ''), pageUrl: typeof d.pageUrl === 'string' ? d.pageUrl : null, doc: d.doc };
+  return { savedAt: String(d.savedAt ?? ''), pageUrl: typeof d.pageUrl === 'string' ? d.pageUrl : null, doc: sanitizeDoc(d.doc) };
 }
 
 export function clearDraft(courseId) {
