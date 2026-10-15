@@ -27,3 +27,28 @@ export const CONTENT_CONTAINMENT = Object.freeze({
 // Presentation-only companion class (index.css): lets wide tables and display
 // equations scroll sideways instead of being clipped by paint containment.
 export const CONTAINED_CLASS = 'paper-contained';
+
+// Containment for the frame around a page with its own stylesheet
+// (DesignedPageView / PageScope). The page CSS is scoped to the inner root
+// (#paper-page-<id>) and its descendants, so it can restyle the root itself:
+// `:root { padding-right: 1200px }` grows the root's own box (paint
+// containment clips what is inside a box, not the box), and
+// `.paper-contained { contain: none !important }` switches off an inner
+// viewer's containment. The frame is the root's parent, which no scoped
+// selector can match, so its containment always holds:
+//
+//   contain: layout paint + isolation + position  -> as CONTENT_CONTAINMENT;
+//   overflow: clip, overflow-clip-margin: 0       -> whatever the root grows
+//                                                    to is cut at the frame's
+//                                                    edge, with no scroll
+//                                                    container (and no
+//                                                    scrollbar to style).
+export const PAGE_FRAME_CONTAINMENT = Object.freeze({
+  ...CONTENT_CONTAINMENT,
+  overflow: 'clip',
+  overflowClipMargin: '0px',
+});
+
+// Class and data attribute of that frame (for tests and devtools; nothing
+// styles it, and page CSS cannot reach it).
+export const PAGE_FRAME_CLASS = 'paper-page-frame';

@@ -1,6 +1,7 @@
 /* global describe, test, expect */
 import { render, screen } from '@testing-library/react';
-import DesignedPageView, { PageContent, PageScope } from '../DesignedPageView';
+import DesignedPageView, { PageContent, PageFrame, PageScope } from '../DesignedPageView';
+import { PAGE_FRAME_CONTAINMENT } from '../../contentContainment';
 import RichContentViewer from '../../RichContentViewer';
 import SafeHTML from '../../SafeHTML';
 
@@ -156,6 +157,88 @@ describe('PageContent / PageScope', () => {
   test('PageScope accepts an id field as well as page_id', () => {
     const { container } = render(<PageScope page={{ id: 9, scoped_css: 'x{}' }}><span>in</span></PageScope>);
     expect(container.querySelector('#paper-page-9')).not.toBeNull();
+  });
+});
+
+// The audit's repro: page CSS that grows the root's own box and switches off
+// an inner viewer's containment. Scoped the way the server scopes it.
+const ESCAPE_CSS =
+  '#paper-page-42{padding-right:1200px;min-height:400px} #paper-page-42 .paper-contained{contain:none!important;position:static!important}';
+
+function expectFramed(container, id) {
+  const root = container.querySelector(`#${id}`);
+  const frame = root.parentElement;
+  expect(frame).toHaveClass('paper-page-frame');
+  expect(frame).toHaveAttribute('data-paper-page-frame');
+  // The frame carries nothing a page stylesheet could name, and the page
+  // root is its only child.
+  expect(frame.id).toBe('');
+  expect(frame.children).toHaveLength(1);
+  expect(frame.getAttribute('style')).toMatch(/contain: layout paint/);
+  expect(frame.getAttribute('style')).toMatch(/isolation: isolate/);
+  expect(frame.getAttribute('style')).toMatch(/position: relative/);
+  expect(frame.getAttribute('style')).toMatch(/overflow: clip/);
+  // The stylesheet sits outside the frame.
+  expect(frame.querySelector('style')).toBeNull();
+  return { frame, root };
+}
+
+describe('page frame (containment the page stylesheet cannot reach)', () => {
+  test('the shared frame styles', () => {
+    expect(PAGE_FRAME_CONTAINMENT).toEqual({
+      contain: 'layout paint',
+      isolation: 'isolate',
+      position: 'relative',
+      overflow: 'clip',
+      overflowClipMargin: '0px',
+    });
+    expect(Object.isFrozen(PAGE_FRAME_CONTAINMENT)).toBe(true);
+  });
+
+  test('a designed page renders frame > root, the root still contained', () => {
+    const { container } = render(<DesignedPageView page={designed({ scoped_css: ESCAPE_CSS })} />);
+    const { frame, root } = expectFramed(container, 'paper-page-42');
+    expectContained(root);
+    expectContained(frame);
+  });
+
+  test('an ordinary page with CSS renders frame > root > its prose viewer', () => {
+    const page = { page_id: 42, body: '<p>Hello</p>', scoped_css: ESCAPE_CSS, design: null };
+    const { container } = render(<PageContent page={page} fallback={<RichContentViewer content={page.body} />} />);
+    const { root } = expectFramed(container, 'paper-page-42');
+    expectContained(root);
+    // The inner viewer keeps its own containment for normal pages.
+    const viewer = root.querySelector('.paper-contained');
+    expect(viewer).not.toBeNull();
+    expectContained(viewer);
+  });
+
+  test('no rule in the escape stylesheet can match the frame', () => {
+    const { container } = render(<DesignedPageView page={designed({ scoped_css: ESCAPE_CSS })} />);
+    const { frame } = expectFramed(container, 'paper-page-42');
+    const sheet = container.querySelector('style').textContent;
+    const selectors = sheet
+      .replace(/\{[^}]*\}/g, ',')
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean);
+    expect(selectors.length).toBeGreaterThan(0);
+    for (const sel of selectors) {
+      expect(frame.matches(sel)).toBe(false);
+      // Every scoped selector matches the root or something inside it.
+      for (const el of container.querySelectorAll(sel)) expect(frame.contains(el) && el !== frame).toBe(true);
+    }
+    // jsdom has no layout, so assert the structure: the frame is an ancestor
+    // of the scope root (selectors are scoped to the root and its
+    // descendants) and keeps its own inline containment.
+    expect(frame.style.overflow).toBe('clip');
+    expect(frame.style.contain).toBe('layout paint');
+  });
+
+  test('PageFrame renders only its children inside the box', () => {
+    const { container } = render(<PageFrame><span>in</span></PageFrame>);
+    expect(container.firstElementChild).toHaveClass('paper-page-frame');
+    expect(container.firstElementChild.textContent).toBe('in');
   });
 });
 
