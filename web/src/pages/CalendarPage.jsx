@@ -251,7 +251,7 @@ const CalendarPage = () => {
                   type="button"
                   aria-pressed={view === v}
                   onClick={() => changeView(v)}
-                  className={`px-3 py-1.5 text-sm border-s first:border-s-0 border-border-strong ${view === v ? 'bg-brand-600 text-white' : 'bg-surface-0 text-text-secondary hover:bg-surface-1'}`}
+                  className={`px-3 py-1.5 text-sm border-s first:border-s-0 border-border-strong ${view === v ? 'bg-brand-600 text-on-brand' : 'bg-surface-0 text-text-secondary hover:bg-surface-1'}`}
                 >
                   {t(`calendarLane.views.${v}`)}
                 </button>
@@ -259,25 +259,27 @@ const CalendarPage = () => {
             </div>
             <Link
               to="/appointments"
+              aria-label={t('calendarLane.myAppointments')}
               className="inline-flex items-center gap-1 border border-border-strong text-text-secondary px-3 py-1.5 rounded-md hover:bg-surface-1 text-sm font-medium"
             >
-              <CalendarCheck className="w-4 h-4" />
+              <CalendarCheck className="w-4 h-4" aria-hidden="true" />
               <span className="hidden sm:inline">{t('calendarLane.myAppointments')}</span>
             </Link>
             <button
               type="button"
               onClick={() => setShowFeed((s) => !s)}
               aria-expanded={showFeed}
+              aria-label={t('calendarLane.feed.button')}
               className="inline-flex items-center gap-1 border border-border-strong text-text-secondary px-3 py-1.5 rounded-md hover:bg-surface-1 text-sm font-medium"
             >
-              <Rss className="w-4 h-4" />
+              <Rss className="w-4 h-4" aria-hidden="true" />
               <span className="hidden sm:inline">{t('calendarLane.feed.button')}</span>
             </button>
             {canCreate && (
               <button
                 type="button"
                 onClick={() => (form ? setForm(null) : openNew())}
-                className="inline-flex items-center gap-1 bg-brand-600 text-white px-3 py-1.5 rounded-md hover:bg-brand-700 text-sm font-medium"
+                className="inline-flex items-center gap-1 bg-brand-600 text-on-brand px-3 py-1.5 rounded-md hover:bg-brand-700 text-sm font-medium"
               >
                 {form ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                 <span>{form ? t('common.cancel') : t('calendarPage.newEvent')}</span>
@@ -425,7 +427,7 @@ function ItemDetail({ item, busy, onClose, onEdit, onDelete, onCancelReservation
             <RichOrPlainText className="text-sm text-text-secondary mt-2 prose prose-sm max-w-none" body={item.description} />
           )}
         </div>
-        <button type="button" onClick={onClose} className="p-1 text-text-disabled hover:text-text-secondary" aria-label={t('common.close')}>
+        <button type="button" onClick={onClose} className="p-1 text-text-tertiary hover:text-text-secondary" aria-label={t('common.close')}>
           <X className="w-4 h-4" />
         </button>
       </div>

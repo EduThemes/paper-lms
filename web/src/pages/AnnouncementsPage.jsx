@@ -306,7 +306,7 @@ const AnnouncementsPage = () => {
         <Link to={`/courses/${courseId}`} className="text-brand-600 hover:underline text-sm">
           &larr; Back to Course
         </Link>
-        <div className="flex items-center justify-between mt-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
           <div className="flex items-center space-x-2">
             <Megaphone className="w-6 h-6 text-text-secondary" aria-hidden="true" />
             <h2 className="text-2xl font-bold text-text-primary">{t('announcementsPage.title')}</h2>
@@ -319,7 +319,7 @@ const AnnouncementsPage = () => {
                 }
                 setShowForm(!showForm);
               }}
-              className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+              className="inline-flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
               aria-expanded={showForm}
               aria-controls="announcement-form"
             >
@@ -475,7 +475,7 @@ const AnnouncementsPage = () => {
               <button
                 type="submit"
                 disabled={creating}
-                className="bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+                className="bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
               >
                 {creating ? 'Saving...' : editingId ? 'Update Announcement' : 'Post Announcement'}
               </button>
@@ -486,7 +486,7 @@ const AnnouncementsPage = () => {
 
       {/* Urgent announcements banner */}
       {announcements.filter((a) => a.priority === 'urgent' && !a.is_read).length > 0 && (
-        <div className="bg-accent-danger text-white rounded-lg p-4 mb-6 flex items-center space-x-3" role="alert" aria-live="assertive">
+        <div className="bg-accent-danger text-on-accent rounded-lg p-4 mb-6 flex items-center space-x-3" role="alert" aria-live="assertive">
           <AlertTriangle className="w-5 h-5 flex-shrink-0" aria-hidden="true" />
           <div>
             <strong>Urgent Announcements:</strong>{' '}
@@ -496,7 +496,7 @@ const AnnouncementsPage = () => {
       )}
 
       {/* Announcements list */}
-      <div className="space-y-4" role="feed" aria-label="Announcements list">
+      <div className="space-y-4" role={announcements.length ? 'feed' : undefined} aria-label={announcements.length ? 'Announcements list' : undefined}>
         {announcements.length === 0 ? (
           <div className="bg-surface-0 rounded-lg shadow p-6 text-center text-text-tertiary">
             {t('announcementsPage.noAnnouncements')}
@@ -542,7 +542,7 @@ const AnnouncementsPage = () => {
                       <RichContentViewer content={announcement.message} className="prose-sm text-sm" />
                     </div>
 
-                    <div className="flex items-center space-x-4 mt-3 text-xs text-text-disabled">
+                    <div className="flex items-center space-x-4 mt-3 text-xs text-text-tertiary">
                       <span>
                         {announcement.posted_at
                           ? `Posted ${formatDate(announcement.posted_at)}`
@@ -614,14 +614,14 @@ const AnnouncementsPage = () => {
                         </button>
                         <button
                           onClick={() => handleEdit(announcement)}
-                          className="text-text-disabled hover:text-text-secondary"
+                          className="text-text-tertiary hover:text-text-secondary"
                           aria-label={`Edit "${announcement.title}"`}
                         >
                           <Edit2 className="w-4 h-4" aria-hidden="true" />
                         </button>
                         <button
                           onClick={() => handleDelete(announcement.id)}
-                          className="text-text-disabled hover:text-accent-danger"
+                          className="text-text-tertiary hover:text-accent-danger"
                           aria-label={`Delete "${announcement.title}"`}
                         >
                           <Trash2 className="w-4 h-4" aria-hidden="true" />
@@ -675,7 +675,7 @@ const AnnouncementsPage = () => {
                                         {formatDate(receipt.acknowledged_at)}
                                       </span>
                                     ) : (
-                                      <span className="text-text-disabled">Not yet</span>
+                                      <span className="text-text-tertiary">Not yet</span>
                                     )}
                                   </td>
                                 )}

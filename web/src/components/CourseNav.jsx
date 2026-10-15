@@ -182,7 +182,7 @@ const CourseNav = () => {
     return (
       <div className="border-b border-border-default bg-surface-0 -mx-6 px-6 mb-6">
         <div className="flex items-center">
-          <nav className="flex items-center space-x-2" aria-label="Course navigation">
+          <nav className="flex flex-wrap items-center gap-x-2" aria-label="Course navigation">
             {simplifiedTabs.map((tab) => (
               <Link
                 key={tab.path + tab.label}
@@ -201,22 +201,26 @@ const CourseNav = () => {
   }
 
   // Standard mode
-  const tabClass = (active) =>
+  // Theme tokens, not Tailwind's fixed palette: gray-500 on the dark surface
+  // is 3.7:1. A hidden tab is marked by its icon and italic label, not by
+  // fading it below AA.
+  const tabClass = (active, hidden = false) =>
     `px-3 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
       active
-        ? 'border-blue-600 text-blue-600'
-        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-    }`;
+        ? 'border-brand-600 text-brand-600'
+        : `border-transparent hover:text-text-primary hover:border-border-strong ${hidden ? 'text-text-tertiary' : 'text-text-secondary'}`
+    }${hidden ? ' italic inline-flex items-center gap-1' : ''}`;
 
   return (
     <div className="border-b border-border-default bg-surface-0 -mx-6 px-6 mb-6">
       <div className="flex items-center">
-        <nav className="flex items-center space-x-1" aria-label="Course navigation">
+        <nav className="flex flex-wrap items-center gap-x-1" aria-label="Course navigation">
           {primaryTabs.map((tab) => (
             <Link
               key={tab.path}
               to={basePath + tab.path}
-              className={`${tabClass(isTabActive(tab.path))}${tab.hidden ? ' opacity-60 inline-flex items-center gap-1' : ''}`}
+              className={tabClass(isTabActive(tab.path), tab.hidden)}
+              aria-current={isTabActive(tab.path) ? 'page' : undefined}
               title={tab.hidden ? HIDDEN_TAB_TITLE : undefined}
             >
               {tab.label}
@@ -228,7 +232,9 @@ const CourseNav = () => {
           {moreTabs.length > 0 && (
             <div className="relative" ref={moreRef}>
               <button
+                type="button"
                 onClick={() => setMoreOpen(!moreOpen)}
+                aria-expanded={moreOpen}
                 className={`${tabClass(isMoreActive && !primaryTabs.some(t => isTabActive(t.path)))} inline-flex items-center gap-1`}
               >
                 More
@@ -242,11 +248,12 @@ const CourseNav = () => {
                       key={tab.path}
                       to={basePath + tab.path}
                       onClick={() => setMoreOpen(false)}
+                      aria-current={isTabActive(tab.path) ? 'page' : undefined}
                       className={`block px-4 py-2 text-sm ${
                         isTabActive(tab.path)
-                          ? 'bg-brand-50 text-brand-600 font-medium'
-                          : 'text-text-primary hover:bg-surface-1'
-                      }${tab.hidden ? ' opacity-60' : ''}`}
+                          ? 'bg-brand-50 text-brand-700 font-medium'
+                          : tab.hidden ? 'text-text-tertiary hover:bg-surface-1' : 'text-text-primary hover:bg-surface-1'
+                      }${tab.hidden ? ' italic' : ''}`}
                       title={tab.hidden ? HIDDEN_TAB_TITLE : undefined}
                     >
                       {tab.label}

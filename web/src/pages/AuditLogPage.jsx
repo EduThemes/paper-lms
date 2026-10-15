@@ -250,7 +250,7 @@ const AuditLogPage = () => {
         </Link>
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <FileText className="w-8 h-8 text-text-disabled" />
+            <FileText className="w-8 h-8 text-text-tertiary" />
             <div>
               <h1 className="text-2xl font-bold text-text-primary">Audit Log</h1>
               <p className="text-sm text-text-tertiary">{course?.name || 'Course'}</p>
@@ -307,7 +307,7 @@ const AuditLogPage = () => {
               </button>
               <button
                 onClick={handleExportAuditCSV}
-                className="flex items-center space-x-2 px-3 py-1.5 bg-accent-success text-white text-sm rounded hover:bg-accent-success/90 transition-colors"
+                className="flex items-center space-x-2 px-3 py-1.5 bg-accent-success text-on-accent text-sm rounded hover:bg-accent-success/90 transition-colors"
               >
                 <Download className="w-4 h-4" />
                 <span>Export CSV</span>
@@ -372,13 +372,13 @@ const AuditLogPage = () => {
 </div>
           ) : auditLogs.length === 0 ? (
             <div className="bg-surface-0 rounded-lg shadow p-8 text-center">
-              <FileText className="w-12 h-12 text-text-disabled mx-auto mb-3" />
+              <FileText className="w-12 h-12 text-text-tertiary mx-auto mb-3" />
               <p className="text-text-tertiary">No audit log entries found.</p>
-              <p className="text-text-disabled text-sm mt-1">Activity will appear here as changes are made to this course.</p>
+              <p className="text-text-tertiary text-sm mt-1">Activity will appear here as changes are made to this course.</p>
             </div>
           ) : (
             <div className="bg-surface-0 rounded-lg shadow overflow-hidden">
-              <div className="overflow-x-auto">
+              <div className="relative overflow-x-auto">
                 <table className="min-w-full border-collapse" aria-label="Course audit log">
                   <caption className="sr-only">Course activity audit log showing recent changes and actions</caption>
                   <thead>
@@ -432,7 +432,7 @@ const AuditLogPage = () => {
                                 {formatPayload(log.payload)}
                               </pre>
                               {log.ip_address && (
-                                <p className="text-xs text-text-disabled mt-2">IP: {log.ip_address} | User-Agent: {log.user_agent}</p>
+                                <p className="text-xs text-text-tertiary mt-2">IP: {log.ip_address} | User-Agent: {log.user_agent}</p>
                               )}
                             </td>
                           </tr>
@@ -482,7 +482,7 @@ const AuditLogPage = () => {
               </button>
               <button
                 onClick={handleExportGradeCSV}
-                className="flex items-center space-x-2 px-3 py-1.5 bg-accent-success text-white text-sm rounded hover:bg-accent-success/90 transition-colors"
+                className="flex items-center space-x-2 px-3 py-1.5 bg-accent-success text-on-accent text-sm rounded hover:bg-accent-success/90 transition-colors"
               >
                 <Download className="w-4 h-4" />
                 <span>Export CSV</span>
@@ -556,13 +556,13 @@ const AuditLogPage = () => {
 </div>
           ) : gradeChanges.length === 0 ? (
             <div className="bg-surface-0 rounded-lg shadow p-8 text-center">
-              <FileText className="w-12 h-12 text-text-disabled mx-auto mb-3" />
+              <FileText className="w-12 h-12 text-text-tertiary mx-auto mb-3" />
               <p className="text-text-tertiary">No grade changes found.</p>
-              <p className="text-text-disabled text-sm mt-1">Grade changes will appear here when grades are modified.</p>
+              <p className="text-text-tertiary text-sm mt-1">Grade changes will appear here when grades are modified.</p>
             </div>
           ) : (
             <div className="bg-surface-0 rounded-lg shadow overflow-hidden">
-              <div className="overflow-x-auto">
+              <div className="relative overflow-x-auto">
                 <table className="min-w-full border-collapse" aria-label="Grade change log">
                   <caption className="sr-only">Grade change log showing all grade modifications for this course</caption>
                   <thead>
@@ -585,8 +585,8 @@ const AuditLogPage = () => {
                         <td className="px-4 py-3 whitespace-nowrap text-sm text-text-secondary">User {gc.grader_id}</td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm">
                           <div className="flex items-center space-x-1">
-                            <span className={gc.old_grade ? 'text-accent-danger line-through' : 'text-text-disabled'}>{gc.old_grade || 'none'}</span>
-                            <ArrowRight className="w-3 h-3 text-text-disabled" />
+                            <span className={gc.old_grade ? 'text-accent-danger line-through' : 'text-text-tertiary'}>{gc.old_grade || 'none'}</span>
+                            <ArrowRight className="w-3 h-3 text-text-tertiary" />
                             <span className="text-accent-success font-medium">{gc.new_grade || 'none'}</span>
                             {gc.excused && (
                               <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-accent-warning/20 text-accent-warning">EX</span>
@@ -596,7 +596,7 @@ const AuditLogPage = () => {
                         <td className="px-4 py-3 whitespace-nowrap text-sm">
                           <div className="flex items-center space-x-1">
                             <span className="text-text-tertiary">{gc.old_score != null ? gc.old_score : '-'}</span>
-                            <ArrowRight className="w-3 h-3 text-text-disabled" />
+                            <ArrowRight className="w-3 h-3 text-text-tertiary" />
                             <span className="text-text-primary font-medium">{gc.new_score != null ? gc.new_score : '-'}</span>
                           </div>
                         </td>

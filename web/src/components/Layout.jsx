@@ -93,7 +93,7 @@ const MasqueradeBanner = ({ userName, onStopMasquerade, stopping }) => {
   if (studentViewCourse) return <StudentViewBanner courseId={studentViewCourse} />;
   return (
     <div
-      className="fixed top-0 left-0 right-0 z-[60] bg-accent-warning text-white px-4 py-2 flex items-center justify-center gap-3 shadow-md"
+      className="fixed top-0 left-0 right-0 z-[60] bg-accent-warning text-on-accent px-4 py-2 flex items-center justify-center gap-3 shadow-md"
       role="alert"
       aria-live="polite"
     >
@@ -118,7 +118,7 @@ const PreviewBanner = ({ mode, onExit, offset }) => {
   const modeLabel = mode === 'k2' ? t('nav.modeK2') : t('nav.mode35');
   return (
     <div
-      className="fixed left-0 right-0 z-[60] bg-brand-600 text-white px-4 py-2 flex items-center justify-center gap-3 shadow-md"
+      className="fixed left-0 right-0 z-[60] bg-brand-600 text-on-brand px-4 py-2 flex items-center justify-center gap-3 shadow-md"
       style={{ top: offset }}
       role="status"
       aria-live="polite"
@@ -142,11 +142,13 @@ const Layout = ({ children }) => {
   const { user, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const showAdminNav = isAdminRoute(location.pathname);
   const { isK2, is35, effectiveMode, isPreview, exitPreview } = useCourseUI();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [stoppingMasquerade, setStoppingMasquerade] = useState(false);
   const isAdmin = user?.role === 'admin';
+  // /settings/* also hosts every user's own settings (notifications, language):
+  // only admins get the admin sub-nav there.
+  const showAdminNav = isAdmin && isAdminRoute(location.pathname);
   const isMasquerading = !!user?.masquerading_as;
   const baseNav = buildBaseNav(t);
   const adminLeadNav = buildAdminLeadNav(t);
@@ -233,10 +235,9 @@ const Layout = ({ children }) => {
         <OfflineIndicator />
         <SkipToContent />
 
-        <aside
+        <nav
           className="fixed inset-y-0 left-0 z-30 flex flex-col items-center w-20 bg-chrome-sidebar"
           style={sidebarTopOffset}
-          role="navigation"
           aria-label={t('nav.globalNavigation')}
         >
           <div className="flex items-center justify-center h-14 border-b border-white/10 w-full">
@@ -245,11 +246,11 @@ const Layout = ({ children }) => {
             </Link>
           </div>
 
-          <nav className="flex-1 overflow-y-auto overflow-x-hidden sidebar-scroll py-3 space-y-1 flex flex-col items-center">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden sidebar-scroll py-3 space-y-1 flex flex-col items-center">
             {simplifiedNav.map((item) => (
               <SimplifiedNavItem key={item.to + item.label} {...item} active={isActive(item.to)} />
             ))}
-          </nav>
+          </div>
 
           <div className="border-t border-white/10 py-2 flex flex-col items-center w-full">
             <button
@@ -261,7 +262,7 @@ const Layout = ({ children }) => {
               <span className="text-xs mt-1">{t('nav.logout')}</span>
             </button>
           </div>
-        </aside>
+        </nav>
 
         {showAdminNav && <AdminNav />}
 
@@ -283,16 +284,16 @@ const Layout = ({ children }) => {
     <>
       {/* Logo */}
       <div className="flex items-center justify-center h-14 border-b border-white/10 w-full">
-        <Link to="/" className="text-white relative group" title={t('nav.paperLms')} onClick={() => setMobileMenuOpen(false)}>
-          <BrandLogo size={28} />
-          <span className="absolute left-full ml-2 px-2 py-1 rounded bg-chrome-tooltip text-chrome-tooltip-fg text-xs font-medium whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 hidden md:block">
+        <Link to="/" className="text-white relative group" aria-label={t('nav.paperLms')} onClick={() => setMobileMenuOpen(false)}>
+          <BrandLogo size={28} alt="" />
+          <span aria-hidden="true" className="absolute left-full ml-2 px-2 py-1 rounded bg-chrome-tooltip text-chrome-tooltip-fg text-xs font-medium whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 hidden md:block">
             {t('nav.paperLms')}
           </span>
         </Link>
       </div>
 
-      {/* Primary nav */}
-      <nav className="flex-1 overflow-y-auto overflow-x-hidden sidebar-scroll py-3 space-y-1 flex flex-col items-center">
+      {/* Primary nav (the whole sidebar is the navigation landmark) */}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden sidebar-scroll py-3 space-y-1 flex flex-col items-center">
         {primaryNav.map((item) => (
           <Link
             key={item.to}
@@ -311,7 +312,7 @@ const Layout = ({ children }) => {
             </span>
           </Link>
         ))}
-      </nav>
+      </div>
 
       {/* User section at bottom */}
       <div className="border-t border-white/10 py-2 space-y-1 flex flex-col items-center w-full">
@@ -326,7 +327,7 @@ const Layout = ({ children }) => {
   );
 
   return (
-    <div className="min-h-screen bg-surface-1 flex" style={topPaddingStyle}>
+    <div className="min-h-screen bg-surface-1 flex flex-col md:flex-row" style={topPaddingStyle}>
       {isMasquerading && (
         <MasqueradeBanner
           userName={user.masquerading_as}
@@ -354,14 +355,13 @@ const Layout = ({ children }) => {
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div aria-hidden="true" className="fixed inset-0 bg-black/50" onClick={() => setMobileMenuOpen(false)} />
-          <aside
+          <nav
             className="fixed inset-y-0 left-0 z-50 flex flex-col items-center w-16 bg-chrome-sidebar"
             style={sidebarTopOffset}
-            role="navigation"
             aria-label={t('nav.globalNavigation')}
           >
             {sidebarContent}
-          </aside>
+          </nav>
           <button
             onClick={() => setMobileMenuOpen(false)}
             className="fixed left-[72px] z-50 p-1 rounded-full bg-surface-0 text-text-secondary shadow"
@@ -374,24 +374,23 @@ const Layout = ({ children }) => {
       )}
 
       {/* Desktop sidebar */}
-      <aside
+      <nav
         className="hidden md:flex fixed inset-y-0 left-0 z-30 flex-col items-center w-16 bg-chrome-sidebar"
         style={sidebarTopOffset}
-        role="navigation"
         aria-label={t('nav.globalNavigation')}
       >
         {sidebarContent}
-      </aside>
+      </nav>
 
       {/* Admin sub-nav panel */}
       {showAdminNav && <AdminNav />}
 
       {/* Main content area */}
-      <div className={`flex-1 ${showAdminNav ? 'md:ml-[280px] ml-0' : 'md:ml-16 ml-0'}`}>
+      <div className={`flex-1 min-w-0 ${showAdminNav ? 'md:ml-[280px] ml-0' : 'md:ml-16 ml-0'}`}>
         <div className="hidden md:block">
           <CurrencyPills />
         </div>
-        <main id="main-content" className="max-w-7xl mx-auto px-6 py-8 pb-16 md:pb-0 pt-14 md:pt-8" role="main">
+        <main id="main-content" className={`max-w-7xl mx-auto px-6 py-8 pb-16 md:pb-0 ${showAdminNav ? 'pt-6' : 'pt-14'} md:pt-8`} role="main">
           {children}
         </main>
       </div>

@@ -120,7 +120,8 @@ const getProviderStyle = (provider) => {
   return {
     bg: 'bg-text-primary',
     border: 'border border-text-primary',
-    text: 'text-white',
+    // bg-text-primary is near-white in dark mode, so the label takes the page colour
+    text: 'text-surface-0',
     hover: 'hover:bg-text-secondary',
     icon: DefaultProviderIcon,
     label: `Sign in with ${provider.name}`,
@@ -132,7 +133,7 @@ const getProviderStyle = (provider) => {
 const PaperLogo = () => (
   <div className="flex flex-col items-center mb-2">
     <div className="mb-3">
-      <BrandLogo size={72} />
+      <BrandLogo size={72} alt="" />
     </div>
     <h1 className="text-2xl font-bold text-text-primary">Paper LMS</h1>
   </div>
@@ -376,7 +377,7 @@ const LoginPageSSO = () => {
   };
 
   return (
-    <div className="min-h-screen bg-surface-1 flex items-center justify-center px-4 py-12">
+    <main className="min-h-screen bg-surface-1 flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
         <div className="bg-surface-0 rounded-2xl shadow-xl p-8">
           <PaperLogo />
@@ -450,7 +451,7 @@ const LoginPageSSO = () => {
                 <div className="w-full border-t border-border-default" />
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="bg-surface-0 px-4 text-text-disabled">{t('loginPage.orSignInWithEmail')}</span>
+                <span className="bg-surface-0 px-4 text-text-tertiary">{t('loginPage.orSignInWithEmail')}</span>
               </div>
             </div>
           )}
@@ -501,7 +502,7 @@ const LoginPageSSO = () => {
                       type="email"
                       name="email"
                       autoComplete="email"
-                      className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-disabled focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
+                      className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-tertiary focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
                       placeholder={t('loginPage.emailPlaceholder')}
                       required
                       aria-required="true"
@@ -509,7 +510,7 @@ const LoginPageSSO = () => {
                   </div>
                   <button
                     type="submit"
-                    className="w-full bg-brand-600 text-white py-2.5 px-4 rounded-lg font-medium hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 transition-colors"
+                    className="w-full bg-brand-600 text-on-brand py-2.5 px-4 rounded-lg font-medium hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 transition-colors"
                   >
                     {t('loginPage.requestPasswordReset')}
                   </button>
@@ -537,7 +538,7 @@ const LoginPageSSO = () => {
                       type="text"
                       name="token"
                       defaultValue={resetToken}
-                      className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-disabled focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors font-mono text-sm"
+                      className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-tertiary focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors font-mono text-sm"
                       placeholder={t('loginPage.resetTokenPlaceholder')}
                       required
                       aria-required="true"
@@ -552,7 +553,7 @@ const LoginPageSSO = () => {
                       type="password"
                       name="new_password"
                       autoComplete="new-password"
-                      className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-disabled focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
+                      className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-tertiary focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
                       placeholder={t('loginPage.newPasswordPlaceholder')}
                       required
                       aria-required="true"
@@ -568,7 +569,7 @@ const LoginPageSSO = () => {
                       type="password"
                       name="confirm_password"
                       autoComplete="new-password"
-                      className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-disabled focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
+                      className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-tertiary focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
                       placeholder={t('loginPage.confirmPasswordPlaceholder')}
                       required
                       aria-required="true"
@@ -577,7 +578,7 @@ const LoginPageSSO = () => {
                   </div>
                   <button
                     type="submit"
-                    className="w-full bg-brand-600 text-white py-2.5 px-4 rounded-lg font-medium hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 transition-colors"
+                    className="w-full bg-brand-600 text-on-brand py-2.5 px-4 rounded-lg font-medium hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 transition-colors"
                   >
                     {t('loginPage.resetPasswordButton')}
                   </button>
@@ -606,7 +607,7 @@ const LoginPageSSO = () => {
                         type="text"
                         name="name"
                         autoComplete="name"
-                        className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-disabled focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
+                        className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-tertiary focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
                         placeholder={t('loginPage.fullNamePlaceholder')}
                         required
                         aria-required="true"
@@ -622,7 +623,7 @@ const LoginPageSSO = () => {
                       type="email"
                       name="email"
                       autoComplete="email"
-                      className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-disabled focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
+                      className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-tertiary focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
                       placeholder={t('loginPage.emailPlaceholder')}
                       required
                       aria-required="true"
@@ -637,7 +638,7 @@ const LoginPageSSO = () => {
                       type="password"
                       name="password"
                       autoComplete={isRegister ? 'new-password' : 'current-password'}
-                      className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-disabled focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
+                      className="block w-full rounded-lg border border-border-strong px-3 py-2.5 text-text-primary placeholder:text-text-tertiary focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
                       placeholder={t('loginPage.passwordPlaceholder')}
                       required
                       aria-required="true"
@@ -656,7 +657,7 @@ const LoginPageSSO = () => {
                   )}
                   <button
                     type="submit"
-                    className="w-full bg-brand-600 text-white py-2.5 px-4 rounded-lg font-medium hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 transition-colors"
+                    className="w-full bg-brand-600 text-on-brand py-2.5 px-4 rounded-lg font-medium hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 transition-colors"
                   >
                     {isRegister ? t('loginPage.createAccount') : t('loginPage.logIn')}
                   </button>
@@ -679,13 +680,13 @@ const LoginPageSSO = () => {
 
           {/* ── COPPA Notice ── */}
           <div className="mt-6 pt-5 border-t border-border-subtle">
-            <p className="text-xs text-text-disabled text-center leading-relaxed">
+            <p className="text-xs text-text-tertiary text-center leading-relaxed">
               {t('loginPage.coppaNoticeIntro')}{' '}
-              <a href="/privacy" className="text-brand-500 hover:underline focus:underline focus:outline-none">
+              <a href="/privacy" className="text-brand-600 underline underline-offset-2 hover:no-underline rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 {t('loginPage.privacyPolicy')}
               </a>{' '}
               {t('loginPage.and')}{' '}
-              <a href="/terms" className="text-brand-500 hover:underline focus:underline focus:outline-none">
+              <a href="/terms" className="text-brand-600 underline underline-offset-2 hover:no-underline rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 {t('loginPage.termsOfService')}
               </a>.
               <br />
@@ -694,7 +695,7 @@ const LoginPageSSO = () => {
           </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 };
 

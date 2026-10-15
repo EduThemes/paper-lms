@@ -33,6 +33,8 @@ export default function RouteAnnouncer() {
       const target = heading || main;
       if (target) {
         if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+        // Not a control, so no focus ring (index.css): the move is announced, not drawn as a box.
+        target.setAttribute('data-route-focus', '');
         target.focus({ preventScroll: false });
       }
       if (regionRef.current) {

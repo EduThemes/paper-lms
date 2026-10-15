@@ -111,7 +111,7 @@ const PullToQuizModal = ({ courseId, bankId, questions, onClose, onSuccess }) =>
       >
         <div className="flex items-center justify-between p-4 border-b">
           <h3 className="text-lg font-semibold">Pull Questions to Quiz</h3>
-          <button onClick={onClose} className="text-text-disabled hover:text-text-secondary text-xl leading-none">&times;</button>
+          <button onClick={onClose} className="text-text-tertiary hover:text-text-secondary text-xl leading-none">&times;</button>
         </div>
 
         <div className="p-4 overflow-y-auto flex-1 space-y-4">
@@ -222,7 +222,7 @@ const PullToQuizModal = ({ courseId, bankId, questions, onClose, onSuccess }) =>
             type="button"
             onClick={handlePull}
             disabled={pulling || !selectedQuizId || (mode === 'select' && selectedQuestionIds.length === 0)}
-            className="inline-flex items-center px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+            className="inline-flex items-center px-4 py-2 bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
           >
             {pulling ? (
               <>
@@ -366,7 +366,7 @@ const QuestionForm = ({ initial, onSave, onCancel, saving, courseId }) => {
         <button
           type="submit"
           disabled={saving}
-          className="px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+          className="px-4 py-2 bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
         >
           {saving ? 'Saving...' : 'Save Question'}
         </button>
@@ -511,9 +511,9 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate, onCopied }) =
         >
           <div className="flex items-center gap-3 min-w-0 flex-1">
             {expanded ? (
-              <ChevronDown className="w-5 h-5 text-text-disabled flex-shrink-0" />
+              <ChevronDown className="w-5 h-5 text-text-tertiary flex-shrink-0" />
             ) : (
-              <ChevronRight className="w-5 h-5 text-text-disabled flex-shrink-0" />
+              <ChevronRight className="w-5 h-5 text-text-tertiary flex-shrink-0" />
             )}
             <BookOpen className="w-5 h-5 text-brand-500 flex-shrink-0" />
             {editingTitle && canEdit ? (
@@ -592,14 +592,14 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate, onCopied }) =
               <>
                 <button
                   onClick={() => { setEditingTitle(true); setTitleDraft(bank.title); }}
-                  className="text-text-disabled hover:text-brand-600 p-1"
+                  className="text-text-tertiary hover:text-brand-600 p-1"
                   title="Edit bank title"
                 >
                   <Edit2 className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => onDelete(bank.id)}
-                  className="text-text-disabled hover:text-accent-danger p-1"
+                  className="text-text-tertiary hover:text-accent-danger p-1"
                   title="Delete question bank"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -636,7 +636,7 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate, onCopied }) =
               <>
                 {questions.length === 0 && !questionsError && (
                   <div className="text-center text-text-tertiary text-sm py-6">
-                    <HelpCircle className="w-8 h-8 mx-auto mb-2 text-text-disabled" />
+                    <HelpCircle className="w-8 h-8 mx-auto mb-2 text-text-tertiary" />
                     No questions in this bank yet.
                   </div>
                 )}
@@ -692,7 +692,7 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate, onCopied }) =
                                 </div>
                               )}
                             {q.feedback && (
-                              <div className="text-xs text-text-disabled mt-1 italic">
+                              <div className="text-xs text-text-tertiary mt-1 italic">
                                 Feedback: <RichOrPlainText className="inline-block align-top" body={q.feedback} />
                               </div>
                             )}
@@ -701,14 +701,14 @@ const BankCard = ({ bank, courseId, isTeacher, onDelete, onUpdate, onCopied }) =
                             <div className="flex items-center gap-1 flex-shrink-0 pt-0.5">
                               <button
                                 onClick={() => setEditingQuestionId(q.id)}
-                                className="text-text-disabled hover:text-brand-600 p-1"
+                                className="text-text-tertiary hover:text-brand-600 p-1"
                                 title="Edit question"
                               >
                                 <Edit2 className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={() => handleDeleteQuestion(q.id)}
-                                className="text-text-disabled hover:text-accent-danger p-1"
+                                className="text-text-tertiary hover:text-accent-danger p-1"
                                 title="Delete question"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -865,11 +865,11 @@ const QuestionBanksPage = () => {
           &larr; Back to Course
         </Link>
         <div className="flex items-center justify-between mt-2">
-          <h2 className="text-2xl font-bold text-text-primary">Question Banks</h2>
+          <h1 className="text-2xl font-bold text-text-primary">Question Banks</h1>
           {isTeacher && (
             <button
               onClick={() => setShowCreate(!showCreate)}
-              className="inline-flex items-center px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium"
+              className="inline-flex items-center px-4 py-2 bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 text-sm font-medium"
             >
               <Plus className="w-4 h-4 me-1" />
               New Bank
@@ -903,7 +903,7 @@ const QuestionBanksPage = () => {
             <button
               type="submit"
               disabled={creating}
-              className="px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+              className="px-4 py-2 bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
             >
               {creating ? 'Creating...' : 'Create'}
             </button>
@@ -920,7 +920,7 @@ const QuestionBanksPage = () => {
 
       {banks.length === 0 ? (
         <div className="bg-surface-0 rounded-lg shadow p-8 text-center text-text-tertiary">
-          <BookOpen className="w-12 h-12 mx-auto mb-3 text-text-disabled" />
+          <BookOpen className="w-12 h-12 mx-auto mb-3 text-text-tertiary" />
           <p className="text-lg font-medium text-text-secondary mb-1">No question banks yet</p>
           <p className="text-sm">
             {isTeacher

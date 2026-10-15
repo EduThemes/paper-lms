@@ -40,7 +40,7 @@ function RestoreCourses() {
       </Field>
       <StatusNote message={status} />
       <table className="w-full text-sm mt-3">
-        <thead className="text-left text-text-secondary"><tr><th className="py-1">Course</th><th>SIS ID</th><th>Deleted</th><th /></tr></thead>
+        <thead className="text-left text-text-secondary"><tr><th className="py-1">Course</th><th>SIS ID</th><th>Deleted</th><th><span className="sr-only">Actions</span></th></tr></thead>
         <tbody>
           {courses.length === 0 && !query.isLoading && (
             <tr><td colSpan={4} className="py-3 text-text-tertiary">No deleted courses match.</td></tr>
@@ -195,7 +195,7 @@ const AdminToolsPage = () => {
               role="tab"
               aria-selected={tab === k}
               onClick={() => setTab(k)}
-              className={`px-3 py-1.5 rounded-full text-sm font-medium ${tab === k ? 'bg-brand-600 text-white' : 'bg-surface-1 text-text-secondary'}`}
+              className={`px-3 py-1.5 rounded-full text-sm font-medium ${tab === k ? 'bg-brand-600 text-on-brand' : 'bg-surface-1 text-text-secondary'}`}
             >
               {label}
             </button>

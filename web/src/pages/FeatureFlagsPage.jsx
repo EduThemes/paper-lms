@@ -26,7 +26,7 @@ const STATE_STYLES = {
 const STAGE_STYLES = {
   released: 'bg-accent-success/10 text-accent-success ring-1 ring-accent-success/30',
   beta:     'bg-accent-warning/10  text-accent-warning  ring-1 ring-accent-warning/30',
-  hidden:   'bg-slate-100 text-slate-700  ring-1 ring-slate-200',
+  hidden:   'bg-surface-2 text-text-secondary  ring-1 ring-border-default',
 };
 
 const Spinner = () => (
@@ -186,9 +186,9 @@ const FeatureFlagsPage = () => {
               <li key={flag.feature} className="p-4 flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-sm font-semibold text-text-primary">
+                    <h2 className="text-sm font-semibold text-text-primary">
                       {flag.display_name}
-                    </h3>
+                    </h2>
                     <span
                       className={`text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded ${STAGE_STYLES[flag.release_stage] || ''}`}
                     >

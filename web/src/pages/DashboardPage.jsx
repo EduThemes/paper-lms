@@ -123,7 +123,7 @@ const ComingUpPanel = ({ items, loading, missingCount, onToggle }) => (
     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
       <div className="flex items-center gap-2">
         <Clock className="h-4 w-4 text-primary" aria-hidden="true" />
-        <CardTitle className="text-base font-semibold">Coming up</CardTitle>
+        <CardTitle as="h2" className="text-base font-semibold">Coming up</CardTitle>
       </div>
       <div className="flex items-center gap-2">
         {missingCount > 0 && (
@@ -336,7 +336,7 @@ const ACTIVITY_ICONS = {
 const ActivityRail = ({ items, loading }) => (
   <Card>
     <CardHeader className="pb-3">
-      <CardTitle className="text-base font-semibold">Recent activity</CardTitle>
+      <CardTitle as="h2" className="text-base font-semibold">Recent activity</CardTitle>
     </CardHeader>
     <Separator />
     <CardContent className="p-0">

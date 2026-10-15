@@ -67,8 +67,8 @@ function ProfileTab({ user, onSaved }) {
         <Banner kind="success">{success}</Banner>
         <Banner kind="error">{error}</Banner>
         <div>
-          <label className="block text-sm font-medium mb-1">Name</label>
-          <input
+          <label htmlFor="account-name" className="block text-sm font-medium mb-1">Name</label>
+          <input id="account-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -76,8 +76,8 @@ function ProfileTab({ user, onSaved }) {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">Email</label>
-          <input
+          <label htmlFor="account-email" className="block text-sm font-medium mb-1">Email</label>
+          <input id="account-email"
             type="email"
             value={user?.email || ''}
             disabled
@@ -89,8 +89,8 @@ function ProfileTab({ user, onSaved }) {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium mb-1">Locale</label>
-            <select
+            <label htmlFor="account-locale" className="block text-sm font-medium mb-1">Locale</label>
+            <select id="account-locale"
               value={locale}
               onChange={(e) => setLocale(e.target.value)}
               className="w-full rounded-md border border-border-default bg-surface-0 px-3 py-2 text-sm"
@@ -109,7 +109,7 @@ function ProfileTab({ user, onSaved }) {
         <button
           type="submit"
           disabled={saving}
-          className="inline-flex items-center gap-2 rounded-md bg-brand-primary text-white px-4 py-2 text-sm font-medium disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-md bg-brand-600 text-on-brand hover:bg-brand-700 px-4 py-2 text-sm font-medium disabled:opacity-50"
         >
           <Save className="w-4 h-4" />
           {saving ? 'Saving…' : 'Save profile'}
@@ -178,8 +178,8 @@ function PasswordTab() {
       <Banner kind="success">{success}</Banner>
       <Banner kind="error">{error}</Banner>
       <div>
-        <label className="block text-sm font-medium mb-1">Current password</label>
-        <input
+        <label htmlFor="account-current-password" className="block text-sm font-medium mb-1">Current password</label>
+        <input id="account-current-password"
           type="password"
           autoComplete="current-password"
           value={current}
@@ -189,8 +189,8 @@ function PasswordTab() {
         />
       </div>
       <div>
-        <label className="block text-sm font-medium mb-1">New password</label>
-        <input
+        <label htmlFor="account-new-password" className="block text-sm font-medium mb-1">New password</label>
+        <input id="account-new-password"
           type="password"
           autoComplete="new-password"
           value={next}
@@ -202,8 +202,8 @@ function PasswordTab() {
         <p className="mt-1 text-xs text-text-secondary">At least 8 characters.</p>
       </div>
       <div>
-        <label className="block text-sm font-medium mb-1">Confirm new password</label>
-        <input
+        <label htmlFor="account-confirm-password" className="block text-sm font-medium mb-1">Confirm new password</label>
+        <input id="account-confirm-password"
           type="password"
           autoComplete="new-password"
           value={confirm}
@@ -216,7 +216,7 @@ function PasswordTab() {
       <button
         type="submit"
         disabled={saving}
-        className="inline-flex items-center gap-2 rounded-md bg-brand-primary text-white px-4 py-2 text-sm font-medium disabled:opacity-50"
+        className="inline-flex items-center gap-2 rounded-md bg-brand-600 text-on-brand hover:bg-brand-700 px-4 py-2 text-sm font-medium disabled:opacity-50"
       >
         <Save className="w-4 h-4" />
         {saving ? 'Updating…' : 'Update password'}
@@ -377,7 +377,7 @@ const AccountSettingsPage = () => {
                 onClick={() => setTab(id)}
                 className={`w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition ${
                   tab === id
-                    ? 'bg-brand-primary/10 text-brand-primary font-medium'
+                    ? 'bg-brand-50 text-brand-700 font-medium'
                     : 'text-text-primary hover:bg-surface-1'
                 }`}
               >
