@@ -656,6 +656,13 @@
     "vi": "Tiếng Việt",
     "languageLabel": "Idioma"
   },
+  "designHome": {
+    "title": "Diseña la página de inicio",
+    "body": "Elige un tema y una distribución, escribe directamente en la página y publica una página de inicio que tus estudiantes querrán abrir. Sin HTML.",
+    "designHome": "Diseñar la página de inicio",
+    "makeover": "Renovar el diseño de todo el curso",
+    "dismiss": "Descartar"
+  },
   "publicPage": {
     "notFoundTitle": "Página no encontrada",
     "notFoundDescription": "Esta página no existe o no está disponible públicamente.",

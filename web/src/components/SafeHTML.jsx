@@ -1,7 +1,9 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import PropTypes from 'prop-types';
 import { sanitizeHTML } from './RichContentViewer';
 import { enhanceUserContent } from '../utils/enhanceUserContent';
 import { looksLikeHTML } from '../utils/html';
+import { CONTENT_CONTAINMENT, CONTAINED_CLASS } from './contentContainment';
 
 /**
  * Render stored rich content (question text, syllabus, stimulus, submission
@@ -13,7 +15,7 @@ import { looksLikeHTML } from '../utils/html';
  * styling, read-aloud button or wrapper), so it fits inline spots such as a
  * question prompt or a table cell.
  */
-export default function SafeHTML({ html, as: Tag = 'div', className, ...rest }) {
+export default function SafeHTML({ html, as: Tag = 'div', className, style, ...rest }) {
   const ref = useRef(null);
   const clean = useMemo(() => sanitizeHTML(html), [html]);
 
@@ -21,7 +23,18 @@ export default function SafeHTML({ html, as: Tag = 'div', className, ...rest }) 
     if (ref.current && clean) enhanceUserContent(ref.current);
   }, [clean]);
 
-  return <Tag ref={ref} className={className} dangerouslySetInnerHTML={{ __html: clean }} {...rest} />;
+  // The root is a containment box (contentContainment.js) so positioned or
+  // z-indexed content can't draw over the surrounding interface. Callers may
+  // add styles but not undo the containment.
+  return (
+    <Tag
+      ref={ref}
+      {...rest}
+      className={[className, CONTAINED_CLASS].filter(Boolean).join(' ')}
+      style={{ ...style, ...CONTENT_CONTAINMENT }}
+      dangerouslySetInnerHTML={{ __html: clean }}
+    />
+  );
 }
 
 /**
@@ -38,3 +51,11 @@ export function SubmissionBody({ body, className }) {
   }
   return <div className={[className, 'whitespace-pre-wrap'].filter(Boolean).join(' ')}>{body}</div>;
 }
+
+SafeHTML.propTypes = {
+  html: PropTypes.string,
+  as: PropTypes.elementType,
+  className: PropTypes.string,
+  style: PropTypes.object,
+};
+SubmissionBody.propTypes = { body: PropTypes.string, className: PropTypes.string };

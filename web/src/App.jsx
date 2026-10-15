@@ -26,6 +26,9 @@ const SISImportPage = React.lazy(() => import('./pages/SISImportPage'));
 const PagesPage = React.lazy(() => import('./pages/PagesPage'));
 const PageDetailPage = React.lazy(() => import('./pages/PageDetailPage'));
 const PageHistoryPage = React.lazy(() => import('./pages/PageHistoryPage'));
+// Page Designer (docs/page-designer/README.md): teacher-only.
+const PageDesignerPage = React.lazy(() => import('./pages/PageDesignerPage'));
+const CourseMakeoverPage = React.lazy(() => import('./pages/CourseMakeoverPage'));
 const QuizzesPage = React.lazy(() => import('./pages/QuizzesPage'));
 const QuizTakePage = React.lazy(() => import('./pages/QuizTakePage'));
 const QuizReviewPage = React.lazy(() => import('./pages/QuizReviewPage'));
@@ -97,6 +100,7 @@ import { OAuthConsentGate, ResumePendingOAuthConsent } from './components/OAuthC
 import SuperAdminGate from './components/SuperAdminGate';
 import { CourseUIProvider } from './contexts/CourseUIContext';
 import CourseTabGate from './components/CourseTabGate';
+import TeacherOnlyRoute from './components/TeacherOnlyRoute';
 import CoursePageViewTracker from './components/analytics/CoursePageViewTracker';
 import { useAuth } from './contexts/AuthContext';
 import { api } from './services/api';
@@ -240,6 +244,8 @@ const App = () => {
           <Route path="pages" element={<PagesPage />} />
           <Route path="pages/:slug" element={<PageDetailPage />} />
           <Route path="pages/:slug/revisions" element={<PageHistoryPage />} />
+          <Route path="designer" element={<TeacherOnlyRoute><PageDesignerPage /></TeacherOnlyRoute>} />
+          <Route path="designer/makeover" element={<TeacherOnlyRoute><CourseMakeoverPage /></TeacherOnlyRoute>} />
           <Route path="quizzes" element={<QuizzesPage />} />
           <Route path="quizzes/:quizId" element={<Navigate to="take" replace />} />
           <Route path="quizzes/:quizId/take" element={<QuizTakePage />} />

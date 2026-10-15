@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { FileText, Plus, Eye, EyeOff, Home, Trash2 } from 'lucide-react';
+import { FileText, Plus, Eye, EyeOff, Home, Trash2, Paintbrush } from 'lucide-react';
 import { canDeletePage, canUnpublishPage } from '../utils/pageManagement';
+import { designerPath } from '../utils/pageDesign';
 import { api } from '../services/api';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
@@ -145,13 +146,22 @@ const PagesPage = () => {
         <div className="flex items-center justify-between mt-2">
           <h2 className="text-2xl font-bold text-text-primary">Pages</h2>
           {isTeacher && (
-            <button
-              onClick={() => setShowCreate(!showCreate)}
-              className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Page</span>
-            </button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Link
+                to={designerPath(courseId)}
+                className="inline-flex items-center gap-2 border border-border-strong bg-surface-0 text-text-primary px-4 py-2 rounded-md hover:bg-surface-1 text-sm font-medium"
+              >
+                <Paintbrush className="w-4 h-4" aria-hidden="true" />
+                <span>Design a page</span>
+              </Link>
+              <button
+                onClick={() => setShowCreate(!showCreate)}
+                className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Page</span>
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -223,6 +233,11 @@ const PagesPage = () => {
                       {page.front_page && (
                         <span className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-brand-700 bg-brand-50 px-2 py-0.5 rounded-full align-middle">
                           <Home className="w-3 h-3" aria-hidden="true" /> Front Page
+                        </span>
+                      )}
+                      {isTeacher && page.has_design && (
+                        <span className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-text-secondary bg-surface-2 px-2 py-0.5 rounded-full align-middle">
+                          <Paintbrush className="w-3 h-3" aria-hidden="true" /> Designed
                         </span>
                       )}
                     </span>

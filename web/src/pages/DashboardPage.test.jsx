@@ -1,4 +1,4 @@
-import React from 'react';
+/* global vi, describe, test, expect, beforeEach */
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -113,5 +113,30 @@ describe('DashboardPage', () => {
     renderDashboard();
     await waitFor(() => expect(screen.getByText('Network error')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: /Try again/i })).toBeInTheDocument();
+  });
+
+  test('a course look gives the tile its banner and colours', async () => {
+    learnerApi.dashboardCards = () => ([
+      card(1, 'Math', {
+        look: {
+          version: 1,
+          theme_id: 'tide-pool',
+          colors: { primary: '#12355b', on_primary: '#ffffff' },
+          dark_colors: { primary: '#9cc4ef', on_primary: '#0b1b2e' },
+          banner: { src: '/design-assets/themes/tide-pool/banner.webp', src_2x: '/design-assets/themes/tide-pool/banner@2x.webp', alt: '' },
+        },
+      }),
+      card(2, 'Chem'),
+    ]);
+    renderDashboard();
+    await waitFor(() => expect(screen.getByText('Math')).toBeInTheDocument());
+    const [withLook, plain] = screen.getAllByTestId('course-tile-header');
+    expect(withLook).toHaveClass('course-look');
+    expect(withLook.style.getPropertyValue('--look-primary')).toBe('#12355b');
+    expect(withLook.querySelector('img')).toHaveAttribute(
+      'srcset', '/design-assets/themes/tide-pool/banner.webp 1x, /design-assets/themes/tide-pool/banner@2x.webp 2x',
+    );
+    expect(plain).not.toHaveClass('course-look');
+    expect(plain.querySelector('img')).toBeNull();
   });
 });
