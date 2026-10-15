@@ -59,15 +59,22 @@ func Sanitize(css string) (string, error)
 func Scope(css, root string) string
 ```
 
-- Every selector is prefixed with `root` as an ancestor. `:root`, `html` and `body` (alone or compound at
-  the start) become `root` itself.
+- Every selector is prefixed with `root` as an ancestor. A bare `:root`, `html`, `body` or `html body`
+  becomes `root` itself; a qualified one keeps its qualifier on the real element (`html.dark p` →
+  `html.dark root p`). Selectors that reach siblings of the root (`:root + p`, a leading `~`) are dropped.
+- Rules whose subject is the root itself may only set custom properties and properties that paint inside
+  the box (colour, fonts, backgrounds, borders, padding, text and gap properties), so a stylesheet can't
+  undo the containment with `position: fixed`, `display: contents` and the like.
 - `@media (prefers-color-scheme: dark)` → rules prefixed `html.dark root`; `light` → `html:not(.dark) root`.
   Other `@media` conditions are kept. Allowed at-rules: `@media`, `@supports`, `@container`, `@keyframes`
   (names are prefixed per page; `animation`/`animation-name` references are rewritten to match).
 - Dropped: `@import`, `@font-face`, `@namespace`, `@charset`, `@page`, `@layer`, `@property`, unknown at-rules,
   `expression()`, `-moz-binding`, `behavior`, `javascript:`, and `url()` other than `https:`,
   `/api/v1/files/<id>/download`, `/api/v1/design/icons/…` and `/design-assets/…`.
-- `</style` can never appear in output.
+- `</style` can never appear in output. Comments are removed and the sheet is reformatted, so the
+  designer keeps the teacher's own source in `doc.customCss`.
+- Values use the same validator as inline styles (`htmlsanitize.CSSValueOK`): `@` only inside URLs (for
+  `@2x` art), no backslash escapes, functions from an allowlist.
 
 ## Data model
 
