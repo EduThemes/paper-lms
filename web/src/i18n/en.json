@@ -1000,6 +1000,17 @@
       "spanish": "Spanish",
       "currentLabel": "Current language",
       "savedToast": "Language updated"
+    },
+    "detachDesign": {
+      "title": "Edit this page as HTML?",
+      "body": "This page was made with the page designer. When you save HTML edits, the page is detached from its design: it keeps how it looks now, but it can no longer be opened in the designer.",
+      "bodyCssOff": "This page was made with the page designer. When you save HTML edits, the page is detached from its design and can no longer be opened in the designer.",
+      "cssRemoved": "Custom CSS is turned off for this account, so the page's stylesheet is removed when it is detached, and the page may look different (for example, it no longer follows dark mode).",
+      "undo": "To undo, restore an earlier version from the page history.",
+      "cancel": "Cancel",
+      "confirm": "Edit as HTML",
+      "htmlHelp": "Saving detaches this page from its design. Its look stays; the designer can no longer open it.",
+      "htmlHelpCssOff": "Saving detaches this page from its design and removes its stylesheet, so it may look different; the designer can no longer open it."
     }
   },
   "languagePreferencesPage": {

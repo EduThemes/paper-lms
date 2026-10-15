@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import PageDetailPage from '../PageDetailPage';
 import { api } from '../../services/api';
+import i18n from '../../i18n';
 
 vi.mock('../../services/api', () => ({
   api: {
@@ -112,6 +113,46 @@ describe('PageDetailPage with designed pages', () => {
     expect(payload.body).toBe('<p>New</p>');
     // After detaching, the page is ordinary: the usual Edit button is back.
     expect(await screen.findByRole('button', { name: /^Edit$/ })).toBeInTheDocument();
+  });
+
+  test('with custom CSS allowed, the detach confirm says the look is kept', async () => {
+    api.getPage.mockResolvedValue(designedPage);
+    renderPage('start-here');
+    fireEvent.click(await screen.findByRole('button', { name: /Edit as HTML/i }));
+    const dialog = await screen.findByRole('dialog', { name: /Edit this page as HTML/i });
+    expect(dialog).toHaveTextContent(/keeps how it looks now/i);
+    expect(dialog).not.toHaveTextContent(/stylesheet is removed/i);
+  });
+
+  test('with custom CSS off, the detach confirm says the styling is removed, not kept', async () => {
+    course = { id: 3, custom_css_enabled: false };
+    api.getPage.mockResolvedValue(designedPage);
+    renderPage('start-here');
+    fireEvent.click(await screen.findByRole('button', { name: /Edit as HTML/i }));
+    const dialog = await screen.findByRole('dialog', { name: /Edit this page as HTML/i });
+    expect(dialog).toHaveTextContent(/detached from its design/i);
+    expect(dialog).toHaveTextContent(/page's stylesheet is removed when it is detached/i);
+    expect(dialog).not.toHaveTextContent(/keeps how it looks/i);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Edit as HTML' }));
+    await screen.findByLabelText('HTML');
+    expect(screen.getByText(/removes its stylesheet/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Its look stays/i)).toBeNull();
+  });
+
+  test('the custom-CSS-off detach copy is translated (es)', async () => {
+    course = { id: 3, custom_css_enabled: false };
+    await i18n.changeLanguage('es');
+    try {
+      api.getPage.mockResolvedValue(designedPage);
+      renderPage('start-here');
+      fireEvent.click(await screen.findByRole('button', { name: /Edit as HTML/i }));
+      const dialog = await screen.findByRole('dialog', { name: /¿Editar esta página como HTML\?/ });
+      expect(dialog).toHaveTextContent(/se elimina la hoja de estilos de la página/);
+      expect(dialog).not.toHaveTextContent(/conserva su aspecto/);
+      expect(within(dialog).getByRole('button', { name: 'Editar como HTML' })).toBeInTheDocument();
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 
   test('student editors cannot edit a designed page here', async () => {
