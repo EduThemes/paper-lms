@@ -78,7 +78,7 @@ export function CustomCssPanel() {
             className="min-h-[16rem] flex-1 resize-y bg-transparent px-3 py-2 font-mono text-xs leading-5 text-text-primary outline-none"
           />
         </div>
-        <p id={`${id}-count`} className="text-xs text-text-tertiary">
+        <p id={`${id}-count`} className="text-xs text-text-secondary">
           {t('advanced.lines', { count: lines })}
         </p>
       </div>

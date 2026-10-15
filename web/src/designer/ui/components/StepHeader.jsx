@@ -49,7 +49,7 @@ export function StepHeader() {
                     onClick={() => setStep(s)}
                     className={cn(
                       'inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
-                      current ? 'bg-brand-600 text-white' : 'text-text-secondary hover:bg-surface-1 hover:text-text-primary',
+                      current ? 'bg-brand-600 text-white dark:text-surface-0' : 'text-text-secondary hover:bg-surface-1 hover:text-text-primary',
                     )}
                   >
                     <span

@@ -23,7 +23,7 @@ export function DesignerShell({ initialKind = 'home', notices = null }) {
   }, [step]);
 
   return (
-    <div className="flex min-h-full flex-col bg-surface-0">
+    <div className="flex min-h-full flex-col bg-surface-0 text-text-primary">
       <StepHeader />
       {notices && <div className="space-y-2 px-4 pt-4 sm:px-6">{notices}</div>}
       <div ref={main} tabIndex={-1} className="flex-1 outline-none" data-step={step}>
