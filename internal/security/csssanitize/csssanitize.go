@@ -15,9 +15,15 @@
 //     custom property (--name), and whose value passes
 //     htmlsanitize.CSSValueOK, the same validator inline styles use: listed
 //     functions only, url()/image-set() limited to https: and Paper's file,
-//     icon and artwork paths, no escapes, comments or at-keywords. Unlike
-//     inline styles, position: fixed and sticky and any z-index are allowed:
-//     the page root is a containment box. "!important" is kept.
+//     icon and artwork paths, no escapes, comments or at-keywords. A value
+//     may load a URL only in background / background-image
+//     (htmlsanitize.URLStyleProperties) and in content on a rule whose
+//     selectors all target img (the designer's dark-mode icon swap,
+//     img[data-pd-icon]{content:url(...)}); not in filter, border-image,
+//     list-style, cursor, mask, clip-path or a custom property (which var()
+//     could carry anywhere). Unlike inline styles, position: fixed and
+//     sticky and any z-index are allowed: the page root is a containment
+//     box. "!important" is kept.
 //   - Selectors made of ordinary selector tokens (no backslash escapes,
 //     strings with markup, at-keywords or braces), with whitespace and
 //     combinators normalized.
@@ -185,7 +191,7 @@ func (p *parser) sanitizeStyleRule(r rawRule, inKeyframes bool) *node {
 	if len(selectors) == 0 {
 		return nil
 	}
-	decls := p.sanitizeDecls(r.block)
+	decls := p.sanitizeDecls(r.block, !inKeyframes && allSubjectsAreImg(selectors))
 	if len(decls) == 0 {
 		return nil
 	}
@@ -196,7 +202,46 @@ func (p *parser) sanitizeStyleRule(r rawRule, inKeyframes bool) *node {
 	return n
 }
 
-func (p *parser) sanitizeDecls(s span) []decl {
+// urlValueAllowed reports whether prop may have a value that loads a URL:
+// the background properties, and content when every selector of the rule
+// targets img.
+func urlValueAllowed(prop string, imgSubject bool) bool {
+	if strings.HasPrefix(prop, "--") {
+		return false
+	}
+	p := vendorPrefix.ReplaceAllString(prop, "")
+	return htmlsanitize.URLStyleProperties[p] || (p == "content" && imgSubject)
+}
+
+// allSubjectsAreImg reports whether every selector's subject (its last
+// compound) starts with the type selector img.
+func allSubjectsAreImg(selectors []string) bool {
+	if len(selectors) == 0 {
+		return false
+	}
+	for _, sel := range selectors {
+		toks := trimWS(tokenize(sel))
+		start, depth := 0, 0
+		for i, t := range toks {
+			switch {
+			case isOpener(t.tt):
+				depth++
+			case t.tt == css.RightParenthesisToken || t.tt == css.RightBracketToken:
+				if depth > 0 {
+					depth--
+				}
+			case depth == 0 && (t.tt == css.WhitespaceToken || t.delim('>') || t.delim('+') || t.delim('~')):
+				start = i + 1
+			}
+		}
+		if start >= len(toks) || !toks[start].ident("img") {
+			return false
+		}
+	}
+	return true
+}
+
+func (p *parser) sanitizeDecls(s span, imgSubject bool) []decl {
 	var out []decl
 	for _, d := range p.declarations(s.lo, s.hi) {
 		var prop string
@@ -231,6 +276,9 @@ func (p *parser) sanitizeDecls(s span) []decl {
 		}
 		value := joinTokens(toks)
 		if !htmlsanitize.CSSValueOK(value) {
+			continue
+		}
+		if htmlsanitize.CSSValueLoadsURL(value) && !urlValueAllowed(prop, imgSubject) {
 			continue
 		}
 		out = append(out, decl{prop: prop, value: value, important: important})

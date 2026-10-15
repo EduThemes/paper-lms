@@ -41,7 +41,8 @@ func TestSanitize_InlineStylesSurvive(t *testing.T) {
 		{"clamp font size", `font-size: clamp(1.5rem, 1rem + 2vw, 3rem)`},
 		{"oklch colour", `color: oklch(62% 0.19 255)`},
 		{"steps easing", `animation-timing-function: steps(4, jump-end)`},
-		{"list style image", `list-style-image: url(/design-assets/themes/tide-pool/bullet.svg)`},
+		{"list style", `list-style: disc outside`},
+		{"background image", `background-image: url(/design-assets/themes/tide-pool/bullet.svg)`},
 		{"cursor", `cursor: pointer`},
 	}
 	for _, tc := range cases {
@@ -108,6 +109,18 @@ func TestSanitize_InlineStylesBlocked(t *testing.T) {
 		{"not allowed property mask", `mask-image: url(/design-assets/a.svg)`, "mask"},
 		{"not allowed property pointer-events", `pointer-events: none`, "pointer"},
 		{"vbscript", `background: url(vbscript:msgbox)`, "vbscript"},
+		// Only backgrounds may load a URL; cursor takes keywords only.
+		{"cursor url", `cursor: url(https://cdn.example.com/c.png), auto`, "cdn"},
+		{"cursor maths", `cursor: var(--c)`, "cursor"},
+		{"filter url", `filter: url(https://cdn.example.com/f.svg#f)`, "cdn"},
+		{"backdrop-filter url", `backdrop-filter: url(https://cdn.example.com/f.svg#f)`, "cdn"},
+		{"border-image url", `border-image: url(/design-assets/a.png) 30 round`, "border-image"},
+		{"border-image-source url", `border-image-source: url(https://cdn.example.com/b.png)`, "cdn"},
+		{"list-style-image url", `list-style-image: url(/design-assets/bullet.svg)`, "bullet"},
+		{"list-style url", `list-style: url(/design-assets/bullet.svg) inside`, "bullet"},
+		{"clip-path url", `clip-path: url(https://cdn.example.com/c.svg#c)`, "cdn"},
+		{"shape-outside url", `shape-outside: url(https://cdn.example.com/s.png)`, "cdn"},
+		{"shape-outside image-set", `shape-outside: image-set("https://cdn.example.com/s.png" 1x)`, "cdn"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
