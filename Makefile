@@ -1,4 +1,4 @@
-.PHONY: help build run test lint vet clean docker migrate-up migrate-down migrate-version migrate-baseline migrate-create schema-diff schema-diff-sql stale-cols dev backup restore dex-up dex-down dex-logs frontend-build frontend-dev
+.PHONY: help build run test lint vet clean docker migrate-up migrate-down migrate-version migrate-baseline migrate-create schema-diff schema-diff-sql stale-cols designer-icons dev backup restore dex-up dex-down dex-logs frontend-build frontend-dev
 
 # Default target: print the help screen.
 .DEFAULT_GOAL := help
@@ -36,6 +36,9 @@ help:
 	@echo "  schema-diff        Report tables/indexes the SQL chain is missing vs GORM AutoMigrate"
 	@echo "  schema-diff-sql    Same, but emit paste-ready CREATE TABLE/INDEX statements"
 	@echo "  stale-cols         Categorize SQL-chain columns AutoMigrate doesn't know about; writes STALE_COLUMNS.md"
+	@echo ""
+	@echo "Page Designer:"
+	@echo "  designer-icons     Refresh the embedded Lucide icon geometry + aliases and the icon golden test (needs web/node_modules)"
 	@echo ""
 	@echo "Local OIDC (Phase 10-A.7 — Dex testing):"
 	@echo "  dex-up             Start the local Dex OIDC server (docker-compose --profile dex)"
@@ -120,6 +123,20 @@ schema-diff-sql:
 # cleanup migrations.
 stale-cols:
 	@go run ./cmd/stalecols
+
+# Page Designer icons. /api/v1/design/icons/* (internal/designassets) is a Go
+# port of the engine's renderIconSvg and must stay byte-identical, so it
+# embeds the same Lucide geometry (web/node_modules/lucide-static, pinned in
+# web/package.json) and alias table as the engine. Run after bumping
+# lucide-static or regenerating icon-aliases.json (`npm ci` in web/ first),
+# then commit the three files.
+DESIGNER_GOLDEN_JS = $${TMPDIR:-/tmp}/paper-designer-icons-golden.mjs
+designer-icons:
+	node -e "const fs=require('fs');fs.writeFileSync('internal/designassets/icon-nodes.json',JSON.stringify(JSON.parse(fs.readFileSync('web/node_modules/lucide-static/icon-nodes.json','utf8')))+'\\n')"
+	cp web/src/designer/engine/icon-aliases.json internal/designassets/icon-aliases.json
+	web/node_modules/.bin/esbuild internal/designassets/testdata/gen_golden.ts --bundle --platform=node --format=esm --log-level=warning --outfile=$(DESIGNER_GOLDEN_JS)
+	node $(DESIGNER_GOLDEN_JS) > internal/designassets/testdata/golden.json
+	rm -f $(DESIGNER_GOLDEN_JS)
 
 # Docker
 docker:
