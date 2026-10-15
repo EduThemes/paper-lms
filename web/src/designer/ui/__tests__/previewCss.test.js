@@ -70,4 +70,27 @@ describe('preview document', () => {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     expect(sectionIdOf(doc.querySelector('p'))).toBe('s1');
   });
+
+  it('puts the root inside an outer frame, like DesignedPageView, that the page stylesheet cannot reach', () => {
+    const css = ':root{padding-right:1200px;min-height:400px} .paper-contained{contain:none!important;position:static!important}';
+    const html = previewShell({ html: '<p>Hi</p>', css, appStyles: '' });
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const root = doc.querySelector(R);
+    const frame = root.parentElement;
+    expect(frame.classList.contains('paper-page-frame')).toBe(true);
+    expect(frame.parentElement).toBe(doc.body);
+    expect(frame.children).toHaveLength(1);
+    expect(frame.style.contain).toBe('layout paint');
+    expect(frame.style.isolation).toBe('isolate');
+    expect(frame.style.position).toBe('relative');
+    expect(frame.style.overflow).toBe('clip');
+    expect(frame.getAttribute('style')).toContain('overflow-clip-margin: 0px');
+    expect(root.style.contain).toBe('layout paint');
+    // Every rule of the scoped sheet matches the root or inside it, never the frame.
+    const sheet = doc.getElementById('pd-page-css').textContent;
+    expect(sheet).toContain(`${R}{padding-right:1200px`);
+    for (const sel of sheet.replace(/\{[^}]*\}/g, ',').split(',').map((x) => x.trim()).filter(Boolean)) {
+      expect(frame.matches(sel)).toBe(false);
+    }
+  });
 });

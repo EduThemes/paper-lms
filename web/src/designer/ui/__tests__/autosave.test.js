@@ -26,6 +26,19 @@ describe('drafts', () => {
     expect(loadDraft('42')).toBeNull();
   });
 
+  it('cleans a draft on the way in: localStorage is outside the designer', () => {
+    const doc = makeDoc([
+      { id: 'w', type: 'welcome', heading: 'Hi', body: '<p>Hi</p><img src=x onerror=alert(1)><iframe srcdoc="x"></iframe>' },
+      { id: 'q', type: 'quick-links', heading: 'L', links: [{ id: 'l', label: 'L', href: 'javascript:alert(1)', icon: 'book' }] },
+      { id: 'z', type: 'evil', html: '<script>alert(1)</script>' },
+    ]);
+    localStorage.setItem(draftKey('42'), JSON.stringify({ version: 1, savedAt: 'x', pageUrl: null, doc }));
+    const d = loadDraft('42');
+    expect(d.doc.sections.map((s) => s.id)).toEqual(['w', 'q']);
+    expect(d.doc.sections[0].body).toBe('<p>Hi</p>');
+    expect(d.doc.sections[1].links[0].href).toBe('');
+  });
+
   it('survives storage that throws (private mode, blocked storage)', () => {
     stubThrowingStorage();
     expect(saveDraft('42', makeDoc())).toBe(false);

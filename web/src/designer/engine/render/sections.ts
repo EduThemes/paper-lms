@@ -6,7 +6,7 @@
 import { ensureContrast, mix, readable } from '../color';
 import { esc, h } from '../html';
 import type { QuickLink, Section } from '../types';
-import type { Ctx, Tone } from './context';
+import { safeImageSrc, type Ctx, type Tone } from './context';
 import {
   LIST_RESET,
   bestCols,
@@ -184,9 +184,11 @@ export function quickLinks(ctx: Ctx, s: S<'quick-links'>, tone: Tone, variant: Q
 export function instructor(ctx: Ctx, s: S<'instructor'>, tone: Tone, o: { compact?: boolean; panel?: Tone; headingInside?: boolean; photo?: number } = {}): string {
   const t = o.panel ?? tone;
   const size = o.photo ?? (o.compact ? 56 : 96);
-  const photo = s.photoSrc?.trim()
+  // Same source rules as the banner's custom image: https / Paper-relative only (no data:, javascript: …).
+  const photoSrc = s.photoSrc ? safeImageSrc(s.photoSrc) : null;
+  const photo = photoSrc
     ? // square crop where supported (Canvas drops aspect-ratio/object-fit and shows the photo uncropped)
-      h('img', { src: s.photoSrc.trim().replace(/^http:/i, 'https:'), alt: s.photoAlt ?? '', width: size, height: size, loading: 'lazy', style: `display:block; width:${size}px; max-width:100%; height:auto; aspect-ratio:1 / 1; object-fit:cover; border-radius:${px(ctx.r.lg)};` })
+      h('img', { src: photoSrc, alt: s.photoAlt ?? '', width: size, height: size, loading: 'lazy', style: `display:block; width:${size}px; max-width:100%; height:auto; aspect-ratio:1 / 1; object-fit:cover; border-radius:${px(ctx.r.lg)};` })
     : `<span aria-hidden="true"${fontAttr(ctx)} style="display:inline-block; width:${size}px; line-height:${size}px; border-radius:999px; text-align:center; font-size:${Math.round((size / 16) * 0.38 * 100) / 100}rem; ${paint(ctx.tones.primary)};"><strong>${esc(initials(s.name))}</strong></span>`;
   const contact: string[] = [];
   if (s.email?.trim())

@@ -6,15 +6,22 @@
 //   css_source  staff only: the stylesheet as the teacher typed it (with
 //               comments and formatting), when it still matches css
 //   scoped_css  the same CSS scoped to #paper-page-<id> for display
-//   design      the PageDoc a designed page was made from, or null
-// The list payload carries has_design instead.
+//   design      staff only: the PageDoc a designed page was made from, or
+//               null
+//   has_design  true for a designed page. Readers (students, observers,
+//               anonymous public viewers) get this and never `design`.
+// The list payload carries has_design too.
+//
+// So "is it designed?" is read from either field, and nothing that only
+// teachers may see (an "Edit design" link) may key off `design` alone:
+// gate it on useIsTeacher.
 
 // isDesignedPage: the page was made with the designer (its design is kept).
-export const isDesignedPage = (page) => Boolean(page && page.design);
+export const isDesignedPage = (page) => Boolean(page && (page.design || page.has_design));
 
 // hasPageStyling: the page needs the scoped renderer (designed, or has CSS).
 export const hasPageStyling = (page) =>
-  Boolean(page && (page.design || (typeof page.scoped_css === 'string' && page.scoped_css.trim())));
+  Boolean(page && (isDesignedPage(page) || (typeof page.scoped_css === 'string' && page.scoped_css.trim())));
 
 // pageCssSource: what the Page CSS editor shows, the teacher's own text when
 // the server kept it, else the sanitized stylesheet.

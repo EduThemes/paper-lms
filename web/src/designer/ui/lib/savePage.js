@@ -1,7 +1,7 @@
 /**
  * Turning a design into a Paper wiki page, and checking a saved page before re-opening it.
  */
-import { docHash, renderDesign, renderOptions } from './engine';
+import { docHash, renderDesign, renderOptions, sanitizeDoc } from './engine';
 import { isPageDoc } from './autosave';
 
 /**
@@ -73,10 +73,14 @@ const textOf = (html) => {
  *
  * "Changed" = the body's data-pd-hash doesn't match the design, or its text differs from a fresh render.
  * (A body without a hash at all is judged by its text alone.)
+ *
+ * The design is stored data any course teacher or TA can write through the API (and it arrives through
+ * Commons and Common Cartridge imports too), so `doc` is always the sanitizeDoc'd copy. A design the
+ * designer wrote is unchanged by that; one that wasn't fails the hash check and opens as "changed".
  */
 export function inspectSavedPage(page, courseId) {
   if (!isPageDoc(page?.design)) return { status: 'not-designed' };
-  const doc = canonicalDoc(page.design);
+  const doc = canonicalDoc(sanitizeDoc(page.design));
   const body = String(page.body ?? '');
   const m = HASH_RE.exec(body);
   if (m && m[1].toLowerCase() !== docHash(doc)) return { status: 'changed', doc };

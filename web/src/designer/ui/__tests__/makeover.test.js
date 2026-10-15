@@ -36,6 +36,23 @@ describe('planMakeover', () => {
     expect(section(plan.find((p) => p.role === 'instructor').doc, 'instructor').name).toBe('Ms. Example');
   });
 
+  it('cleans every planned doc: API names stay plain text, a bad palette is dropped', () => {
+    const evilModules = normalizeModules([{ ...PAPER_MODULES[0], name: '<img src=x onerror=alert(1)>' }], {});
+    const plan = planMakeover(
+      input({
+        modules: evilModules,
+        picks: defaultPicks(evilModules),
+        palette: { id: 'scheme-1', name: 'Mine', primary: 'red;background:url(javascript:1)' },
+      }),
+    );
+    for (const p of plan) {
+      expect(p.doc).not.toHaveProperty('palette');
+      const { html } = renderDesign(p.doc, renderOptions('42'));
+      expect(html).not.toMatch(/<img[^>]*onerror/i);
+    }
+    expect(section(plan.find((p) => p.module).doc, 'title').text).toBe('<img src=x onerror=alert(1)>');
+  });
+
   it('honours picks and the layout override, and defaults to published modules', () => {
     const plan = planMakeover(input({ layout: 'timeline', picks: { pages: ['home'], modules: ['5001'] } }));
     expect(plan.map((p) => p.role)).toEqual(['module:5001', 'home']);

@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { normalizeRich } from '../lib/richtext';
+import { sanitizeRich } from '../lib/engine';
 import { useDesignerT } from '../i18n';
 
 const escText = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
@@ -24,15 +25,18 @@ export function RichTextEditor({ label, value, onChange }) {
   const [linkUrl, setLinkUrl] = useState('https://');
   const [active, setActive] = useState({ bold: false, italic: false, insertUnorderedList: false, insertOrderedList: false });
 
+  // The value can come from a stored design (any teacher or TA can write one through the API) and this
+  // editor lives in Paper's own document, so it is always written through sanitizeRich: only p, strong, em,
+  // a[href], ul, ol, li and br ever reach the DOM, never an <img onerror> or an <iframe>.
   useLayoutEffect(() => {
-    if (ref.current) ref.current.innerHTML = value ?? '';
+    if (ref.current) ref.current.innerHTML = sanitizeRich(value ?? '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     // Only rewrite the DOM when the value changed from outside (undo, a fix) — never while typing.
     if (ref.current && value !== lastEmitted.current) {
-      ref.current.innerHTML = value ?? '';
+      ref.current.innerHTML = sanitizeRich(value ?? '');
       lastEmitted.current = value;
     }
   }, [value]);

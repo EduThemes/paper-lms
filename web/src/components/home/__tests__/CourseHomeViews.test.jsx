@@ -80,6 +80,26 @@ describe('CourseHomeViews', () => {
     expect(screen.queryByRole('link', { name: /Edit design/i })).toBeNull();
   });
 
+  test('the reader payload (has_design, no design) still renders as designed, with no edit bar', async () => {
+    api.getCourseFrontPage.mockResolvedValue({
+      page_id: 12, url: 'home', title: 'Home',
+      body: '<div class="paper-design"><h2>Welcome, explorers</h2></div>',
+      css: ':root{--x:#123456}', scoped_css: '#paper-page-12{--x:#123456}', has_design: true,
+    });
+    const { container } = renderWithQuery(<CourseFrontPageView courseId="4" />);
+    const region = await screen.findByRole('region', { name: 'Home' });
+    expect(region).toHaveAttribute('data-testid', 'designed-front-page');
+    expect(container.querySelector('#paper-page-12 .paper-design')).not.toBeNull();
+    expect(container.querySelector('.prose')).toBeNull();
+    expect(screen.queryByRole('link', { name: /Edit design/i })).toBeNull();
+  });
+
+  test('the edit bar follows isTeacher, not the presence of design', async () => {
+    api.getCourseFrontPage.mockResolvedValue({ page_id: 12, url: 'home', title: 'Home', body: '<p>Hi</p>', has_design: true });
+    renderWithQuery(<CourseFrontPageView courseId="4" isTeacher />);
+    expect(await screen.findByRole('link', { name: /Edit design/i })).toHaveAttribute('href', '/courses/4/designer?page=home');
+  });
+
   test('an ordinary front page with page CSS keeps the prose card, scoped', async () => {
     api.getCourseFrontPage.mockResolvedValue({
       page_id: 7, url: 'home', title: 'Home', body: '<p class="note">Note</p>',

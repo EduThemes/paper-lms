@@ -119,6 +119,8 @@ export function LivePreview({ html, css, device, dark, selectedId, onSelect, tin
     const d = docOf();
     const root = d?.querySelector(PREVIEW_ROOT);
     if (!loaded || !root) return;
+    // `html` is the engine's render (every field escaped, rich text through sanitizeRich, from a sanitizeDoc'd
+    // doc), written into a frame sandboxed without allow-scripts, never into Paper's own document.
     root.innerHTML = html;
     const style = d.getElementById('pd-page-css');
     if (style) style.textContent = scopeCss(css);

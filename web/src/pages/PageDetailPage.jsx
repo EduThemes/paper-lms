@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { FileText, ArrowLeft, Pencil, Save, X, Home, History, Trash2, Eye, EyeOff, CalendarCheck, Paintbrush, Code2 } from 'lucide-react';
 import {
   EDITING_ROLE_OPTIONS, editingRolesLabel, canDeletePage, canUnpublishPage, editFormFromPage, buildPageUpdate,
@@ -41,6 +42,10 @@ const PageDetailPage = () => {
   const [htmlMode, setHtmlMode] = useState(false);
   const [detachOpen, setDetachOpen] = useState(false);
   const { course } = useCourseUI();
+  const { t } = useTranslation();
+  // With hand-written CSS off, the server clears a page's stylesheet when its
+  // design is detached, so the detach copy must not promise the look stays.
+  const customCssOff = course?.custom_css_enabled === false;
   const navigate = useNavigate();
   // G074: students may edit pages whose editing roles admit them; the
   // server reports it as can_edit.
@@ -102,7 +107,7 @@ const PageDetailPage = () => {
       // Show what the server stored (it sanitizes the body), not the local
       // editor HTML — otherwise anything the server drops looks saved until
       // the next reload (B102).
-      const detached = htmlMode ? { design: null } : {};
+      const detached = htmlMode ? { design: null, has_design: false } : {};
       setPage((prev) => (saved && typeof saved === 'object' && 'body' in saved
         ? { ...prev, ...saved, ...detached }
         : { ...prev, title: editForm.title, body: editForm.body, updated_at: new Date().toISOString(), ...detached }));
@@ -221,7 +226,7 @@ const PageDetailPage = () => {
                   className="w-full border border-border-strong rounded-md px-3 py-2 font-mono text-xs leading-relaxed bg-surface-0 text-text-primary"
                 />
                 <p id="page-html-help" className="text-xs text-text-tertiary mt-1">
-                  Saving detaches this page from its design. Its look stays; the designer can no longer open it.
+                  {customCssOff ? t('pages.detachDesign.htmlHelpCssOff') : t('pages.detachDesign.htmlHelp')}
                 </p>
               </div>
             ) : (
@@ -418,7 +423,7 @@ const PageDetailPage = () => {
           )}
         </div>
       )}
-      <DetachDesignDialog open={detachOpen} onOpenChange={setDetachOpen} onConfirm={confirmDetach} />
+      <DetachDesignDialog open={detachOpen} onOpenChange={setDetachOpen} onConfirm={confirmDetach} customCssEnabled={!customCssOff} />
       <CrossCourseWarningDialog issues={crossCourseIssues} onGoBack={dismissCrossCourse} onSaveAnyway={confirmCrossCourse} />
     </Layout>
   );

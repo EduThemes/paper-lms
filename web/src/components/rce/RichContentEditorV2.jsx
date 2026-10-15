@@ -20,6 +20,7 @@ import { countWords } from './findReplace';
 import { formatHtml, cleanPastedHtml, pastedHtmlHasContent } from './contentTransforms';
 import { readRceDraft, scheduleRceDraftWrite, cancelRceDraftWrite, clearRceDraft } from './rceDrafts';
 import { normalizeHTML, plainTextToHtml } from '../../utils/html';
+import { CONTAINED_CLASS, CONTENT_CONTAINMENT, styleText } from '../contentContainment';
 
 /**
  * @typedef {Object} RCEV2Props
@@ -46,6 +47,20 @@ function sameContent(a, b) {
 }
 
 const isImageFile = (f) => f && /^image\//.test(f.type || '');
+
+// The editing surface (ProseMirror's root) is a containment box like every
+// rich-content viewer (../contentContainment.js): content being edited may
+// carry position: absolute, z-index and negative offsets, and must not cover
+// Paper's chrome or the editor's own toolbar. Safe for the editor's menus:
+// Tiptap mounts BubbleMenu / FloatingMenu in the root's PARENT (appendTo
+// defaults to view.dom.parentElement), ProseMirror's drop cursor in the
+// root's offsetParent, and dialogs portal to <body>, so none of them sit
+// inside the box or get clipped by it. Node views (media, math) render
+// inside the root, as content should.
+const CONTENT_ATTRS = Object.freeze({
+  class: `rce-v2-content prose prose-sm sm:prose-base max-w-none focus:outline-none min-h-[200px] px-4 py-3 ${CONTAINED_CLASS}`,
+  style: styleText(CONTENT_CONTAINMENT),
+});
 
 /**
  * RichContentEditorV2 — the TipTap-based rich content editor used for every
@@ -105,7 +120,7 @@ export default function RichContentEditorV2({
     content: value || '',
     editorProps: {
       attributes: {
-        class: 'rce-v2-content prose prose-sm sm:prose-base max-w-none focus:outline-none min-h-[200px] px-4 py-3',
+        ...CONTENT_ATTRS,
         role: 'textbox',
         'aria-multiline': 'true',
         'aria-label': label,

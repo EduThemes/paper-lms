@@ -192,6 +192,48 @@ describe('editing a saved page', () => {
     expect(await screen.findByText('This page was changed outside the designer')).toBeInTheDocument();
   });
 
+  it('opens a hostile stored design without putting its HTML in the document', async () => {
+    // What a teacher or TA could store through the API (or bring in through Commons / a cartridge).
+    const evil = makeDoc([
+      { id: 'a', type: 'title', text: 'Biology 101' },
+      {
+        id: 'b',
+        type: 'welcome',
+        heading: 'Welcome',
+        body: '<p>Hi</p><img src=x onerror="window.__pwned=1"><iframe srcdoc="<script>parent.__pwned=1</script>" style="position:fixed;inset:0;width:100vw;height:100vh"></iframe>',
+      },
+      { id: 'i', type: 'instructor', heading: 'Me', name: 'Jane Doe', bio: '<p>Bio</p><img src=x onerror=alert(1)>', photoSrc: 'data:image/svg+xml,<svg onload=alert(1)>' },
+      { id: 'z', type: 'raw-html', html: '<iframe src="https://evil.example"></iframe>' },
+    ]);
+    const r = renderForSave({ ...evil, sections: evil.sections.slice(0, 1) }, { courseId: '42', customCssEnabled: false });
+    fake.current.api.getPage.mockResolvedValue({ page_id: 5, url: 'biology-101', title: 'Biology 101', body: r.html, css: r.css, design: evil, published: true });
+    const user = userEvent.setup();
+    open('/courses/42/designer?page=biology-101');
+    await screen.findByRole('heading', { name: 'Sections on this page' });
+    const outline = screen.getByRole('heading', { name: 'Sections on this page' }).closest('section');
+    // The unknown section type was dropped.
+    expect(within(outline).getAllByRole('listitem')).toHaveLength(3);
+    await user.click(within(outline).getByRole('button', { name: /^Edit Welcome/ }));
+    const editor = await screen.findByRole('textbox', { name: /Text|Message|Body/i });
+    expect(editor.innerHTML).toBe('<p>Hi</p>');
+    expect(document.querySelector('img[onerror]')).toBeNull();
+    expect(document.querySelector('[contenteditable] iframe, [contenteditable] img')).toBeNull();
+    // The only frames are the designer's own sandboxed previews.
+    for (const f of document.querySelectorAll('iframe')) {
+      expect(f).toHaveAttribute('sandbox', 'allow-same-origin');
+      expect(f.getAttribute('srcdoc') ?? '').not.toMatch(/__pwned|onerror/);
+    }
+    expect(window.__pwned).toBeUndefined();
+    // Saving writes the cleaned design back.
+    await user.click(screen.getByRole('button', { name: 'Back to all sections' }));
+    await user.click(screen.getByRole('button', { name: /Next: Finish/ }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('“Biology 101” was updated.');
+    const saved = fake.current.api.updatePage.mock.calls[0][2];
+    expect(JSON.stringify(saved.design)).not.toMatch(/onerror|iframe|data:image|raw-html/);
+    expect(saved.body).not.toMatch(/onerror|<iframe/);
+  });
+
   it('never opens a page that has no design', async () => {
     fake.current.api.getPage.mockResolvedValue({ page_id: 6, url: 'syllabus-notes', title: 'Notes', body: '<p>Mine</p>', design: null });
     open('/courses/42/designer?page=syllabus-notes');

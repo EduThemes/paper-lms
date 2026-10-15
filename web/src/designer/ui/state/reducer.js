@@ -1,5 +1,6 @@
 /** The designer's reducer: the document history (lib/history.js) plus UI state. */
 import { docReducer, emptyHistory } from '../lib/history';
+import { sanitizeDoc } from '../lib/engine';
 
 export const initialState = {
   history: emptyHistory,
@@ -23,9 +24,10 @@ export function designerReducer(state, action) {
     case 'doc':
       return { ...state, history: docReducer(state.history, action.action) };
     case 'openDoc':
+      // A doc opened from outside (a draft, a new page, a saved design) is cleaned once more on the way in.
       return {
         ...state,
-        history: docReducer(state.history, { type: 'load', doc: action.doc }),
+        history: docReducer(state.history, { type: 'load', doc: sanitizeDoc(action.doc) }),
         step: action.step ?? 'customize',
         selectedId: null,
         panelTab: 'content',

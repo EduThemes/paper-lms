@@ -3,7 +3,7 @@ import PropTypes from 'prop-types';
 import { sanitizeHTML, ReadAloudButton, htmlToPlainText } from '../RichContentViewer';
 import { enhanceUserContent } from '../../utils/enhanceUserContent';
 import { ReadingPrefsContext } from '../../contexts/ReadingPrefsContext';
-import { CONTENT_CONTAINMENT } from '../contentContainment';
+import { CONTENT_CONTAINMENT, PAGE_FRAME_CLASS, PAGE_FRAME_CONTAINMENT } from '../contentContainment';
 import { isDesignedPage, pageScopeId } from '../../utils/pageDesign';
 
 // Rendering for wiki pages with a page stylesheet or a design
@@ -14,8 +14,14 @@ import { isDesignedPage, pageScopeId } from '../../utils/pageDesign';
 // goes into a <style> element as a React text child, which React writes as
 // a text node (textContent), never parsed as HTML.
 //
-// The page root is a containment box, so nothing in the page, not even
-// position: fixed from its stylesheet, can draw over Paper's interface.
+// Two boxes: an outer frame (PageFrame) and, inside it, the page root
+// #paper-page-<id> the stylesheet is scoped to. Both are containment boxes,
+// so nothing in the page, not even position: fixed from its stylesheet, can
+// draw over Paper's interface. The root alone is not enough: the stylesheet
+// can restyle the root itself (padding, min-height) and so grow its box past
+// the page area, and it can switch off containment on elements inside it.
+// The frame is the root's parent, out of reach of every scoped selector, and
+// clips whatever the root grows to.
 
 const pageShape = PropTypes.shape({
   page_id: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
@@ -33,19 +39,34 @@ export function PageStylesheet({ css }) {
 }
 PageStylesheet.propTypes = { css: PropTypes.string };
 
+// PageFrame is the containment box around a page root. It carries no id or
+// class a page stylesheet could name, and it is an ancestor of the root, so
+// no scoped selector (all of which match the root or its descendants) can
+// reach it.
+export function PageFrame({ children }) {
+  return (
+    <div className={PAGE_FRAME_CLASS} data-paper-page-frame="" style={PAGE_FRAME_CONTAINMENT}>
+      {children}
+    </div>
+  );
+}
+PageFrame.propTypes = { children: PropTypes.node };
+
 // PageScope wraps an ordinary page's usual rendering (prose and all) in the
 // scope root its stylesheet targets.
 export function PageScope({ page, className, children }) {
   return (
     <>
       <PageStylesheet css={page?.scoped_css} />
-      <div
-        id={pageScopeId(page)}
-        className={['paper-page', className].filter(Boolean).join(' ')}
-        style={CONTENT_CONTAINMENT}
-      >
-        {children}
-      </div>
+      <PageFrame>
+        <div
+          id={pageScopeId(page)}
+          className={['paper-page', className].filter(Boolean).join(' ')}
+          style={CONTENT_CONTAINMENT}
+        >
+          {children}
+        </div>
+      </PageFrame>
     </>
   );
 }
@@ -74,14 +95,16 @@ export default function DesignedPageView({ page, className }) {
         </div>
       )}
       <PageStylesheet css={page?.scoped_css} />
-      <div
-        ref={ref}
-        id={pageScopeId(page)}
-        className={['paper-page', className].filter(Boolean).join(' ')}
-        data-designed-page=""
-        style={CONTENT_CONTAINMENT}
-        dangerouslySetInnerHTML={{ __html: sanitized }}
-      />
+      <PageFrame>
+        <div
+          ref={ref}
+          id={pageScopeId(page)}
+          className={['paper-page', className].filter(Boolean).join(' ')}
+          data-designed-page=""
+          style={CONTENT_CONTAINMENT}
+          dangerouslySetInnerHTML={{ __html: sanitized }}
+        />
+      </PageFrame>
     </>
   );
 }

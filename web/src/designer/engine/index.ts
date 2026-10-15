@@ -6,7 +6,7 @@ export * from './types';
 export { createPage, makeQuickLink, SLOT_HREFS, SLOT_ICONS, LAYOUT_DEFAULTS } from './starter';
 export { renderDesign, renderDesignDetail, renderPage, resolveDarkPalette, type DesignDetail } from './render';
 export { READER_FONT_VAR, flattenDesignVars } from './render/design';
-export { resolvePalette } from './render/context';
+export { resolvePalette, safeImageSrc } from './render/context';
 export { courseLook, DESIGN_ASSET_BASE } from './look';
 export { checkAccessibility, checkHtmlAccessibility, type A11yOptions } from './a11y';
 export { contrastRatio, luminance, mix, normHex, readable, ensureContrast } from './color';
@@ -38,6 +38,7 @@ export {
   type PairResult,
 } from './palette';
 export { sanitizeRich, safeHref } from './sanitize';
+export { sanitizeDoc, DOC_TEXT_MAX, DOC_RICH_MAX, DOC_CSS_MAX } from './sanitize-doc';
 export { renderIconSvg, iconSrc, iconUrl, themeImageUrl, themeImageUrl2x, at2x, hasIcon, iconNames, ICON_FALLBACK } from './icons';
 export { LAYOUTS } from './layouts';
 export { SECTION_TYPES } from './sections-meta';

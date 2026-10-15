@@ -40,6 +40,11 @@ export const HEX_RE = core.HEX_RE;
 export const createPage = (theme, kind, locale, layout) => core.createPage(theme, kind, locale, layout || undefined);
 export const starterStrings = (locale) => core.strings(locale);
 export const sanitizeRich = (html) => core.sanitizeRich(html);
+/**
+ * Every doc that enters the designer from outside its own state (a saved page's design, a draft, a makeover
+ * plan) goes through this first. Not wrapped: an engine failure here must not let an unclean doc through.
+ */
+export const sanitizeDoc = (doc) => core.sanitizeDoc(doc);
 export const iconNames = () => core.iconNames();
 export const normHex = (c) => core.normHex(c);
 export const derivePalette = (base, name, id) => core.derivePalette(base, name, id);
