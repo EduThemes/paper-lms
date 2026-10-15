@@ -198,6 +198,9 @@ func (h *CourseHandler) CreateCourse(c *fiber.Ctx) error {
 	}
 
 	course := &models.Course{
+		// The course belongs to the creating admin's account. Without this
+		// it took the column default (account 1), landing in another tenant.
+		AccountID:        callerAccountID(c),
 		Name:             input.Course.Name,
 		CourseCode:       input.Course.CourseCode,
 		EnrollmentTermID: input.Course.EnrollmentTermID,
