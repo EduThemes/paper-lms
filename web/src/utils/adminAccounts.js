@@ -51,6 +51,27 @@ function rgbToHslString([r, g, b]) {
   return `${Math.round(h * 360)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`;
 }
 
+const channel = (c) => {
+  const v = c / 255;
+  return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+};
+const luminance = ([r, g, b]) => 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+const contrast = (a, b) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+const ON_LIGHT_FILL = [24, 24, 27];
+const WHITE = [255, 255, 255];
+
+// onBrandFor picks the text colour for solid brand fills (--color-on-brand,
+// used on bg-brand-500/600/700): white unless the account's brand is light
+// enough that near-black reads better on those fills.
+export function onBrandFor(scale) {
+  const fills = [500, 600, 700].map((step) => scale[step].split(' ').map(Number));
+  const worst = (fg) => Math.min(...fills.map((f) => contrast(fg, f)));
+  return worst(WHITE) >= worst(ON_LIGHT_FILL) ? WHITE : ON_LIGHT_FILL;
+}
+
 // buildBrandCss turns a theme's variables into CSS custom properties for
 // the light theme. Only #RRGGBB values are used (the server allow-lists
 // them too), so the output can never carry arbitrary CSS.
@@ -59,6 +80,7 @@ export function buildBrandCss(variables = {}) {
   const scale = brandScaleFromHex(variables.brand_primary);
   if (scale) {
     Object.entries(scale).forEach(([step, rgb]) => decls.push(`--color-brand-${step}: ${rgb};`));
+    decls.push(`--color-on-brand: ${onBrandFor(scale).join(' ')};`);
   }
   const button = hexToRgb(variables.button_primary);
   if (button) {
