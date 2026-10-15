@@ -107,6 +107,8 @@ var allowedStyleProperties = []string{
 	"min-block-size", "max-block-size", "box-sizing", "aspect-ratio",
 	"overflow", "overflow-x", "overflow-y", "overflow-inline", "overflow-block",
 	"visibility", "contain", "isolation", "float", "clear",
+	// clip: rect(0 0 0 0) is the visually-hidden pattern the designer uses.
+	"clip",
 	// Borders and outlines.
 	"border", "border-width", "border-style", "border-color",
 	"border-top", "border-right", "border-bottom", "border-left",
