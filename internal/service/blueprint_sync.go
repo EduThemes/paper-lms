@@ -775,6 +775,9 @@ func applyPageFields(dst, src *models.WikiPage) {
 	dst.EditingRoles = src.EditingRoles
 	dst.Public = src.Public
 	dst.WebsiteMode = src.WebsiteMode
+	// Page Designer stylesheet and design travel with the page.
+	dst.CSS = src.CSS
+	dst.Design = src.Design
 }
 
 func (s *BlueprintService) syncPages(ctx context.Context, sourceCourseID uint, sc *syncCtx) error {
@@ -1295,8 +1298,7 @@ func (s *BlueprintService) rewritePushedLinks(ctx context.Context, sc *syncCtx) 
 			}
 		case "WikiPage":
 			if pg, err := s.pageRepo.FindByID(ctx, p.childID, 0); err == nil && pg != nil {
-				if body := rw.rewriteHTML(pg.Body); body != pg.Body {
-					pg.Body = body
+				if rw.rewritePage(pg) {
 					if err := s.pageRepo.Update(ctx, pg); err != nil {
 						return err
 					}

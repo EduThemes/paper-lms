@@ -355,7 +355,20 @@ var Catalog = []Definition{
 		EnvFallback: "MAX_UPLOAD_SIZE_MB",
 		Default:     "5120",
 	},
+
+	// ── Pages ───────────────────────────────────────────────────────
+	{
+		Key: "pages.custom_css_enabled", Group: "Pages", Label: "Hand-written page CSS",
+		Description: "Let teachers write their own CSS for a wiki page (docs/page-designer). When off, a page stylesheet is accepted only together with a Page Designer design, so designed pages keep their generated CSS but ordinary pages cannot carry hand-written CSS.",
+		ValueType:   TypeBool,
+		Scopes:      []ScopeType{ScopeInstance, ScopeAccount},
+		Default:     "true",
+	},
 }
+
+// PagesCustomCSSEnabled is the catalog key for the page-stylesheet switch
+// (service.PagesCustomCSSEnabledKey, which resolves it, must match).
+const PagesCustomCSSEnabled = "pages.custom_css_enabled"
 
 // Find returns the catalog entry for the given key, or (zero, false)
 // if the key is not declared. The service rejects all reads/writes
