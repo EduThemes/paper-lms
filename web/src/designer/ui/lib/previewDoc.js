@@ -5,7 +5,7 @@
  * reach, then the page root; no prose wrapper: designed pages carry their own styling), and adds the page
  * stylesheet scoped to the root. Dark mode is the `dark` class on the iframe's <html>, like Paper's.
  */
-import { CONTENT_CONTAINMENT, PAGE_FRAME_CLASS, PAGE_FRAME_CONTAINMENT } from '@/components/contentContainment';
+import { CONTENT_CONTAINMENT, PAGE_FRAME_CLASS, PAGE_FRAME_CONTAINMENT, styleText } from '@/components/contentContainment';
 import { PREVIEW_ROOT, scopeCss } from './previewCss';
 
 export const DEVICE_WIDTHS = { desktop: 1100, tablet: 768, phone: 375 };
@@ -15,12 +15,8 @@ export const CONTENT_CLASS = 'paper-page';
 
 /** The outer frame and the root, as DesignedPageView renders them (components/contentContainment.js). */
 export const FRAME_CLASS = PAGE_FRAME_CLASS;
-const cssText = (o) =>
-  Object.entries(o)
-    .map(([k, v]) => `${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}: ${v}`)
-    .join('; ');
-const FRAME_STYLE = cssText(PAGE_FRAME_CONTAINMENT);
-const ROOT_STYLE = cssText(CONTENT_CONTAINMENT);
+const FRAME_STYLE = styleText(PAGE_FRAME_CONTAINMENT);
+const ROOT_STYLE = styleText(CONTENT_CONTAINMENT);
 
 const BASE_CSS = `
   html { overflow: hidden; }

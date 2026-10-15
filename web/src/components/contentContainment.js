@@ -24,6 +24,13 @@ export const CONTENT_CONTAINMENT = Object.freeze({
   position: 'relative',
 });
 
+// A style object as an inline `style` attribute string, for roots React does
+// not render itself (the RCE's ProseMirror root, the designer preview shell).
+export const styleText = (o) =>
+  Object.entries(o)
+    .map(([k, v]) => `${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}: ${v}`)
+    .join('; ');
+
 // Presentation-only companion class (index.css): lets wide tables and display
 // equations scroll sideways instead of being clipped by paint containment.
 export const CONTAINED_CLASS = 'paper-contained';
