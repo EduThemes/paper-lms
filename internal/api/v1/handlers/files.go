@@ -359,10 +359,14 @@ func (h *FileHandler) DownloadFile(c *fiber.Ctx) error {
 		disposition = "inline"
 	}
 	c.Set("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"; filename*=UTF-8''%s", disposition, safeName, url.PathEscape(safeName)))
+	// The security middleware sets this globally; set it here too so the
+	// served type (service.ServedContentType) is never second-guessed.
+	c.Set("X-Content-Type-Options", "nosniff")
 
 	backend := h.fileService.StorageBackend()
 
-	// For S3 backend, redirect to presigned URL instead of proxying
+	// For S3 backend, redirect to presigned URL instead of proxying. The
+	// URL makes S3 answer with service.ServedContentType (GetFileURL).
 	if _, isS3 := backend.(*storage.S3Backend); isS3 {
 		downloadURL, err := h.fileService.GetFileURL(c.Context(), uint(id), callerAccountID(c))
 		if err != nil {
@@ -383,7 +387,7 @@ func (h *FileHandler) DownloadFile(c *fiber.Ctx) error {
 	// and closes the reader itself (io.Closer). Closing it here sent an
 	// empty/failed download from local storage.
 
-	c.Set("Content-Type", attachment.ContentType)
+	c.Set("Content-Type", service.ServedContentType(attachment.ContentType))
 	return c.SendStream(reader)
 }
 
