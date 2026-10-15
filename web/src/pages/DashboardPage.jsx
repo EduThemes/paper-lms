@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import PropTypes from 'prop-types';
 import {
   Clock,
   Megaphone,
@@ -43,6 +44,7 @@ import {
 } from '../services/api_learner';
 import { isDone, itemTitle, itemKey, windowRange } from '../utils/planner';
 import { dayKeyInZone } from '../lib/userTimeZone';
+import { normalizeLook, lookCssVars } from '../utils/courseLook';
 
 // Student dashboard (G144 / G145): course cards with the user's
 // favorites, nicknames, colors and order; the "coming up" list from the
@@ -221,9 +223,26 @@ function CustomizeDialog({ card, onClose }) {
 
 const CourseTile = ({ card, nextItem, dueCount, onFavorite, onCustomize, onMove, isFirst, isLast }) => {
   const color = cardColor(card);
+  // A course look (Page Designer) gives the tile its banner art and primary
+  // colour, light or dark with Paper's theme; a colour the user picked for
+  // the card still wins over the look's.
+  const look = normalizeLook(card.look);
+  const headerStyle = look
+    ? { ...lookCssVars(look), ...(card.color ? { backgroundColor: card.color } : {}) }
+    : { background: color };
   return (
     <Card className="h-full overflow-hidden transition-all hover:shadow-md">
-      <div className="relative h-24 w-full" style={{ background: color }}>
+      <div className={`relative h-24 w-full${look ? ' course-look' : ''}`} style={headerStyle} data-testid="course-tile-header">
+        {look?.banner && (
+          <img
+            src={look.banner.src}
+            srcSet={look.banner.srcSet}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" aria-hidden="true" />
         {card.isFavorited && (
           <Star className="absolute start-2 top-2 h-4 w-4 fill-white text-white" aria-label="Favorite" />
@@ -284,6 +303,27 @@ const CourseTile = ({ card, nextItem, dueCount, onFavorite, onCustomize, onMove,
       </CardContent>
     </Card>
   );
+};
+CourseTile.propTypes = {
+  card: PropTypes.shape({
+    id: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+    href: PropTypes.string,
+    shortName: PropTypes.string,
+    originalName: PropTypes.string,
+    nickname: PropTypes.string,
+    courseCode: PropTypes.string,
+    term: PropTypes.string,
+    color: PropTypes.string,
+    isFavorited: PropTypes.bool,
+    look: PropTypes.object,
+  }).isRequired,
+  nextItem: PropTypes.object,
+  dueCount: PropTypes.number,
+  onFavorite: PropTypes.func,
+  onCustomize: PropTypes.func,
+  onMove: PropTypes.func,
+  isFirst: PropTypes.bool,
+  isLast: PropTypes.bool,
 };
 
 const ACTIVITY_ICONS = {

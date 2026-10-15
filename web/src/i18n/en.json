@@ -656,6 +656,13 @@
     "vi": "Tiếng Việt",
     "languageLabel": "Language"
   },
+  "designHome": {
+    "title": "Design your home page",
+    "body": "Pick a theme and a layout, write straight onto the page, and publish a home page your students will want to open. No HTML needed.",
+    "designHome": "Design your home page",
+    "makeover": "Give the whole course a makeover",
+    "dismiss": "Dismiss"
+  },
   "publicPage": {
     "notFoundTitle": "Page Not Found",
     "notFoundDescription": "This page doesn't exist or is not publicly available.",

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useParams, Navigate } from 'react-router-dom';
+import { useParams, Navigate, Link } from 'react-router-dom';
 import { api } from '../services/api';
 import useIsTeacher from '../hooks/useIsTeacher';
 import useUnsavedChanges from '../hooks/useUnsavedChanges';
@@ -25,6 +25,8 @@ import {
 import { cn } from '@/lib/utils';
 import CourseStorageCard from '../components/files/CourseStorageCard';
 import CourseDateAccessCard from '../components/enrollments/CourseDateAccessCard';
+import CourseLookCard from '../components/settings/CourseLookCard';
+import { designerPath } from '../utils/pageDesign';
 import { dateInputToStartISO, dateInputToEndISO, isoToDateInput } from '../utils/datetimeLocal';
 
 // All available CourseNav tabs in default order
@@ -604,6 +606,14 @@ const CourseSettingsPage = () => {
                       </label>
                     ))}
                   </div>
+                  {form.default_view === 'wiki' && (
+                    <p className="mt-3 text-sm text-text-secondary">
+                      The course home shows the page set as the front page.{' '}
+                      <Link to={designerPath(courseId, { kind: 'home' })} className="text-brand-600 hover:underline">
+                        Design a home page
+                      </Link>
+                    </p>
+                  )}
                   {form.default_view === 'home_engine' && (
                     <div className="mt-6 space-y-6">
                       <Separator />
@@ -619,6 +629,16 @@ const CourseSettingsPage = () => {
                   )}
                 </CardContent>
               </Card>
+
+              {/* Page Designer: the course header's banner and colours. Removing
+                  it updates the course in place, which re-seeds this form, so
+                  it waits until unsaved changes are saved or discarded. */}
+              <CourseLookCard
+                courseId={courseId}
+                course={course}
+                onCourseChange={(updated) => setCourse((prev) => ({ ...prev, ...updated }))}
+                disabledReason={isDirty ? 'Save or discard your other changes first.' : undefined}
+              />
 
               <Card>
                 <CardHeader>

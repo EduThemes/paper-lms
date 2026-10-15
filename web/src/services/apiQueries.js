@@ -58,6 +58,10 @@ export const queryKeys = {
     setting: (key, accountId) =>
       ['superAdminSettings', 'setting', String(key), accountId ? String(accountId) : 'instance'],
   },
+  pages: {
+    all: ['pages'],
+    frontPage: (courseId) => ['pages', String(courseId), 'front'],
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -85,6 +89,24 @@ export function useCourseModules(courseId, page = 1, perPage = 100, includeItems
   return useQuery({
     queryKey: queryKeys.courses.modules(courseId, { page, perPage, includeItems }),
     queryFn: () => api.getModules(courseId, page, perPage, includeItems),
+    enabled: !!courseId,
+    ...options,
+  });
+}
+
+// useCourseFrontPage — the course's front page (GET .../front_page), or
+// null when the course has none (404). Other failures surface as errors.
+export function useCourseFrontPage(courseId, options = {}) {
+  return useQuery({
+    queryKey: queryKeys.pages.frontPage(courseId),
+    queryFn: async () => {
+      try {
+        return (await api.getCourseFrontPage(courseId)) || null;
+      } catch (err) {
+        if (err?.status === 404) return null;
+        throw err;
+      }
+    },
     enabled: !!courseId,
     ...options,
   });
