@@ -67,7 +67,7 @@ function CheckLabel({ issues }) {
     <>
       {t('customize.check')}
       {counted.length > 0 && (
-        <span className={cn('inline-flex min-w-[1.25rem] justify-center rounded-full px-1.5 text-xs font-semibold text-white', errors ? 'bg-accent-danger' : 'bg-accent-warning')}>
+        <span className={cn('inline-flex min-w-[1.25rem] justify-center rounded-full px-1.5 text-xs font-semibold text-on-accent', errors ? 'bg-accent-danger' : 'bg-accent-warning')}>
           <span aria-hidden="true">{counted.length}</span>
           <span className="sr-only">, {t('customize.checkCount', { count: counted.length })}</span>
         </span>

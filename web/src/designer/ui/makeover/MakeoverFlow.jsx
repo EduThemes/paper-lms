@@ -22,6 +22,7 @@ import { ThumbFrame } from '../components/PreviewFrames';
 import { useDesignerModules } from '../state/useDesignerModules';
 import { createMakeoverRunner, initialRun } from './runner';
 import { useDesignerT } from '../i18n';
+import { lookCssVars, normalizeLook } from '@/utils/courseLook';
 
 const designerHref = (courseId, slug) => `/courses/${courseId}/designer?page=${encodeURIComponent(slug)}`;
 
@@ -196,7 +197,7 @@ function StatusRow({ p, courseId, running, onRetry }) {
       <div className="flex flex-wrap items-center gap-2">
         <Icon className={cn('h-4 w-4 shrink-0', STATE_COLOR[p.state])} aria-hidden="true" />
         {p.state === 'done' && p.pageUrl ? (
-          <Link to={`/courses/${courseId}/pages/${encodeURIComponent(p.pageUrl)}`} className="font-semibold text-brand-600 hover:underline dark:text-brand-300">
+          <Link to={`/courses/${courseId}/pages/${encodeURIComponent(p.pageUrl)}`} className="font-semibold text-brand-600 hover:underline">
             {p.title}
             <span className="sr-only"> ({t('makeover.openPage', { title: p.title })})</span>
           </Link>
@@ -205,7 +206,7 @@ function StatusRow({ p, courseId, running, onRetry }) {
         )}
         <span className="text-xs text-text-secondary">{t(`makeover.status.${p.state}`)}</span>
         {p.state === 'done' && p.pageUrl && (
-          <Link to={designerHref(courseId, p.pageUrl)} className="ml-auto text-xs text-brand-600 hover:underline dark:text-brand-300">
+          <Link to={designerHref(courseId, p.pageUrl)} className="ml-auto text-xs text-brand-600 hover:underline">
             {t('makeover.editPage', { title: p.title })}
           </Link>
         )}
@@ -300,7 +301,9 @@ function LookOnlyStage({ ctx, look, onChangeLook, onMakePages }) {
   );
   if (!doc) return null;
   const value = courseLook(doc);
-  const c = value.colors;
+  // Preview the header as the course will show it: .course-look picks the look's light or dark colourway
+  // from Paper's theme, like CourseHero does.
+  const preview = normalizeLook(value);
   return (
     <div className="space-y-5">
       <div className="space-y-2">
@@ -312,7 +315,7 @@ function LookOnlyStage({ ctx, look, onChangeLook, onMakePages }) {
       </div>
       <figure className="overflow-hidden rounded-card border border-border">
         {value.banner && <img src={value.banner.src} alt="" className="block max-h-48 w-full object-cover" />}
-        <figcaption className="px-4 py-3 text-lg font-semibold" style={{ background: c.primary, color: c.on_primary }}>
+        <figcaption className="course-look px-4 py-3 text-lg font-semibold" style={lookCssVars(preview)}>
           {ctx.course?.name}
         </figcaption>
       </figure>
