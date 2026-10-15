@@ -38,11 +38,11 @@ export const timeline: LayoutModule = {
         ? `<p style="margin:0 0 .5rem; font-size:${ctx.type.small}; background:${page.bg}; color:${page.heading};"><strong>${esc(eyebrowText(hero.title.subtitle, ctx.doc.locale))}</strong></p>`
         : '';
       const t = hero.title
-        ? `<div data-rmt-section="${esc(hero.title.id)}" data-rmt-type="title" style="margin:0 0 1.5rem;">${sub}${R.title(ctx, { ...hero.title, subtitle: undefined }, page)}</div>`
+        ? `<div data-pd-section="${esc(hero.title.id)}" data-pd-type="title" style="margin:0 0 1.5rem;">${sub}${R.title(ctx, { ...hero.title, subtitle: undefined }, page)}</div>`
         : '';
       // Without theme art the banner renders nothing; skip the wrapper so no empty <div> is left behind.
       const bannerHtml = hero.banner ? R.bannerImg(ctx, hero.banner) : '';
-      const img = bannerHtml ? `<div data-rmt-section="${esc(hero.banner!.id)}" data-rmt-type="banner">${bannerHtml}</div>` : '';
+      const img = bannerHtml ? `<div data-pd-section="${esc(hero.banner!.id)}" data-pd-type="banner">${bannerHtml}</div>` : '';
       header = `<header style="margin:0 0 ${ctx.gap};">${t}${img}</header>`;
     }
     const line = mix(ctx.p.primary, page.bg, 0.7);
@@ -57,7 +57,7 @@ export const timeline: LayoutModule = {
           name && s.type !== 'divider'
             ? iconImg(ctx, name, M, page, { iconStyle: 'solid-circle', style: `position:absolute; left:-${29.5 + M / 2}px; top:-2px;` })
             : '';
-        return `<section data-rmt-section="${esc(s.id)}" data-rmt-type="${s.type}" style="position:relative; margin:0; padding:0 0 ${last ? '0' : ctx.compact ? '2rem' : '2.75rem'};">${marker}${inner}</section>`;
+        return `<section data-pd-section="${esc(s.id)}" data-pd-type="${s.type}" style="position:relative; margin:0; padding:0 0 ${last ? '0' : ctx.compact ? '2rem' : '2.75rem'};">${marker}${inner}</section>`;
       })
       .join('');
     return header + `<div style="margin:0 0 0 18px; padding:0 0 .5rem 28px; border-left:3px solid ${line}; border-radius:0 0 0 ${px(2)};">${items}</div>`;

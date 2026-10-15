@@ -1,11 +1,10 @@
 /**
- * RMT Studio — shared contract.
+ * Paper Page Designer — engine contract (see docs/page-designer/README.md).
  *
- * Every package builds against these types:
- *   - @rmt/core    implements render / a11y / starter content / icons
- *   - @rmt/themes  supplies Theme data (look) — palettes, art, icon style
- *   - builder app  edits a PageDoc and calls core to preview / export
- *   - server app   serves builder + assets, does LTI 1.3, serves icon SVGs
+ *   - engine (this folder)  render / a11y / starter content / icons / palette maths
+ *   - themes                Theme data (look): palettes, art, icon style
+ *   - designer UI           edits a PageDoc and calls the engine to preview / save
+ *   - server                stores the page HTML + stylesheet, serves icon SVGs and theme art
  *
  * A *theme* is the look (palette, art, icon style, type). A *layout* is the
  * structure. They are independent: any theme can be rendered with any layout.
@@ -92,15 +91,26 @@ export interface Palette {
   accent: string;
   surface: string; // tinted panel background
   onSurface: string;
-  background: string; // page background (Canvas pages are white; keep near-white)
+  background: string; // page background (light pages are white; keep near-white)
   text: string;
   link: string; // must reach 4.5:1 on background AND surface
+}
+
+/** The ten colours of a palette, without id and name. */
+export type PaletteColors = Omit<Palette, 'id' | 'name'>;
+
+/**
+ * A theme's colourway. `dark` optionally hand-tunes the derived dark colourway: these colours are merged over
+ * `darkPalette(palette)` and the result is fixed to pass every PALETTE_PAIRS rule.
+ */
+export interface ThemePalette extends Palette {
+  dark?: Partial<PaletteColors>;
 }
 
 export interface ThemeImage {
   id: string; // e.g. "banner", "banner-alt", "spot-instructor"
   kind: 'banner' | 'spot' | 'card';
-  /** File name under apps/server/public/assets/themes/<themeId>/ */
+  /** File name under web/public/design-assets/themes/<themeId>/ (a `<name>@2x.<ext>` twin sits beside it). */
   file: string;
   width: number;
   height: number;
@@ -117,9 +127,9 @@ export interface Theme {
   audiences: Audience[];
   tags: string[];
   defaultLayout: LayoutId;
-  palettes: Palette[]; // [0] is the default colourway
+  palettes: ThemePalette[]; // [0] is the default colourway
   iconStyle: IconStyle;
-  /** Font stack. Canvas keeps inline font-family; first entry should be a web-safe or Canvas-loaded font. */
+  /** Heading font stack. Rendered in the designer stylesheet, never inline, so a reader's own font wins. */
   headingFont?: string;
   corners: 'square' | 'soft' | 'round';
   images: ThemeImage[];
@@ -222,10 +232,48 @@ export interface PageDoc {
 }
 
 export interface RenderOptions {
-  /** Absolute base for images/icons, no trailing slash, e.g. "https://rmt.eduthemes.org/assets". */
+  /** Base for theme art, no trailing slash, e.g. "/design-assets". Art is `${assetBase}/themes/<id>/<file>`. */
   assetBase: string;
-  /** Canvas course id, substituted for {course} in link hrefs when known. */
+  /** Base for icon SVGs, e.g. "/api/v1/design/icons". Defaults to `${assetBase}/icons`. */
+  iconBase?: string;
+  /** Course id, substituted for {course} in link hrefs when known. */
   courseId?: string;
+  /**
+   * Emit a dark colourway (default true): colours that differ between light and dark become
+   * `var(--pd-cN, #light)` and the stylesheet sets them under `prefers-color-scheme: dark`. false = plain hex.
+   */
+  dark?: boolean;
+}
+
+/** renderDesign output: the page body and the designer stylesheet (written against `:root` = the page). */
+export interface RenderResult {
+  html: string;
+  css: string;
+}
+
+/** `courses.look` colours, snake_case. */
+export interface LookColors {
+  primary: string;
+  on_primary: string;
+  secondary: string;
+  on_secondary: string;
+  accent: string;
+  surface: string;
+  on_surface: string;
+  background: string;
+  text: string;
+  link: string;
+}
+
+/** The `courses.look` JSON (docs/page-designer/README.md, "Data model"). */
+export interface CourseLook {
+  version: 1;
+  theme_id: string;
+  palette_id: string;
+  colors: LookColors;
+  dark_colors: LookColors;
+  /** Absent when the theme has no banner art. */
+  banner?: { src: string; src_2x: string; alt: string };
 }
 
 export interface A11yIssue {
@@ -242,10 +290,13 @@ export interface A11yIssue {
 }
 
 /**
- * The public API of @rmt/core (implemented in src/index.ts).
+ * The public API of the engine (implemented in index.ts).
  *
  *   createPage(theme: Theme, kind: PageKind, locale: Locale, layout?: LayoutId): PageDoc
- *   renderPage(doc: PageDoc, theme: Theme, opts: RenderOptions): string        // Canvas-safe HTML fragment
+ *   renderDesign(doc: PageDoc, theme: Theme, opts: RenderOptions): RenderResult   // { html, css }
+ *   renderPage(doc: PageDoc, theme: Theme, opts: RenderOptions): string           // renderDesign(...).html
+ *   darkPalette(p: Palette): Palette            themeDarkPalette(p: ThemePalette): Palette
+ *   courseLook(theme: Theme, paletteId: string, palette?: Palette): CourseLook
  *   checkAccessibility(doc: PageDoc, theme: Theme): A11yIssue[]
  *   contrastRatio(fg: string, bg: string): number
  *   derivePalette(base: { primary; secondary?; accent? }, name: string, id?: string): Palette   // AA-passing
@@ -254,8 +305,9 @@ export interface A11yIssue {
  *   renderIconSvg(name: IconName, o: { style: IconStyle; fg: string; bg: string; size?: number }): string
  *   iconUrl(assetBase: string, name: IconName, o: { style: IconStyle; fg: string; bg: string }): string
  *     -> `${assetBase}/icons/${style}/${name}.svg?fg=<hex no #>&bg=<hex no #>`
+ *   iconSrc(iconBase: string, name: IconName, o): string  -> `${iconBase}/${style}/${name}.svg?fg=…&bg=…`
  *   themeImageUrl(assetBase: string, themeId: string, image: ThemeImage): string
- *     -> `${assetBase}/themes/${themeId}/${image.file}`
+ *     -> `${assetBase}/themes/${themeId}/${image.file}`   (themeImageUrl2x -> `…/<name>@2x.<ext>`)
  *   LAYOUTS: { id: LayoutId; name: string; description: string }[]
  *   SECTION_TYPES: { type: SectionType; label: string; description: string }[]
  *   strings(locale: Locale): Record<string, string>                           // UI-facing starter copy

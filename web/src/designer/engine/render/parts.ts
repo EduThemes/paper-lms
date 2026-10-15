@@ -15,7 +15,11 @@ export const LIST_RESET = 'list-style:none; margin:0; padding:0';
 export const vh = (text: string) =>
   `<span style="position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;">${esc(text)}</span>`;
 
-export const fontFamily = (ctx: Ctx) => (ctx.headingFont ? `font-family:${ctx.headingFont.replace(/"/g, "'")}` : '');
+/**
+ * Marks a non-heading element (an index label, a big number) that should use the theme's heading font. The
+ * font itself is set in the designer stylesheet (render/design.ts), never inline, so a reader's own font wins.
+ */
+export const fontAttr = (ctx: Ctx) => (ctx.headingFont ? ' data-pd-font="1"' : '');
 
 export type HeadingStyle = 'band' | 'underline' | 'plain';
 
@@ -29,6 +33,8 @@ export interface HeadingOpts {
   lineHeight?: number;
   /** Override the heading colour (must already contrast with tone.bg). */
   color?: string;
+  /** Defaults to 700 for h2 and 600 below (Paper's CSS reset makes headings inherit the body weight). */
+  weight?: number;
 }
 
 /** A heading in the document's heading style. Empty text renders nothing (no empty headings). */
@@ -37,7 +43,8 @@ export function heading(ctx: Ctx, text: string, o: HeadingOpts): string {
   const level = o.level ?? 2;
   const style = o.style ?? 'plain';
   const size = o.size ?? (level === 2 ? ctx.type.h2 : ctx.type.h3);
-  const common = [`margin:${o.margin ?? '0 0 1rem'}`, `font-size:${size}`, `line-height:${o.lineHeight ?? 1.25}`, fontFamily(ctx), o.align === 'center' && 'text-align:center'];
+  const weight = o.weight ?? (level === 2 ? 700 : 600);
+  const common = [`margin:${o.margin ?? '0 0 1rem'}`, `font-size:${size}`, `font-weight:${weight}`, `line-height:${o.lineHeight ?? 1.25}`, o.align === 'center' && 'text-align:center'];
   let decl: (string | false | undefined)[];
   if (style === 'band') {
     // A light band: tinted strip with a brand bar. One strong band per page is the title; these stay quiet.
@@ -64,13 +71,12 @@ export function heading(ctx: Ctx, text: string, o: HeadingOpts): string {
     decl = [...common, `background:${o.tone.bg}`, `color:${o.color ?? o.tone.heading}`];
   }
   const s = decl.filter(Boolean).join('; ');
-  const after = style === 'underline' && o.align !== 'center' ? '' : '';
-  return `<h${level} style="${esc(s)};">${esc(text)}</h${level}>${after}`;
+  return `<h${level} style="${esc(s)};">${esc(text)}</h${level}>`;
 }
 
 /** Section-level heading honouring doc.options.headingStyle (only on the page tone; panels use plain). */
 export function sectionHeading(ctx: Ctx, text: string, tone: Tone, o: Partial<HeadingOpts> = {}): string {
-  const onPage = tone.bg === ctx.tones.page.bg;
+  const onPage = tone.role === 'page';
   const style = o.style ?? (onPage ? ctx.headingStyle : 'plain');
   const hs = heading(ctx, text, { level: 2, tone, ...o, style });
   // inline-block underline headings need a line break after them so the next block starts below
@@ -106,7 +112,8 @@ export function rich(ctx: Ctx, html: string, tone: Tone, o: { size?: string; lin
         return `<p style="margin:0 0 ${last ? '0' : gap};">${kids}</p>`;
       case 'ul':
       case 'ol':
-        return `<${n.name} style="margin:0 0 ${last ? '0' : gap}; padding:0 0 0 1.5em;">${kids}</${n.name}>`;
+        // list-style is explicit: Paper's CSS reset removes list markers
+        return `<${n.name} style="margin:0 0 ${last ? '0' : gap}; padding:0 0 0 1.5em; list-style:${n.name === 'ul' ? 'disc' : 'decimal'} outside;">${kids}</${n.name}>`;
       case 'li':
         return `<li style="margin:0 0 .35em;">${kids}</li>`;
       case 'a': {
@@ -128,7 +135,7 @@ export function rich(ctx: Ctx, html: string, tone: Tone, o: { size?: string; lin
 /** Icon colours that contrast (≥3:1, WCAG non-text) on the given tone. */
 export function iconColors(ctx: Ctx, tone: Tone, which: 'primary' | 'secondary' = 'primary', style: IconStyle = ctx.iconStyle): { fg: string; bg: string } {
   const base = which === 'primary' ? ctx.tones.primary : ctx.tones.secondary;
-  const onBase = base.bg === tone.bg;
+  const onBase = tone.role ? tone.role === base.role : base.bg === tone.bg;
   switch (style) {
     case 'solid-circle':
     case 'soft-square':
@@ -144,23 +151,30 @@ export function iconColors(ctx: Ctx, tone: Tone, which: 'primary' | 'secondary' 
   }
 }
 
-/** Decorative icon image (alt=""): the label beside it carries the meaning. */
+/** Decorative icon image (alt=""): the label beside it carries the meaning. Icons never sit in the hero, so lazy. */
 export function iconImg(ctx: Ctx, name: string, size: number, tone: Tone, o: { which?: 'primary' | 'secondary'; style?: string; iconStyle?: IconStyle } = {}): string {
   const st = o.iconStyle ?? ctx.iconStyle;
   const c = iconColors(ctx, tone, o.which ?? 'primary', st);
+  return iconTag(ctx.icon(name, c.fg, c.bg, st), size, o.style);
+}
+
+/** An icon <img>. Margin is explicit: Paper's rich-content CSS gives small images inside li/span a side margin. */
+export function iconTag(src: string, size: number, style = ''): string {
+  const margin = /(^|[\s;])margin\s*:/.test(style) ? '' : ' margin:0;';
   return h('img', {
-    src: ctx.icon(name, c.fg, c.bg, st),
+    src,
     alt: '',
     width: size,
     height: size,
-    style: `display:block; width:${size}px; max-width:100%; height:auto; ${o.style ?? ''}`.trim().replace(/;?\s*$/, ';'),
+    loading: 'lazy',
+    style: `display:block; width:${size}px; max-width:100%; height:auto;${margin} ${style}`.trim().replace(/;?\s*$/, ';'),
   });
 }
 
 /** Button-style link. It navigates, so no role="button". */
 export function button(ctx: Ctx, href: string | null, label: string, tone: Tone, o: { arrow?: boolean; size?: string } = {}): string {
   if (!href || !label.trim()) return '';
-  return `<a href="${esc(href)}" style="display:inline-block; padding:.75rem 1.375rem; border:2px solid ${tone.bg}; border-radius:${px(Math.max(ctx.r.md, 6))}; background:${tone.bg}; color:${tone.fg}; text-decoration:none; font-size:${o.size ?? '1rem'}; line-height:1.25;"><strong>${esc(label)}</strong>${o.arrow === false ? '' : ' <span aria-hidden="true">→</span>'}</a>`;
+  return `<a href="${esc(href)}" data-pd-button="1" style="display:inline-block; padding:.75rem 1.375rem; border:2px solid ${tone.bg}; border-radius:${px(Math.max(ctx.r.md, 6))}; background:${tone.bg}; color:${tone.fg}; text-decoration:none; font-size:${o.size ?? '1rem'}; line-height:1.25;"><strong>${esc(label)}</strong>${o.arrow === false ? '' : ' <span aria-hidden="true">→</span>'}</a>`;
 }
 
 /** Best column count ≤ max for n items: avoids a lonely orphan row (6 → 3, 8 → 4, 5 → 3, 7 → 4). */
@@ -185,7 +199,7 @@ export const gridStyle = (minPx: number, n: number, gap: number) =>
 
 export function section(ctx: Ctx, s: Section, inner: string, style?: string): string {
   if (!inner.trim()) return '';
-  return `<section data-rmt-section="${esc(s.id)}" data-rmt-type="${s.type}" style="${esc(style ?? `margin:0 0 ${ctx.gap}`)};">${inner}</section>`;
+  return `<section data-pd-section="${esc(s.id)}" data-pd-type="${s.type}" style="${esc(style ?? `margin:0 0 ${ctx.gap}`)};">${inner}</section>`;
 }
 
 export function hr(color: string, o: { width?: number; margin?: string; maxWidth?: string } = {}): string {
@@ -205,5 +219,5 @@ export const initials = (name: string) =>
 export const pill = (ctx: Ctx, text: string, tone: Tone, extra = '') =>
   `<span style="display:inline-block; padding:.2em .75em; border-radius:999px; ${paint(tone)}; font-size:${ctx.type.small}; line-height:1.4; white-space:nowrap;${extra ? ` ${extra}` : ''}">${esc(text)}</span>`;
 
-/** Eyebrow text (short label above a heading). Upper-cased only when short, since CSS text-transform is stripped. */
+/** Eyebrow text (short label above a heading). Upper-cased in the text, not with text-transform, which Canvas strips on export. */
 export const eyebrowText = (text: string, lang: string) => (text.length <= 24 ? text.toLocaleUpperCase(lang) : text);

@@ -25,11 +25,11 @@ export const editorial: LayoutModule = {
         ? `<p style="margin:0 0 1rem; font-size:${ctx.type.small}; line-height:1.4; background:${page.bg}; color:${page.heading};"><strong>${esc(eyebrowText(hero.title.subtitle, ctx.doc.locale))}</strong></p>`
         : '';
       const t = hero.title
-        ? `<div data-rmt-section="${esc(hero.title.id)}" data-rmt-type="title" style="margin:0 0 ${ctx.compact ? '1.5rem' : '2.25rem'};">${sub}${heading(ctx, hero.title.text, { level: 2, tone: page, size: ctx.type.title, margin: '0', lineHeight: 1.08, color: page.fg })}${hr(page.fg, { width: 2, margin: `${ctx.compact ? '1.25rem' : '1.75rem'} 0 0` })}</div>`
+        ? `<div data-pd-section="${esc(hero.title.id)}" data-pd-type="title" style="margin:0 0 ${ctx.compact ? '1.5rem' : '2.25rem'};">${sub}${heading(ctx, hero.title.text, { level: 2, tone: page, size: ctx.type.title, margin: '0', lineHeight: 1.08, color: page.fg })}${hr(page.fg, { width: 2, margin: `${ctx.compact ? '1.25rem' : '1.75rem'} 0 0` })}</div>`
         : '';
       // Without theme art the banner renders nothing; skip the wrapper so no empty <div> is left behind.
       const bannerHtml = hero.banner ? R.bannerImg(ctx, hero.banner, { radius: px(ctx.r.sm) }) : '';
-      const img = bannerHtml ? `<div data-rmt-section="${esc(hero.banner!.id)}" data-rmt-type="banner">${bannerHtml}</div>` : '';
+      const img = bannerHtml ? `<div data-pd-section="${esc(hero.banner!.id)}" data-pd-type="banner">${bannerHtml}</div>` : '';
       header = `<header style="margin:0 0 ${ctx.compact ? '2.5rem' : '4rem'};">${t}${img}</header>`;
     }
     const gap = ctx.compact ? '2.5rem' : '4rem';
@@ -39,7 +39,7 @@ export const editorial: LayoutModule = {
         if (!inner.trim()) return '';
         const last = i === hero.rest.length - 1;
         const measure = MEASURE.has(s.type) ? ' max-width:46rem;' : '';
-        return `<section data-rmt-section="${esc(s.id)}" data-rmt-type="${s.type}" style="margin:0 0 ${last ? '0' : gap};${measure}">${inner}</section>`;
+        return `<section data-pd-section="${esc(s.id)}" data-pd-type="${s.type}" style="margin:0 0 ${last ? '0' : gap};${measure}">${inner}</section>`;
       })
       .join('');
     return header + items;

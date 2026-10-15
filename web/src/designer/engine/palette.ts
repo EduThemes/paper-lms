@@ -7,7 +7,7 @@
  * Fixes move a colour's HSL lightness only, so the hue (the "brand") is kept.
  */
 import { contrastRatio, hexToRgb, luminance, mix, normHex, readable, rgbToHex } from './color';
-import type { Palette } from './types';
+import type { Palette, PaletteColors, ThemePalette } from './types';
 
 export { contrastRatio };
 
@@ -241,4 +241,96 @@ export function derivePalette(base: PaletteBase, name: string, id = 'custom'): P
     text: DARK_TEXT,
     link: primary,
   });
+}
+
+/* ------------------------------------------------------------------ dark */
+
+/** Paper's dark tokens: `--background: 240 4% 10%` and `--card: 240 5% 14%` (HSL). */
+export const PAPER_DARK_BACKGROUND = hslToHex(240, 0.04, 0.1);
+export const PAPER_DARK_CARD = hslToHex(240, 0.05, 0.14);
+
+/** Lightness of the dark page sheet and its panels: a step above Paper's own background, like a card. */
+const DARK_SHEET_L = 0.125;
+const DARK_SURFACE_L = 0.18;
+const DARK_TEXT_L = 0.93;
+
+/**
+ * Raise a colour's lightness to at least `minL` (hue kept, saturation capped so pale brand colours don't turn
+ * neon), then to the nearest lightness that reaches `ratio` on every colour in `bgs`.
+ */
+function lift(c: string, minL: number, maxS: number, bgs: string[], ratio: number): string {
+  const [h, s, l] = hexToHsl(normHex(c) ?? FALLBACK_PRIMARY);
+  const start = hslToHex(h, Math.min(s, maxS), Math.max(l, minL));
+  return nudgeLightness(start, bgs, ratio) ?? readable(bgs[0], ['#ffffff', '#000000']);
+}
+
+/** A dark colourway that passes every PALETTE_PAIRS rule: moves the `on*`, text and link colours the shortest way. */
+export function fixDarkPalette(p: Palette): Palette {
+  const background = normHex(p.background) ?? PAPER_DARK_BACKGROUND;
+  const surface = normHex(p.surface) ?? background;
+  const text = nudgeLightness(normHex(p.text) ?? '#eeeeee', [background, surface]) ?? readable(background, ['#ffffff', '#000000']);
+  const link = nudgeLightness(normHex(p.link) ?? text, [background, surface]) ?? text;
+  const on = (fg: string, bg: string) => nudgeLightness(normHex(fg) ?? background, [bg]) ?? readable(bg, ['#000000', '#ffffff']);
+  const primary = normHex(p.primary) ?? FALLBACK_PRIMARY;
+  const secondary = normHex(p.secondary) ?? primary;
+  return {
+    id: p.id,
+    name: p.name,
+    primary,
+    onPrimary: on(p.onPrimary, primary),
+    secondary,
+    onSecondary: on(p.onSecondary, secondary),
+    accent: normHex(p.accent) ?? primary,
+    surface,
+    onSurface: on(p.onSurface, surface),
+    background,
+    text,
+    link,
+  };
+}
+
+/**
+ * The dark twin of a light colourway. The page becomes a dark sheet tinted with the primary's hue (near
+ * Paper's dark background), panels a lighter step of the same tint, text near-white; primary, secondary,
+ * link and accent keep their hue and are lifted until they read on the dark sheet, and the `on*` colours
+ * are recomputed (dark text on the lifted brand colours). Passes every PALETTE_PAIRS rule. Pure.
+ */
+export function darkPalette(p: Palette): Palette {
+  const primary0 = normHex(p.primary) ?? FALLBACK_PRIMARY;
+  const [h, s] = hexToHsl(primary0);
+  // a whisper of the brand hue: greys stay grey, saturated brands tint the sheet a little
+  const tint = s < 0.08 ? 0 : Math.min(0.24, 0.08 + s * 0.16);
+  const background = hslToHex(h, tint, DARK_SHEET_L);
+  const surface = hslToHex(h, Math.min(0.3, tint + 0.06), DARK_SURFACE_L);
+  const text = hslToHex(h, Math.min(0.14, tint), DARK_TEXT_L);
+  const primary = lift(primary0, 0.62, 0.78, [background, surface], AA);
+  const secondary = lift(normHex(p.secondary) ?? primary0, 0.6, 0.78, [background], AA);
+  const accent = lift(normHex(p.accent) ?? primary0, 0.55, 0.85, [background], 3);
+  const link = lift(normHex(p.link) ?? primary0, 0.72, 0.85, [background, surface], AA);
+  return fixDarkPalette({
+    id: p.id,
+    name: p.name,
+    primary,
+    onPrimary: background,
+    secondary,
+    onSecondary: background,
+    accent,
+    surface,
+    onSurface: text,
+    background,
+    text,
+    link,
+  });
+}
+
+/** A theme colourway's dark twin: darkPalette, then the theme's hand-tuned `dark` colours, fixed to pass. */
+export function themeDarkPalette(p: ThemePalette): Palette {
+  const base = darkPalette(p);
+  if (!p.dark) return base;
+  const tuned: Partial<PaletteColors> = {};
+  for (const k of PALETTE_KEYS) {
+    const v = normHex(p.dark[k]);
+    if (v) tuned[k] = v;
+  }
+  return fixDarkPalette({ ...base, ...tuned });
 }

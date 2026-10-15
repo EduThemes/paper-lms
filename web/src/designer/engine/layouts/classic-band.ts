@@ -21,9 +21,9 @@ export const classicBand: LayoutModule = {
       const band = ctx.tones.primary;
       const img = hero.banner ? R.bannerImg(ctx, hero.banner, { radius: hero.title ? `0 0 ${px(ctx.r.lg)} ${px(ctx.r.lg)}` : px(ctx.r.lg) }) : '';
       const bandHtml = hero.title
-        ? `<div data-rmt-section="${esc(hero.title.id)}" data-rmt-type="title" style="${paint(band)}; padding:${ctx.compact ? '1.25rem 1.5rem' : '1.75rem 2rem'}; border-radius:${img ? `${px(ctx.r.lg)} ${px(ctx.r.lg)} 0 0` : px(ctx.r.lg)}; border-bottom:6px solid ${ctx.p.accent};">${R.title(ctx, hero.title, band)}</div>`
+        ? `<div data-pd-section="${esc(hero.title.id)}" data-pd-type="title" style="${paint(band)}; padding:${ctx.compact ? '1.25rem 1.5rem' : '1.75rem 2rem'}; border-radius:${img ? `${px(ctx.r.lg)} ${px(ctx.r.lg)} 0 0` : px(ctx.r.lg)}; border-bottom:6px solid ${ctx.p.accent};">${R.title(ctx, hero.title, band)}</div>`
         : '';
-      const imgHtml = img ? `<div data-rmt-section="${esc(hero.banner!.id)}" data-rmt-type="banner">${img}</div>` : '';
+      const imgHtml = img ? `<div data-pd-section="${esc(hero.banner!.id)}" data-pd-type="banner">${img}</div>` : '';
       header = `<header style="margin:0 0 ${ctx.gap};">${bandHtml}${imgHtml}</header>`;
     }
     return header + renderList(ctx, hero.rest, ctx.tones.page, V);

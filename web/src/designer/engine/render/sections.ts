@@ -1,7 +1,7 @@
 /**
  * Section renderers shared by the layouts. Each takes the container tone and a variant so a layout can
- * restyle a section without re-implementing it. All output follows the Canvas rulebook: inline styles only,
- * bg+color paired, links never wrap blocks, headings start at h2.
+ * restyle a section without re-implementing it. Inline styles only (Paper's rich-content allowlist; what Canvas
+ * strips on export degrades gracefully), bg+color paired, links never wrap blocks, headings start at h2.
  */
 import { ensureContrast, mix, readable } from '../color';
 import { esc, h } from '../html';
@@ -11,11 +11,12 @@ import {
   LIST_RESET,
   bestCols,
   eyebrowText,
-  fontFamily,
+  fontAttr,
   gridStyle,
   heading,
   hr,
   iconImg,
+  iconTag,
   initials,
   paint,
   pill,
@@ -37,11 +38,14 @@ export function title(ctx: Ctx, s: S<'title'>, tone: Tone, o: { size?: string; a
   return o.subtitleFirst ? sub + t : t + sub;
 }
 
+/** The hero banner: never cropped, never lazy (it is above the fold). Theme art gets its @2x twin. */
 export function bannerImg(ctx: Ctx, s: S<'banner'>, o: { radius?: string; style?: string } = {}): string {
   const img = ctx.image(s);
   if (!img) return '';
   return h('img', {
     src: img.src,
+    srcset: img.srcset,
+    'data-pd-art': img.srcset ? 'banner' : undefined,
     alt: (s.alt ?? '').trim(),
     width: img.width,
     height: img.height,
@@ -72,10 +76,11 @@ export function divider(ctx: Ctx, o: { short?: boolean } = {}): string {
 
 export type QuickLinkVariant = 'tiles' | 'cards' | 'list' | 'rows' | 'index' | 'chips' | 'playful';
 
-function linkOpen(ctx: Ctx, l: QuickLink, style: string): [string, string] {
+function linkOpen(ctx: Ctx, l: QuickLink, style: string, variant: QuickLinkVariant): [string, string] {
   const href = ctx.href(l.href);
   // A link that can't be made safe is shown as a plain tile (the checker reports it).
-  return href === null ? [`<span style="${esc(style)}">`, '</span>'] : [`<a href="${esc(href)}" style="${esc(style)}">`, '</a>'];
+  // data-pd-tile hooks the hover / focus styles in the designer stylesheet.
+  return href === null ? [`<span style="${esc(style)}">`, '</span>'] : [`<a href="${esc(href)}" data-pd-tile="${variant}" style="${esc(style)}">`, '</a>'];
 }
 
 export function quickLinks(ctx: Ctx, s: S<'quick-links'>, tone: Tone, variant: QuickLinkVariant, o: { maxCols?: number; headingSize?: string; headingAlign?: 'left' | 'center' } = {}): string {
@@ -96,7 +101,7 @@ export function quickLinks(ctx: Ctx, s: S<'quick-links'>, tone: Tone, variant: Q
       return (
         head +
         items(l => {
-          const [a, z] = linkOpen(ctx, l, `display:block; flex:1 1 auto; min-width:0; padding:1.5rem 1rem 1.375rem; border:1px solid ${t.border}; border-radius:${px(ctx.r.lg)}; ${paint(t)}; text-align:center; text-decoration:none;`);
+          const [a, z] = linkOpen(ctx, l, `display:block; flex:1 1 auto; min-width:0; padding:1.5rem 1rem 1.375rem; border:1px solid ${t.border}; border-radius:${px(ctx.r.lg)}; ${paint(t)}; text-align:center; text-decoration:none;`, 'tiles');
           return `${a}${iconImg(ctx, l.icon, 64, t, { style: 'margin:0 auto .875rem;' })}<span style="display:block; font-size:1.125rem; line-height:1.3; background:${t.bg}; color:${t.heading};"><strong>${esc(l.label)}</strong></span>${desc(l, t)}${z}`;
         }, `${LIST_RESET}; ${gridStyle(150, n, g)}`)
       );
@@ -107,7 +112,7 @@ export function quickLinks(ctx: Ctx, s: S<'quick-links'>, tone: Tone, variant: Q
       return (
         head +
         items(l => {
-          const [a, z] = linkOpen(ctx, l, `display:block; flex:1 1 auto; min-width:0; padding:1.25rem 1.25rem 1.125rem; border:1px solid ${t.border}; border-radius:${px(ctx.r.lg)}; ${paint(t)}; text-decoration:none;`);
+          const [a, z] = linkOpen(ctx, l, `display:block; flex:1 1 auto; min-width:0; padding:1.25rem 1.25rem 1.125rem; border:1px solid ${t.border}; border-radius:${px(ctx.r.lg)}; ${paint(t)}; text-decoration:none;`, 'cards');
           return `${a}${iconImg(ctx, l.icon, 48, t, { style: 'margin:0 0 1rem;', iconStyle: ctx.iconStyle === 'solid-circle' ? 'soft-square' : ctx.iconStyle })}<span style="display:block; font-size:1.125rem; line-height:1.3; background:${t.bg}; color:${t.heading};"><strong>${esc(l.label)}</strong> <span aria-hidden="true">→</span></span>${desc(l, t)}${z}`;
         }, `${LIST_RESET}; ${gridStyle(150, n, g)}`)
       );
@@ -117,7 +122,7 @@ export function quickLinks(ctx: Ctx, s: S<'quick-links'>, tone: Tone, variant: Q
       return (
         head +
         items((l, i) => {
-          const [a, z] = linkOpen(ctx, l, `display:flex; flex:1 1 auto; min-width:0; align-items:center; gap:.75rem; min-height:48px; padding:.5rem 0; ${i ? `border-top:1px solid ${t.border}; ` : ''}${paint(t)}; text-decoration:none;`);
+          const [a, z] = linkOpen(ctx, l, `display:flex; flex:1 1 auto; min-width:0; align-items:center; gap:.75rem; min-height:48px; padding:.5rem 0; ${i ? `border-top:1px solid ${t.border}; ` : ''}${paint(t)}; text-decoration:none;`, 'list');
           return `${a}${iconImg(ctx, l.icon, 36, t, { style: 'flex:0 0 auto;' })}<span style="display:block; flex:1 1 auto; font-size:1rem; line-height:1.3; background:${t.bg}; color:${t.heading};"><strong>${esc(l.label)}</strong></span><span aria-hidden="true" style="flex:0 0 auto; font-size:1.25rem; background:${t.bg}; color:${t.muted};">›</span>${z}`;
         }, LIST_RESET)
       );
@@ -128,7 +133,7 @@ export function quickLinks(ctx: Ctx, s: S<'quick-links'>, tone: Tone, variant: Q
       return (
         head +
         items(l => {
-          const [a, z] = linkOpen(ctx, l, `display:flex; align-items:center; gap:1rem; flex:1 1 auto; min-width:0; padding:.875rem 1.125rem .875rem .875rem; border:1px solid ${t.border}; border-radius:${px(ctx.r.lg)}; ${paint(t)}; text-decoration:none;`);
+          const [a, z] = linkOpen(ctx, l, `display:flex; align-items:center; gap:1rem; flex:1 1 auto; min-width:0; padding:.875rem 1.125rem .875rem .875rem; border:1px solid ${t.border}; border-radius:${px(ctx.r.lg)}; ${paint(t)}; text-decoration:none;`, 'rows');
           return `${a}${iconImg(ctx, l.icon, 48, t, { style: 'flex:0 0 auto;' })}<span style="display:block; flex:1 1 auto; min-width:0;"><span style="display:block; font-size:1.0625rem; line-height:1.3; background:${t.bg}; color:${t.heading};"><strong>${esc(l.label)}</strong></span>${desc(l, t)}</span><span aria-hidden="true" style="flex:0 0 auto; font-size:1.25rem; background:${t.bg}; color:${t.heading};">→</span>${z}`;
         }, `${LIST_RESET}; ${gridStyle(260, n, g)}`)
       );
@@ -139,8 +144,8 @@ export function quickLinks(ctx: Ctx, s: S<'quick-links'>, tone: Tone, variant: Q
       return (
         head +
         items((l, i) => {
-          const [a, z] = linkOpen(ctx, l, `display:flex; align-items:baseline; gap:1rem; flex:1 1 auto; min-width:0; padding:1rem 0 1.125rem; border-top:2px solid ${t.fg}; ${paint(t)}; text-decoration:none;`);
-          return `${a}<span aria-hidden="true" style="flex:0 0 2rem; font-size:${ctx.type.small}; background:${t.bg}; color:${t.muted};">${String(i + 1).padStart(2, '0')}</span><span style="display:block; flex:1 1 auto; min-width:0;"><span style="display:block; font-size:1.25rem; line-height:1.3; background:${t.bg}; color:${t.heading};${ctx.headingFont ? ` ${fontFamily(ctx)};` : ''}">${esc(l.label)}</span>${desc(l, t, '.9375rem')}</span><span aria-hidden="true" style="flex:0 0 auto; font-size:1.25rem; background:${t.bg}; color:${t.heading};">→</span>${z}`;
+          const [a, z] = linkOpen(ctx, l, `display:flex; align-items:baseline; gap:1rem; flex:1 1 auto; min-width:0; padding:1rem 0 1.125rem; border-top:2px solid ${t.fg}; ${paint(t)}; text-decoration:none;`, 'index');
+          return `${a}<span aria-hidden="true" style="flex:0 0 2rem; font-size:${ctx.type.small}; background:${t.bg}; color:${t.muted};">${String(i + 1).padStart(2, '0')}</span><span style="display:block; flex:1 1 auto; min-width:0;"><span style="display:block; font-size:1.25rem; line-height:1.3; background:${t.bg}; color:${t.heading};"${fontAttr(ctx)}>${esc(l.label)}</span>${desc(l, t, '.9375rem')}</span><span aria-hidden="true" style="flex:0 0 auto; font-size:1.25rem; background:${t.bg}; color:${t.heading};">→</span>${z}`;
         }, `${LIST_RESET}; display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, max(260px, calc((100% - ${(n - 1) * 32}px) / ${n}))), 1fr)); column-gap:32px; row-gap:0`)
       );
     }
@@ -149,7 +154,7 @@ export function quickLinks(ctx: Ctx, s: S<'quick-links'>, tone: Tone, variant: Q
       return (
         head +
         items(l => {
-          const [a, z] = linkOpen(ctx, l, `display:inline-flex; align-items:center; gap:.625rem; min-height:44px; padding:.375rem 1.125rem .375rem .375rem; border:1px solid ${t.border}; border-radius:999px; ${paint(t)}; text-decoration:none;`);
+          const [a, z] = linkOpen(ctx, l, `display:inline-flex; align-items:center; gap:.625rem; min-height:44px; padding:.375rem 1.125rem .375rem .375rem; border:1px solid ${t.border}; border-radius:999px; ${paint(t)}; text-decoration:none;`, 'chips');
           return `${a}${iconImg(ctx, l.icon, 36, t, { style: 'flex:0 0 auto;' })}<span style="font-size:1rem; line-height:1.3; background:${t.bg}; color:${t.heading};"><strong>${esc(l.label)}</strong></span>${l.description ? vh(` — ${l.description}`) : ''}${z}`;
         }, `${LIST_RESET}; display:flex; flex-wrap:wrap; gap:.625rem`)
       );
@@ -162,11 +167,11 @@ export function quickLinks(ctx: Ctx, s: S<'quick-links'>, tone: Tone, variant: Q
         items((l, i) => {
           const c = colours[i % colours.length];
           const bg = mix(c, ctx.p.background, 0.88);
-          const t = { ...ctx.tones.page, bg, fg: readable(bg, [ctx.p.text]), heading: readable(bg, [ctx.p.primary, ctx.p.text]) };
+          const t = { ...ctx.tones.page, role: undefined, bg, fg: readable(bg, [ctx.p.text]), heading: readable(bg, [ctx.p.primary, ctx.p.text]) };
           const iconBg = ensureContrast(c, bg, 3);
           const iconFg = readable(iconBg, ['#ffffff', ctx.p.text], 3);
-          const [a, z] = linkOpen(ctx, l, `display:block; flex:1 1 auto; min-width:0; min-height:64px; padding:1.5rem 1rem 1.25rem; border:3px solid ${iconBg}; border-radius:${px(ctx.r.xl)}; ${paint(t)}; text-align:center; text-decoration:none;`);
-          const img = h('img', { src: ctx.icon(l.icon, iconFg, iconBg, 'solid-circle'), alt: '', width: 96, height: 96, style: 'display:block; width:96px; max-width:100%; height:auto; margin:0 auto .75rem;' });
+          const [a, z] = linkOpen(ctx, l, `display:block; flex:1 1 auto; min-width:0; min-height:64px; padding:1.5rem 1rem 1.25rem; border:3px solid ${iconBg}; border-radius:${px(ctx.r.xl)}; ${paint(t)}; text-align:center; text-decoration:none;`, 'playful');
+          const img = iconTag(ctx.icon(l.icon, iconFg, iconBg, 'solid-circle'), 96, 'margin:0 auto .75rem;');
           return `${a}${img}<span style="display:block; font-size:1.375rem; line-height:1.2; background:${t.bg}; color:${t.heading};"><strong>${esc(l.label)}</strong></span>${l.description ? vh(` — ${l.description}`) : ''}${z}`;
         }, `${LIST_RESET}; ${gridStyle(140, n, 20)}`)
       );
@@ -180,8 +185,9 @@ export function instructor(ctx: Ctx, s: S<'instructor'>, tone: Tone, o: { compac
   const t = o.panel ?? tone;
   const size = o.photo ?? (o.compact ? 56 : 96);
   const photo = s.photoSrc?.trim()
-    ? h('img', { src: s.photoSrc.trim().replace(/^http:/i, 'https:'), alt: s.photoAlt ?? '', width: size, style: `display:block; width:${size}px; max-width:100%; height:auto; border-radius:${px(ctx.r.lg)};` })
-    : `<span aria-hidden="true" style="display:inline-block; width:${size}px; line-height:${size}px; border-radius:999px; text-align:center; font-size:${Math.round((size / 16) * 0.38 * 100) / 100}rem; ${paint(ctx.tones.primary)};${fontFamily(ctx) ? ` ${fontFamily(ctx)};` : ''}"><strong>${esc(initials(s.name))}</strong></span>`;
+    ? // square crop where supported (Canvas drops aspect-ratio/object-fit and shows the photo uncropped)
+      h('img', { src: s.photoSrc.trim().replace(/^http:/i, 'https:'), alt: s.photoAlt ?? '', width: size, height: size, loading: 'lazy', style: `display:block; width:${size}px; max-width:100%; height:auto; aspect-ratio:1 / 1; object-fit:cover; border-radius:${px(ctx.r.lg)};` })
+    : `<span aria-hidden="true"${fontAttr(ctx)} style="display:inline-block; width:${size}px; line-height:${size}px; border-radius:999px; text-align:center; font-size:${Math.round((size / 16) * 0.38 * 100) / 100}rem; ${paint(ctx.tones.primary)};"><strong>${esc(initials(s.name))}</strong></span>`;
   const contact: string[] = [];
   if (s.email?.trim())
     contact.push(
@@ -238,7 +244,7 @@ export function objectives(ctx: Ctx, s: S<'objectives'>, tone: Tone, variant: 'c
       items
         .map(
           (x, i) =>
-            `<li style="display:flex; gap:1rem; align-items:baseline; margin:0; padding:.875rem 0; border-top:1px solid ${tone.border};"><span aria-hidden="true" style="flex:0 0 2.25rem; font-size:1.5rem; line-height:1; background:${tone.bg}; color:${tone.heading};${fontFamily(ctx) ? ` ${fontFamily(ctx)};` : ''}">${i + 1}</span><span style="flex:1 1 auto; font-size:1.0625rem; line-height:1.5;">${esc(x)}</span></li>`,
+            `<li style="display:flex; gap:1rem; align-items:baseline; margin:0; padding:.875rem 0; border-top:1px solid ${tone.border};"><span aria-hidden="true"${fontAttr(ctx)} style="flex:0 0 2.25rem; font-size:1.5rem; line-height:1; background:${tone.bg}; color:${tone.heading};">${i + 1}</span><span style="flex:1 1 auto; font-size:1.0625rem; line-height:1.5;">${esc(x)}</span></li>`,
         )
         .join('') +
       `</ol>`
@@ -270,7 +276,7 @@ export function schedule(ctx: Ctx, s: S<'schedule'>, tone: Tone, variant: 'rows'
   const titleOf = (it: (typeof items)[number], t: Tone, size: string) => {
     const href = it.href ? ctx.href(it.href) : null;
     const inner = href ? `<a href="${esc(href)}" style="background:${t.bg}; color:${t.link}; text-decoration:underline;">${esc(it.title)}</a>` : esc(it.title);
-    return `<h3 style="margin:0; font-size:${size}; line-height:1.3; background:${t.bg}; color:${href ? t.link : t.heading};${fontFamily(ctx) ? ` ${fontFamily(ctx)};` : ''}">${inner}</h3>`;
+    return `<h3 style="margin:0; font-size:${size}; font-weight:600; line-height:1.3; background:${t.bg}; color:${href ? t.link : t.heading};">${inner}</h3>`;
   };
   const summary = (it: (typeof items)[number], t: Tone) =>
     it.summary?.trim() ? `<p style="margin:.375rem 0 0; background:${t.bg}; color:${t.muted};">${esc(it.summary)}</p>` : '';

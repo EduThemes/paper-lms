@@ -25,9 +25,9 @@ export const cardGrid: LayoutModule = {
     if (hero.title || hero.banner) {
       const img = hero.banner ? R.bannerImg(ctx, hero.banner) : '';
       const card = hero.title
-        ? `<div data-rmt-section="${esc(hero.title.id)}" data-rmt-type="title" style="position:relative; ${img ? 'margin:max(-4.5rem, -7vw) auto 0 clamp(.75rem, 3vw, 2rem)' : 'margin:0'}; max-width:36rem; ${paint(page)}; padding:${ctx.compact ? '1rem 1.25rem' : '1.375rem 1.75rem 1.5rem'}; border:1px solid ${page.border}; border-top:6px solid ${ctx.p.primary}; border-radius:${px(ctx.r.lg)};">${R.title(ctx, hero.title, page)}</div>`
+        ? `<div data-pd-section="${esc(hero.title.id)}" data-pd-type="title" style="position:relative; ${img ? 'margin:max(-4.5rem, -7vw) auto 0 clamp(.75rem, 3vw, 2rem)' : 'margin:0'}; max-width:36rem; ${paint(page)}; padding:${ctx.compact ? '1rem 1.25rem' : '1.375rem 1.75rem 1.5rem'}; border:1px solid ${page.border}; border-top:6px solid ${ctx.p.primary}; border-radius:${px(ctx.r.lg)};">${R.title(ctx, hero.title, page)}</div>`
         : '';
-      header = `<header style="margin:0 0 ${ctx.compact ? '1.5rem' : '2rem'};">${img ? `<div data-rmt-section="${esc(hero.banner!.id)}" data-rmt-type="banner">${img}</div>` : ''}${card}</header>`;
+      header = `<header style="margin:0 0 ${ctx.compact ? '1.5rem' : '2rem'};">${img ? `<div data-pd-section="${esc(hero.banner!.id)}" data-pd-type="banner">${img}</div>` : ''}${card}</header>`;
     }
     const gap = ctx.compact ? 16 : 24;
     const items = hero.rest
@@ -38,7 +38,7 @@ export const cardGrid: LayoutModule = {
         const flex = wide ? 'flex:1 1 100%' : s.type === 'welcome' ? 'flex:2 1 400px' : 'flex:1 1 280px';
         const framed = !wide && !SELF_FRAMED.has(s.type);
         const frame = framed ? `; ${paint(page)}; padding:${ctx.pad}; border:1px solid ${page.border}; border-radius:${px(ctx.r.lg)}` : '';
-        return `<section data-rmt-section="${esc(s.id)}" data-rmt-type="${s.type}" style="${flex}; min-width:0; margin:0${frame};">${inner}</section>`;
+        return `<section data-pd-section="${esc(s.id)}" data-pd-type="${s.type}" style="${flex}; min-width:0; margin:0${frame};">${inner}</section>`;
       })
       .join('');
     return header + `<div style="display:flex; flex-wrap:wrap; gap:${gap}px; align-items:stretch;">${items}</div>`;

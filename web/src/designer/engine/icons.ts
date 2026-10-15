@@ -79,14 +79,27 @@ export function renderIconSvg(name: IconName, o: { style: IconStyle; fg: string;
   );
 }
 
+/** `${iconBase}/${style}/${name}.svg?fg=<hex>&bg=<hex>` (colours without '#'), e.g. iconBase "/api/v1/design/icons". */
+export function iconSrc(iconBase: string, name: IconName, o: { style: IconStyle; fg: string; bg: string }): string {
+  return `${trimBase(iconBase)}/${o.style}/${encodeURIComponent(cleanName(name) || ICON_FALLBACK)}.svg?fg=${bare(o.fg)}&bg=${bare(o.bg)}`;
+}
+
 /** `${assetBase}/icons/${style}/${name}.svg?fg=<hex>&bg=<hex>` (colours without '#'). */
 export function iconUrl(assetBase: string, name: IconName, o: { style: IconStyle; fg: string; bg: string }): string {
-  return `${trimBase(assetBase)}/icons/${o.style}/${encodeURIComponent(cleanName(name) || ICON_FALLBACK)}.svg?fg=${bare(o.fg)}&bg=${bare(o.bg)}`;
+  return iconSrc(`${trimBase(assetBase)}/icons`, name, o);
 }
 
 /** `${assetBase}/themes/${themeId}/${image.file}` */
-export function themeImageUrl(assetBase: string, themeId: string, image: ThemeImage): string {
-  return `${trimBase(assetBase)}/themes/${encodeURIComponent(themeId)}/${image.file.split('/').map(encodeURIComponent).join('/')}`;
+export function themeImageUrl(assetBase: string, themeId: string, image: ThemeImage | Pick<ThemeImage, 'file'>): string {
+  return `${trimBase(assetBase)}/themes/${encodeURIComponent(themeId)}/${image.file.split('/').map(seg => encodeURIComponent(seg).replace(/%40/g, '@')).join('/')}`;
 }
+
+/** The 2x twin of a theme image: `banner.webp` → `…/banner@2x.webp`. */
+export function themeImageUrl2x(assetBase: string, themeId: string, image: ThemeImage | Pick<ThemeImage, 'file'>): string {
+  return themeImageUrl(assetBase, themeId, { file: at2x(image.file) });
+}
+
+/** `name.ext` → `name@2x.ext` (no extension: `name@2x`). */
+export const at2x = (file: string): string => (/\.[a-z0-9]+$/i.test(file) ? file.replace(/(\.[a-z0-9]+)$/i, '@2x$1') : `${file}@2x`);
 
 const trimBase = (b: string) => String(b ?? '').replace(/\/+$/, '');

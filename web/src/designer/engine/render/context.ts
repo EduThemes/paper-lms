@@ -1,5 +1,5 @@
 import { ensureContrast, mix, normHex, readable } from '../color';
-import { iconUrl, themeImageUrl } from '../icons';
+import { iconSrc, themeImageUrl, themeImageUrl2x } from '../icons';
 import { sanitizePalette } from '../palette';
 import { safeHref } from '../sanitize';
 import { strings } from '../strings';
@@ -7,6 +7,11 @@ import type { IconStyle, LayoutId, Palette, PageDoc, RenderOptions, Section, The
 
 /** A surface plus everything that may sit on it, all checked for contrast. */
 export interface Tone {
+  /**
+   * Which of ctx.tones this is. Layout decisions compare roles, never colours, so the light and dark renders
+   * of a page always have the same structure (render/design.ts relies on it).
+   */
+  role?: 'page' | 'surface' | 'primary' | 'secondary' | 'tint' | 'tint2';
   bg: string;
   fg: string;
   /** Heading colour: the brand primary when it reads well here, else the text colour. */
@@ -49,13 +54,17 @@ export interface Ctx {
   s: Record<string, string>;
   href(raw: string | undefined): string | null;
   icon(name: string, fg: string, bg: string, style?: IconStyle): string;
-  image(section: Extract<Section, { type: 'banner' }>): { src: string; width?: number; height?: number } | null;
+  /** Theme art carries `srcset` (its @2x twin); a teacher's own banner does not. */
+  image(section: Extract<Section, { type: 'banner' }>): { src: string; srcset?: string; width?: number; height?: number } | null;
+  /** `srcset` for a theme image: "<1x> 1x, <2x> 2x". */
+  srcset(file: string): string;
 }
 
-export function makeTone(bg: string, fg: string, p: Palette): Tone {
+export function makeTone(bg: string, fg: string, p: Palette, role?: Tone['role']): Tone {
   const b = normHex(bg) ?? '#ffffff';
   const f = ensureContrast(normHex(fg) ?? '#1f2328', b, 4.5);
   return {
+    role,
     bg: b,
     fg: f,
     heading: readable(b, [p.primary, f], 4.5),
@@ -71,14 +80,14 @@ const RADII = {
   round: { sm: 10, md: 16, lg: 22, xl: 28 },
 } as const;
 
-export function makeCtx(doc: PageDoc, theme: Theme, opts: RenderOptions, type: TypeScale, extra?: { forceRound?: boolean }): Ctx {
-  const raw = resolvePalette(doc, theme);
+export function makeCtx(doc: PageDoc, theme: Theme, opts: RenderOptions, type: TypeScale, extra?: { forceRound?: boolean; palette?: Palette }): Ctx {
+  const raw = extra?.palette ?? resolvePalette(doc, theme);
   // 6-digit lower-case hex everywhere (Canvas's course checker reads only hex)
   const p = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, k === 'id' || k === 'name' ? v : normHex(v) ?? v])) as unknown as Palette;
   const compact = doc.options?.density === 'compact';
   const young = !!theme.audiences?.includes('early-elementary');
   const corners = extra?.forceRound ? 'round' : theme.corners ?? 'soft';
-  const page = makeTone(p.background, p.text, p);
+  const page = makeTone(p.background, p.text, p, 'page');
   const tintBg = mix(p.primary, p.background, 0.92);
   const tint2Bg = mix(p.secondary, p.background, 0.9);
   const ctx: Ctx = {
@@ -96,11 +105,11 @@ export function makeCtx(doc: PageDoc, theme: Theme, opts: RenderOptions, type: T
     type,
     tones: {
       page,
-      surface: makeTone(p.surface, p.onSurface, p),
-      primary: makeTone(p.primary, p.onPrimary, p),
-      secondary: makeTone(p.secondary, p.onSecondary, p),
-      tint: makeTone(tintBg, readable(tintBg, [p.text, p.onSurface]), p),
-      tint2: makeTone(tint2Bg, readable(tint2Bg, [p.text, p.onSurface]), p),
+      surface: makeTone(p.surface, p.onSurface, p, 'surface'),
+      primary: makeTone(p.primary, p.onPrimary, p, 'primary'),
+      secondary: makeTone(p.secondary, p.onSecondary, p, 'secondary'),
+      tint: makeTone(tintBg, readable(tintBg, [p.text, p.onSurface]), p, 'tint'),
+      tint2: makeTone(tint2Bg, readable(tint2Bg, [p.text, p.onSurface]), p, 'tint2'),
     },
     headingStyle: doc.options?.headingStyle ?? 'plain',
     headingFont: displayFont(theme.headingFont),
@@ -112,7 +121,7 @@ export function makeCtx(doc: PageDoc, theme: Theme, opts: RenderOptions, type: T
       return opts.courseId ? safe.split('{course}').join(encodeURIComponent(opts.courseId)) : safe;
     },
     icon(name, fg, bg, style) {
-      return iconUrl(opts.assetBase, name, { style: style ?? ctx.iconStyle, fg, bg });
+      return iconSrc(opts.iconBase ?? `${String(opts.assetBase ?? '').replace(/\/+$/, '')}/icons`, name, { style: style ?? ctx.iconStyle, fg, bg });
     },
     image(sec) {
       if (sec.customSrc) {
@@ -121,7 +130,10 @@ export function makeCtx(doc: PageDoc, theme: Theme, opts: RenderOptions, type: T
       }
       const img = theme.images?.find(i => i.id === sec.imageId) ?? (sec.imageId ? undefined : theme.images?.find(i => i.kind === 'banner'));
       if (!img) return null;
-      return { src: themeImageUrl(opts.assetBase, theme.id, img), width: img.width, height: img.height };
+      return { src: themeImageUrl(opts.assetBase, theme.id, img), srcset: ctx.srcset(img.file), width: img.width, height: img.height };
+    },
+    srcset(file) {
+      return `${themeImageUrl(opts.assetBase, theme.id, { file })} 1x, ${themeImageUrl2x(opts.assetBase, theme.id, { file })} 2x`;
     },
   };
   return ctx;
@@ -147,8 +159,8 @@ export function safeImageSrc(src: string): string | null {
 }
 
 /**
- * Inline font-family overrides the reader's OpenDyslexic / K-5 Balsamiq font, so only emit it for a real
- * display face — never for Canvas's own Lato stack, which every page already inherits.
+ * The heading font goes in the designer stylesheet (never inline, so a reader's own font can win), and only
+ * for a real display face — never for a Lato/Helvetica stack, which reads as the default UI face anyway.
  */
 function displayFont(f: string | undefined): string | undefined {
   const v = f?.trim();

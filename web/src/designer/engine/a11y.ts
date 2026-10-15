@@ -9,7 +9,7 @@
 import { contrastRatio, normHex } from './color';
 import { fixPalette, isNearWhite, paletteFailures, sanitizePalette } from './palette';
 import { attr, decodeEntities, parseHtml, parseStyle, textOf, walk, type HElement, type HNode } from './html';
-import { renderPage } from './render';
+import { renderBody, resolveDarkPalette } from './render';
 import { safeHref, sanitizeRich } from './sanitize';
 import { strings } from './strings';
 import type { A11yIssue, PageDoc, QuickLink, RenderOptions, Section, Theme } from './types';
@@ -330,8 +330,10 @@ export function checkAccessibility(doc: PageDoc, theme: Theme, opts: A11yOptions
     add({ rule: 'course-token', severity: 'warning', message: 'Some links point to “this course” but the course isn’t known yet. Insert the page from inside Canvas (or set the course) so the links work.' });
 
   /* ------------------------------------------------------------ 2. Canvas checker rules on the rendered HTML */
-  const html = renderPage(doc, theme, { assetBase: opts.assetBase ?? 'https://assets.invalid', courseId: opts.courseId ?? '0' });
-  scanRendered(parseHtml(html), add);
+  const ropts = { assetBase: opts.assetBase ?? 'https://assets.invalid', courseId: opts.courseId ?? '0' };
+  scanRendered(parseHtml(renderBody(doc, theme, ropts).html), add);
+  // and contrast once more in the dark colourway Paper shows in dark mode
+  scanRendered(parseHtml(renderBody(doc, theme, ropts, resolveDarkPalette(doc, theme)).html), add, { dark: true });
   return issues;
 }
 
@@ -388,7 +390,11 @@ function fontPx(value: string, parent: number): number | null {
 
 const HEADING_PX: Record<string, number> = { h2: 1.5 * 16, h3: 1.17 * 16, h4: 16, h5: 0.83 * 16, h6: 0.67 * 16 };
 
-function scanRendered(nodes: HNode[], add: (i: Omit<A11yIssue, 'id'> & { rule: string }) => void): void {
+/** A colour in an inline style: plain hex, or the light fallback of the designer's `var(--pd-cN, #hex)`. */
+const styleHex = (v: string): string | null => normHex(/^var\(\s*--[\w-]+\s*,\s*(#[0-9a-fA-F]{3,6})\s*\)$/.exec(v.trim())?.[1] ?? v);
+
+/** `dark`: only the contrast rules, reported as dark-mode issues (the structure rules already ran on the light page). */
+function scanRendered(nodes: HNode[], add: (i: Omit<A11yIssue, 'id'> & { rule: string }) => void, o: { dark?: boolean } = {}): void {
   const contrastSeen = new Set<string>();
   let lastLevel = 1;
 
@@ -407,10 +413,10 @@ function scanRendered(nodes: HNode[], add: (i: Omit<A11yIssue, 'id'> & { rule: s
           if (!contrastSeen.has(key)) {
             contrastSeen.add(key);
             add({
-              rule: large ? 'large-text-contrast' : 'small-text-contrast',
+              rule: `${o.dark ? 'dark-' : ''}${large ? 'large-text-contrast' : 'small-text-contrast'}`,
               severity: 'error',
               sectionId: inh.section,
-              message: `Some text here is hard to read: ${inh.fg} on ${inh.bg} has a contrast of ${ratio.toFixed(2)}:1, and ${large ? 'large' : 'normal-size'} text needs ${need}:1. Try another colourway.`,
+              message: `${o.dark ? 'In dark mode, some' : 'Some'} text here is hard to read: ${inh.fg} on ${inh.bg} has a contrast of ${ratio.toFixed(2)}:1, and ${large ? 'large' : 'normal-size'} text needs ${need}:1. Try another colourway.`,
             });
           }
         }
@@ -418,10 +424,10 @@ function scanRendered(nodes: HNode[], add: (i: Omit<A11yIssue, 'id'> & { rule: s
       }
       const el = n;
       const next: Inh = { ...inh };
-      const sec = attr(el, 'data-rmt-section');
+      const sec = attr(el, 'data-pd-section');
       if (sec) next.section = sec;
       for (const [k, v] of parseStyle(attr(el, 'style'))) {
-        if (k === 'color') next.fg = normHex(v) ?? next.fg;
+        if (k === 'color') next.fg = styleHex(v) ?? next.fg;
         else if (k === 'background' || k === 'background-color') {
           if (/url\(|gradient\(/i.test(v)) next.bgImage = true;
           const hex = /#[0-9a-fA-F]{3,6}\b/.exec(v);
@@ -434,6 +440,10 @@ function scanRendered(nodes: HNode[], add: (i: Omit<A11yIssue, 'id'> & { rule: s
       if (/^h[1-6]$/.test(el.name)) {
         next.bold = true;
         if (!parseStyle(attr(el, 'style')).some(([k]) => k === 'font-size')) next.px = HEADING_PX[el.name] ?? next.px;
+        if (o.dark) {
+          visit(el.children, next);
+          continue;
+        }
         const level = Number(el.name[1]);
         const text = textOf(el.children);
         if (level === 1) add({ rule: 'headings-start-at-h2', severity: 'error', sectionId: next.section, message: 'Canvas already uses the biggest heading (H1) for the page title. Start at H2.' });
@@ -443,6 +453,7 @@ function scanRendered(nodes: HNode[], add: (i: Omit<A11yIssue, 'id'> & { rule: s
         lastLevel = level;
       }
       if (el.name === 'strong' || el.name === 'b') next.bold = true;
+      if (el.name === 'img' && o.dark) continue;
       if (el.name === 'img') {
         const alt = attr(el, 'alt');
         if (alt === undefined) add({ rule: 'img-alt', severity: 'error', sectionId: next.section, message: 'A picture has no description (alt text).' });
@@ -450,6 +461,10 @@ function scanRendered(nodes: HNode[], add: (i: Omit<A11yIssue, 'id'> & { rule: s
           if (FILENAME_RE.test(alt.trim())) add({ rule: 'img-alt-filename', severity: 'error', sectionId: next.section, message: 'A picture’s description is a file name.' });
           if (alt.length > 120) add({ rule: 'img-alt-length', severity: 'error', sectionId: next.section, message: 'A picture’s description is over 120 characters.' });
         }
+        continue;
+      }
+      if (el.name === 'a' && o.dark) {
+        visit(el.children, next);
         continue;
       }
       if (el.name === 'a') {
@@ -460,6 +475,10 @@ function scanRendered(nodes: HNode[], add: (i: Omit<A11yIssue, 'id'> & { rule: s
         const prev = list[j];
         if (href && prev && prev.type === 'el' && prev.name === 'a' && attr(prev, 'href') === href)
           add({ rule: 'adjacent-links', severity: 'warning', sectionId: next.section, message: 'Two links side by side go to the same place. Combine them into one link.' });
+        visit(el.children, next);
+        continue;
+      }
+      if (o.dark) {
         visit(el.children, next);
         continue;
       }

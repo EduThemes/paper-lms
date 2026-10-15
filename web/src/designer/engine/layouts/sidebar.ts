@@ -27,11 +27,11 @@ export const sidebar: LayoutModule = {
     let header = '';
     if (hero.title || hero.banner) {
       const t = hero.title
-        ? `<div data-rmt-section="${esc(hero.title.id)}" data-rmt-type="title" style="margin:0 0 1.25rem; padding:0 0 1rem; border-bottom:1px solid ${page.border};">${R.title(ctx, hero.title, page, { subtitleFirst: false })}</div>`
+        ? `<div data-pd-section="${esc(hero.title.id)}" data-pd-type="title" style="margin:0 0 1.25rem; padding:0 0 1rem; border-bottom:1px solid ${page.border};">${R.title(ctx, hero.title, page, { subtitleFirst: false })}</div>`
         : '';
       // Without theme art the banner renders nothing; skip the wrapper so no empty <div> is left behind.
       const bannerHtml = hero.banner ? R.bannerImg(ctx, hero.banner) : '';
-      const img = bannerHtml ? `<div data-rmt-section="${esc(hero.banner!.id)}" data-rmt-type="banner">${bannerHtml}</div>` : '';
+      const img = bannerHtml ? `<div data-pd-section="${esc(hero.banner!.id)}" data-pd-type="banner">${bannerHtml}</div>` : '';
       header = `<header style="margin:0 0 ${ctx.compact ? '1.5rem' : '2rem'};">${t}${img}</header>`;
     }
     // Balance: when the reading column would be nearly empty, quick links stay in it (as rows).
