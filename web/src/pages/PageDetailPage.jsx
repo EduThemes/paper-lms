@@ -102,7 +102,7 @@ const PageDetailPage = () => {
       // Show what the server stored (it sanitizes the body), not the local
       // editor HTML — otherwise anything the server drops looks saved until
       // the next reload (B102).
-      const detached = htmlMode ? { design: null } : {};
+      const detached = htmlMode ? { design: null, has_design: false } : {};
       setPage((prev) => (saved && typeof saved === 'object' && 'body' in saved
         ? { ...prev, ...saved, ...detached }
         : { ...prev, title: editForm.title, body: editForm.body, updated_at: new Date().toISOString(), ...detached }));

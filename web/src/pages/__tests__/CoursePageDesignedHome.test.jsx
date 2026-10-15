@@ -76,6 +76,18 @@ describe('CoursePage course home and the Page Designer', () => {
     expect(api.getCourseFrontPage).toHaveBeenCalledTimes(1);
   });
 
+  test('students get the full-width designed home from the reader payload (has_design, no design)', async () => {
+    api.getCourse.mockResolvedValue({ id: 4, name: 'Biology', default_view: 'wiki' });
+    const reader = { ...designedFront, has_design: true };
+    delete reader.design;
+    api.getCourseFrontPage.mockResolvedValue(reader);
+    renderCourse();
+    const region = await screen.findByRole('region', { name: 'Welcome home' });
+    expect(region.closest('.md\\:col-span-2')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Hello, class' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Edit design/i })).toBeNull();
+  });
+
   test('an ordinary front page stays in the main column', async () => {
     api.getCourse.mockResolvedValue({ id: 4, name: 'Biology', default_view: 'wiki' });
     api.getCourseFrontPage.mockResolvedValue({ page_id: 31, url: 'home', title: 'Plain home', body: '<p>Plain body</p>', design: null });
