@@ -229,6 +229,11 @@ export interface PageDoc {
     density: 'comfortable' | 'compact';
     headingStyle: 'band' | 'underline' | 'plain';
   };
+  /**
+   * The teacher's own stylesheet (Advanced), appended after the designer's. Written against `:root` as the
+   * page; Paper's server sanitizes and scopes it. The engine never reads it.
+   */
+  customCss?: string;
 }
 
 export interface RenderOptions {
