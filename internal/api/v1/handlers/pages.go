@@ -28,15 +28,15 @@ type PageHandler struct {
 	// disables history (older tests build the handler without it).
 	revisionService *service.WikiPageRevisionService
 
-	// settingsLookup resolves pages.custom_css_enabled for the caller's
-	// account. Nil means the setting's default (on).
-	settingsLookup service.SettingsLookupFunc
+	// cssPolicy resolves pages.custom_css_enabled for the page's course
+	// (its account's setting, as course show reports it). Nil means the
+	// setting's default (on).
+	cssPolicy service.CourseCSSPolicy
 }
 
-// SetSettingsLookup attaches the Settings Engine lookup used for
-// pages.custom_css_enabled.
-func (h *PageHandler) SetSettingsLookup(f service.SettingsLookupFunc) *PageHandler {
-	h.settingsLookup = f
+// SetCourseCSSPolicy attaches the pages.custom_css_enabled resolution.
+func (h *PageHandler) SetCourseCSSPolicy(p service.CourseCSSPolicy) *PageHandler {
+	h.cssPolicy = p
 	return h
 }
 
@@ -111,18 +111,22 @@ func pageListJSON(p *models.WikiPage) fiber.Map {
 
 // pageDetailJSON is a single page: its stylesheet as stored (css), the
 // same stylesheet scoped to the page root #paper-page-<id> (scoped_css,
-// what readers apply), and the Page Designer document (design, or null).
-// Course staff also get css_source, the stylesheet as typed, for the
-// editor. The client wraps the body in <div id="paper-page-<id>">.
+// what readers apply) and has_design. Course staff also get the editor's
+// inputs: the Page Designer document (design, or null) and css_source, the
+// stylesheet as typed. Readers (students, observers, the public page) get
+// neither: they render body and scoped_css. The client wraps the body in
+// <div id="paper-page-<id>">.
 func pageDetailJSON(c *fiber.Ctx, p *models.WikiPage) fiber.Map {
 	out := pageToJSON(p)
 	out["css"] = p.CSS
-	if src := pageCSSSource(p); src != "" && canViewUnpublishedContent(c) {
-		out["css_source"] = src
-	}
 	out["scoped_css"] = scopedPageCSS(p)
-	out["design"] = p.Design
 	out["has_design"] = !p.Design.IsNull()
+	if canViewUnpublishedContent(c) {
+		out["design"] = p.Design
+		if src := pageCSSSource(p); src != "" {
+			out["css_source"] = src
+		}
+	}
 	return out
 }
 

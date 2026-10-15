@@ -46,7 +46,9 @@ func (f *laneFixture) seedDesigned(t *testing.T, code string) *designedCourse {
 		`<img src="/design-assets/themes/tide-pool/banner.webp" srcset="/design-assets/themes/tide-pool/banner.webp 1x, /design-assets/themes/tide-pool/banner@2x.webp 2x" alt="">` +
 		`<img src="/api/v1/design/icons/duotone/star.svg?fg=ffffff&amp;bg=12355b" alt="">` +
 		`<p style="font-family:var(--reading-font-family, Georgia)">Welcome</p></div>`
-	design := fmt.Sprintf(`{"version":1,"id":"doc-1","themeId":"tide-pool","sections":[{"type":"hero","image":%q,"html":"<a href=\"/courses/%d/pages/syllabus-notes\">Notes</a>"}]}`,
+	design := fmt.Sprintf(`{"version":1,"id":"doc-1","themeId":"tide-pool","sections":[`+
+		`{"id":"s1","type":"banner","customSrc":%q,"alt":""},`+
+		`{"id":"s2","type":"quick-links","heading":"Go","links":[{"id":"l1","label":"Notes","href":"/courses/%d/pages/syllabus-notes","icon":"file-text"}]}]}`,
 		fileURL, d.course.ID)
 	d.page = &models.WikiPage{CourseID: d.course.ID, Title: "Home", Body: body, WorkflowState: "active",
 		CSS: fmt.Sprintf(`.hero{background:url(%s)}`, fileURL), Design: models.NullJSON(design)}
@@ -141,9 +143,10 @@ func TestIMSCC_PageDesignsExportForCanvasAndRoundTrip(t *testing.T) {
 	var design map[string]any
 	require.NoError(t, json.Unmarshal(home.Design, &design))
 	assert.Equal(t, "doc-1", design["id"])
-	section := design["sections"].([]any)[0].(map[string]any)
-	assert.Equal(t, newFileURL, section["image"])
-	assert.Contains(t, section["html"], fmt.Sprintf(`/courses/%d/pages/syllabus-notes`, dst.ID))
+	sections := design["sections"].([]any)
+	assert.Equal(t, newFileURL, sections[0].(map[string]any)["customSrc"])
+	link := sections[1].(map[string]any)["links"].([]any)[0].(map[string]any)
+	assert.Equal(t, fmt.Sprintf(`/courses/%d/pages/syllabus-notes`, dst.ID), link["href"])
 	assert.NotContains(t, string(home.Design), "$IMS-CC-FILEBASE$")
 
 	// The body's designer URLs are local again on the instance that made them.
@@ -213,6 +216,40 @@ func TestCourseCopy_CarriesPageDesignsAndLook(t *testing.T) {
 	var course models.Course
 	require.NoError(t, f.g.First(&course, dst.ID).Error)
 	assert.Contains(t, string(course.Look), newFileURL)
+}
+
+// With pages.custom_css_enabled off for the target course, a copied page
+// without a design loses its hand-written stylesheet; a designed page keeps
+// the designer's. Designs are cleaned on the way in.
+func TestCourseCopy_HonoursCustomCSSSettingAndCleansDesigns(t *testing.T) {
+	f := newLaneFixture(t)
+	ctx := context.Background()
+	src := f.seedDesigned(t, "DESIGN-7")
+	pages := postgres.NewPageRepository(f.g)
+	styled := &models.WikiPage{CourseID: src.course.ID, Title: "Styled", Body: "<p>x</p>", WorkflowState: "active",
+		CSS: "p{color:red}", CSSSource: "p { color: red }"}
+	require.NoError(t, pages.Create(ctx, styled))
+	// A stored design with markup the designer would write into the page.
+	dirty := `{"version":1,"id":"doc-1","sections":[{"id":"w","type":"welcome","heading":"Hi","body":"<p>ok</p><img src=x onerror=alert(1)>"}]}`
+	require.NoError(t, f.g.Exec(`UPDATE wiki_pages SET design = ?::jsonb WHERE id = ?`, dirty, src.page.ID).Error)
+
+	dst := laneSeedCourse(t, f.g, 1, "DESIGN-8")
+	var asked []uint
+	off := func(_ context.Context, courseID uint) bool { asked = append(asked, courseID); return false }
+	_, err := f.copier().SetCourseCSSPolicy(off).Copy(ctx, src.course.ID, dst.ID, f.userID, models.MigrationSettings{}, nil)
+	require.NoError(t, err)
+	assert.Contains(t, asked, dst.ID, "the target course's setting decides")
+
+	var copied models.WikiPage
+	require.NoError(t, f.g.Where("course_id = ? AND title = ?", dst.ID, "Styled").First(&copied).Error)
+	assert.Empty(t, copied.CSS)
+	assert.Empty(t, copied.CSSSource)
+	var home models.WikiPage
+	require.NoError(t, f.g.Where("course_id = ? AND title = ?", dst.ID, "Home").First(&home).Error)
+	assert.NotEmpty(t, home.CSS, "designer CSS travels with its design")
+	require.False(t, home.Design.IsNull())
+	assert.NotContains(t, string(home.Design), "onerror")
+	assert.Contains(t, string(home.Design), "<p>ok</p>")
 }
 
 // rewriteZipEntry copies the cartridge at path with one entry rewritten.

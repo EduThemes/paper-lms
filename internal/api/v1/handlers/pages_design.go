@@ -38,10 +38,14 @@ func unprocessable(c *fiber.Ctx, msg string) error {
 //   - css goes through csssanitize.Sanitize (stored unscoped).
 //   - design must be a JSON object with version 1 and a string id, at
 //     most 256 KB; null clears it (the page becomes an ordinary page).
-//   - With pages.custom_css_enabled off, a non-empty css is accepted only
-//     with a non-null design in the same request. A request without css
-//     leaves the stored stylesheet alone, even one that detaches the
-//     design (design: null), so "Edit as HTML" keeps the page's look.
+//   - pages.custom_css_enabled is resolved for the page's course (its
+//     account's setting, the value course show reports), not the
+//     caller's account. With it off, a non-empty css is accepted only with
+//     a non-null design in the same request, and a request that detaches
+//     the design (design: null) also clears the stored stylesheet and its
+//     source: without a design the page may not carry hand-written CSS.
+//     With it on, a request without css leaves the stored stylesheet
+//     alone, so "Edit as HTML" keeps the page's look.
 func (h *PageHandler) applyPageDesignInput(c *fiber.Ctx, page *models.WikiPage, css *string, design json.RawMessage) (bool, error) {
 	if css == nil && len(design) == 0 {
 		return false, nil
@@ -72,7 +76,7 @@ func (h *PageHandler) applyPageDesignInput(c *fiber.Ctx, page *models.WikiPage, 
 		newCSS = sanitized
 	}
 
-	enabled := customCSSEnabled(c.Context(), h.settingsLookup, callerAccountID(c))
+	enabled := h.cssPolicy.Allowed(c.Context(), page.CourseID)
 	if !enabled && css != nil && strings.TrimSpace(*css) != "" && (!designSent || newDesign.IsNull()) {
 		return true, unprocessable(c, "Custom CSS is turned off for this account: a page stylesheet can only be saved together with a Page Designer design")
 	}
@@ -86,6 +90,11 @@ func (h *PageHandler) applyPageDesignInput(c *fiber.Ctx, page *models.WikiPage, 
 		if newCSS != "" {
 			page.CSSSource = *css
 		}
+	}
+	if !enabled && designSent && newDesign.IsNull() {
+		// Detached with hand-written CSS turned off: no design, no CSS.
+		page.CSS = ""
+		page.CSSSource = ""
 	}
 	return false, nil
 }

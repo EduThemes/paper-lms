@@ -114,10 +114,20 @@ type CourseCopyDeps struct {
 // CourseCopyService copies content between two courses of one account.
 type CourseCopyService struct {
 	d CourseCopyDeps
+	// cssPolicy resolves pages.custom_css_enabled for the target course
+	// (Page Designer). Nil: on.
+	cssPolicy CourseCSSPolicy
 }
 
 func NewCourseCopyService(d CourseCopyDeps) *CourseCopyService {
 	return &CourseCopyService{d: d}
+}
+
+// SetCourseCSSPolicy attaches the pages.custom_css_enabled resolution a
+// copy applies to the pages it creates.
+func (s *CourseCopyService) SetCourseCSSPolicy(p CourseCSSPolicy) *CourseCopyService {
+	s.cssPolicy = p
+	return s
 }
 
 // CourseCopyResult reports what a copy created.
@@ -776,6 +786,7 @@ func (c *copier) copyPages(ctx context.Context) error {
 	if fp, err := c.s.d.Pages.FindFrontPage(ctx, c.target.ID); err == nil && fp != nil {
 		hasFront = true
 	}
+	cssAllowed := c.s.cssPolicy.Allowed(ctx, c.target.ID)
 	for _, src := range pages.Items {
 		if !c.sel.wants(CopyTypePages, src.ID) {
 			continue
@@ -788,6 +799,7 @@ func (c *copier) copyPages(ctx context.Context) error {
 		if p.FrontPage && hasFront {
 			p.FrontPage = false
 		}
+		cleanPageDesign(&p, cssAllowed)
 		if err := c.s.d.Pages.Create(ctx, &p); err != nil {
 			c.warn("page %q could not be copied: %v", src.Title, err)
 			continue
@@ -1038,7 +1050,8 @@ func (c *copier) rewritePage(p *models.WikiPage) bool {
 		changed = true
 	}
 	if design, ok := c.rewriteJSON(p.Design); ok {
-		p.Design = design
+		// Re-clean the rewritten design like any other stored one.
+		p.Design = revalidateDesign(design)
 		changed = true
 	}
 	return changed

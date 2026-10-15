@@ -35,6 +35,7 @@ func wireContentMigrationLane(
 	commons *service.CommonsService,
 	migrationHandler *handlers.ContentMigrationHandler,
 	importHandler *handlers.ContentImportHandler,
+	cssPolicy service.CourseCSSPolicy,
 ) contentMigrationLane {
 	courses := postgres.NewCourseRepository(database)
 	enrollments := postgres.NewEnrollmentRepository(database)
@@ -65,7 +66,7 @@ func wireContentMigrationLane(
 		Pages: pages, Discussions: discussions, Modules: modules, ModuleItems: items,
 		Events: events, Rubrics: rubrics, RubricAssocs: rubricAssocs,
 		Folders: postgres.NewFolderRepository(database), Attachments: attachments, Files: fileService,
-	})
+	}).SetCourseCSSPolicy(cssPolicy) // Page Designer: pages.custom_css_enabled of the target course
 	runner := service.NewContentMigrationRunner(
 		postgres.NewContentMigrationRepository(database), postgres.NewContentMigrationQueue(database),
 		courses, copier, parser,

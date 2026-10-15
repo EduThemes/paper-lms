@@ -53,7 +53,8 @@ func folderCourseID(folders repository.FolderRepository) func(ctx context.Contex
 func wirePagesFiles(d pagesFilesDeps) *v1.PagesFilesRoutes {
 	// Page history (G065).
 	revisionRepo := postgres.NewWikiPageRevisionRepository(d.database)
-	revisionService := service.NewWikiPageRevisionService(revisionRepo, d.pageRepo)
+	revisionService := service.NewWikiPageRevisionService(revisionRepo, d.pageRepo).
+		SetCourseCSSPolicy(service.NewCourseCSSPolicy(d.courseRepo, d.settingsLookup))
 	d.pageHandler.SetRevisionService(revisionService)
 
 	// File tree, visibility and quotas (G070-G072). Course quotas share

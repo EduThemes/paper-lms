@@ -63,6 +63,16 @@ type BatchService struct {
 	convMessageRepo     repository.ConversationMessageRepository
 	userRepo            repository.UserRepository
 	sectionRepo         repository.SectionRepository
+
+	// cssPolicy resolves pages.custom_css_enabled for a clone's new
+	// course (SetCourseCSSPolicy). Nil: on.
+	cssPolicy CourseCSSPolicy
+}
+
+// SetCourseCSSPolicy attaches the pages.custom_css_enabled resolution a
+// course clone applies to the pages it creates.
+func (s *BatchService) SetCourseCSSPolicy(p CourseCSSPolicy) {
+	s.cssPolicy = p
 }
 
 func NewBatchService(
@@ -241,6 +251,7 @@ func (s *BatchService) clonePages(ctx context.Context, sourceCourseID, destCours
 		return err
 	}
 
+	cssAllowed := s.cssPolicy.Allowed(ctx, destCourseID)
 	for _, p := range result.Items {
 		oldID := p.ID
 		newPage := &models.WikiPage{
@@ -255,6 +266,7 @@ func (s *BatchService) clonePages(ctx context.Context, sourceCourseID, destCours
 			CSSSource:     p.CSSSource,
 			Design:        p.Design,
 		}
+		cleanPageDesign(newPage, cssAllowed)
 		if err := s.pageRepo.Create(ctx, newPage); err != nil {
 			return fmt.Errorf("failed to clone page %d: %w", oldID, err)
 		}

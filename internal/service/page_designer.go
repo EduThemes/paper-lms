@@ -10,6 +10,7 @@ import (
 
 	"github.com/EduThemes/paper-lms/internal/designdoc"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/repository"
 	"github.com/EduThemes/paper-lms/internal/security/csssanitize"
 	"github.com/EduThemes/paper-lms/internal/settingsctx"
 )
@@ -38,6 +39,58 @@ func CustomCSSEnabled(ctx context.Context, lookup SettingsLookupFunc, accountID 
 	return b
 }
 
+// CourseCSSPolicy reports whether pages.custom_css_enabled is on for the
+// account that owns a course. The setting is the course's account's, not
+// the caller's: an admin of a parent account editing a sub-account's course
+// gets that sub-account's rule, the same value course show reports. A nil
+// policy means the setting's default (on).
+type CourseCSSPolicy func(ctx context.Context, courseID uint) bool
+
+// NewCourseCSSPolicy resolves the setting through the course's account. A
+// course that can't be loaded falls back to the default (on), like
+// CustomCSSEnabled does for a failed lookup.
+func NewCourseCSSPolicy(courses repository.CourseRepository, lookup SettingsLookupFunc) CourseCSSPolicy {
+	return func(ctx context.Context, courseID uint) bool {
+		if courses == nil {
+			return true
+		}
+		// accountID=0: auth-internal — the caller already tied courseID to
+		// its tenant (a page it loaded, or a copy/import target it checked).
+		course, err := courses.FindByID(ctx, courseID, 0)
+		if err != nil || course == nil {
+			return true
+		}
+		return CustomCSSEnabled(ctx, lookup, course.AccountID)
+	}
+}
+
+// Allowed reports whether hand-written page CSS is allowed in courseID.
+func (p CourseCSSPolicy) Allowed(ctx context.Context, courseID uint) bool {
+	if p == nil {
+		return true
+	}
+	return p(ctx, courseID)
+}
+
+// cleanPageDesign re-checks a page's design and stylesheet before a write
+// path that did not come through the page API stores them (revision
+// restore, Commons import, blueprint sync, course copy, batch clone): the
+// design is cleaned by designdoc.ValidateDesign (dropped if invalid), the
+// stylesheet re-sanitized, and when cssAllowed is false (the destination
+// course's account has pages.custom_css_enabled off) a page without a
+// design loses its stylesheet, since only designer CSS is allowed there.
+// css_source is cleared whenever the stylesheet is.
+func cleanPageDesign(p *models.WikiPage, cssAllowed bool) {
+	p.Design = revalidateDesign(p.Design)
+	p.CSS = resanitizePageCSS(p.CSS)
+	if !cssAllowed && p.Design.IsNull() {
+		p.CSS = ""
+	}
+	if p.CSS == "" {
+		p.CSSSource = ""
+	}
+}
+
 // resanitizePageCSS runs a stored or imported page stylesheet through the
 // sanitizer again (it is idempotent); anything it refuses is dropped.
 func resanitizePageCSS(css string) string {
@@ -51,8 +104,8 @@ func resanitizePageCSS(css string) string {
 	return out
 }
 
-// revalidateDesign returns d when it is a valid page design (compacted),
-// or nil.
+// revalidateDesign returns d cleaned by designdoc.ValidateDesign, or nil
+// when it is not a valid page design.
 func revalidateDesign(d models.NullJSON) models.NullJSON {
 	if d.IsNull() {
 		return nil
