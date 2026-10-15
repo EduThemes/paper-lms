@@ -38,7 +38,11 @@ type Course struct {
 	GradingStandardID *uint `json:"grading_standard_id"`
 	// GradingStandardDisabled turns letter grades off for course totals
 	// (Canvas "Enable course grading scheme" unchecked).
-	GradingStandardDisabled bool      `json:"grading_standard_disabled" gorm:"default:false"`
-	CreatedAt               time.Time `json:"created_at"`
-	UpdatedAt               time.Time `json:"updated_at"`
+	GradingStandardDisabled bool `json:"grading_standard_disabled" gorm:"default:false"`
+	// Look is the course header look from the Page Designer (theme,
+	// colours, banner); NULL keeps Paper's generated header. Validated by
+	// designdoc.ValidateLook. Migration 000136.
+	Look      NullJSON  `json:"look" gorm:"column:look;type:jsonb"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

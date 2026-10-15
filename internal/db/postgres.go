@@ -302,6 +302,8 @@ func allAutoMigrateModels() []interface{} {
 		&models.ObserverAlertThreshold{},
 		&models.ObserverAlert{},
 		&models.UserProfileLink{},
+		// Page Designer: saved colour schemes (000137).
+		&models.DesignColourScheme{},
 	}
 }
 
