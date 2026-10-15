@@ -209,7 +209,7 @@ func TestScope(t *testing.T) {
 			`#paper-page-42{color:red;--x:1;background:#fff;font-size:20px;padding:1rem;border-top:1px solid}`},
 		{"root subject split from the rest", `:root, p{position:fixed;color:red}`, `#paper-page-42{color:red}#paper-page-42 p{position:fixed;color:red}`},
 		{"dark root subject limited", `@media (prefers-color-scheme: dark){html.x{position:fixed;color:red}}`, `html.dark.x #paper-page-42{color:red}`},
-		{"is root not a hole", `:is(:root) p{position:fixed}`, `#paper-page-42 :is(:root) p{position:fixed}`},
+		{"root inside is dropped", `:is(:root) p{position:fixed} p{color:blue}`, `#paper-page-42 p{color:blue}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -228,7 +228,7 @@ func TestScope_BadRoot(t *testing.T) {
 			t.Errorf("Scope with root %q = %q, want empty", root, got)
 		}
 	}
-	if got := Scope(strings.Repeat(" ", MaxBytes+1), "#r"); got != "" {
+	if got := Scope(strings.Repeat(" ", MaxScopeBytes+1), "#r"); got != "" {
 		t.Errorf("oversized input scoped to %q", got)
 	}
 }
@@ -282,13 +282,29 @@ func checkScoped(t *testing.T, out, root string) {
 	walk(span{0, len(p.toks)}, false)
 }
 
+// rootScoped also checks that qualifiers left on html / body are only
+// classes and [attr] / [attr=value] tests (after the scoper's own
+// ":not(.dark)" for light-mode rules).
 func rootScoped(toks []token, root string) bool {
 	i := 0
 	if i < len(toks) && toks[i].ident("html") {
-		i = skipWS(toks, compoundEnd(toks, i))
+		end := compoundEnd(toks, i)
+		q := toks[i+1 : end]
+		if len(q) >= 5 && q[0].is(css.ColonToken) && q[1].is(css.FunctionToken) && strings.EqualFold(q[1].data, "not(") &&
+			q[2].delim('.') && q[3].ident("dark") && q[4].is(css.RightParenthesisToken) {
+			q = q[5:]
+		}
+		if !simpleQualifiers(q) {
+			return false
+		}
+		i = skipWS(toks, end)
 	}
 	if i < len(toks) && toks[i].ident("body") {
-		i = skipWS(toks, compoundEnd(toks, i))
+		end := compoundEnd(toks, i)
+		if !simpleQualifiers(toks[i+1 : end]) {
+			return false
+		}
+		i = skipWS(toks, end)
 	}
 	if i >= len(toks) || toks[i].tt != css.HashToken || toks[i].data != root {
 		return false

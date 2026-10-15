@@ -97,7 +97,7 @@ func resanitizePageCSS(css string) string {
 	if strings.TrimSpace(css) == "" {
 		return ""
 	}
-	out, err := csssanitize.Sanitize(css)
+	out, err := csssanitize.Resanitize(css)
 	if err != nil {
 		return ""
 	}

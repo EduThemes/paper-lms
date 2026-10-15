@@ -28,6 +28,13 @@ var fuzzSeeds = []string{
 	`.a { .b { color: red } } .c { @media x { color: red } }`,
 	`.x-->p{color:red} .y--{color:red}`,
 	"\x00\xff .a{color:red}",
+	// Audit regressions: a page stylesheet querying the rest of the document,
+	// and URLs outside backgrounds.
+	`html:has(input[name="q"][value^="se"]) p{color:red}`,
+	`p:is(html:has(a[href*="/users/77"]) *){color:red}`,
+	`:root:has(~ div){color:red} body:not(.x) p{color:red} li:nth-child(1 of html *){color:red}`,
+	`p:where(.a > .b), p:not(:scope *), p:is([rel=html]){color:red}`,
+	`.b{filter:url(https://cdn.example.com/f.svg#f);--i:url(/design-assets/a.png);cursor:url(/design-assets/c.png),auto} img.i{content:url(/design-assets/a.png)}`,
 }
 
 // FuzzSanitize checks the properties that must hold for any input:
