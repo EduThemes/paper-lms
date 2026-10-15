@@ -217,7 +217,7 @@ export function useSaveDesignedPage(courseId, options = {}) {
     },
     ...rest,
     onSuccess: (data, ...args) => {
-      if (data?.page?.url) qc.setQueryData(designerKeys.page(courseId, data.page.url), data.page);
+      if (data?.page?.url) qc.invalidateQueries({ queryKey: designerKeys.page(courseId, data.page.url) });
       invalidateCourse(qc, courseId);
       qc.invalidateQueries({ queryKey: ['courses', String(courseId), 'modules'] });
       onSuccess?.(data, ...args);
