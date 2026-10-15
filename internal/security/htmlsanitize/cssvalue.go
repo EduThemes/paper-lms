@@ -290,6 +290,34 @@ func CSSValueOK(value string) bool {
 	return len(stack) == 0 && varState == varNone
 }
 
+// CSSValueLoadsURL reports whether a declaration value would load a URL:
+// it contains url() (quoted or not) or image-set() in any vendor form.
+func CSSValueLoadsURL(value string) bool {
+	l := css.NewLexer(parse.NewInputString(value))
+	for {
+		tt, data := l.Next()
+		switch tt {
+		case css.ErrorToken:
+			return false
+		case css.URLToken, css.BadURLToken:
+			return true
+		case css.FunctionToken:
+			name := strings.ToLower(string(data[:len(data)-1]))
+			for _, prefix := range cssVendorPrefixes {
+				name = strings.TrimPrefix(name, prefix)
+			}
+			if name == "url" || name == "image-set" {
+				return true
+			}
+		}
+	}
+}
+
+// cssValueNoURL is CSSValueOK for a property that may not load anything.
+func cssValueNoURL(value string) bool {
+	return CSSValueOK(value) && !CSSValueLoadsURL(value)
+}
+
 // unquoteCSSString strips the quotes from a string token. Strings with
 // escapes were already rejected; an unterminated string (the tokenizer
 // returns one at EOF) is rejected here.

@@ -24,6 +24,14 @@ func SanitizeHTML(input string) string {
 	return htmlsanitize.Sanitize(input)
 }
 
+// SanitizeEmailHTML cleans the HTML body of an outgoing email
+// (htmlsanitize.SanitizeEmail): the rich-content elements with the
+// conservative inline-style allowlist, since a mail client does not contain
+// positioned content the way Paper's viewers do.
+func SanitizeEmailHTML(input string) string {
+	return htmlsanitize.SanitizeEmail(input)
+}
+
 // SanitizePlainText is the sanitizer for plain-text fields (descriptions and
 // messages typed into a textarea and rendered by the client as text). It
 // strips all markup but keeps the text literal — "Don't forget A & B" is
