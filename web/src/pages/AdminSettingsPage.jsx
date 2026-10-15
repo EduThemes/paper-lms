@@ -28,6 +28,7 @@ import Layout from '../components/Layout';
 import Page from '../components/Page';
 import { useEffectiveSetting, useUpdateSetting } from '../services/apiQueries';
 import StorageQuotaSettings from '../components/admin/StorageQuotaSettings';
+import PageCssSettings from '../components/admin/PageCssSettings';
 
 // SETTING_KEY is the catalog key in internal/service/settings/catalog.go.
 // Bound at instance scope here; account-scoped overrides land in the
@@ -188,6 +189,9 @@ const AdminSettingsPage = () => {
                 )}
               </form>
               <div className="mt-8">
+                <PageCssSettings />
+              </div>
+              <div>
                 <StorageQuotaSettings />
               </div>
             </div>

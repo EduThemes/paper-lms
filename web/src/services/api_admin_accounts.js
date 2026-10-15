@@ -102,6 +102,12 @@ export const adminAccountsApi = {
     return api.request(`/accounts/${acct(accountId)}/audit_log?${params.toString()}`);
   },
 
+  // Account-admin settings (the Settings Engine keys a tenant admin may set
+  // for their own account). value: true | false | null (null = inherit).
+  getAccountSettings: (accountId) => get(`/accounts/${acct(accountId)}/settings`),
+  setAccountSetting: (key, value, accountId) =>
+    send(`/accounts/${acct(accountId)}/settings/${encodeURIComponent(key)}`, 'PUT', { value }),
+
   // Storage quotas (G120)
   getQuotaDefaults: (accountId) => get(`/accounts/${acct(accountId)}/storage_quotas`),
   updateQuotaDefaults: (defaults, accountId) => send(`/accounts/${acct(accountId)}/storage_quotas`, 'PUT', defaults),

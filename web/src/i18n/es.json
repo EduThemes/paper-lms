@@ -842,6 +842,27 @@
     "hide": "Ocultar",
     "show": "Mostrar"
   },
+  "adminSettingsPage": {
+    "pages": {
+      "title": "Páginas",
+      "description": "Lo que los profesores pueden hacer en las páginas del curso.",
+      "cssLabel": "Permitir que los profesores escriban su propio CSS de página",
+      "cssHelp": "Las páginas diseñadas (Diseñador de páginas) conservan sus colores, el modo oscuro y la distribución en cualquier caso. Esto controla el CSS escrito a mano: el CSS de página en las páginas normales y el CSS personalizado en la pestaña Avanzado del diseñador. Todo se depura y se limita a la página, así que no puede cambiar el resto de Paper.",
+      "on": "Activado",
+      "off": "Desactivado",
+      "lockedByInstance": "Desactivado por el administrador de Paper",
+      "lockedByAccount": "Desactivado por {{name}}",
+      "lockedByParent": "Desactivado por una cuenta superior",
+      "inherited": "Se usa el valor predeterminado ({{state}}).",
+      "explicit": "Configurado para esta cuenta.",
+      "useDefault": "Usar el valor predeterminado",
+      "saving": "Guardando…",
+      "saved": "Guardado",
+      "loadError": "No se pudo cargar la configuración de páginas.",
+      "retry": "Intentar de nuevo",
+      "loading": "Cargando la configuración de páginas"
+    }
+  },
   "contentImport": {
     "title": "Importar contenido",
     "backToCourse": "← Volver al curso",
