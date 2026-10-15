@@ -165,7 +165,7 @@ func (h *DiscussionParityHandler) DownloadEntryAttachment(c *fiber.Ctx) error {
 	}
 	// No defer Close: fasthttp streams the body after the handler
 	// returns and closes the reader itself.
-	c.Set("Content-Type", attachment.ContentType)
+	c.Set("Content-Type", service.ServedContentType(attachment.ContentType))
 	return c.SendStream(reader)
 }
 

@@ -272,6 +272,8 @@ func (s *FileService) uploadFile(ctx context.Context, attachment *models.Attachm
 	} else if err := s.ValidateUploadWithMIME(attachment.Filename, attachment.Size, attachment.ContentType); err != nil {
 		return err
 	}
+	// Never record (or hand S3) a script type: see RecordedContentType.
+	attachment.ContentType = RecordedContentType(attachment.ContentType)
 	// Storage quota (G120): user uploads only; trusted course imports are
 	// an instructor's own content migration and are not refused midway.
 	if !trusted && s.quota != nil {
@@ -355,5 +357,11 @@ func (s *FileService) GetFileURL(ctx context.Context, id, accountID uint) (strin
 	// storage.s3.* at account scope (Wave 6 lookup closure walks account →
 	// parent → instance → env). Enables per-district S3 buckets.
 	scopedCtx := settingsctx.WithAccountID(ctx, accountID)
+	// Backends that can (S3) answer with the same safe Content-Type a
+	// proxied download gets (ServedContentType), whatever the object was
+	// stored with.
+	if b, ok := s.storageBackend.(storage.ContentTypeURLer); ok {
+		return b.URLWithContentType(scopedCtx, attachment.StoragePath, ServedContentType(attachment.ContentType))
+	}
 	return s.storageBackend.URL(scopedCtx, attachment.StoragePath)
 }

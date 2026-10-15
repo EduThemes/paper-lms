@@ -292,17 +292,32 @@ func (b *S3Backend) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// URLWithContentType presigns a GET like URL, with S3 told to answer with
+// contentType (ResponseContentType) instead of the type stored on the
+// object.
+func (b *S3Backend) URLWithContentType(ctx context.Context, key, contentType string) (string, error) {
+	return b.presignGet(ctx, key, contentType)
+}
+
 func (b *S3Backend) URL(ctx context.Context, key string) (string, error) {
+	return b.presignGet(ctx, key, "")
+}
+
+func (b *S3Backend) presignGet(ctx context.Context, key, contentType string) (string, error) {
 	client, bucket, err := b.clientFor(ctx)
 	if err != nil {
 		return "", err
 	}
 
 	presigner := s3.NewPresignClient(client)
-	output, err := presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+	input := &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
-	}, s3.WithPresignExpires(b.expiry))
+	}
+	if contentType != "" {
+		input.ResponseContentType = aws.String(contentType)
+	}
+	output, err := presigner.PresignGetObject(ctx, input, s3.WithPresignExpires(b.expiry))
 	if err != nil {
 		return "", fmt.Errorf("storage: s3 presign failed for key %s: %w", key, err)
 	}

@@ -26,3 +26,11 @@ type Backend interface {
 	// For S3, this returns a presigned URL.
 	URL(ctx context.Context, key string) (string, error)
 }
+
+// ContentTypeURLer is implemented by backends whose download URLs can
+// override the Content-Type the stored object is served with (S3's
+// ResponseContentType), so a redirect download gets the same safe type as
+// a proxied one.
+type ContentTypeURLer interface {
+	URLWithContentType(ctx context.Context, key, contentType string) (string, error)
+}

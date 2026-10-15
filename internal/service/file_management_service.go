@@ -131,6 +131,7 @@ func (s *FileService) ReplaceContent(ctx context.Context, attachment *models.Att
 	if err := s.ValidateUploadWithMIME(filename, size, contentType); err != nil {
 		return err
 	}
+	contentType = RecordedContentType(contentType)
 	key := filepath.Join(attachment.ContextType, fmt.Sprintf("%d", attachment.ContextID), uuid.New().String(), filename)
 	hash := md5.New() // #nosec G401 -- content checksum, not a security control
 	if err := s.storageBackend.Put(ctx, key, io.TeeReader(data, hash), contentType); err != nil {
