@@ -251,6 +251,8 @@ func (s *BatchService) clonePages(ctx context.Context, sourceCourseID, destCours
 			WorkflowState: "unpublished",
 			EditingRoles:  p.EditingRoles,
 			FrontPage:     p.FrontPage,
+			CSS:           p.CSS,
+			Design:        p.Design,
 		}
 		if err := s.pageRepo.Create(ctx, newPage); err != nil {
 			return fmt.Errorf("failed to clone page %d: %w", oldID, err)

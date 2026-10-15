@@ -982,7 +982,7 @@ func main() {
 	// handlers
 	discussionV2Handler := handlers.NewDiscussionV2Handler(discussionV2Service).SetParity(discussionParityService)
 	contentImportHandler := handlers.NewContentImportHandler(imsccParser, contentMigrationService, cfg.FileStoragePath)
-	contentLane := wireContentMigrationLane(database, fileService, cfg.FileStoragePath, imsccParser, blueprintService, commonsService, contentMigrationHandler, contentImportHandler)
+	contentLane := wireContentMigrationLane(database, fileService, cfg.FileStoragePath, cfg.FrontendURL, imsccParser, blueprintService, commonsService, contentMigrationHandler, contentImportHandler)
 	batchHandler := handlers.NewBatchHandler(batchService, authz)
 	// handlers
 	coppaHandler := handlers.NewCOPPAHandler(coppaService).SetAuthorizer(authz)
@@ -1080,6 +1080,8 @@ func main() {
 	pagesFilesRoutes := wirePagesFiles(pagesFilesDeps{database: database, pageRepo: pageRepo, courseRepo: courseRepo, pageHandler: pageHandler,
 		fileService: fileService, fileHandler: fileHandler, settingsLookup: settingsLookup,
 		userHandler: userHandler, authz: authz, permMiddleware: permMiddleware, courseHandler: courseHandler, folderRepo: folderRepo})
+	designColourSchemeHandler := wirePageDesigner(pageDesignerDeps{database: database, courseRepo: courseRepo, attachmentRepo: attachmentRepo,
+		pageHandler: pageHandler, courseHandler: courseHandler, imsccParser: imsccParser, settingsLookup: settingsLookup, frontendURL: cfg.FrontendURL})
 
 	// Create router
 	router := &v1.Router{
@@ -1181,6 +1183,8 @@ func main() {
 		LearnerHandler:            learnerHandler,
 
 		RCEDraftKeyHandler: handlers.NewRCEDraftKeyHandler(cfg.JWTSecret),
+
+		DesignColourSchemeHandler: designColourSchemeHandler,
 
 		FeatureFlagHandler:           featureFlagHandler,
 		CustomGradebookColumnHandler: customGradebookColumnHandler,

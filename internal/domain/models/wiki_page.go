@@ -19,6 +19,13 @@ type WikiPage struct {
 	// TodoDate puts an ungraded page on learners' to-do lists for that
 	// date (Canvas wiki_pages.todo_date). Migration 000094.
 	TodoDate *time.Time `json:"todo_date"`
+
+	// CSS is the page stylesheet: sanitized (csssanitize.Sanitize) and
+	// unscoped. It is scoped to #paper-page-<id> on output. Migration 000136.
+	CSS string `json:"css" gorm:"column:css;type:text;not null;default:''"`
+	// Design is the Page Designer document (PageDoc) the page was made
+	// from; NULL for an ordinary page. Migration 000136.
+	Design NullJSON `json:"design" gorm:"column:design;type:jsonb"`
 }
 
 func (WikiPage) TableName() string {

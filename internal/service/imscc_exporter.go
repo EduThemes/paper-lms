@@ -44,6 +44,9 @@ type IMSCCExporter struct {
 	calendarEventRepo   repository.CalendarEventRepository
 	attachmentRepo      repository.AttachmentRepository
 	fileService         *FileService
+	// publicBaseURL (FRONTEND_URL, SetPublicBaseURL) makes Page Designer
+	// asset and icon URLs absolute in exported page HTML.
+	publicBaseURL string
 }
 
 // NewIMSCCExporter creates a new IMSCC exporter with all required dependencies.
@@ -474,6 +477,9 @@ func (e *IMSCCExporter) exportCourse(ctx context.Context, courseID uint, outputD
 	}
 
 	// --- Export Wiki Pages (we already pre-listed them above for the emitter ctx) ---
+	// Page Designer stylesheets and designs, keyed by resource id, go to
+	// course_settings/paper_designs.json below.
+	pageDesigns := map[string]paperPageDesign{}
 	if pageList != nil {
 		for _, page := range pageList.Items {
 			if !filter.want(CopyTypePages, page.ID) {
@@ -485,8 +491,11 @@ func (e *IMSCCExporter) exportCourse(ctx context.Context, courseID uint, outputD
 			// Wrap the body in a minimal HTML document so the importer's
 			// extractBodyHTML pulls the body cleanly back out, and rewrite
 			// internal URLs back to Canvas placeholder tokens.
-			body := emitTokens(page.Body, emitterCtx)
+			body := emitTokens(e.exportPageBody(page.Body), emitterCtx)
 			doc := buildWikiHTMLDocument(page.Title, body)
+			if entry, ok := exportPageDesign(&page, emitterCtx); ok {
+				pageDesigns[resID] = entry
+			}
 
 			w, writeErr := zipWriter.Create(href)
 			if writeErr != nil {
@@ -661,6 +670,9 @@ func (e *IMSCCExporter) exportCourse(ctx context.Context, courseID uint, outputD
 		_ = e.writeSyllabusHTML(zipWriter, course)
 	}
 	_ = e.writeCanvasExportTxt(zipWriter)
+	if err := e.writePaperDesigns(zipWriter, course, filter.wantType(CopyTypeCourseSettings), pageDesigns, emitterCtx); err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("failed to write page designs: %v", err))
+	}
 	_ = e.writeModuleMetaXML(ctx, zipWriter, courseID, result, filter)
 	_ = e.writeAssignmentGroupsXML(ctx, zipWriter, courseID, result)
 	_ = e.writeRubricsXML(ctx, zipWriter, courseID, result)

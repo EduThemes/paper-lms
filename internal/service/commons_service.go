@@ -484,6 +484,11 @@ func (im *commonsImporter) page(ctx context.Context, raw json.RawMessage) error 
 	p.CourseID = im.target
 	// The target course keeps its own front page.
 	p.FrontPage = false
+	// The snapshot carries the page's stylesheet and design (Page
+	// Designer). Re-check both on the way in, as the body is: the snapshot
+	// was written by this server, but the policy may have tightened since.
+	p.CSS = resanitizePageCSS(p.CSS)
+	p.Design = revalidateDesign(p.Design)
 	if err := im.s.pageRepo.Create(ctx, &p); err != nil {
 		return err
 	}
@@ -697,8 +702,7 @@ func (im *commonsImporter) rewriteLinks(ctx context.Context) error {
 			}
 		case "WikiPage":
 			if p, err := im.s.pageRepo.FindByID(ctx, ref.ID, 0); err == nil && p != nil {
-				if body := rw.rewriteHTML(p.Body); body != p.Body {
-					p.Body = body
+				if rw.rewritePage(p) {
 					if err := im.s.pageRepo.Update(ctx, p); err != nil {
 						return err
 					}

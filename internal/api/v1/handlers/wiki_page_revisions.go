@@ -45,6 +45,9 @@ func revisionToJSON(r *models.WikiPageRevision, page *models.WikiPage, latest in
 	}
 	if includeBody {
 		out["body"] = r.Body
+		// Page Designer snapshot (stored, unscoped stylesheet and PageDoc).
+		out["css"] = r.CSS
+		out["design"] = r.Design
 	}
 	return out
 }

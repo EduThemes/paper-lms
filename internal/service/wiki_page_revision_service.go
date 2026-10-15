@@ -6,6 +6,7 @@ import (
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
+	"github.com/EduThemes/paper-lms/internal/security/csssanitize"
 )
 
 // ErrRevisionNotFound is returned when a revision number does not exist
@@ -13,9 +14,10 @@ import (
 var ErrRevisionNotFound = errors.New("revision not found")
 
 // WikiPageRevisionService records and restores page versions (Canvas
-// wiki page history). Every save that changes a page's title or body
-// appends a revision; a revert copies an old revision's title and body
-// back onto the page and records that as a new revision.
+// wiki page history). Every save that changes a page's title, body,
+// stylesheet or design appends a revision; a revert copies an old
+// revision's content back onto the page and records that as a new
+// revision.
 type WikiPageRevisionService struct {
 	revisionRepo repository.WikiPageRevisionRepository
 	pageRepo     repository.PageRepository
@@ -32,13 +34,37 @@ func editorPtr(editedBy uint) *uint {
 	return &editedBy
 }
 
-// CreateRevision appends the page's current title and body as its next
-// revision.
-func (s *WikiPageRevisionService) CreateRevision(ctx context.Context, pageID uint, title, body string, editedBy uint) (*models.WikiPageRevision, error) {
+// PageSnapshot is the part of a page that is versioned: title, body,
+// stylesheet and design.
+type PageSnapshot struct {
+	Title  string
+	Body   string
+	CSS    string
+	Design models.NullJSON
+}
+
+// SnapshotOf returns page's versioned content.
+func SnapshotOf(page *models.WikiPage) PageSnapshot {
+	if page == nil {
+		return PageSnapshot{}
+	}
+	return PageSnapshot{Title: page.Title, Body: page.Body, CSS: page.CSS, Design: page.Design}
+}
+
+// Equal reports whether two snapshots hold the same content. Designs are
+// compared as JSON values: jsonb hands documents back re-formatted.
+func (a PageSnapshot) Equal(b PageSnapshot) bool {
+	return a.Title == b.Title && a.Body == b.Body && a.CSS == b.CSS && jsonValuesEqual(a.Design, b.Design)
+}
+
+// CreateRevision appends snap as the page's next revision.
+func (s *WikiPageRevisionService) CreateRevision(ctx context.Context, pageID uint, snap PageSnapshot, editedBy uint) (*models.WikiPageRevision, error) {
 	revision := &models.WikiPageRevision{
 		WikiPageID: pageID,
-		Title:      title,
-		Body:       body,
+		Title:      snap.Title,
+		Body:       snap.Body,
+		CSS:        snap.CSS,
+		Design:     snap.Design,
 		EditedBy:   editorPtr(editedBy),
 	}
 	if err := s.revisionRepo.CreateNext(ctx, revision); err != nil {
@@ -47,21 +73,25 @@ func (s *WikiPageRevisionService) CreateRevision(ctx context.Context, pageID uin
 	return revision, nil
 }
 
-// RecordSave is called after a page save. prevTitle / prevBody are the
-// values before the save. Nothing is recorded when neither changed. A
+// RecordSave is called after a page save. prev is the page's content
+// before the save. Nothing is recorded when nothing versioned changed. A
 // page that has no history yet (created by an import, a module item or
 // blueprint sync, which bypass the handler) first gets its pre-save
 // content as revision 1, so the edit can still be undone.
-func (s *WikiPageRevisionService) RecordSave(ctx context.Context, page *models.WikiPage, prevTitle, prevBody string, editedBy uint) error {
-	if page == nil || (page.Title == prevTitle && page.Body == prevBody) {
+func (s *WikiPageRevisionService) RecordSave(ctx context.Context, page *models.WikiPage, prev PageSnapshot, editedBy uint) error {
+	if page == nil {
+		return nil
+	}
+	cur := SnapshotOf(page)
+	if cur.Equal(prev) {
 		return nil
 	}
 	if _, err := s.revisionRepo.GetLatestRevision(ctx, page.ID); err != nil {
-		if _, err := s.CreateRevision(ctx, page.ID, prevTitle, prevBody, 0); err != nil {
+		if _, err := s.CreateRevision(ctx, page.ID, prev, 0); err != nil {
 			return err
 		}
 	}
-	_, err := s.CreateRevision(ctx, page.ID, page.Title, page.Body, editedBy)
+	_, err := s.CreateRevision(ctx, page.ID, cur, editedBy)
 	return err
 }
 
@@ -70,7 +100,7 @@ func (s *WikiPageRevisionService) RecordCreate(ctx context.Context, page *models
 	if page == nil {
 		return nil
 	}
-	_, err := s.CreateRevision(ctx, page.ID, page.Title, page.Body, editedBy)
+	_, err := s.CreateRevision(ctx, page.ID, SnapshotOf(page), editedBy)
 	return err
 }
 
@@ -105,10 +135,11 @@ func (s *WikiPageRevisionService) LatestNumber(ctx context.Context, pageID uint)
 	return rev.RevisionNumber
 }
 
-// RevertToRevision restores the page's title and body from revision
-// number and saves the page, recording the restore as a new revision.
-// The body is re-sanitized on the way back in: it was sanitized when it
-// was saved, but the policy may have tightened since.
+// RevertToRevision restores the page's title, body, stylesheet and design
+// from revision number and saves the page, recording the restore as a new
+// revision. The body and stylesheet are re-sanitized on the way back in:
+// they were sanitized when they were saved, but the policy may have
+// tightened since.
 func (s *WikiPageRevisionService) RevertToRevision(ctx context.Context, page *models.WikiPage, number int, userID uint) (*models.WikiPageRevision, error) {
 	if page == nil {
 		return nil, ErrRevisionNotFound
@@ -119,10 +150,17 @@ func (s *WikiPageRevisionService) RevertToRevision(ctx context.Context, page *mo
 	}
 	page.Title = target.Title
 	page.Body = SanitizeHTML(target.Body)
+	page.CSS = ""
+	if target.CSS != "" {
+		if css, err := csssanitize.Sanitize(target.CSS); err == nil {
+			page.CSS = css
+		}
+	}
+	page.Design = target.Design
 	if err := s.pageRepo.Update(ctx, page); err != nil {
 		return nil, err
 	}
 	// The target exists, so the page already has history; no baseline
 	// revision is needed before recording the restore.
-	return s.CreateRevision(ctx, page.ID, page.Title, page.Body, userID)
+	return s.CreateRevision(ctx, page.ID, SnapshotOf(page), userID)
 }

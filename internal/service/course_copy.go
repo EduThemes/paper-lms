@@ -19,6 +19,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -402,6 +403,9 @@ func (c *copier) copyCourseSettings(ctx context.Context) error {
 		c.target.License = c.source.License
 		c.target.NavigationTabs = c.source.NavigationTabs
 		c.target.UIMode = c.source.UIMode
+		// Page Designer course look. A banner that is a source-course file
+		// is re-pointed at the copied file in rewriteLinks.
+		c.target.Look = c.source.Look
 		changed = true
 		c.result.Counts[CopyTypeCourseSettings] = 1
 	}
@@ -1008,13 +1012,55 @@ func (c *copier) rewriteHTML(html string) string {
 	})
 }
 
+// rewriteJSON is rewriteHTML for a JSON document (a page design or a
+// course look); a result that is no longer valid JSON is dropped.
+func (c *copier) rewriteJSON(doc models.NullJSON) (models.NullJSON, bool) {
+	if doc.IsNull() {
+		return doc, false
+	}
+	out := c.rewriteHTML(string(doc))
+	if out == string(doc) || !json.Valid([]byte(out)) {
+		return doc, false
+	}
+	return models.NullJSON(out), true
+}
+
+// rewritePage rewrites links in a copied page's body, stylesheet and
+// design, and reports whether anything changed.
+func (c *copier) rewritePage(p *models.WikiPage) bool {
+	changed := false
+	if body := c.rewriteHTML(p.Body); body != p.Body {
+		p.Body = body
+		changed = true
+	}
+	if css := c.rewriteHTML(p.CSS); css != p.CSS {
+		p.CSS = css
+		changed = true
+	}
+	if design, ok := c.rewriteJSON(p.Design); ok {
+		p.Design = design
+		changed = true
+	}
+	return changed
+}
+
 func (c *copier) rewriteLinks(ctx context.Context) error {
+	courseChanged := false
 	if c.result.Counts[CopyTypeSyllabus] > 0 {
 		if body := c.rewriteHTML(c.target.SyllabusBody); body != c.target.SyllabusBody {
 			c.target.SyllabusBody = body
-			if err := c.s.d.Courses.Update(ctx, c.target); err != nil {
-				return err
-			}
+			courseChanged = true
+		}
+	}
+	if c.result.Counts[CopyTypeCourseSettings] > 0 {
+		if look, ok := c.rewriteJSON(c.target.Look); ok {
+			c.target.Look = look
+			courseChanged = true
+		}
+	}
+	if courseChanged {
+		if err := c.s.d.Courses.Update(ctx, c.target); err != nil {
+			return err
 		}
 	}
 	// accountID=0 below: auth-internal — every ref is a row this copy
@@ -1050,8 +1096,7 @@ func (c *copier) rewriteLinks(ctx context.Context) error {
 			}
 		case "WikiPage":
 			if p, err := c.s.d.Pages.FindByID(ctx, ref.ID, 0); err == nil && p != nil {
-				if body := c.rewriteHTML(p.Body); body != p.Body {
-					p.Body = body
+				if c.rewritePage(p) {
 					if err := c.s.d.Pages.Update(ctx, p); err != nil {
 						return err
 					}

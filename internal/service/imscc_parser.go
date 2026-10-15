@@ -284,6 +284,9 @@ type IMSCCParser struct {
 	// prereqRepo (optional, SetPrerequisiteRepo) stores imported module
 	// prerequisites (G068).
 	prereqRepo repository.ModulePrerequisiteRepository
+	// Page Designer (optional, SetPageDesigner; imscc_page_designs.go).
+	publicBaseURL    string
+	customCSSAllowed func(ctx context.Context, courseID uint) bool
 }
 
 // NewIMSCCParser creates a new IMSCC parser with all required dependencies.
@@ -445,6 +448,10 @@ func (p *IMSCCParser) ParsePackage(ctx context.Context, courseID uint, userID ui
 	if err := p.rewriteAllBodies(ctx, courseID, result); err != nil {
 		return result, fmt.Errorf("token rewrite failed: %w", err)
 	}
+
+	// post pass-2: Paper-only Page Designer data (page stylesheets and
+	// designs, the course look). Best-effort, like the other metadata.
+	p.applyPaperDesigns(ctx, courseID, zipFiles, result)
 
 	return result, nil
 }

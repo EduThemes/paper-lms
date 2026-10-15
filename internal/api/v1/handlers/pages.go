@@ -3,11 +3,13 @@ package handlers
 import (
 	"log/slog"
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/EduThemes/paper-lms/internal/api/v1/middleware"
 	"github.com/EduThemes/paper-lms/internal/api/v1/responses"
 	"github.com/EduThemes/paper-lms/internal/domain/models"
+	"github.com/EduThemes/paper-lms/internal/security/csssanitize"
 	"github.com/EduThemes/paper-lms/internal/service"
 	"github.com/EduThemes/paper-lms/internal/service/gamification"
 )
@@ -25,6 +27,17 @@ type PageHandler struct {
 	// revisionService records page history on create/update (G065). Nil
 	// disables history (older tests build the handler without it).
 	revisionService *service.WikiPageRevisionService
+
+	// settingsLookup resolves pages.custom_css_enabled for the caller's
+	// account. Nil means the setting's default (on).
+	settingsLookup service.SettingsLookupFunc
+}
+
+// SetSettingsLookup attaches the Settings Engine lookup used for
+// pages.custom_css_enabled.
+func (h *PageHandler) SetSettingsLookup(f service.SettingsLookupFunc) *PageHandler {
+	h.settingsLookup = f
+	return h
 }
 
 // SetRevisionService attaches page history recording.
@@ -67,6 +80,9 @@ func (h *PageHandler) recordPageView(c *fiber.Ctx, page *models.WikiPage) {
 	}
 }
 
+// pageToJSON is the page shape shared by list and show. The list adds
+// has_design (pageListJSON); show adds the stylesheet and design
+// (pageDetailJSON).
 func pageToJSON(p *models.WikiPage) fiber.Map {
 	return fiber.Map{
 		"page_id":        p.ID,
@@ -83,6 +99,39 @@ func pageToJSON(p *models.WikiPage) fiber.Map {
 		"created_at":     p.CreatedAt,
 		"updated_at":     p.UpdatedAt,
 	}
+}
+
+// pageListJSON is a page in GET /pages: whether it is a designed page, but
+// not its stylesheet or design (docs/page-designer, "API").
+func pageListJSON(p *models.WikiPage) fiber.Map {
+	out := pageToJSON(p)
+	out["has_design"] = !p.Design.IsNull()
+	return out
+}
+
+// pageDetailJSON is a single page: its stylesheet as stored (css), the
+// same stylesheet scoped to the page root #paper-page-<id> (scoped_css,
+// what readers apply), and the Page Designer document (design, or null).
+// The client wraps the body in <div id="paper-page-<id>">.
+func pageDetailJSON(p *models.WikiPage) fiber.Map {
+	out := pageToJSON(p)
+	out["css"] = p.CSS
+	out["scoped_css"] = scopedPageCSS(p)
+	out["design"] = p.Design
+	out["has_design"] = !p.Design.IsNull()
+	return out
+}
+
+// pageRootID is the element id a page's stylesheet is scoped to.
+func pageRootID(p *models.WikiPage) string {
+	return "#paper-page-" + strconv.FormatUint(uint64(p.ID), 10)
+}
+
+func scopedPageCSS(p *models.WikiPage) string {
+	if strings.TrimSpace(p.CSS) == "" {
+		return ""
+	}
+	return csssanitize.Scope(p.CSS, pageRootID(p))
 }
 
 func (h *PageHandler) ListPages(c *fiber.Ctx) error {
@@ -107,7 +156,7 @@ func (h *PageHandler) ListPages(c *fiber.Ctx) error {
 
 	pages := make([]fiber.Map, len(result.Items))
 	for i, p := range result.Items {
-		pages[i] = pageToJSON(&p)
+		pages[i] = pageListJSON(&p)
 	}
 
 	return c.JSON(pages)
@@ -144,7 +193,7 @@ func (h *PageHandler) GetPage(c *fiber.Ctx) error {
 	}
 
 	h.recordPageView(c, page)
-	out := pageToJSON(page)
+	out := pageDetailJSON(page)
 	// G074: tells the client whether to offer Edit / History.
 	out["can_edit"] = canEditPage(c, page)
 	return c.JSON(out)
@@ -166,7 +215,7 @@ func (h *PageHandler) GetFrontPage(c *fiber.Ctx) error {
 		return responses.NotFound(c, "front page")
 	}
 	h.recordPageView(c, page)
-	return c.JSON(pageToJSON(page))
+	return c.JSON(pageDetailJSON(page))
 }
 
 func (h *PageHandler) GetPublicPage(c *fiber.Ctx) error {
@@ -185,5 +234,5 @@ func (h *PageHandler) GetPublicPage(c *fiber.Ctx) error {
 		return responses.NotFound(c, "page")
 	}
 
-	return c.JSON(pageToJSON(page))
+	return c.JSON(pageDetailJSON(page))
 }

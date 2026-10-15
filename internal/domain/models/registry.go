@@ -202,5 +202,7 @@ func AllModels() []interface{} {
 		&ObserverAlertThreshold{},
 		&ObserverAlert{},
 		&UserProfileLink{},
+		// Page Designer (migration 000137).
+		&DesignColourScheme{},
 	}
 }
