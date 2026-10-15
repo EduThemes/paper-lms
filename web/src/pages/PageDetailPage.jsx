@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { FileText, ArrowLeft, Pencil, Save, X, Home, History, Trash2, Eye, EyeOff, CalendarCheck } from 'lucide-react';
+import { FileText, ArrowLeft, Pencil, Save, X, Home, History, Trash2, Eye, EyeOff, CalendarCheck, Paintbrush, Code2 } from 'lucide-react';
 import {
   EDITING_ROLE_OPTIONS, editingRolesLabel, canDeletePage, canUnpublishPage, editFormFromPage, buildPageUpdate,
 } from '../utils/pageManagement';
@@ -14,6 +14,11 @@ import RichContentEditorV2 from '../components/rce/RichContentEditorV2';
 import { clearRceDraft } from '../components/rce/rceDrafts';
 import useCrossCourseCheck from '../hooks/useCrossCourseCheck';
 import CrossCourseWarningDialog from '../components/CrossCourseWarningDialog';
+import { useCourseUI } from '../contexts/CourseUIContext';
+import DesignedPageView, { PageContent } from '../components/pages/DesignedPageView';
+import PageCssPanel from '../components/pages/PageCssPanel';
+import DetachDesignDialog from '../components/pages/DetachDesignDialog';
+import { isDesignedPage, designerPath } from '../utils/pageDesign';
 
 const PageDetailPage = () => {
   const { courseId, slug } = useParams();
@@ -28,10 +33,23 @@ const PageDetailPage = () => {
   const [saving, setSaving] = useState(false);
   const [editForm, setEditForm] = useState(editFormFromPage(null));
   const [isDirty, setIsDirty] = useState(false);
+  // Designed pages (Page Designer) are edited in the designer. "Edit as
+  // HTML" opens a plain HTML editor instead, after a confirm, and saving
+  // detaches the design (design: null). They never open in the rich text
+  // editor, which would rewrite their markup (block links, empty layout
+  // boxes).
+  const [htmlMode, setHtmlMode] = useState(false);
+  const [detachOpen, setDetachOpen] = useState(false);
+  const { course } = useCourseUI();
   const navigate = useNavigate();
   // G074: students may edit pages whose editing roles admit them; the
   // server reports it as can_edit.
   const canEdit = isTeacher || Boolean(page?.can_edit);
+  const designed = isDesignedPage(page);
+  // Page CSS (wiki_page.css): teachers, when the account allows
+  // hand-written CSS, on ordinary pages (a designed page's CSS belongs to
+  // the designer; once detached it is an ordinary page's CSS).
+  const showCssPanel = Boolean(isTeacher && course?.custom_css_enabled && (!designed || htmlMode));
 
   useUnsavedChanges(isDirty);
   const { issues: crossCourseIssues, checkAndSave, dismiss: dismissCrossCourse, confirm: confirmCrossCourse } = useCrossCourseCheck(courseId);
@@ -50,24 +68,45 @@ const PageDetailPage = () => {
     fetchData();
   }, [courseId, slug]);
 
-  const startEditing = () => {
-    setEditForm(editFormFromPage(page));
+  const startEditing = ({ asHtml = false } = {}) => {
+    // Never open a designed page in the rich text editor; go through the
+    // detach confirm instead.
+    if (isDesignedPage(page) && !asHtml) {
+      setDetachOpen(true);
+      return;
+    }
+    setEditForm({ ...editFormFromPage(page), css: page?.css || '' });
+    setHtmlMode(asHtml);
     setEditing(true);
+  };
+
+  const confirmDetach = () => {
+    setDetachOpen(false);
+    startEditing({ asHtml: true });
+  };
+
+  const stopEditing = () => {
+    setEditing(false);
+    setHtmlMode(false);
+    setIsDirty(false);
   };
 
   const doSave = async () => {
     setSaving(true);
     try {
-      const saved = await api.updatePage(courseId, slug, buildPageUpdate(editForm, { isTeacher }));
+      const update = buildPageUpdate(editForm, { isTeacher });
+      if (htmlMode) update.design = null;
+      if (showCssPanel && (editForm.css || '') !== (page?.css || '')) update.css = editForm.css || '';
+      const saved = await api.updatePage(courseId, slug, update);
       clearRceDraft(`page-${courseId}-${slug || 'new'}-body`);
       // Show what the server stored (it sanitizes the body), not the local
       // editor HTML — otherwise anything the server drops looks saved until
       // the next reload (B102).
+      const detached = htmlMode ? { design: null } : {};
       setPage((prev) => (saved && typeof saved === 'object' && 'body' in saved
-        ? { ...prev, ...saved }
-        : { ...prev, title: editForm.title, body: editForm.body, updated_at: new Date().toISOString() }));
-      setIsDirty(false);
-      setEditing(false);
+        ? { ...prev, ...saved, ...detached }
+        : { ...prev, title: editForm.title, body: editForm.body, updated_at: new Date().toISOString(), ...detached }));
+      stopEditing();
     } catch (err) {
       setActionError(err.message);
     } finally {
@@ -154,8 +193,8 @@ const PageDetailPage = () => {
         <form onSubmit={handleSave} className="bg-surface-0 rounded-lg shadow">
           <div className="p-6 border-b space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-text-primary">Edit Page</h3>
-              <button type="button" onClick={() => { setEditing(false); setIsDirty(false); }} className="text-text-disabled hover:text-text-secondary">
+              <h3 className="text-lg font-semibold text-text-primary">{htmlMode ? 'Edit Page HTML' : 'Edit Page'}</h3>
+              <button type="button" onClick={stopEditing} aria-label="Close editor" className="text-text-disabled hover:text-text-secondary">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -169,17 +208,35 @@ const PageDetailPage = () => {
                 className="w-full border border-border-strong rounded-md px-3 py-2 text-sm"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Content</label>
-              <RichContentEditorV2
-                value={editForm.body}
-                onChange={(html) => { setEditForm((prev) => ({ ...prev, body: html })); setIsDirty(true); }}
-                placeholder="Page content..."
-                minHeight="300px"
-                courseId={courseId}
-                autoSaveKey={`page-${courseId}-${slug || 'new'}-body`}
-              />
-            </div>
+            {htmlMode ? (
+              <div>
+                <label htmlFor="page-html" className="block text-sm font-medium text-text-secondary mb-1">HTML</label>
+                <textarea
+                  id="page-html"
+                  value={editForm.body}
+                  onChange={(e) => { setEditForm({ ...editForm, body: e.target.value }); setIsDirty(true); }}
+                  aria-describedby="page-html-help"
+                  spellCheck={false}
+                  rows={20}
+                  className="w-full border border-border-strong rounded-md px-3 py-2 font-mono text-xs leading-relaxed bg-surface-0 text-text-primary"
+                />
+                <p id="page-html-help" className="text-xs text-text-tertiary mt-1">
+                  Saving detaches this page from its design. Its look stays; the designer can no longer open it.
+                </p>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1">Content</label>
+                <RichContentEditorV2
+                  value={editForm.body}
+                  onChange={(html) => { setEditForm((prev) => ({ ...prev, body: html })); setIsDirty(true); }}
+                  placeholder="Page content..."
+                  minHeight="300px"
+                  courseId={courseId}
+                  autoSaveKey={`page-${courseId}-${slug || 'new'}-body`}
+                />
+              </div>
+            )}
             {isTeacher && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -206,10 +263,16 @@ const PageDetailPage = () => {
                 </div>
               </div>
             )}
+            {showCssPanel && (
+              <PageCssPanel
+                value={editForm.css || ''}
+                onChange={(css) => { setEditForm((prev) => ({ ...prev, css })); setIsDirty(true); }}
+              />
+            )}
             {actionError && <p role="alert" className="text-sm text-accent-danger">{actionError}</p>}
           </div>
           <div className="p-4 flex justify-end space-x-3 bg-surface-1">
-            <button type="button" onClick={() => { setEditing(false); setIsDirty(false); }} className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary">
+            <button type="button" onClick={stopEditing} className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary">
               Cancel
             </button>
             <button
@@ -251,13 +314,15 @@ const PageDetailPage = () => {
                   <History className="w-4 h-4" aria-hidden="true" />
                   History
                 </Link>
-                <button
-                  onClick={startEditing}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-surface-2 text-text-secondary hover:bg-border-default"
-                >
-                  <Pencil className="w-4 h-4" aria-hidden="true" />
-                  Edit
-                </button>
+                {!designed && (
+                  <button
+                    onClick={() => startEditing()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-surface-2 text-text-secondary hover:bg-border-default"
+                  >
+                    <Pencil className="w-4 h-4" aria-hidden="true" />
+                    Edit
+                  </button>
+                )}
               </div>
             )}
             {isTeacher && (
@@ -305,26 +370,55 @@ const PageDetailPage = () => {
                     Use as Front Page
                   </button>
                 )}
-                <button
-                  onClick={startEditing}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-surface-2 text-text-secondary hover:bg-border-default"
-                >
-                  <Pencil className="w-4 h-4" />
-                  Edit
-                </button>
+                {designed ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setDetachOpen(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-surface-2 text-text-secondary hover:bg-border-default"
+                    >
+                      <Code2 className="w-4 h-4" aria-hidden="true" />
+                      Edit as HTML
+                    </button>
+                    <Link
+                      to={designerPath(courseId, { page: slug })}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-brand-600 text-white hover:bg-brand-700"
+                    >
+                      <Paintbrush className="w-4 h-4" aria-hidden="true" />
+                      Edit design
+                    </Link>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => startEditing()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-surface-2 text-text-secondary hover:bg-border-default"
+                  >
+                    <Pencil className="w-4 h-4" />
+                    Edit
+                  </button>
+                )}
               </div>
             )}
           </div>
           {actionError && <p role="alert" className="px-6 pt-4 text-sm text-accent-danger">{actionError}</p>}
-          <div className="p-6">
-            {page.body ? (
-              <RichContentViewer content={page.body} />
-            ) : (
-              <p className="text-text-disabled italic">This page has no content yet.</p>
-            )}
-          </div>
+          {designed ? (
+            // A designed page brings its own layout and colours: edge to
+            // edge under the header, no prose wrapper.
+            <div className="overflow-hidden rounded-b-lg">
+              <DesignedPageView page={page} />
+            </div>
+          ) : (
+            <div className="p-6">
+              {page.body ? (
+                <PageContent page={page} fallback={<RichContentViewer content={page.body} />} />
+              ) : (
+                <p className="text-text-disabled italic">This page has no content yet.</p>
+              )}
+            </div>
+          )}
         </div>
       )}
+      <DetachDesignDialog open={detachOpen} onOpenChange={setDetachOpen} onConfirm={confirmDetach} />
       <CrossCourseWarningDialog issues={crossCourseIssues} onGoBack={dismissCrossCourse} onSaveAnyway={confirmCrossCourse} />
     </Layout>
   );

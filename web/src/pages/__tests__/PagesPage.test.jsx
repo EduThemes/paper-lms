@@ -1,4 +1,4 @@
-import React from 'react';
+/* global vi, describe, test, expect, beforeEach, afterEach */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import PagesPage from '../PagesPage';
@@ -93,5 +93,37 @@ describe('PagesPage management', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete Draft' }));
     expect(api.deletePage).toHaveBeenCalledWith('3', 2);
     await waitFor(() => expect(screen.queryByText('Draft')).toBeNull());
+  });
+});
+
+// Page Designer entry points: "Design a page" for teachers, and a badge on
+// pages made with the designer.
+describe('PagesPage and the Page Designer', () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => { isTeacher = false; });
+
+  test('teachers get Design a page and see which pages are designed', async () => {
+    isTeacher = true;
+    api.getPages.mockResolvedValue({
+      data: [
+        { page_id: 1, url: 'home', title: 'Home', published: true, has_design: true },
+        { page_id: 2, url: 'notes', title: 'Notes', published: true, has_design: false },
+      ],
+      pagination: {},
+    });
+    renderPage();
+    expect(await screen.findByText('Home')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Design a page/i })).toHaveAttribute('href', '/courses/3/designer');
+    expect(screen.getAllByText('Designed')).toHaveLength(1);
+    expect(screen.getByRole('link', { name: /Home/ })).toHaveTextContent('Designed');
+  });
+
+  test('students see neither', async () => {
+    isTeacher = false;
+    api.getPages.mockResolvedValue({ data: [{ page_id: 1, url: 'home', title: 'Home', has_design: true }], pagination: {} });
+    renderPage();
+    expect(await screen.findByText('Home')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Design a page/i })).toBeNull();
+    expect(screen.queryByText('Designed')).toBeNull();
   });
 });
