@@ -152,7 +152,7 @@ const FilesPage = () => {
         <button onClick={() => openFolder(null)} className="hover:text-brand-600 font-medium">Files</button>
         {breadcrumbs.map((crumb) => (
           <React.Fragment key={crumb.id}>
-            <ChevronRight className="w-4 h-4 text-text-disabled" aria-hidden="true" />
+            <ChevronRight className="w-4 h-4 text-text-tertiary" aria-hidden="true" />
             <button onClick={() => openFolder(crumb.id)} className="hover:text-brand-600 font-medium">{crumb.name}</button>
           </React.Fragment>
         ))}
@@ -167,7 +167,7 @@ const FilesPage = () => {
             <Plus className="w-4 h-4" aria-hidden="true" />
             <span>New Folder</span>
           </button>
-          <label className="inline-flex items-center gap-1 bg-brand-600 text-white px-3 py-2 rounded-md hover:bg-brand-700 text-sm font-medium shadow-sm cursor-pointer">
+          <label className="inline-flex items-center gap-1 bg-brand-600 text-on-brand px-3 py-2 rounded-md hover:bg-brand-700 text-sm font-medium shadow-sm cursor-pointer">
             <Upload className="w-4 h-4" aria-hidden="true" />
             <span>{upload.isPending ? 'Uploading...' : 'Upload File'}</span>
             <input
@@ -186,7 +186,7 @@ const FilesPage = () => {
             onSubmit={(e) => { e.preventDefault(); if (newFolderName.trim()) createFolder.mutate(newFolderName.trim()); }}
             className="flex items-center gap-3"
           >
-            <Folder className="w-5 h-5 text-text-disabled" aria-hidden="true" />
+            <Folder className="w-5 h-5 text-text-tertiary" aria-hidden="true" />
             <input
               type="text"
               aria-label="Folder name"
@@ -196,8 +196,8 @@ const FilesPage = () => {
               className="flex-1 border border-border-strong rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
               autoFocus
             />
-            <button type="submit" className="bg-brand-600 text-white px-3 py-1.5 rounded-md text-sm hover:bg-brand-700">Create</button>
-            <button type="button" aria-label="Cancel" onClick={() => { setShowNewFolder(false); setNewFolderName(''); }} className="text-text-disabled hover:text-text-secondary">
+            <button type="submit" className="bg-brand-600 text-on-brand px-3 py-1.5 rounded-md text-sm hover:bg-brand-700">Create</button>
+            <button type="button" aria-label="Cancel" onClick={() => { setShowNewFolder(false); setNewFolderName(''); }} className="text-text-tertiary hover:text-text-secondary">
               <X className="w-5 h-5" />
             </button>
           </form>
@@ -219,12 +219,12 @@ const FilesPage = () => {
                 </button>
                 {isTeacher && (
                   <div className="flex items-center gap-1">
-                    <button onClick={() => setEditingFolder(folder)} className="text-text-disabled hover:text-text-secondary p-1" aria-label={`Settings for folder ${folder.name}`}>
+                    <button onClick={() => setEditingFolder(folder)} className="text-text-tertiary hover:text-text-secondary p-1" aria-label={`Settings for folder ${folder.name}`}>
                       <Settings className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => { if (window.confirm(`Delete "${folder.name}" and everything in it?`)) deleteFolder.mutate(folder.id); }}
-                      className="text-text-disabled hover:text-accent-danger p-1"
+                      className="text-text-tertiary hover:text-accent-danger p-1"
                       aria-label={`Delete folder ${folder.name}`}
                     >
                       <Trash2 className="w-4 h-4" />
@@ -241,7 +241,7 @@ const FilesPage = () => {
               return (
                 <li key={`file-${file.id}`} className="flex items-center justify-between px-4 py-3 hover:bg-surface-1">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    {learnerLocked ? <Lock className="w-5 h-5 text-text-disabled" aria-hidden="true" /> : <File className="w-5 h-5 text-text-disabled" aria-hidden="true" />}
+                    {learnerLocked ? <Lock className="w-5 h-5 text-text-tertiary" aria-hidden="true" /> : <File className="w-5 h-5 text-text-tertiary" aria-hidden="true" />}
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-text-primary truncate">{file.display_name}</p>
                       <p className="text-xs text-text-tertiary">
@@ -270,12 +270,12 @@ const FilesPage = () => {
                     )}
                     {isTeacher && (
                       <>
-                        <button onClick={() => setEditingFile(file)} className="text-text-disabled hover:text-text-secondary p-1" aria-label={`Settings for ${file.display_name}`}>
+                        <button onClick={() => setEditingFile(file)} className="text-text-tertiary hover:text-text-secondary p-1" aria-label={`Settings for ${file.display_name}`}>
                           <Settings className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => { if (window.confirm('Are you sure you want to delete this file?')) deleteFile.mutate(file.id); }}
-                          className="text-text-disabled hover:text-accent-danger p-1"
+                          className="text-text-tertiary hover:text-accent-danger p-1"
                           aria-label={`Delete ${file.display_name}`}
                         >
                           <Trash2 className="w-4 h-4" />

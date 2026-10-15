@@ -40,7 +40,7 @@ function RegradeRow({ index, question, onRegrade, busy }) {
           type="button"
           disabled={busy}
           onClick={() => onRegrade(question, option)}
-          className="inline-flex items-center gap-2 px-3 py-2 bg-brand-600 text-white rounded hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+          className="inline-flex items-center gap-2 px-3 py-2 bg-brand-600 text-on-brand rounded hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
         >
           <RefreshCcw className="w-4 h-4" aria-hidden="true" /> Regrade
         </button>

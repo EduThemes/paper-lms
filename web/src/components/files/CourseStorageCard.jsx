@@ -60,7 +60,7 @@ export default function CourseStorageCard({ courseId, course, onSaved }) {
                 className="w-40 border border-border-strong rounded-md px-3 py-2 text-sm"
               />
             </div>
-            <button type="submit" disabled={save.isPending} className="px-3 py-2 bg-brand-600 text-white rounded-md text-sm font-medium disabled:opacity-50">
+            <button type="submit" disabled={save.isPending} className="px-3 py-2 bg-brand-600 text-on-brand rounded-md text-sm font-medium disabled:opacity-50">
               {save.isPending ? 'Saving…' : 'Save quota'}
             </button>
             {save.isError && <p role="alert" className="w-full text-sm text-accent-danger">{save.error.message}</p>}

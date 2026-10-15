@@ -107,7 +107,7 @@ function NewTokenBanner({ token, onClose }) {
             </button>
           </div>
         </div>
-        <button onClick={onClose} className="text-text-disabled hover:text-text-secondary" aria-label="Dismiss">
+        <button onClick={onClose} className="text-text-tertiary hover:text-text-secondary" aria-label="Dismiss">
           <X className="w-5 h-5" />
         </button>
       </div>
@@ -141,7 +141,7 @@ function TokenTable({ tokens, onDelete, onRegenerate, emptyText }) {
             <tr key={token.id} className="hover:bg-surface-1">
               <td className="px-6 py-4 whitespace-nowrap">
                 <div className="flex items-center gap-2">
-                  <Key className="w-4 h-4 text-text-disabled flex-shrink-0" />
+                  <Key className="w-4 h-4 text-text-tertiary flex-shrink-0" />
                   <span className="text-sm font-medium text-text-primary">
                     {token.app_name || token.purpose || 'Unnamed token'}
                   </span>
@@ -157,7 +157,7 @@ function TokenTable({ tokens, onDelete, onRegenerate, emptyText }) {
                       <span key={scope} className="inline-block bg-brand-100 text-brand-700 text-xs px-2 py-0.5 rounded-full">{scope}</span>
                     ))
                   ) : (
-                    <span className="text-xs text-text-disabled">Full access</span>
+                    <span className="text-xs text-text-tertiary">Full access</span>
                   )}
                 </div>
               </td>
@@ -204,7 +204,7 @@ function ConfirmDialog({ title, children, confirmLabel, busy, confirmDisabled = 
           <button
             onClick={onConfirm}
             disabled={busy || confirmDisabled}
-            className={`${danger ? 'bg-accent-danger hover:bg-accent-danger/90' : 'bg-brand-600 hover:bg-brand-700'} text-white px-4 py-2 rounded-md text-sm disabled:opacity-50`}
+            className={`${danger ? 'bg-accent-danger hover:bg-accent-danger/90' : 'bg-brand-600 hover:bg-brand-700'} text-on-brand px-4 py-2 rounded-md text-sm disabled:opacity-50`}
           >
             {confirmLabel}
           </button>
@@ -395,7 +395,7 @@ const AccessTokensPage = () => {
             setShowForm(!showForm);
             setNewToken(null);
           }}
-          className="flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
+          className="flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
         >
           <Plus className="w-4 h-4" />
           Generate New Token
@@ -460,7 +460,7 @@ const AccessTokensPage = () => {
               <button
                 type="submit"
                 disabled={create.isPending}
-                className="bg-accent-success text-white px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50"
+                className="bg-accent-success text-on-accent px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50"
               >
                 {create.isPending ? 'Generating...' : 'Generate Token'}
               </button>

@@ -62,7 +62,7 @@ const CalendarFeedPanel = ({ onClose, onDownload }) => {
         <h3 id="calendar-feed-heading" className="font-semibold text-text-primary flex items-center gap-2">
           <Rss className="w-4 h-4" /> {t('calendarLane.feed.title')}
         </h3>
-        <button type="button" onClick={onClose} className="p-1 text-text-disabled hover:text-text-secondary" aria-label={t('common.close')}>
+        <button type="button" onClick={onClose} className="p-1 text-text-tertiary hover:text-text-secondary" aria-label={t('common.close')}>
           <X className="w-4 h-4" />
         </button>
       </div>
@@ -108,7 +108,7 @@ const CalendarFeedPanel = ({ onClose, onDownload }) => {
         <div className="mt-3 space-y-2">
           <p className="text-sm text-text-secondary">{t('calendarLane.feed.hidden')}</p>
           <div className="flex gap-3">
-            <button type="button" onClick={create} disabled={busy} className="bg-brand-600 text-white px-3 py-1.5 rounded-md text-sm hover:bg-brand-700 disabled:opacity-50">
+            <button type="button" onClick={create} disabled={busy} className="bg-brand-600 text-on-brand px-3 py-1.5 rounded-md text-sm hover:bg-brand-700 disabled:opacity-50">
               {t('calendarLane.feed.reset')}
             </button>
             <button type="button" onClick={revoke} disabled={busy} className="text-accent-danger text-sm hover:underline disabled:opacity-50">
@@ -118,7 +118,7 @@ const CalendarFeedPanel = ({ onClose, onDownload }) => {
         </div>
       ) : (
         <div className="mt-3">
-          <button type="button" onClick={create} disabled={busy} className="bg-brand-600 text-white px-3 py-1.5 rounded-md text-sm hover:bg-brand-700 disabled:opacity-50">
+          <button type="button" onClick={create} disabled={busy} className="bg-brand-600 text-on-brand px-3 py-1.5 rounded-md text-sm hover:bg-brand-700 disabled:opacity-50">
             {t('calendarLane.feed.create')}
           </button>
         </div>

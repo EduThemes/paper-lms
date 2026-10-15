@@ -176,7 +176,7 @@ const App = () => {
   return (
     <BrowserRouter>
       <RouteAnnouncer />
-      <React.Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-gray-600">Loading...</div></div>}>
+      <React.Suspense fallback={<div className="min-h-screen bg-surface-1 flex items-center justify-center"><div className="text-text-secondary">Loading...</div></div>}>
       <Routes>
         <Route path="/privacy" element={<LegalPage kind="privacy" />} />
         <Route path="/terms" element={<LegalPage kind="terms" />} />

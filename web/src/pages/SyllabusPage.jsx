@@ -110,7 +110,7 @@ function GradingBar({ breakdown }) {
         })}
         {remaining > 0 && (
           <div
-            className="h-full flex items-center justify-center text-xs font-medium text-text-disabled bg-border-default"
+            className="h-full flex items-center justify-center text-xs font-medium text-text-tertiary bg-border-default"
             style={{ width: remaining + '%' }}
             title={'Unassigned: ' + remaining.toFixed(1) + '%'}
           >
@@ -143,7 +143,7 @@ function GradingBar({ breakdown }) {
               <span className="text-sm font-medium text-text-tertiary">Unassigned</span>
             </div>
             <div className="mt-1">
-              <span className="text-lg font-bold text-text-disabled">{remaining.toFixed(1)}%</span>
+              <span className="text-lg font-bold text-text-tertiary">{remaining.toFixed(1)}%</span>
             </div>
           </div>
         )}
@@ -164,10 +164,10 @@ function TimelineItem({ item, isStudent }) {
         {date ? (
           <div>
             <div className="text-sm font-medium text-text-secondary">{formatDate(date)}</div>
-            <div className="text-xs text-text-disabled">{formatTime(date)}</div>
+            <div className="text-xs text-text-tertiary">{formatTime(date)}</div>
           </div>
         ) : (
-          <span className="text-xs text-text-disabled italic">No date</span>
+          <span className="text-xs text-text-tertiary italic">No date</span>
         )}
       </div>
 
@@ -185,7 +185,7 @@ function TimelineItem({ item, isStudent }) {
               {isAssignment ? (
                 <BookOpen className="w-4 h-4 text-brand-500 flex-shrink-0" />
               ) : (
-                <Calendar className="w-4 h-4 text-text-disabled flex-shrink-0" />
+                <Calendar className="w-4 h-4 text-text-tertiary flex-shrink-0" />
               )}
               <span className="font-medium text-text-primary truncate">{item.title}</span>
               {colors && item.group_name && (
@@ -376,7 +376,7 @@ const SyllabusPage = () => {
               <div className="text-xs text-text-tertiary mt-1">Upcoming</div>
             </div>
             <div className="bg-surface-0 rounded-lg border border-border-default p-4 text-center shadow-sm">
-              <div className={'text-2xl font-bold ' + (stats.missing > 0 ? 'text-accent-danger' : 'text-text-disabled')}>{stats.missing}</div>
+              <div className={'text-2xl font-bold ' + (stats.missing > 0 ? 'text-accent-danger' : 'text-text-tertiary')}>{stats.missing}</div>
               <div className="text-xs text-text-tertiary mt-1">Overdue</div>
             </div>
           </div>
@@ -399,7 +399,7 @@ const SyllabusPage = () => {
             <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
               <div className="w-1 h-5 bg-indigo-500 rounded-full"></div>
               Assignment Timeline
-              <span className="text-sm font-normal text-text-disabled ml-2">
+              <span className="text-sm font-normal text-text-tertiary ml-2">
                 {filteredTimeline.length} {filteredTimeline.length === 1 ? 'item' : 'items'}
               </span>
             </h2>
@@ -433,7 +433,7 @@ const SyllabusPage = () => {
 
           <div className="px-2 sm:px-4 py-2">
             {groupedTimeline.length === 0 ? (
-              <div className="text-center py-12 text-text-disabled">
+              <div className="text-center py-12 text-text-tertiary">
                 <Calendar className="w-10 h-10 mx-auto mb-3 opacity-50" />
                 <p className="font-medium">No items to display</p>
                 <p className="text-sm mt-1">
@@ -444,7 +444,7 @@ const SyllabusPage = () => {
               groupedTimeline.map((group, gIdx) => (
                 <div key={gIdx} className="mb-2">
                   <div className="sticky top-0 bg-surface-0 z-[5] px-4 py-2">
-                    <h3 className="text-xs font-semibold text-text-disabled uppercase tracking-wider">{group.label}</h3>
+                    <h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">{group.label}</h3>
                   </div>
                   {group.items.map((item, iIdx) => (
                     <TimelineItem key={item.type + '-' + item.id + '-' + iIdx} item={item} isStudent={isStudent} />

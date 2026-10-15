@@ -293,7 +293,7 @@ export default function RecipeEditor({
               <button
                 type="submit"
                 disabled={!formValid || saving}
-                className="px-3 py-1.5 rounded-md text-sm bg-brand-500 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-brand-600"
+                className="px-3 py-1.5 rounded-md text-sm bg-brand-500 text-on-brand disabled:opacity-50 disabled:cursor-not-allowed hover:bg-brand-600"
               >
                 {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create recipe'}
               </button>

@@ -158,7 +158,7 @@ function AssignmentRow({ a, courseId, whatIf, whatIfValue, onWhatIf, scale, drop
               )}
             </span>
           ) : (
-            <span className="text-sm text-text-disabled">–/{pts}</span>
+            <span className="text-sm text-text-tertiary">–/{pts}</span>
           )}
         </td>
         <td className="px-2 py-3 text-right">

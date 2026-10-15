@@ -38,7 +38,7 @@ export default function WindowModeToggle({ mode, onChange, disabled = false }) {
             onClick={() => onChange(opt.value)}
             className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-brand-400/60 ${
               active
-                ? 'bg-brand-600 text-white shadow-sm'
+                ? 'bg-brand-600 text-on-brand shadow-sm'
                 : 'text-text-secondary hover:bg-surface-2 hover:text-text-primary'
             } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
           >

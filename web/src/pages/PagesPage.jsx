@@ -156,7 +156,7 @@ const PagesPage = () => {
               </Link>
               <button
                 onClick={() => setShowCreate(!showCreate)}
-                className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+                className="inline-flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
               >
                 <Plus className="w-4 h-4" />
                 <span>Page</span>
@@ -204,7 +204,7 @@ const PagesPage = () => {
             <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary">
               Cancel
             </button>
-            <button type="submit" disabled={creating} className="px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
+            <button type="submit" disabled={creating} className="px-4 py-2 bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
               {creating ? 'Creating...' : 'Create Page'}
             </button>
           </div>
@@ -226,7 +226,7 @@ const PagesPage = () => {
                   to={`/courses/${courseId}/pages/${page.url}`}
                   className="flex items-center space-x-3 min-w-0 flex-1"
                 >
-                  <FileText className="w-5 h-5 text-text-disabled flex-shrink-0" />
+                  <FileText className="w-5 h-5 text-text-tertiary flex-shrink-0" />
                   <div className="min-w-0">
                     <span className="font-medium text-text-primary truncate block">
                       {page.title}
@@ -242,7 +242,7 @@ const PagesPage = () => {
                       )}
                     </span>
                     {page.updated_at && (
-                      <span className="text-xs text-text-disabled">
+                      <span className="text-xs text-text-tertiary">
                         Last edited {formatDate(page.updated_at)}
                       </span>
                     )}
@@ -272,7 +272,7 @@ const PagesPage = () => {
                       disabled={busyId === page.page_id || !canDeletePage(page)}
                       aria-label={`Delete ${page.title}`}
                       title={!canDeletePage(page) ? 'Choose another front page before deleting this one' : 'Delete page'}
-                      className="p-1 text-text-disabled hover:text-accent-danger disabled:opacity-40"
+                      className="p-1 text-text-tertiary hover:text-accent-danger disabled:opacity-40"
                     >
                       <Trash2 className="w-4 h-4" aria-hidden="true" />
                     </button>

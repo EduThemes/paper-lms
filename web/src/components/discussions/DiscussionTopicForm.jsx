@@ -349,7 +349,7 @@ export default function DiscussionTopicForm({ courseId, topicId, onSaved, onCanc
           <button
             type="submit"
             disabled={saving}
-            className="bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+            className="bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
           >
             {saving ? 'Saving...' : editing ? 'Save' : 'Create Discussion'}
           </button>

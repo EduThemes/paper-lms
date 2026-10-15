@@ -101,7 +101,7 @@ const MatchingEditor = ({ answers, onChange }) => {
                 type="button"
                 onClick={() => removePair(i)}
                 disabled={model.pairs.length <= 1}
-                className="col-span-1 p-1 text-text-disabled hover:text-accent-danger disabled:opacity-30 flex justify-center"
+                className="col-span-1 p-1 text-text-tertiary hover:text-accent-danger disabled:opacity-30 flex justify-center"
                 aria-label={`Remove pair ${i + 1}`}
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -121,7 +121,7 @@ const MatchingEditor = ({ answers, onChange }) => {
 
       <div>
         <label className="block text-xs font-medium text-text-secondary mb-1">
-          Distractors <span className="text-text-disabled">(extra wrong matches shown in every dropdown)</span>
+          Distractors <span className="text-text-tertiary">(extra wrong matches shown in every dropdown)</span>
         </label>
         <div className="space-y-2">
           {model.distractors.map((d, i) => (
@@ -134,7 +134,7 @@ const MatchingEditor = ({ answers, onChange }) => {
                 placeholder="Distractor"
                 aria-label={`Distractor ${i + 1}`}
               />
-              <button type="button" onClick={() => removeDistractor(i)} className="p-1 text-text-disabled hover:text-accent-danger" aria-label={`Remove distractor ${i + 1}`}>
+              <button type="button" onClick={() => removeDistractor(i)} className="p-1 text-text-tertiary hover:text-accent-danger" aria-label={`Remove distractor ${i + 1}`}>
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>

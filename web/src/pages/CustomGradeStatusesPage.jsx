@@ -111,7 +111,7 @@ const CustomGradeStatusesPage = () => {
             Final grades
           </label>
           <button type="submit" disabled={saving || !draft.name.trim()}
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
             <Plus className="w-4 h-4" /> Add status
           </button>
         </form>
@@ -143,7 +143,7 @@ const CustomGradeStatusesPage = () => {
                       <Save className="w-4 h-4" /> Save
                     </button>
                   )}
-                  <button type="button" onClick={() => remove(s)} aria-label={`Delete ${s.name}`} className="text-text-disabled hover:text-accent-danger">
+                  <button type="button" onClick={() => remove(s)} aria-label={`Delete ${s.name}`} className="text-text-tertiary hover:text-accent-danger">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>

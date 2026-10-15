@@ -42,7 +42,7 @@ const SortableAssignmentChip = ({ assignment, onRemove }) => {
     >
       <button
         type="button"
-        className="text-text-disabled hover:text-text-secondary cursor-grab active:cursor-grabbing"
+        className="text-text-tertiary hover:text-text-secondary cursor-grab active:cursor-grabbing"
         aria-label="Drag to reorder"
         {...attributes}
         {...listeners}
@@ -53,7 +53,7 @@ const SortableAssignmentChip = ({ assignment, onRemove }) => {
       <button
         type="button"
         onClick={() => onRemove(assignment.id)}
-        className="text-text-disabled hover:text-accent-danger"
+        className="text-text-tertiary hover:text-accent-danger"
         aria-label={`Remove ${assignment.name}`}
       >
         <Trash2 size={14} />
@@ -145,7 +145,7 @@ const ScoreRangeRow = ({
             }
           />
         </div>
-        <div className="text-text-disabled mt-5">→</div>
+        <div className="text-text-tertiary mt-5">→</div>
         <div className="flex-1">
           <label className="block text-xs text-text-secondary mb-1">Upper %</label>
           <Input
@@ -172,7 +172,7 @@ const ScoreRangeRow = ({
             strategy={verticalListSortingStrategy}
           >
             {selected.length === 0 && (
-              <p className="text-sm text-text-disabled italic">
+              <p className="text-sm text-text-tertiary italic">
                 No assignments yet — add one below.
               </p>
             )}

@@ -61,7 +61,7 @@ export default function CourseInvitationsBanner({ onAccepted }) {
               type="button"
               disabled={busy === inv.id}
               onClick={() => respond(inv, true)}
-              className="px-3 py-1.5 rounded-md bg-brand-600 text-white text-xs font-medium hover:bg-brand-700 disabled:opacity-50"
+              className="px-3 py-1.5 rounded-md bg-brand-600 text-on-brand text-xs font-medium hover:bg-brand-700 disabled:opacity-50"
             >
               Accept
             </button>

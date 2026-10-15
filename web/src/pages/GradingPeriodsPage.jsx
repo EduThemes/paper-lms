@@ -153,7 +153,7 @@ const GradingPeriodsPage = () => {
           <h2 className="text-2xl font-bold">{t('gradingPeriods.title')}</h2>
           <button
             onClick={() => setShowCreateGroup(!showCreateGroup)}
-            className="flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
+            className="flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
           >
             <Plus className="w-4 h-4" />
             <span>{t('gradingPeriods.newGroup')}</span>
@@ -174,7 +174,7 @@ const GradingPeriodsPage = () => {
               className="flex-1 border border-border-strong rounded px-3 py-2 text-sm"
               required
             />
-            <button type="submit" className="bg-brand-600 text-white px-4 py-2 rounded text-sm hover:bg-brand-700">{t('common.create')}</button>
+            <button type="submit" className="bg-brand-600 text-on-brand px-4 py-2 rounded text-sm hover:bg-brand-700">{t('common.create')}</button>
             <button type="button" onClick={() => setShowCreateGroup(false)} className="text-text-tertiary text-sm">{t('common.cancel')}</button>
           </form>
         </div>
@@ -188,13 +188,13 @@ const GradingPeriodsPage = () => {
             <div key={group.id} className="bg-surface-0 rounded-lg shadow">
               <div className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-surface-1" {...clickableProps(() => toggleGroup(group.id))}>
                 <div className="flex items-center space-x-3">
-                  {expandedGroups[group.id] ? <ChevronDown className="w-5 h-5 text-text-disabled" /> : <ChevronRight className="w-5 h-5 text-text-disabled" />}
+                  {expandedGroups[group.id] ? <ChevronDown className="w-5 h-5 text-text-tertiary" /> : <ChevronRight className="w-5 h-5 text-text-tertiary" />}
                   <Calendar className="w-5 h-5 text-indigo-500" />
                   <span className="font-medium">{group.title}</span>
                 </div>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id); }}
-                  className="text-text-disabled hover:text-accent-danger"
+                  className="text-text-tertiary hover:text-accent-danger"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -273,7 +273,7 @@ const GradingPeriodsPage = () => {
                       </div>
                       <button
                         onClick={() => handleDeletePeriod(group.id, period.id)}
-                        className="text-text-disabled hover:text-accent-danger"
+                        className="text-text-tertiary hover:text-accent-danger"
                       >
                         <Trash2 className="w-3 h-3" />
                       </button>
@@ -331,7 +331,7 @@ const GradingPeriodsPage = () => {
                         )}
                       </div>
                       <div className="flex space-x-2">
-                        <button type="submit" className="bg-brand-600 text-white px-3 py-1 rounded text-sm hover:bg-brand-700">{t('common.add')}</button>
+                        <button type="submit" className="bg-brand-600 text-on-brand px-3 py-1 rounded text-sm hover:bg-brand-700">{t('common.add')}</button>
                         <button type="button" onClick={() => setShowCreatePeriod(null)} className="text-text-tertiary text-sm">{t('common.cancel')}</button>
                       </div>
                     </form>

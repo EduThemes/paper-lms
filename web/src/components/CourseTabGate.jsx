@@ -31,7 +31,7 @@ export default function CourseTabGate({ children }) {
         <p className="text-sm text-text-secondary mb-6">Your teacher has hidden it from the course navigation.</p>
         <Link
           to={`/courses/${courseId}`}
-          className="inline-flex px-4 py-2 rounded-md text-sm font-medium bg-brand-600 text-white hover:bg-brand-700"
+          className="inline-flex px-4 py-2 rounded-md text-sm font-medium bg-brand-600 text-on-brand hover:bg-brand-700"
         >
           Go to the course home
         </Link>

@@ -152,7 +152,7 @@ const StudentRow = ({ record, onStatusChange, onNoteChange, saving }) => {
         <button
           type="button"
           onClick={() => setShowNotes(!showNotes)}
-          className="text-text-disabled hover:text-text-secondary focus:outline-none focus:text-text-secondary p-1"
+          className="text-text-tertiary hover:text-text-secondary focus:outline-none focus:text-text-secondary p-1"
           aria-label={showNotes ? 'Hide notes' : 'Show notes'}
           aria-expanded={showNotes}
         >
@@ -226,7 +226,7 @@ const CalendarHeatmap = ({ courseId }) => {
   const getHeatColor = (day) => {
     const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const dayData = monthData[dateKey];
-    if (!dayData) return 'bg-surface-1 text-text-disabled';
+    if (!dayData) return 'bg-surface-1 text-text-tertiary';
     const rate = dayData.total > 0 ? dayData.present / dayData.total : 0;
     if (rate >= 0.95) return 'bg-green-400 text-white';
     if (rate >= 0.85) return 'bg-green-300 text-green-900';
@@ -378,7 +378,7 @@ const StudentAttendanceView = ({ courseId, userId }) => {
       )}
 
       {/* Record List */}
-      <div className="bg-surface-0 border border-border-default rounded-lg divide-y divide-gray-100">
+      <div className="bg-surface-0 border border-border-default rounded-lg divide-y divide-border-default">
         {records.length === 0 ? (
           <p className="p-6 text-center text-text-tertiary">No attendance records found.</p>
         ) : (
@@ -390,7 +390,7 @@ const StudentAttendanceView = ({ courseId, userId }) => {
                   {STATUS_MAP[r.status]?.label || r.status}
                 </span>
               ) : (
-                <span className="text-xs text-text-disabled">No record</span>
+                <span className="text-xs text-text-tertiary">No record</span>
               )}
             </div>
           ))
@@ -564,7 +564,7 @@ const AttendancePage = () => {
                   aria-controls="roster-panel"
                   onClick={() => setView('roster')}
                   className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 ${
-                    view === 'roster' ? 'bg-brand-600 text-white' : 'bg-surface-0 text-text-secondary hover:bg-surface-1'
+                    view === 'roster' ? 'bg-brand-600 text-on-brand' : 'bg-surface-0 text-text-secondary hover:bg-surface-1'
                   }`}
                 >
                   <List className="w-4 h-4" aria-hidden="true" />
@@ -577,7 +577,7 @@ const AttendancePage = () => {
                   aria-controls="calendar-panel"
                   onClick={() => setView('calendar')}
                   className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 ${
-                    view === 'calendar' ? 'bg-brand-600 text-white' : 'bg-surface-0 text-text-secondary hover:bg-surface-1'
+                    view === 'calendar' ? 'bg-brand-600 text-on-brand' : 'bg-surface-0 text-text-secondary hover:bg-surface-1'
                   }`}
                 >
                   <Calendar className="w-4 h-4" aria-hidden="true" />
@@ -677,7 +677,7 @@ const AttendancePage = () => {
 
             {/* Saving Indicator */}
             {saving && (
-              <div className="fixed bottom-4 right-4 bg-brand-600 text-white px-4 py-2 rounded-lg shadow-lg text-sm flex items-center gap-2" role="status" aria-live="polite">
+              <div className="fixed bottom-4 right-4 bg-brand-600 text-on-brand px-4 py-2 rounded-lg shadow-lg text-sm flex items-center gap-2" role="status" aria-live="polite">
                 <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" aria-hidden="true" />
                 Saving...
               </div>

@@ -61,7 +61,7 @@ const FillInMultipleBlanksEditor = ({ answers, onChange, questionText }) => {
                 placeholder="Accepted answer"
                 aria-label={`Accepted answer ${i + 1} for ${blankId}`}
               />
-              <button type="button" onClick={() => remove(row.id)} className="p-1 text-text-disabled hover:text-accent-danger" aria-label={`Remove answer ${i + 1} for ${blankId}`}>
+              <button type="button" onClick={() => remove(row.id)} className="p-1 text-text-tertiary hover:text-accent-danger" aria-label={`Remove answer ${i + 1} for ${blankId}`}>
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>

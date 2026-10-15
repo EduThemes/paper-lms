@@ -254,7 +254,7 @@ const NotificationBell = ({ position = 'sidebar' }) => {
           )}
           <button
             onClick={close}
-            className="p-1 text-text-disabled hover:text-text-secondary rounded"
+            className="p-1 text-text-tertiary hover:text-text-secondary rounded"
             aria-label="Close notifications"
           >
             <X className="w-4 h-4" />
@@ -285,7 +285,7 @@ const NotificationBell = ({ position = 'sidebar' }) => {
       {/* Notification list */}
       <div className="flex-1 overflow-y-auto">
         {loading && notifications.length === 0 ? (
-          <div className="flex items-center justify-center py-8 text-text-disabled text-sm gap-2">
+          <div className="flex items-center justify-center py-8 text-text-tertiary text-sm gap-2">
             <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
               <circle
                 className="opacity-25"
@@ -304,7 +304,7 @@ const NotificationBell = ({ position = 'sidebar' }) => {
             Loading...
           </div>
         ) : notifications.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-text-disabled">
+          <div className="flex flex-col items-center justify-center py-8 text-text-tertiary">
             <Bell className="w-8 h-8 mb-2 opacity-50" />
             <p className="text-sm">No notifications</p>
           </div>
@@ -350,14 +350,14 @@ const NotificationBell = ({ position = 'sidebar' }) => {
                       {n.message}
                     </p>
                   )}
-                  <p className="text-xs text-text-disabled mt-1">
+                  <p className="text-xs text-text-tertiary mt-1">
                     {formatTime(n.created_at)}
                   </p>
                 </div>
                 {!n.is_read && (
                   <button
                     onClick={(e) => handleMarkAsRead(n.id, e)}
-                    className="p-1 text-text-disabled hover:text-brand-600 rounded flex-shrink-0"
+                    className="p-1 text-text-tertiary hover:text-brand-600 rounded flex-shrink-0"
                     aria-label="Mark as read"
                     title="Mark as read"
                   >
@@ -471,7 +471,7 @@ const NotificationBell = ({ position = 'sidebar' }) => {
             {dndActive ? <BellOff className="w-5 h-5" /> : <Bell className="w-5 h-5" />}
             {showBadge && (
               <span
-                className="absolute top-1 end-1 flex items-center justify-center min-w-[16px] h-4 px-1 text-[11px] font-semibold text-white bg-accent-danger rounded-full leading-none"
+                className="absolute top-1 end-1 flex items-center justify-center min-w-[16px] h-4 px-1 text-[11px] font-semibold text-on-accent bg-accent-danger rounded-full leading-none"
                 aria-hidden="true"
               >
                 {unreadCount > 99 ? '99+' : unreadCount}
@@ -479,7 +479,7 @@ const NotificationBell = ({ position = 'sidebar' }) => {
             )}
             {dndActive && (
               <span
-                className="absolute -bottom-0.5 -end-0.5 flex items-center justify-center px-1 h-3.5 text-[9px] font-semibold text-white bg-accent-warning rounded-full leading-none"
+                className="absolute -bottom-0.5 -end-0.5 flex items-center justify-center px-1 h-3.5 text-[9px] font-semibold text-on-accent bg-accent-warning rounded-full leading-none"
                 aria-hidden="true"
                 title="Do Not Disturb"
               >

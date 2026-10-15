@@ -430,7 +430,7 @@ const ModuleSettingsModal = ({ courseId, module, modules, prerequisites, onClose
             <button
               onClick={handleSave}
               disabled={saving}
-              className="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-md hover:bg-brand-700 disabled:opacity-50"
+              className="px-4 py-2 text-sm font-medium text-on-brand bg-brand-600 rounded-md hover:bg-brand-700 disabled:opacity-50"
             >
               {saving ? 'Saving...' : 'Save'}
             </button>

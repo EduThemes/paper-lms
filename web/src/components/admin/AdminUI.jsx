@@ -32,7 +32,7 @@ export const inputClass =
 
 export function Button({ variant = 'primary', className = '', ...props }) {
   const styles = {
-    primary: 'bg-brand-600 text-white hover:bg-brand-700',
+    primary: 'bg-brand-600 text-on-brand hover:bg-brand-700',
     secondary: 'border border-border-strong bg-surface-0 text-text-primary hover:bg-surface-1',
     danger: 'border border-accent-danger/40 text-accent-danger hover:bg-accent-danger/5',
   };

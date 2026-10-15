@@ -96,18 +96,18 @@ export default function AddPeopleForm({ courseId, caller, sections = [], enrolle
           {selectedUser ? (
             <div className="flex items-center gap-2 border border-border-strong rounded-md px-3 py-2 text-sm bg-surface-1">
               <span className="text-text-primary font-medium truncate">{selectedUser.name}</span>
-              {selectedUser.email && <span className="text-text-disabled text-xs truncate">{selectedUser.email}</span>}
+              {selectedUser.email && <span className="text-text-tertiary text-xs truncate">{selectedUser.email}</span>}
               {enrolledUserIds?.has(selectedUser.id) && (
                 <span className="text-xs text-accent-warning">already in this course — adds another role</span>
               )}
-              <button type="button" aria-label="Clear person" onClick={() => setSelectedUser(null)} className="ml-auto text-text-disabled hover:text-text-secondary">
+              <button type="button" aria-label="Clear person" onClick={() => setSelectedUser(null)} className="ml-auto text-text-tertiary hover:text-text-secondary">
                 <X className="w-4 h-4" />
               </button>
             </div>
           ) : (
             <>
               <div className="relative">
-                <Search className="w-4 h-4 absolute start-3 top-1/2 -translate-y-1/2 text-text-disabled" />
+                <Search className="w-4 h-4 absolute start-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
                 <input
                   id="add-person-search"
                   type="text"
@@ -177,7 +177,7 @@ export default function AddPeopleForm({ courseId, caller, sections = [], enrolle
         <button
           type="submit"
           disabled={create.isPending || !selectedUser}
-          className="bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+          className="bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
         >
           {create.isPending ? 'Adding...' : invite ? 'Invite' : 'Add'}
         </button>

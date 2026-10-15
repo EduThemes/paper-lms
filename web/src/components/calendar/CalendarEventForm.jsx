@@ -270,7 +270,7 @@ const CalendarEventForm = ({ contexts, defaultContextCode, event, initialStart, 
                       type="button"
                       aria-pressed={repeat.byDay.includes(code)}
                       onClick={() => toggleDay(code)}
-                      className={`px-2 py-1 rounded text-xs border ${repeat.byDay.includes(code) ? 'bg-brand-600 text-white border-brand-600' : 'border-border-strong text-text-secondary'}`}
+                      className={`px-2 py-1 rounded text-xs border ${repeat.byDay.includes(code) ? 'bg-brand-600 text-on-brand border-brand-600' : 'border-border-strong text-text-secondary'}`}
                     >
                       {t(`calendarLane.weekdays.${code}`)}
                     </button>
@@ -339,7 +339,7 @@ const CalendarEventForm = ({ contexts, defaultContextCode, event, initialStart, 
           <button type="button" onClick={onCancel} className="border border-border-strong text-text-secondary px-4 py-2 rounded-md hover:bg-surface-1 text-sm font-medium">
             {t('common.cancel')}
           </button>
-          <button type="submit" disabled={saving} className="bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
+          <button type="submit" disabled={saving} className="bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
             {saving ? t('common.saving') : t('common.save')}
           </button>
         </div>

@@ -215,7 +215,7 @@ function RegistrationForm({ initial, saving, onSubmit, onCancel }) {
       </fieldset>
 
       <div className="flex gap-3">
-        <button type="submit" disabled={saving} className="rounded-md bg-brand-600 px-4 py-2 text-sm text-white hover:bg-brand-700 disabled:opacity-50">
+        <button type="submit" disabled={saving} className="rounded-md bg-brand-600 px-4 py-2 text-sm text-on-brand hover:bg-brand-700 disabled:opacity-50">
           {saving ? 'Saving…' : 'Save tool'}
         </button>
         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-text-tertiary hover:text-text-secondary">Cancel</button>
@@ -267,7 +267,7 @@ function DynamicRegistrationDialog({ accountId, onDone, onClose, onError }) {
               <label className={labelCls} htmlFor="lti-dr-url">Tool registration URL</label>
               <input id="lti-dr-url" required type="url" className={inputCls} value={toolUrl} onChange={(e) => setToolUrl(e.target.value)} placeholder="https://tool.example.com/lti/register" />
               <p className="text-xs text-text-tertiary">The tool registers itself with Paper and is deployed to every course of this account. You can change its placements afterwards.</p>
-              <button type="submit" disabled={starting} className="rounded-md bg-brand-600 px-4 py-2 text-sm text-white hover:bg-brand-700 disabled:opacity-50">
+              <button type="submit" disabled={starting} className="rounded-md bg-brand-600 px-4 py-2 text-sm text-on-brand hover:bg-brand-700 disabled:opacity-50">
                 {starting ? 'Starting…' : 'Start registration'}
               </button>
             </form>
@@ -329,7 +329,7 @@ function AccountLti11Tools({ accountId, onError }) {
           <select name="privacy_level" aria-label="Privacy level" className={inputCls} defaultValue="anonymous">
             {LTI_PRIVACY_LEVELS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
           </select>
-          <button type="submit" disabled={create.isPending} className="rounded-md bg-brand-600 px-4 py-2 text-sm text-white hover:bg-brand-700 disabled:opacity-50">
+          <button type="submit" disabled={create.isPending} className="rounded-md bg-brand-600 px-4 py-2 text-sm text-on-brand hover:bg-brand-700 disabled:opacity-50">
             {create.isPending ? 'Adding…' : 'Add tool'}
           </button>
         </form>
@@ -418,7 +418,7 @@ export default function LtiRegistrationsPage() {
             <button type="button" onClick={() => setShowDynamic(true)} className="inline-flex items-center gap-2 rounded-md border border-border-strong px-4 py-2 text-sm hover:bg-surface-1">
               <Link2 className="h-4 w-4" /> Register by URL
             </button>
-            <button type="button" onClick={() => setEditing('new')} className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm text-white hover:bg-brand-700">
+            <button type="button" onClick={() => setEditing('new')} className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm text-on-brand hover:bg-brand-700">
               <Plus className="h-4 w-4" /> Register tool
             </button>
           </div>
@@ -462,7 +462,7 @@ export default function LtiRegistrationsPage() {
             <p className="p-6 text-sm text-accent-danger">{query.error?.message || 'Could not load tools'}</p>
           ) : regs.length === 0 ? (
             <div className="p-12 text-center">
-              <Puzzle className="mx-auto mb-4 h-12 w-12 text-text-disabled" />
+              <Puzzle className="mx-auto mb-4 h-12 w-12 text-text-tertiary" />
               <p className="text-text-tertiary">No LTI 1.3 tools registered yet.</p>
             </div>
           ) : (

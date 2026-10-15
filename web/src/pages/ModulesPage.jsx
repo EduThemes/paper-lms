@@ -121,7 +121,7 @@ const DragHandle = memo(function DragHandle({ size = 'md', className, ...props }
   return (
     <button
       className={cn(
-        'flex-shrink-0 text-gray-300 hover:text-text-secondary cursor-grab active:cursor-grabbing touch-none transition-colors',
+        'flex-shrink-0 text-text-tertiary hover:text-text-secondary cursor-grab active:cursor-grabbing touch-none transition-colors',
         className
       )}
       aria-label="Drag to reorder"
@@ -345,7 +345,7 @@ const ModuleItemRow = memo(function ModuleItemRow({
             'p-1.5 flex-shrink-0 rounded transition-colors',
             item.published
               ? 'text-accent-success hover:bg-accent-success/10'
-              : 'text-text-disabled hover:bg-surface-2'
+              : 'text-text-tertiary hover:bg-surface-2'
           )}
         >
           {item.published ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
@@ -476,8 +476,8 @@ const ModuleRow = memo(function ModuleRow({
         aria-expanded={!!expanded}
       >
         {expanded
-          ? <ChevronDown className="w-5 h-5 text-text-disabled flex-shrink-0" />
-          : <ChevronRight className="w-5 h-5 text-text-disabled flex-shrink-0" />}
+          ? <ChevronDown className="w-5 h-5 text-text-tertiary flex-shrink-0" />
+          : <ChevronRight className="w-5 h-5 text-text-tertiary flex-shrink-0" />}
         <span className="font-semibold text-text-primary">{module.name}</span>
         <span className="text-xs text-text-secondary ml-2">
           {itemCount} {itemCount === 1 ? 'item' : 'items'}
@@ -510,7 +510,7 @@ const ModuleRow = memo(function ModuleRow({
               'p-1.5 rounded transition-colors',
               module.published
                 ? 'text-accent-success hover:bg-accent-success/10'
-                : 'text-text-disabled hover:bg-surface-2'
+                : 'text-text-tertiary hover:bg-surface-2'
             )}
             aria-label={module.published ? 'Unpublish module' : 'Publish module'}
           >
@@ -1180,7 +1180,7 @@ const ModulesPage = () => {
                                 items={items.map(i => `item-${i.id}`)}
                                 strategy={verticalListSortingStrategy}
                               >
-                                <div className="divide-y divide-gray-100">
+                                <div className="divide-y divide-border-default">
                                   {items.map((item, idx) => (
                                     <SortableItem
                                       key={item.id}

@@ -145,7 +145,7 @@ const CollaborationsPage = () => {
           <h2 className="text-2xl font-bold text-text-primary">Collaborations</h2>
           <button
             onClick={() => { if (showForm) { resetForm(); } else { setShowForm(true); } }}
-            className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+            className="inline-flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
           >
             {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
             <span>{showForm ? 'Cancel' : 'New Collaboration'}</span>
@@ -210,7 +210,7 @@ const CollaborationsPage = () => {
               <button
                 type="submit"
                 disabled={submitting}
-                className="bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+                className="bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
               >
                 {submitting ? 'Saving...' : (editingId ? 'Update Collaboration' : 'Create Collaboration')}
               </button>
@@ -233,7 +233,7 @@ const CollaborationsPage = () => {
                 className="flex items-center justify-between p-4 hover:bg-surface-1"
               >
                 <div className="flex items-center space-x-3 min-w-0">
-                  <FileText className="w-5 h-5 text-text-disabled flex-shrink-0" />
+                  <FileText className="w-5 h-5 text-text-tertiary flex-shrink-0" />
                   <div className="min-w-0">
                     <div className="flex items-center space-x-2">
                       <span className="font-medium text-text-primary truncate">{collab.title}</span>
@@ -244,7 +244,7 @@ const CollaborationsPage = () => {
                     {collab.description && (
                       <p className="text-sm text-text-tertiary truncate">{collab.description}</p>
                     )}
-                    <span className="text-xs text-text-disabled">Created {formatDate(collab.created_at)}</span>
+                    <span className="text-xs text-text-tertiary">Created {formatDate(collab.created_at)}</span>
                   </div>
                 </div>
                 <div className="flex items-center space-x-2 flex-shrink-0 ml-4">
@@ -261,14 +261,14 @@ const CollaborationsPage = () => {
                   )}
                   <button
                     onClick={() => handleEdit(collab)}
-                    className="p-1.5 text-text-disabled hover:text-brand-600 hover:bg-brand-50 rounded"
+                    className="p-1.5 text-text-tertiary hover:text-brand-600 hover:bg-brand-50 rounded"
                     title="Edit"
                   >
                     <Pencil className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => handleDelete(collab.id)}
-                    className="p-1.5 text-text-disabled hover:text-accent-danger hover:bg-accent-danger/10 rounded"
+                    className="p-1.5 text-text-tertiary hover:text-accent-danger hover:bg-accent-danger/10 rounded"
                     title="Delete"
                   >
                     <Trash2 className="w-4 h-4" />

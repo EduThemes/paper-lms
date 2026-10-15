@@ -141,13 +141,13 @@ const CommonsPage = () => {
     <Layout>
       <div className="p-6 max-w-7xl mx-auto">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-900">Commons</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <h1 className="text-2xl font-bold text-text-primary">Commons</h1>
+          <p className="text-sm text-text-tertiary mt-1">
             Browse and import shared content from teachers across your district.
           </p>
         </div>
 
-        <div className="mb-4 bg-surface-0 border border-slate-200 rounded-lg p-4 space-y-3">
+        <div className="mb-4 bg-surface-0 border border-border-default rounded-lg p-4 space-y-3">
           <div className="flex flex-wrap gap-2">
             {RESOURCE_TYPES.map((rt) => (
               <button
@@ -156,7 +156,7 @@ const CommonsPage = () => {
                 className={`px-3 py-1 text-xs font-medium rounded-full border transition ${
                   resourceType === rt.value
                     ? 'bg-indigo-600 text-white border-indigo-600'
-                    : 'bg-surface-0 text-slate-700 border-slate-200 hover:border-indigo-400'
+                    : 'bg-surface-0 text-text-secondary border-border-default hover:border-indigo-400'
                 }`}
               >
                 {rt.label}
@@ -165,11 +165,11 @@ const CommonsPage = () => {
           </div>
           <div className="flex flex-wrap gap-3 items-center">
             <label className="flex items-center gap-2 text-sm">
-              <span className="text-slate-600">Subject</span>
+              <span className="text-text-secondary">Subject</span>
               <select
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
-                className="px-2 py-1 border border-slate-200 rounded text-sm bg-surface-0"
+                className="px-2 py-1 border border-border-default rounded text-sm bg-surface-0"
               >
                 {SUBJECTS.map((s) => (
                   <option key={s || 'all'} value={s}>
@@ -179,11 +179,11 @@ const CommonsPage = () => {
               </select>
             </label>
             <label className="flex items-center gap-2 text-sm">
-              <span className="text-slate-600">Grade</span>
+              <span className="text-text-secondary">Grade</span>
               <select
                 value={gradeLevel}
                 onChange={(e) => setGradeLevel(e.target.value)}
-                className="px-2 py-1 border border-slate-200 rounded text-sm bg-surface-0"
+                className="px-2 py-1 border border-border-default rounded text-sm bg-surface-0"
               >
                 {GRADE_LEVELS.map((g) => (
                   <option key={g || 'all'} value={g}>
@@ -193,16 +193,16 @@ const CommonsPage = () => {
               </select>
             </label>
             <div className="flex items-center gap-1 flex-1 min-w-[200px]">
-              <Search className="w-4 h-4 text-slate-400" aria-hidden="true" />
+              <Search className="w-4 h-4 text-text-tertiary" aria-hidden="true" />
               <input
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search title or description"
-                className="flex-1 px-2 py-1 border border-slate-200 rounded text-sm"
+                className="flex-1 px-2 py-1 border border-border-default rounded text-sm"
               />
             </div>
-            <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+            <label className="inline-flex items-center gap-2 text-sm text-text-secondary">
               <input
                 type="checkbox"
                 checked={showFavorites}
@@ -220,13 +220,13 @@ const CommonsPage = () => {
             <p>{error}</p>
             <button
               onClick={loadItems}
-              className="mt-2 px-3 py-1 text-sm bg-accent-danger text-white rounded hover:bg-accent-danger/90"
+              className="mt-2 px-3 py-1 text-sm bg-accent-danger text-on-accent rounded hover:bg-accent-danger/90"
             >
               Try Again
             </button>
           </div>
         ) : items.length === 0 ? (
-          <div className="bg-slate-50 border border-slate-200 rounded-lg p-12 text-center text-slate-500">
+          <div className="bg-surface-1 border border-border-default rounded-lg p-12 text-center text-text-tertiary">
             No content found. Try adjusting your filters.
           </div>
         ) : (
@@ -257,10 +257,10 @@ const CommonsPage = () => {
           >
             <div className="p-6">
               <div className="flex items-start justify-between gap-4">
-                <h2 className="text-xl font-semibold text-slate-900">{selected.title}</h2>
+                <h2 className="text-xl font-semibold text-text-primary">{selected.title}</h2>
                 <button
                   onClick={() => setSelected(null)}
-                  className="p-1 hover:bg-slate-100 rounded"
+                  className="p-1 hover:bg-surface-2 rounded"
                   aria-label="Close"
                 >
                   <X className="w-5 h-5" />
@@ -271,32 +271,32 @@ const CommonsPage = () => {
                   {selected.resource_type}
                 </span>
                 {selected.subject && (
-                  <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded">{selected.subject}</span>
+                  <span className="px-2 py-0.5 bg-surface-2 text-text-secondary rounded">{selected.subject}</span>
                 )}
                 {selected.grade_level && (
-                  <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded">{selected.grade_level}</span>
+                  <span className="px-2 py-0.5 bg-surface-2 text-text-secondary rounded">{selected.grade_level}</span>
                 )}
                 {(selected.tags || []).map((t) => (
                   <span key={t} className="px-2 py-0.5 bg-accent-warning/10 text-accent-warning rounded">#{t}</span>
                 ))}
               </div>
-              <p className="mt-4 text-sm text-slate-600 whitespace-pre-wrap">
+              <p className="mt-4 text-sm text-text-secondary whitespace-pre-wrap">
                 {selected.description || 'No description provided.'}
               </p>
-              <div className="mt-4 flex items-center gap-4 text-xs text-slate-500">
+              <div className="mt-4 flex items-center gap-4 text-xs text-text-tertiary">
                 <span className="flex items-center gap-1"><Download className="w-3.5 h-3.5" /> {selected.download_count || 0} imports</span>
                 <span className="flex items-center gap-1"><Star className="w-3.5 h-3.5" /> {selected.favorite_count || 0} favorites</span>
               </div>
 
-              <div className="mt-6 border-t border-slate-200 pt-4">
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+              <div className="mt-6 border-t border-border-default pt-4">
+                <label className="block text-sm font-medium text-text-secondary mb-1">
                   Import to course
                 </label>
                 <div className="flex gap-2">
                   <select
                     value={importTargetCourseId}
                     onChange={(e) => setImportTargetCourseId(e.target.value)}
-                    className="flex-1 px-2 py-1.5 border border-slate-200 rounded text-sm bg-surface-0"
+                    className="flex-1 px-2 py-1.5 border border-border-default rounded text-sm bg-surface-0"
                   >
                     <option value="">Select a course...</option>
                     {courses.map((c) => (
@@ -314,7 +314,7 @@ const CommonsPage = () => {
                   </button>
                 </div>
                 {importMessage && (
-                  <p className="mt-2 text-sm text-slate-700">{importMessage}</p>
+                  <p className="mt-2 text-sm text-text-secondary">{importMessage}</p>
                 )}
               </div>
             </div>

@@ -63,7 +63,7 @@ function ExtensionDialog({ student, name, timed, onClose, onSave, saving }) {
             type="button"
             disabled={saving}
             onClick={() => onSave(extensionPayload(student.user_id, form))}
-            className="px-3 py-1.5 text-sm rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+            className="px-3 py-1.5 text-sm rounded bg-brand-600 text-on-brand hover:bg-brand-700 disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>

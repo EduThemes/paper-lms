@@ -324,7 +324,7 @@ const GroupsPage = () => {
           {isTeacher && (
             <button
               onClick={openCreateCategory}
-              className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+              className="inline-flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
             >
               <Plus className="w-4 h-4" />
               <span>New Category</span>
@@ -343,7 +343,7 @@ const GroupsPage = () => {
             <div key={cat.id} className="bg-surface-0 rounded-lg shadow">
               <div className="p-4 border-b flex items-center justify-between">
                 <div className="flex items-center space-x-3">
-                  <FolderOpen className="w-5 h-5 text-text-disabled" />
+                  <FolderOpen className="w-5 h-5 text-text-tertiary" />
                   <div>
                     <h3 className="font-semibold text-text-primary">{cat.name}</h3>
                     <div className="flex items-center space-x-3 text-xs text-text-tertiary mt-0.5">
@@ -374,14 +374,14 @@ const GroupsPage = () => {
                     </button>
                     <button
                       onClick={() => openEditCategory(cat)}
-                      className="text-text-disabled hover:text-text-secondary"
+                      className="text-text-tertiary hover:text-text-secondary"
                       title="Edit Category"
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => handleDeleteCategory(cat.id)}
-                      className="text-text-disabled hover:text-accent-danger"
+                      className="text-text-tertiary hover:text-accent-danger"
                       title="Delete Category"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -400,13 +400,13 @@ const GroupsPage = () => {
               {/* Groups within category */}
               <div className="divide-y">
                 {(!groupsByCategory[cat.id] || groupsByCategory[cat.id].length === 0) ? (
-                  <div className="p-4 text-center text-text-disabled text-sm">No groups in this category.</div>
+                  <div className="p-4 text-center text-text-tertiary text-sm">No groups in this category.</div>
                 ) : (
                   groupsByCategory[cat.id].map((group) => (
                     <div key={group.id} className="p-4">
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center space-x-2">
-                          <Users className="w-4 h-4 text-text-disabled" />
+                          <Users className="w-4 h-4 text-text-tertiary" />
                           <span className="font-medium text-text-primary">{group.name}</span>
                           {group.max_membership != null && (
                             <span className="text-xs text-text-tertiary">
@@ -452,14 +452,14 @@ const GroupsPage = () => {
                             </button>
                             <button
                               onClick={() => openEditGroup(group, cat.id)}
-                              className="text-text-disabled hover:text-text-secondary"
+                              className="text-text-tertiary hover:text-text-secondary"
                               title="Edit Group"
                             >
                               <Edit2 className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleDeleteGroup(group.id)}
-                              className="text-text-disabled hover:text-accent-danger"
+                              className="text-text-tertiary hover:text-accent-danger"
                               title="Delete Group"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -490,13 +490,13 @@ const GroupsPage = () => {
                           <button
                             onClick={() => handleAddMember(group.id)}
                             disabled={!selectedUserId || saving}
-                            className="bg-accent-success text-white px-3 py-1 rounded text-sm hover:bg-accent-success/90 disabled:opacity-50"
+                            className="bg-accent-success text-on-accent px-3 py-1 rounded text-sm hover:bg-accent-success/90 disabled:opacity-50"
                           >
                             Add
                           </button>
                           <button
                             onClick={() => { setAddingMemberGroup(null); setSelectedUserId(''); }}
-                            className="text-text-disabled hover:text-text-secondary"
+                            className="text-text-tertiary hover:text-text-secondary"
                           >
                             <X className="w-4 h-4" />
                           </button>
@@ -523,7 +523,7 @@ const GroupsPage = () => {
                                 <button
                                   onClick={() => handleToggleLeader(group, member)}
                                   disabled={saving}
-                                  className="text-text-disabled hover:text-accent-warning ml-1 disabled:opacity-50"
+                                  className="text-text-tertiary hover:text-accent-warning ml-1 disabled:opacity-50"
                                   title={isLeader(group, member) ? 'Remove as leader' : 'Make leader'}
                                 >
                                   <Crown className="w-3 h-3" />
@@ -532,7 +532,7 @@ const GroupsPage = () => {
                               {isTeacher && (
                                 <button
                                   onClick={() => handleRemoveMember(group.id, member.id)}
-                                  className="text-text-disabled hover:text-accent-danger ml-1"
+                                  className="text-text-tertiary hover:text-accent-danger ml-1"
                                   title="Remove member"
                                 >
                                   <UserMinus className="w-3 h-3" />
@@ -557,7 +557,7 @@ const GroupsPage = () => {
           <div className="bg-surface-0 rounded-lg shadow-lg p-6 w-full max-w-md mx-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">{editingCategory ? 'Edit Category' : 'New Category'}</h3>
-              <button onClick={() => setShowCategoryModal(false)} className="text-text-disabled hover:text-text-secondary">
+              <button onClick={() => setShowCategoryModal(false)} className="text-text-tertiary hover:text-text-secondary">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -643,7 +643,7 @@ const GroupsPage = () => {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+                  className="bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
                 >
                   {saving ? 'Saving...' : editingCategory ? 'Update' : 'Create'}
                 </button>
@@ -659,7 +659,7 @@ const GroupsPage = () => {
           <div className="bg-surface-0 rounded-lg shadow-lg p-6 w-full max-w-md mx-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">{editingGroup ? 'Edit Group' : 'New Group'}</h3>
-              <button onClick={() => setShowGroupModal(false)} className="text-text-disabled hover:text-text-secondary">
+              <button onClick={() => setShowGroupModal(false)} className="text-text-tertiary hover:text-text-secondary">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -717,7 +717,7 @@ const GroupsPage = () => {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+                  className="bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
                 >
                   {saving ? 'Saving...' : editingGroup ? 'Update' : 'Create'}
                 </button>

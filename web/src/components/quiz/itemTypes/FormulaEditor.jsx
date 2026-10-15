@@ -118,7 +118,7 @@ const FormulaEditor = ({ answers, onChange, courseId, quizId }) => {
                 <input type="number" min="0" max="10" value={v.precision ?? 0} onChange={(e) => setVar(i, { precision: parseInt(e.target.value, 10) || 0 })}
                   className={`col-span-2 ${numInput}`} aria-label={`Variable ${i + 1} decimals`} />
                 <button onClick={() => removeVar(i)} type="button"
-                  className="col-span-1 p-1 text-text-disabled hover:text-accent-danger flex items-center justify-center" aria-label={`Remove variable ${i + 1}`}>
+                  className="col-span-1 p-1 text-text-tertiary hover:text-accent-danger flex items-center justify-center" aria-label={`Remove variable ${i + 1}`}>
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -137,7 +137,7 @@ const FormulaEditor = ({ answers, onChange, courseId, quizId }) => {
             onChange={(e) => patch({ answer_precision: e.target.value === '' ? undefined : parseInt(e.target.value, 10) || 0 })}
             className={`w-full mt-1 ${numInput}`} placeholder="unrounded" aria-label="Answer decimals" />
         </label>
-        <label className="block text-xs font-medium text-text-secondary">Fixed value <span className="text-text-disabled">(no formula)</span>
+        <label className="block text-xs font-medium text-text-secondary">Fixed value <span className="text-text-tertiary">(no formula)</span>
           <input type="text" value={cfg.answer_value || ''} onChange={(e) => patch({ answer_value: e.target.value })}
             className={`w-full mt-1 font-mono ${numInput}`} placeholder="e.g. 42" aria-label="Fixed expected value" />
         </label>

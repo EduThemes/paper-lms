@@ -50,7 +50,7 @@ const QuizSubmissionsPage = () => {
     switch (state) {
       case 'complete': return <CheckCircle className="w-4 h-4 text-accent-success" />;
       case 'pending_review': return <AlertCircle className="w-4 h-4 text-accent-warning" />;
-      default: return <Clock className="w-4 h-4 text-text-disabled" />;
+      default: return <Clock className="w-4 h-4 text-text-tertiary" />;
     }
   };
 

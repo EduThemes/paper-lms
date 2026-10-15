@@ -182,11 +182,11 @@ const ItemAnalysisPage = () => {
 
           {report.summary.respondents === 0 ? (
             <div className="bg-surface-0 rounded-lg shadow border border-border-default p-8 text-center">
-              <FileQuestion className="w-10 h-10 mx-auto text-text-disabled mb-3" />
+              <FileQuestion className="w-10 h-10 mx-auto text-text-tertiary mb-3" />
               <h2 className="text-lg font-semibold text-text-primary mb-1">{t('itemAnalysis.noDataTitle')}</h2>
               <p className="text-sm text-text-tertiary max-w-md mx-auto">{t('itemAnalysis.noDataDescription')}</p>
               {report.items.length > 0 && (
-                <p className="text-xs text-text-disabled mt-3">{t('itemAnalysis.questionsConfigured', { count: report.items.length })}</p>
+                <p className="text-xs text-text-tertiary mt-3">{t('itemAnalysis.questionsConfigured', { count: report.items.length })}</p>
               )}
             </div>
           ) : (

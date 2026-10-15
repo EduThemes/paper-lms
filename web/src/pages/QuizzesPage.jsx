@@ -146,7 +146,7 @@ const QuizzesPage = () => {
           {isTeacher && (
             <button
               onClick={() => setShowCreate(!showCreate)}
-              className="inline-flex items-center px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium"
+              className="inline-flex items-center px-4 py-2 bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 text-sm font-medium"
             >
               <Plus className="w-4 h-4 mr-1" />
               Quiz
@@ -233,7 +233,7 @@ const QuizzesPage = () => {
             <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary">
               Cancel
             </button>
-            <button type="submit" disabled={creating} className="px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
+            <button type="submit" disabled={creating} className="px-4 py-2 bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
               {creating ? 'Creating...' : 'Create Quiz'}
             </button>
           </div>
@@ -261,10 +261,10 @@ const QuizzesPage = () => {
                     to={isTeacher ? `/courses/${courseId}/quizzes/${quiz.id}/edit` : studentLink}
                     className="flex items-center space-x-3 min-w-0 flex-1"
                   >
-                    <ClipboardList className="w-5 h-5 text-text-disabled flex-shrink-0" />
+                    <ClipboardList className="w-5 h-5 text-text-tertiary flex-shrink-0" />
                     <div className="min-w-0">
                       <span className="font-medium text-text-primary truncate block">{quiz.title}</span>
-                      <div className="flex items-center space-x-3 text-xs text-text-disabled mt-0.5">
+                      <div className="flex items-center space-x-3 text-xs text-text-tertiary mt-0.5">
                         <span>{formatQuizType(quiz.quiz_type)}</span>
                         {quiz.points_possible != null && (
                           <span>{quiz.points_possible} pts</span>
@@ -302,7 +302,7 @@ const QuizzesPage = () => {
                           </span>
                         )}
                         {mySub.attempt > 1 && (
-                          <span className="text-xs text-text-disabled">Attempt {mySub.attempt}</span>
+                          <span className="text-xs text-text-tertiary">Attempt {mySub.attempt}</span>
                         )}
                         {isCompleted && mySub.id && (
                           <Link
@@ -316,7 +316,7 @@ const QuizzesPage = () => {
                       </>
                     )}
                     {!isTeacher && !mySub && (
-                      <span className="text-xs text-text-disabled">Not attempted</span>
+                      <span className="text-xs text-text-tertiary">Not attempted</span>
                     )}
                     {/* Teacher controls */}
                     {isTeacher && (

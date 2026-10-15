@@ -188,7 +188,7 @@ const AssignmentOverridesPage = () => {
           </div>
           <button
             onClick={() => setForm(form ? null : { ...EMPTY })}
-            className="flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
+            className="flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
           >
             <Plus className="w-4 h-4" />
             <span>{t('assignmentOverrides.newOverride')}</span>
@@ -271,7 +271,7 @@ const AssignmentOverridesPage = () => {
             </div>
 
             <div className="flex space-x-3">
-              <button type="submit" className="bg-brand-600 text-white px-4 py-2 rounded hover:bg-brand-700 text-sm">
+              <button type="submit" className="bg-brand-600 text-on-brand px-4 py-2 rounded hover:bg-brand-700 text-sm">
                 {form.id ? 'Save' : t('common.create')}
               </button>
               <button type="button" onClick={() => setForm(null)} className="text-text-tertiary text-sm">{t('common.cancel')}</button>
@@ -306,10 +306,10 @@ const AssignmentOverridesPage = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <button aria-label={`Edit ${override.title || 'override'}`} onClick={() => startEdit(override)} className="text-text-disabled hover:text-brand-600">
+                  <button aria-label={`Edit ${override.title || 'override'}`} onClick={() => startEdit(override)} className="text-text-tertiary hover:text-brand-600">
                     <Pencil className="w-4 h-4" />
                   </button>
-                  <button aria-label={`Delete ${override.title || 'override'}`} onClick={() => handleDelete(override.id)} className="text-text-disabled hover:text-accent-danger">
+                  <button aria-label={`Delete ${override.title || 'override'}`} onClick={() => handleDelete(override.id)} className="text-text-tertiary hover:text-accent-danger">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>

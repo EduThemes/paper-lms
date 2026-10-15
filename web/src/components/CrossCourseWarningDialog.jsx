@@ -47,7 +47,7 @@ export default function CrossCourseWarningDialog({ issues, onGoBack, onSaveAnywa
                     <code className="text-xs bg-surface-2 px-1 py-0.5 rounded">{issue.element}</code>
                     {' '}references course <strong className="text-accent-warning">#{issue.referencedCourseId}</strong>
                   </div>
-                  <div className="text-xs text-text-disabled mt-0.5 break-all">{issue.url}</div>
+                  <div className="text-xs text-text-tertiary mt-0.5 break-all">{issue.url}</div>
                   {issue.text && issue.text !== issue.url && (
                     <div className="text-xs text-text-tertiary mt-0.5 italic truncate">"{issue.text}"</div>
                   )}

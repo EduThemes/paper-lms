@@ -117,7 +117,7 @@ export default function MFAEnrollPage() {
             <button
               type="submit"
               disabled={busy || !password}
-              className="rounded-md bg-brand-600 hover:bg-brand-700 px-4 py-2 text-white font-medium disabled:opacity-50"
+              className="rounded-md bg-brand-600 hover:bg-brand-700 px-4 py-2 text-on-brand font-medium disabled:opacity-50"
             >
               {busy ? 'Working…' : 'Continue'}
             </button>
@@ -175,7 +175,7 @@ export default function MFAEnrollPage() {
               type="button"
               disabled={!savedCodes}
               onClick={() => setStep(3)}
-              className="rounded-md bg-brand-600 hover:bg-brand-700 px-4 py-2 text-white font-medium disabled:opacity-50"
+              className="rounded-md bg-brand-600 hover:bg-brand-700 px-4 py-2 text-on-brand font-medium disabled:opacity-50"
             >
               Continue
             </button>
@@ -199,7 +199,7 @@ export default function MFAEnrollPage() {
             <button
               type="submit"
               disabled={busy || !code}
-              className="rounded-md bg-brand-600 hover:bg-brand-700 px-4 py-2 text-white font-medium disabled:opacity-50"
+              className="rounded-md bg-brand-600 hover:bg-brand-700 px-4 py-2 text-on-brand font-medium disabled:opacity-50"
             >
               {busy ? 'Verifying…' : 'Verify and enable'}
             </button>
@@ -218,7 +218,7 @@ export default function MFAEnrollPage() {
             <button
               type="button"
               onClick={() => navigate('/')}
-              className="rounded-md bg-brand-600 hover:bg-brand-700 px-4 py-2 text-white font-medium"
+              className="rounded-md bg-brand-600 hover:bg-brand-700 px-4 py-2 text-on-brand font-medium"
             >
               Back to dashboard
             </button>

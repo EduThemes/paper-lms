@@ -68,7 +68,7 @@ const ButtonEditor = ({ courseId, buttons, setButtons }) => {
       <div className="space-y-2">
         {buttons.map((btn, idx) => (
           <div key={btn.id} className="flex items-center gap-3 p-3 border rounded-lg bg-surface-1">
-            <GripVertical className="w-4 h-4 text-text-disabled cursor-grab" />
+            <GripVertical className="w-4 h-4 text-text-tertiary cursor-grab" />
             <div className="w-8 h-8 rounded flex items-center justify-center" style={{ backgroundColor: btn.color || '#0374B5' }}>
               <span className="text-white text-xs">{btn.icon?.[0]}</span>
             </div>
@@ -120,7 +120,7 @@ const ButtonEditor = ({ courseId, buttons, setButtons }) => {
             <ColorPicker value={form.color} onChange={color => setForm(f => ({ ...f, color }))} />
           </div>
         </div>
-        <button onClick={handleAddCustom} className="mt-3 flex items-center gap-1 bg-brand-600 text-white px-4 py-1.5 rounded text-sm hover:bg-brand-700">
+        <button onClick={handleAddCustom} className="mt-3 flex items-center gap-1 bg-brand-600 text-on-brand px-4 py-1.5 rounded text-sm hover:bg-brand-700">
           <Plus className="w-4 h-4" /> Add Custom Button
         </button>
       </div>

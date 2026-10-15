@@ -54,7 +54,7 @@ export default function DesignHomeCallout({ courseId }) {
       <div className="flex flex-col gap-4 md:flex-row md:items-center">
         <div
           aria-hidden="true"
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm"
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-600 text-on-brand shadow-sm"
         >
           <Palette className="h-6 w-6" />
         </div>

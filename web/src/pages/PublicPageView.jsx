@@ -63,7 +63,7 @@ const PublicPageView = () => {
             fallback={<SafeHTML className="prose prose-lg max-w-none" html={page.body} />}
           />
         </main>
-        <footer className="border-t border-border-default py-4 text-center text-sm text-text-disabled">
+        <footer className="border-t border-border-default py-4 text-center text-sm text-text-tertiary">
           {t('publicPage.poweredBy')}
         </footer>
       </div>

@@ -194,7 +194,7 @@ const OutcomeProficiencyPage = () => {
               onDrop={() => onDrop(idx)}
               className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-border-subtle items-center hover:bg-surface-1"
             >
-              <div className="col-span-1 flex items-center justify-center cursor-move text-text-disabled">
+              <div className="col-span-1 flex items-center justify-center cursor-move text-text-tertiary">
                 <GripVertical className="w-4 h-4" />
               </div>
               <div className="col-span-4">
@@ -266,7 +266,7 @@ const OutcomeProficiencyPage = () => {
         <button
           onClick={save}
           disabled={saving || loading}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded bg-brand-600 text-white text-sm font-medium hover:bg-brand-700 disabled:opacity-50"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded bg-brand-600 text-on-brand text-sm font-medium hover:bg-brand-700 disabled:opacity-50"
         >
           <Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save Scale'}
         </button>

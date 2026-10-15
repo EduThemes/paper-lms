@@ -212,7 +212,7 @@ const CoursePacingPage = () => {
               <button
                 onClick={handlePublish}
                 disabled={saving}
-                className="flex items-center space-x-1 bg-accent-success text-white px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50"
+                className="flex items-center space-x-1 bg-accent-success text-on-accent px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50"
               >
                 <Play className="w-4 h-4" />
                 <span>{saving ? 'Publishing...' : 'Publish'}</span>
@@ -326,7 +326,7 @@ const CoursePacingPage = () => {
           <button
             onClick={handleCreatePace}
             disabled={saving}
-            className="mt-3 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm disabled:opacity-50"
+            className="mt-3 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm disabled:opacity-50"
           >
             {saving ? 'Creating...' : 'Create Pace'}
           </button>
@@ -392,7 +392,7 @@ const CoursePacingPage = () => {
                   {pace.workflow_state}
                 </span>
                 {pace.published_at && (
-                  <span className="ml-2 text-text-disabled">
+                  <span className="ml-2 text-text-tertiary">
                     Published {formatDate(pace.published_at)}
                   </span>
                 )}
@@ -424,7 +424,7 @@ const CoursePacingPage = () => {
             <button
               onClick={handleSaveItems}
               disabled={saving}
-              className="flex items-center space-x-1 bg-brand-600 text-white px-3 py-1.5 rounded-md hover:bg-brand-700 text-sm disabled:opacity-50"
+              className="flex items-center space-x-1 bg-brand-600 text-on-brand px-3 py-1.5 rounded-md hover:bg-brand-700 text-sm disabled:opacity-50"
             >
               <Save className="w-4 h-4" />
               <span>{saving ? 'Saving...' : 'Save Durations'}</span>
@@ -453,7 +453,7 @@ const CoursePacingPage = () => {
                           {item.title || `Module Item #${item.module_item_id}`}
                         </p>
                         {item.module_name && (
-                          <p className="text-xs text-text-disabled">{item.module_name}</p>
+                          <p className="text-xs text-text-tertiary">{item.module_name}</p>
                         )}
                         {timelineEntry && (
                           <p className="text-xs text-text-tertiary">

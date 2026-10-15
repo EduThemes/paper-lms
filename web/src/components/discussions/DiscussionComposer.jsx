@@ -213,7 +213,7 @@ export default function DiscussionComposer({
             type="button"
             onClick={handleSubmit}
             disabled={blank || submitting || uploading}
-            className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-brand-600 text-white text-sm font-medium rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-brand-600 text-on-brand text-sm font-medium rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
             {submitLabel}

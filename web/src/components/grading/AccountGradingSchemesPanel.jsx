@@ -78,7 +78,7 @@ const AccountGradingSchemesPanel = ({ accountId }) => {
         <h3 id="account-schemes-heading" className="text-xl font-bold">Grading schemes</h3>
         {!editing && (
           <button type="button" onClick={startNew}
-            className="flex items-center gap-2 bg-brand-600 text-white px-3 py-1.5 rounded-md hover:bg-brand-700 text-sm">
+            className="flex items-center gap-2 bg-brand-600 text-on-brand px-3 py-1.5 rounded-md hover:bg-brand-700 text-sm">
             <Plus className="w-4 h-4" /> New scheme
           </button>
         )}
@@ -130,7 +130,7 @@ const AccountGradingSchemesPanel = ({ accountId }) => {
                   <td>
                     <button type="button" aria-label={`Remove grade ${r[0] || i + 1}`}
                       onClick={() => setEditing((e) => ({ ...e, rows: e.rows.filter((_, j) => j !== i) }))}
-                      className="text-text-disabled hover:text-accent-danger">
+                      className="text-text-tertiary hover:text-accent-danger">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </td>
@@ -143,7 +143,7 @@ const AccountGradingSchemesPanel = ({ accountId }) => {
             Add grade
           </button>
           <div className="flex gap-2">
-            <button type="submit" disabled={busy} className="bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50">
+            <button type="submit" disabled={busy} className="bg-brand-600 text-on-brand px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50">
               {busy ? 'Saving…' : 'Save scheme'}
             </button>
             <button type="button" onClick={() => setEditing(null)} className="text-text-tertiary">Cancel</button>
@@ -164,10 +164,10 @@ const AccountGradingSchemesPanel = ({ accountId }) => {
               </p>
             </div>
             <div className="flex gap-2">
-              <button type="button" aria-label={`Edit ${s.title}`} onClick={() => startEdit(s)} className="text-text-disabled hover:text-brand-600">
+              <button type="button" aria-label={`Edit ${s.title}`} onClick={() => startEdit(s)} className="text-text-tertiary hover:text-brand-600">
                 <Edit2 className="w-4 h-4" />
               </button>
-              <button type="button" aria-label={`Delete ${s.title}`} onClick={() => remove(s)} className="text-text-disabled hover:text-accent-danger">
+              <button type="button" aria-label={`Delete ${s.title}`} onClick={() => remove(s)} className="text-text-tertiary hover:text-accent-danger">
                 <Trash2 className="w-4 h-4" />
               </button>
             </div>

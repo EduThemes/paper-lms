@@ -96,7 +96,7 @@ const CategorizationEditor = ({ answers, onChange }) => {
                     <option key={b.id} value={b.id}>{b.label || '(unnamed)'}</option>
                   ))}
                 </select>
-                <button onClick={() => removeItem(item.id)} className="p-1 text-text-disabled hover:text-accent-danger" aria-label="Remove item" type="button">
+                <button onClick={() => removeItem(item.id)} className="p-1 text-text-tertiary hover:text-accent-danger" aria-label="Remove item" type="button">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -132,12 +132,12 @@ const CategorizationEditor = ({ answers, onChange }) => {
                       className="flex-1 border border-border-strong rounded px-2 py-1 text-sm font-medium bg-surface-0 text-text-primary"
                       placeholder="Bucket label"
                     />
-                    <button onClick={() => removeBucket(bucket.id)} className="p-1 text-text-disabled hover:text-accent-danger" aria-label="Remove bucket" type="button">
+                    <button onClick={() => removeBucket(bucket.id)} className="p-1 text-text-tertiary hover:text-accent-danger" aria-label="Remove bucket" type="button">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                   {contained.length === 0 ? (
-                    <p className="text-[11px] text-text-disabled italic">No items assigned</p>
+                    <p className="text-[11px] text-text-tertiary italic">No items assigned</p>
                   ) : (
                     <ul className="text-xs text-text-secondary space-y-0.5 list-disc pl-4">
                       {contained.map(i => <li key={i.id} className="truncate">{i.text || '(empty)'}</li>)}

@@ -282,7 +282,7 @@ const GraphiQLPage = () => {
               className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg transition-colors ${
                 loading || !query.trim()
                   ? 'bg-gray-300 text-text-tertiary cursor-not-allowed'
-                  : 'bg-brand-600 text-white hover:bg-brand-700'
+                  : 'bg-brand-600 text-on-brand hover:bg-brand-700'
               }`}
             >
               {loading ? (

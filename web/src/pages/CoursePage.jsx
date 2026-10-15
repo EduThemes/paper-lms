@@ -417,7 +417,7 @@ const ModuleList = ({ courseId, modules }) => {
         {getItemIcon(item.type)}
         <span className="text-sm flex-1">{item.title}</span>
         {isAssignment && item.content_details && (
-          <div className="flex items-center space-x-3 text-xs text-text-disabled">
+          <div className="flex items-center space-x-3 text-xs text-text-tertiary">
             {item.content_details.points_possible !== undefined && (
               <span className="flex items-center space-x-1">
                 <Award className="w-3 h-3" />
@@ -494,9 +494,9 @@ const ModuleList = ({ courseId, modules }) => {
               >
                 <span className="font-medium">{module.name}</span>
                 {expandedModules[module.id] ? (
-                  <ChevronDown className="w-5 h-5 text-text-disabled" />
+                  <ChevronDown className="w-5 h-5 text-text-tertiary" />
                 ) : (
-                  <ChevronRight className="w-5 h-5 text-text-disabled" />
+                  <ChevronRight className="w-5 h-5 text-text-tertiary" />
                 )}
               </button>
 
@@ -504,7 +504,7 @@ const ModuleList = ({ courseId, modules }) => {
                 <div className="bg-surface-1 border-t">
                   {module.items.map((item) => renderModuleItem(item))}
                   {module.items.length === 0 && (
-                    <div className="py-3 px-6 text-sm text-text-disabled">No items</div>
+                    <div className="py-3 px-6 text-sm text-text-tertiary">No items</div>
                   )}
                 </div>
               )}

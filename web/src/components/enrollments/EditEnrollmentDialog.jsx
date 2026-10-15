@@ -83,7 +83,7 @@ export default function EditEnrollmentDialog({ courseId, enrollment, sections = 
           {error && <p role="alert" className="text-sm text-accent-danger">{error}</p>}
           <DialogFooter>
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-md text-sm border border-border-strong">Cancel</button>
-            <button type="submit" disabled={update.isPending} className="px-4 py-2 rounded-md text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+            <button type="submit" disabled={update.isPending} className="px-4 py-2 rounded-md text-sm bg-brand-600 text-on-brand hover:bg-brand-700 disabled:opacity-50">
               {update.isPending ? 'Saving...' : 'Save'}
             </button>
           </DialogFooter>

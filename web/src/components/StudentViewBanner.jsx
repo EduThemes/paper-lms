@@ -37,7 +37,7 @@ export default function StudentViewBanner({ courseId }) {
 
   return (
     <div
-      className="fixed top-0 left-0 right-0 z-[60] bg-brand-700 text-white px-4 py-2 flex flex-wrap items-center justify-center gap-3 shadow-md"
+      className="fixed top-0 left-0 right-0 z-[60] bg-brand-700 text-on-brand px-4 py-2 flex flex-wrap items-center justify-center gap-3 shadow-md"
       role="alert"
       aria-live="polite"
     >
