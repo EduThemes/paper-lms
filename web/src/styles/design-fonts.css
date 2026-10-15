@@ -1,0 +1,33 @@
+/* Page Designer heading fonts — free look-alikes for the system faces theme
+ * headings ask for, so a page looks the same on a Chromebook as on a Mac.
+ * Theme stacks (web/src/designer/themes/define.ts FONTS) name the system face
+ * first and the look-alike second, so these only download on machines
+ * without the original:
+ *
+ *   Georgia        → Gelasio        (metric-compatible)
+ *   Trebuchet MS   → Fira Sans
+ *   Verdana        → DejaVu Sans
+ *   Courier New    → Courier Prime
+ *
+ * Self-hosted from @fontsource (SIL OFL 1.1; DejaVu under the Bitstream Vera
+ * licence) — no third-party font CDN. Latin + Latin Extended only, the
+ * weights headings use (400 body titles, 600 h3, 700 h2). @font-face is lazy:
+ * nothing is fetched until a designed page uses the family. */
+@import '@fontsource/gelasio/latin-400.css';
+@import '@fontsource/gelasio/latin-ext-400.css';
+@import '@fontsource/gelasio/latin-600.css';
+@import '@fontsource/gelasio/latin-ext-600.css';
+@import '@fontsource/gelasio/latin-700.css';
+@import '@fontsource/gelasio/latin-ext-700.css';
+@import '@fontsource/fira-sans/latin-400.css';
+@import '@fontsource/fira-sans/latin-ext-400.css';
+@import '@fontsource/fira-sans/latin-600.css';
+@import '@fontsource/fira-sans/latin-ext-600.css';
+@import '@fontsource/fira-sans/latin-700.css';
+@import '@fontsource/fira-sans/latin-ext-700.css';
+@import '@fontsource/dejavu-sans/latin-400.css';
+@import '@fontsource/dejavu-sans/latin-700.css';
+@import '@fontsource/courier-prime/latin-400.css';
+@import '@fontsource/courier-prime/latin-ext-400.css';
+@import '@fontsource/courier-prime/latin-700.css';
+@import '@fontsource/courier-prime/latin-ext-700.css';
