@@ -80,6 +80,34 @@ func TestCreateCourse_Success(t *testing.T) {
 	mockEnrollmentRepo.AssertExpectations(t)
 }
 
+// A course is created in the caller's account, not the column default
+// (account 1): an admin of another tenant must not create courses there.
+func TestCreateCourse_UsesCallerAccount(t *testing.T) {
+	mockCourseRepo := new(mocks.MockCourseRepository)
+	mockEnrollmentRepo := new(mocks.MockEnrollmentRepository)
+	mockSectionRepo := new(mocks.MockSectionRepository)
+	handler := handlers.NewCourseHandler(
+		service.NewCourseService(mockCourseRepo, mockEnrollmentRepo, mockSectionRepo),
+		service.NewEnrollmentService(mockEnrollmentRepo),
+	)
+	app := testutil.SetupTestApp()
+	app.Post("/courses", func(c *fiber.Ctx) error {
+		c.Locals("user_id", uint(5))
+		c.Locals("account_id", uint(7))
+		return c.Next()
+	}, handler.CreateCourse)
+
+	mockCourseRepo.On("Create", mock.Anything, mock.MatchedBy(func(c *models.Course) bool { return c.AccountID == 7 })).Return(nil)
+	mockSectionRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.CourseSection")).Return(nil)
+	mockEnrollmentRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.Enrollment")).Return(nil)
+
+	resp := testutil.MakeRequest(app, http.MethodPost, "/courses", testutil.JSONBody(map[string]interface{}{
+		"course": map[string]string{"name": "Second School Biology", "course_code": "BIO2"},
+	}))
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	mockCourseRepo.AssertExpectations(t)
+}
+
 func TestCreateCourse_MissingName(t *testing.T) {
 	app, _, _, _ := setupCourseHandler()
 

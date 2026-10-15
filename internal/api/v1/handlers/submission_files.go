@@ -219,7 +219,7 @@ func (h *SubmissionHandler) streamSubmissionAttachment(c *fiber.Ctx, fileID, stu
 	// and closes the reader itself (it implements io.Closer). Closing it
 	// here would truncate the download.
 
-	c.Set("Content-Type", attachment.ContentType)
+	c.Set("Content-Type", service.ServedContentType(attachment.ContentType))
 	return c.SendStream(reader)
 }
 

@@ -367,7 +367,7 @@ func (h *MediaObjectHandler) Stream(c *fiber.Ctx) error {
 
 	// The stored type was checked against the file's bytes at upload and is
 	// always audio/* or video/*, so it is safe to play inline.
-	c.Set("Content-Type", m.ContentType)
+	c.Set("Content-Type", service.ServedContentType(m.ContentType))
 	c.Set("Content-Disposition", "inline")
 	c.Set("Accept-Ranges", "bytes")
 	c.Set("Cache-Control", "private, max-age=3600")
