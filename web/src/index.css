@@ -2,10 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Reading-prefs styles must load AFTER Tailwind's typography plugin so the
- * accessibility font / size / line-height overrides win against `.prose`'s
- * defaults (equal specificity → source order decides). */
-@import './styles/reading-prefs.css';
+/* Reading-prefs styles are imported from main.jsx, right after this file: an
+ * @import here, after the @tailwind directives, is invalid CSS and Vite
+ * silently dropped it from every build. */
 
 /* =========================================================
    Paper LMS design tokens.
