@@ -15,9 +15,15 @@
 //     custom property (--name), and whose value passes
 //     htmlsanitize.CSSValueOK, the same validator inline styles use: listed
 //     functions only, url()/image-set() limited to https: and Paper's file,
-//     icon and artwork paths, no escapes, comments or at-keywords. Unlike
-//     inline styles, position: fixed and sticky and any z-index are allowed:
-//     the page root is a containment box. "!important" is kept.
+//     icon and artwork paths, no escapes, comments or at-keywords. A value
+//     may load a URL only in background / background-image
+//     (htmlsanitize.URLStyleProperties) and in content on a rule whose
+//     selectors all target img (the designer's dark-mode icon swap,
+//     img[data-pd-icon]{content:url(...)}); not in filter, border-image,
+//     list-style, cursor, mask, clip-path or a custom property (which var()
+//     could carry anywhere). Unlike inline styles, position: fixed and
+//     sticky and any z-index are allowed: the page root is a containment
+//     box. "!important" is kept.
 //   - Selectors made of ordinary selector tokens (no backslash escapes,
 //     strings with markup, at-keywords or braces), with whitespace and
 //     combinators normalized.
@@ -39,6 +45,14 @@ import (
 
 // MaxBytes is the largest stylesheet Sanitize accepts.
 const MaxBytes = 200 * 1024
+
+// MaxScopeBytes is the largest sanitized stylesheet: the input limit of
+// Scope and Resanitize, and the most Sanitize may return. Sanitize's output
+// is reformatted (indentation, one declaration per line), typically ~40%
+// larger than its input, so a sheet within MaxBytes can sanitize to more
+// than MaxBytes; with MaxBytes as Scope's limit such a sheet would silently
+// scope to nothing.
+const MaxScopeBytes = 2 * MaxBytes
 
 // ErrTooLarge is returned by Sanitize when the input exceeds MaxBytes.
 var ErrTooLarge = errors.New("stylesheet is larger than 200 KB")
@@ -85,6 +99,17 @@ var selectorFunctions = map[string]bool{
 	"nth-last-of-type(": true, "lang(": true, "dir(": true,
 }
 
+// matchesAnyFunctions are the functional pseudo-classes whose argument is
+// matched against the element itself. Inside them a selector may not use a
+// combinator, and nothing inside any selector function may name html, body,
+// :root or :scope: "p:is(html:has(a[href*=x]) *)" would let a page's
+// stylesheet test the rest of Paper's document from inside the scoped page.
+// (matches and the -any forms are not in selectorFunctions; they are listed
+// so the rule holds if they are ever added.)
+var matchesAnyFunctions = map[string]bool{
+	"is": true, "where": true, "not": true, "matches": true, "-webkit-any": true, "-moz-any": true,
+}
+
 // keyframesReserved cannot be keyframes names.
 var keyframesReserved = map[string]bool{
 	"none": true, "initial": true, "inherit": true, "unset": true,
@@ -107,12 +132,33 @@ type decl struct {
 }
 
 // Sanitize parses author CSS and returns it normalized, keeping only what is
-// allowed. It is idempotent. ErrTooLarge when the input exceeds MaxBytes.
+// allowed. It is idempotent (see Resanitize for sanitized input larger than
+// MaxBytes). ErrTooLarge when the input exceeds MaxBytes, or when the
+// normalized sheet would exceed MaxScopeBytes.
 func Sanitize(css string) (string, error) {
 	if len(css) > MaxBytes {
 		return "", ErrTooLarge
 	}
-	return render(sanitizeSheet(css)), nil
+	return sanitizeBounded(css)
+}
+
+// Resanitize re-applies Sanitize's rules to a stylesheet Sanitize produced
+// earlier (a stored page stylesheet, a copied or imported one). Its input
+// limit is MaxScopeBytes, because Sanitize's output can be larger than
+// MaxBytes.
+func Resanitize(css string) (string, error) {
+	if len(css) > MaxScopeBytes {
+		return "", ErrTooLarge
+	}
+	return sanitizeBounded(css)
+}
+
+func sanitizeBounded(css string) (string, error) {
+	out := render(sanitizeSheet(css))
+	if len(out) > MaxScopeBytes {
+		return "", ErrTooLarge
+	}
+	return out, nil
 }
 
 // sanitizeSheet parses and filters a stylesheet.
@@ -185,7 +231,7 @@ func (p *parser) sanitizeStyleRule(r rawRule, inKeyframes bool) *node {
 	if len(selectors) == 0 {
 		return nil
 	}
-	decls := p.sanitizeDecls(r.block)
+	decls := p.sanitizeDecls(r.block, !inKeyframes && allSubjectsAreImg(selectors))
 	if len(decls) == 0 {
 		return nil
 	}
@@ -196,7 +242,46 @@ func (p *parser) sanitizeStyleRule(r rawRule, inKeyframes bool) *node {
 	return n
 }
 
-func (p *parser) sanitizeDecls(s span) []decl {
+// urlValueAllowed reports whether prop may have a value that loads a URL:
+// the background properties, and content when every selector of the rule
+// targets img.
+func urlValueAllowed(prop string, imgSubject bool) bool {
+	if strings.HasPrefix(prop, "--") {
+		return false
+	}
+	p := vendorPrefix.ReplaceAllString(prop, "")
+	return htmlsanitize.URLStyleProperties[p] || (p == "content" && imgSubject)
+}
+
+// allSubjectsAreImg reports whether every selector's subject (its last
+// compound) starts with the type selector img.
+func allSubjectsAreImg(selectors []string) bool {
+	if len(selectors) == 0 {
+		return false
+	}
+	for _, sel := range selectors {
+		toks := trimWS(tokenize(sel))
+		start, depth := 0, 0
+		for i, t := range toks {
+			switch {
+			case isOpener(t.tt):
+				depth++
+			case t.tt == css.RightParenthesisToken || t.tt == css.RightBracketToken:
+				if depth > 0 {
+					depth--
+				}
+			case depth == 0 && (t.tt == css.WhitespaceToken || t.delim('>') || t.delim('+') || t.delim('~')):
+				start = i + 1
+			}
+		}
+		if start >= len(toks) || !toks[start].ident("img") {
+			return false
+		}
+	}
+	return true
+}
+
+func (p *parser) sanitizeDecls(s span, imgSubject bool) []decl {
 	var out []decl
 	for _, d := range p.declarations(s.lo, s.hi) {
 		var prop string
@@ -233,6 +318,9 @@ func (p *parser) sanitizeDecls(s span) []decl {
 		if !htmlsanitize.CSSValueOK(value) {
 			continue
 		}
+		if htmlsanitize.CSSValueLoadsURL(value) && !urlValueAllowed(prop, imgSubject) {
+			continue
+		}
 		out = append(out, decl{prop: prop, value: value, important: important})
 	}
 	return out
@@ -258,17 +346,49 @@ func selectorText(toks []token) (string, bool) {
 		space = false
 		b.WriteString(s)
 	}
-	parens := 0
+	var funcs []string // open functional pseudo-classes, innermost last
+	inner := func() string {
+		if len(funcs) == 0 {
+			return ""
+		}
+		return funcs[len(funcs)-1]
+	}
+	prevColon := false
 	for _, t := range toks {
 		if strings.Contains(t.data, `\`) {
 			return "", false
 		}
-		switch t.tt {
-		case css.WhitespaceToken:
+		if t.tt == css.WhitespaceToken {
 			if bracket == 0 {
 				space = true
 			}
 			continue
+		}
+		colon := prevColon
+		prevColon = t.tt == css.ColonToken
+		if len(funcs) > 0 && bracket == 0 {
+			// Inside :is() / :where() / :not() a combinator would let the
+			// argument look at the page root's ancestors ("p:is(html:has(..) *)").
+			if matchesAnyFunctions[inner()] && space && b.Len() > 0 {
+				last := b.String()[b.Len()-1]
+				if last != '(' && last != ',' && t.tt != css.RightParenthesisToken && t.tt != css.CommaToken {
+					return "", false // descendant combinator
+				}
+			}
+			if t.tt == css.IdentToken {
+				name := strings.ToLower(t.data)
+				switch {
+				case colon && (name == "root" || name == "scope"):
+					return "", false
+				case !colon && (name == "html" || name == "body"):
+					return "", false
+				case name == "of" && strings.HasPrefix(inner(), "nth-"):
+					// :nth-child(An+B of S): S is a selector list too.
+					return "", false
+				}
+			}
+		}
+		switch t.tt {
 		case css.IdentToken, css.NumberToken, css.DimensionToken, css.ColonToken:
 		case css.CustomPropertyNameToken:
 			if !customPropertyName.MatchString(t.data) {
@@ -294,17 +414,18 @@ func selectorText(toks []token) (string, bool) {
 			}
 			bracket--
 		case css.FunctionToken:
-			if !selectorFunctions[strings.ToLower(t.data)] {
+			name := strings.ToLower(t.data)
+			if !selectorFunctions[name] {
 				return "", false
 			}
-			parens++
+			funcs = append(funcs, strings.TrimSuffix(name, "("))
 		case css.RightParenthesisToken:
-			if parens == 0 {
+			if len(funcs) == 0 {
 				return "", false
 			}
-			parens--
+			funcs = funcs[:len(funcs)-1]
 		case css.CommaToken:
-			if parens == 0 {
+			if len(funcs) == 0 {
 				return "", false
 			}
 			write(",")
@@ -318,6 +439,9 @@ func selectorText(toks []token) (string, bool) {
 					// A leading sibling combinator would reach a sibling
 					// of the page root once scoped.
 					return "", false
+				}
+				if matchesAnyFunctions[inner()] {
+					return "", false // combinator inside :is() / :where() / :not()
 				}
 				if bracket == 0 {
 					space = true
@@ -340,7 +464,7 @@ func selectorText(toks []token) (string, bool) {
 		}
 		write(t.data)
 	}
-	if bracket != 0 || parens != 0 {
+	if bracket != 0 || len(funcs) != 0 {
 		return "", false
 	}
 	out := b.String()

@@ -24,8 +24,9 @@
 // transitions, animations, filters, logical properties and maths functions.
 // Every declaration VALUE is validated by CSSValueOK (cssvalue.go), not just
 // its property name: only listed functions; url() and image-set() limited to
-// https: and Paper's own file, icon and artwork paths; no escapes, comments
-// or at-keywords. Declarations written with backslash escapes are removed
+// https: and Paper's own file, icon and artwork paths, and allowed only in
+// background and background-image (URLStyleProperties); cursor takes
+// keywords only; no escapes, comments or at-keywords. Declarations written with backslash escapes are removed
 // before bluemonday sees them (stripEscapedStyleDeclarations), because
 // bluemonday decodes escapes before calling a value handler but writes the
 // raw value out. "!important" is dropped by bluemonday's style parser.
@@ -164,7 +165,7 @@ var allowedStyleProperties = []string{
 	"transform", "transform-origin", "transform-style", "transform-box",
 	"translate", "rotate", "scale", "perspective", "perspective-origin",
 	"backface-visibility", "object-fit", "object-position", "image-rendering",
-	"shape-outside", "shape-margin", "shape-image-threshold", "cursor",
+	"shape-outside", "shape-margin", "shape-image-threshold",
 	// Motion. Animation names refer to @keyframes in a stylesheet.
 	"transition", "transition-property", "transition-duration",
 	"transition-timing-function", "transition-delay", "transition-behavior",
@@ -176,6 +177,33 @@ var allowedStyleProperties = []string{
 	"scroll-margin", "scroll-margin-top", "scroll-margin-right",
 	"scroll-margin-bottom", "scroll-margin-left", "scroll-margin-inline",
 	"scroll-margin-block",
+}
+
+// URLStyleProperties are the only properties whose values may load a URL
+// (url() or image-set()), inline or in a page stylesheet: backgrounds. Every
+// other property — filter, backdrop-filter, border-image*, list-style*,
+// clip-path, shape-outside, mask*, cursor — must not, so content has one
+// image-loading surface to reason about, not a dozen.
+var URLStyleProperties = map[string]bool{"background": true, "background-image": true}
+
+// cursorKeywords are the values inline cursor may take: keywords only, no
+// url() cursor images.
+var cursorKeywords = map[string]bool{
+	"auto": true, "default": true, "none": true, "context-menu": true, "help": true,
+	"pointer": true, "progress": true, "wait": true, "cell": true, "crosshair": true,
+	"text": true, "vertical-text": true, "alias": true, "copy": true, "move": true,
+	"no-drop": true, "not-allowed": true, "grab": true, "grabbing": true,
+	"all-scroll": true, "col-resize": true, "row-resize": true, "n-resize": true,
+	"e-resize": true, "s-resize": true, "w-resize": true, "ne-resize": true,
+	"nw-resize": true, "se-resize": true, "sw-resize": true, "ew-resize": true,
+	"ns-resize": true, "nesw-resize": true, "nwse-resize": true, "zoom-in": true,
+	"zoom-out": true, "inherit": true, "initial": true, "unset": true,
+	"revert": true, "revert-layer": true,
+}
+
+// cursorValueOK allows a single cursor keyword.
+func cursorValueOK(v string) bool {
+	return cursorKeywords[strings.ToLower(strings.TrimSpace(v))]
 }
 
 // positionValueOK limits inline position to the values that stay inside the
@@ -262,12 +290,68 @@ var (
 // ariaRoleValue matches one or more space-separated ARIA role tokens.
 var ariaRoleValue = regexp.MustCompile(`^[a-z]+( [a-z]+)*$`)
 
+// emailStyleProperties is the inline-CSS allowlist for outgoing email
+// (SanitizeEmail): the conservative set rich content had before the Page
+// Designer widened it — typography, colour, box model and alignment. An
+// email is read outside Paper, in a mail client that applies none of the
+// containment the in-app viewers do, so nothing that positions, layers,
+// transforms or offsets an element, and nothing that loads a URL, is
+// allowed. Values pass the same validator (CSSValueOK) and may not contain
+// url() or image-set().
+var emailStyleProperties = []string{
+	"text-align", "text-decoration", "text-indent", "vertical-align",
+	"color", "background-color",
+	"font-weight", "font-style", "font-size", "font-family", "line-height",
+	"margin", "margin-top", "margin-right", "margin-bottom", "margin-left",
+	"padding", "padding-top", "padding-right", "padding-bottom", "padding-left",
+	"border", "border-width", "border-style", "border-color", "border-collapse",
+	"border-top", "border-right", "border-bottom", "border-left",
+	"border-radius", "border-spacing",
+	"width", "height", "max-width", "max-height", "min-width", "min-height",
+	"float", "clear", "white-space", "list-style-type", "table-layout",
+	"direction",
+}
+
 var (
 	policy     *bluemonday.Policy
 	policyOnce sync.Once
+
+	emailPolicy     *bluemonday.Policy
+	emailPolicyOnce sync.Once
 )
 
 func buildPolicy() *bluemonday.Policy {
+	p := buildBasePolicy()
+
+	// Inline styles: property allowlist plus value validation. Only the
+	// background properties may load a URL (URLStyleProperties).
+	var urlProps, otherProps []string
+	for _, prop := range allowedStyleProperties {
+		if URLStyleProperties[prop] {
+			urlProps = append(urlProps, prop)
+		} else {
+			otherProps = append(otherProps, prop)
+		}
+	}
+	p.AllowStyles(urlProps...).MatchingHandler(CSSValueOK).Globally()
+	p.AllowStyles(otherProps...).MatchingHandler(cssValueNoURL).Globally()
+	p.AllowStyles("cursor").MatchingHandler(cursorValueOK).Globally()
+	p.AllowStyles("position").MatchingHandler(positionValueOK).Globally()
+	p.AllowStyles("z-index").MatchingHandler(zIndexValueOK).Globally()
+	return p
+}
+
+// buildEmailPolicy is the rich-content policy with the conservative email
+// style allowlist instead of the widened inline one.
+func buildEmailPolicy() *bluemonday.Policy {
+	p := buildBasePolicy()
+	p.AllowStyles(emailStyleProperties...).MatchingHandler(cssValueNoURL).Globally()
+	return p
+}
+
+// buildBasePolicy is everything but inline styles: the elements and
+// attributes shared by the content and email policies.
+func buildBasePolicy() *bluemonday.Policy {
 	p := bluemonday.UGCPolicy()
 
 	// class on every element (syntax highlighting, KaTeX, callouts, embed
@@ -277,11 +361,6 @@ func buildPolicy() *bluemonday.Policy {
 	// data-* attributes globally — KaTeX (data-mathml), Canvas equation images
 	// (data-equation-content), Tiptap (data-type / data-checked / data-color).
 	p.AllowDataAttributes()
-
-	// Inline styles: property allowlist plus value validation.
-	p.AllowStyles(allowedStyleProperties...).MatchingHandler(CSSValueOK).Globally()
-	p.AllowStyles("position").MatchingHandler(positionValueOK).Globally()
-	p.AllowStyles("z-index").MatchingHandler(zIndexValueOK).Globally()
 
 	// Free-text alt and title. UGCPolicy limits both to its Paragraph
 	// pattern, which drops alt text with a colon, question mark, quote,
@@ -374,6 +453,21 @@ func Sanitize(input string) string {
 		policy = buildPolicy()
 	})
 	return policy.Sanitize(stripEscapedStyleDeclarations(input))
+}
+
+// SanitizeEmail cleans HTML for the body of an outgoing email. It is
+// Sanitize's element and attribute policy with the conservative inline
+// style allowlist (emailStyleProperties): no position, offsets, z-index,
+// transforms or URL-loading values, because a mail client applies none of
+// the containment Paper's viewers do. Idempotent; "" for "".
+func SanitizeEmail(input string) string {
+	if input == "" {
+		return ""
+	}
+	emailPolicyOnce.Do(func() {
+		emailPolicy = buildEmailPolicy()
+	})
+	return emailPolicy.Sanitize(stripEscapedStyleDeclarations(input))
 }
 
 var strictPolicy = bluemonday.StrictPolicy()

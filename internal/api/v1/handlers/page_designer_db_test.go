@@ -59,12 +59,13 @@ func newDesignFixture(t *testing.T) *designFixture {
 		return "", nil
 	}
 
+	courseRepo := postgres.NewCourseRepository(g)
+	policy := service.NewCourseCSSPolicy(courseRepo, lookup)
 	pageRepo := postgres.NewPageRepository(g)
-	revSvc := service.NewWikiPageRevisionService(postgres.NewWikiPageRevisionRepository(g), pageRepo)
-	f.pages = handlers.NewPageHandler(service.NewPageService(pageRepo)).SetRevisionService(revSvc).SetSettingsLookup(lookup)
+	revSvc := service.NewWikiPageRevisionService(postgres.NewWikiPageRevisionRepository(g), pageRepo).SetCourseCSSPolicy(policy)
+	f.pages = handlers.NewPageHandler(service.NewPageService(pageRepo)).SetRevisionService(revSvc).SetCourseCSSPolicy(policy)
 	f.revs = handlers.NewWikiPageRevisionHandler(f.pages, revSvc)
 
-	courseRepo := postgres.NewCourseRepository(g)
 	enrollRepo := postgres.NewEnrollmentRepository(g)
 	f.courses = handlers.NewCourseHandler(
 		service.NewCourseService(courseRepo, enrollRepo, postgres.NewSectionRepository(g)),
@@ -229,15 +230,18 @@ func TestPageDesign_CSSSourceKeptForStaff(t *testing.T) {
 }
 
 // The front page and the public page render pages too, so they share the
-// show shape.
+// show shape: staff get the design, readers (students, anonymous visitors
+// of a public page) only has_design and what they render.
 func TestPageDesign_FrontAndPublicPagesCarryDesign(t *testing.T) {
 	f := newDesignFixture(t)
 	teacher := f.app(8, 1, "TeacherEnrollment")
+	student := f.app(9, 1, "StudentEnrollment")
+	anonymous := f.app(0, 0, "")
 	resp := testutil.MakeRequest(teacher, http.MethodPost, "/courses/100/pages", pageBody(map[string]any{
 		"title": "Home", "published": true, "front_page": true, "public": true, "css": "p{color:red}", "design": designDoc("doc-f"),
 	}))
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
-	for _, path := range []string{"/courses/100/front_page", "/courses/100/p/home"} {
+	for _, path := range []string{"/courses/100/front_page", "/courses/100/p/home", "/courses/100/pages/home"} {
 		resp = testutil.MakeRequest(teacher, http.MethodGet, path, nil)
 		require.Equal(t, http.StatusOK, resp.StatusCode, path)
 		got := jsonMap(t, resp)
@@ -245,7 +249,47 @@ func TestPageDesign_FrontAndPublicPagesCarryDesign(t *testing.T) {
 		assert.Contains(t, got, "scoped_css", path)
 		require.IsType(t, map[string]any{}, got["design"], path)
 		assert.Equal(t, "doc-f", got["design"].(map[string]any)["id"], path)
+
+		resp = testutil.MakeRequest(student, http.MethodGet, path, nil)
+		require.Equal(t, http.StatusOK, resp.StatusCode, path)
+		got = jsonMap(t, resp)
+		assert.Equal(t, true, got["has_design"], path)
+		assert.NotEmpty(t, got["scoped_css"], path)
+		assert.NotContains(t, got, "design", path)
+		assert.NotContains(t, got, "css_source", path)
 	}
+	resp = testutil.MakeRequest(anonymous, http.MethodGet, "/courses/100/p/home", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	got := jsonMap(t, resp)
+	assert.Equal(t, true, got["has_design"])
+	assert.NotContains(t, got, "design")
+	assert.NotContains(t, got, "css_source")
+}
+
+// The audit repro through the API: a design's rich text, links and image
+// addresses are cleaned before they are stored.
+func TestPageDesign_DesignIsCleanedOnSave(t *testing.T) {
+	f := newDesignFixture(t)
+	teacher := f.app(8, 1, "TeacherEnrollment")
+	doc := designDoc("doc-x")
+	doc["sections"] = []any{
+		map[string]any{"id": "w", "type": "welcome", "heading": "Hi",
+			"body": `<p>Hello</p><img src=x onerror=alert(1)><iframe srcdoc="<script>alert(1)</script>"></iframe>`},
+		map[string]any{"id": "q", "type": "quick-links", "heading": "Go", "links": []any{
+			map[string]any{"id": "l", "label": "Bad", "href": "javascript:alert(1)", "icon": "x"}}},
+		map[string]any{"id": "b", "type": "banner", "customSrc": "data:image/png;base64,AAAA", "alt": ""},
+		map[string]any{"id": "z", "type": "marquee", "text": "unknown"},
+	}
+	resp := testutil.MakeRequest(teacher, http.MethodPost, "/courses/100/pages", pageBody(map[string]any{
+		"title": "Clean", "published": true, "design": doc,
+	}))
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var stored string
+	require.NoError(t, f.g.Raw(`SELECT design::text FROM wiki_pages WHERE url = 'clean'`).Scan(&stored).Error)
+	for _, bad := range []string{"<img", "onerror", "<iframe", "srcdoc", "javascript:", "data:", "marquee"} {
+		assert.NotContains(t, stored, bad)
+	}
+	assert.Contains(t, stored, "<p>Hello</p>")
 }
 
 func TestPageDesign_Validation(t *testing.T) {
@@ -295,11 +339,29 @@ func TestPageDesign_StudentEditorsCannotSetStyleOrDesign(t *testing.T) {
 		resp := testutil.MakeRequest(student, http.MethodPut, "/courses/100/pages/class-notes", pageBody(fields))
 		assert.Equal(t, http.StatusForbidden, resp.StatusCode, name)
 	}
-	// Content edits are still fine, and the design is untouched.
+	// Content edits are still fine, and the design is untouched (the
+	// student sees only that the page is designed).
 	resp = testutil.MakeRequest(student, http.MethodPut, "/courses/100/pages/class-notes", pageBody(map[string]any{"body": "<p>notes</p>"}))
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	got := jsonMap(t, resp)
-	assert.Equal(t, "doc-n", got["design"].(map[string]any)["id"])
+	assert.Equal(t, true, got["has_design"])
+	assert.NotContains(t, got, "design")
+	var docID string
+	require.NoError(t, f.g.Raw(`SELECT design->>'id' FROM wiki_pages WHERE url = 'class-notes'`).Scan(&docID).Error)
+	assert.Equal(t, "doc-n", docID)
+
+	// A student editor may read the page's history, but not the design.
+	resp = testutil.MakeRequest(student, http.MethodGet, "/courses/100/pages/class-notes/revisions", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	revs, err := testutil.ParseJSONArray(resp)
+	require.NoError(t, err)
+	require.NotEmpty(t, revs)
+	for _, r := range revs {
+		assert.Equal(t, true, r["has_design"])
+		assert.NotContains(t, r, "design")
+		assert.NotContains(t, r, "css_source")
+		assert.Contains(t, r, "body")
+	}
 }
 
 func TestPageDesign_CustomCSSSetting(t *testing.T) {
@@ -314,7 +376,7 @@ func TestPageDesign_CustomCSSSetting(t *testing.T) {
 	resp = testutil.MakeRequest(teacher, http.MethodPost, "/courses/100/pages",
 		pageBody(map[string]any{"title": "Plain", "css": "p{color:red}", "design": nil}))
 	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
-	assert.Contains(t, f.lookupAccts, uint(1), "the setting is resolved for the caller's account")
+	assert.Contains(t, f.lookupAccts, uint(1), "the setting is resolved for the course's account")
 
 	// ...but designer CSS travels with a design, and an empty css is fine.
 	resp = testutil.MakeRequest(teacher, http.MethodPost, "/courses/100/pages",
@@ -328,20 +390,74 @@ func TestPageDesign_CustomCSSSetting(t *testing.T) {
 		pageBody(map[string]any{"css": "p{color:blue}"}))
 	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
 
-	// Detaching the design (no css in the request) keeps the stored
-	// stylesheet, setting or not.
+	// Detaching the design with the setting off takes the stylesheet (and
+	// its source) with it: without a design the page may not carry CSS.
 	require.NoError(t, f.g.Model(&models.WikiPage{}).Where("course_id = 100 AND url = 'designed'").
-		Update("css", "p{color:green}").Error)
+		Updates(map[string]any{"css": "p{color:green}", "css_source": "p { color: green }"}).Error)
 	resp = testutil.MakeRequest(teacher, http.MethodPut, "/courses/100/pages/designed", pageBody(map[string]any{"design": nil}))
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	detached := jsonMap(t, resp)
-	assert.Equal(t, "p{color:green}", detached["css"])
+	assert.Empty(t, detached["css"])
+	assert.Empty(t, detached["scoped_css"])
 	assert.Nil(t, detached["design"])
+	var source string
+	require.NoError(t, f.g.Raw("SELECT css_source FROM wiki_pages WHERE url = 'designed'").Scan(&source).Error)
+	assert.Empty(t, source)
 
-	// With the setting on, CSS alone is accepted.
+	// With the setting on, CSS alone is accepted, and a detach keeps it
+	// ("Edit as HTML" keeps the page's look).
 	f.cssSetting = "true"
 	resp = testutil.MakeRequest(teacher, http.MethodPut, "/courses/100/pages/plain", pageBody(map[string]any{"css": "p{color:red}"}))
 	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp = testutil.MakeRequest(teacher, http.MethodPut, "/courses/100/pages/designed",
+		pageBody(map[string]any{"css": "p{color:green}", "design": designDoc("doc-d")}))
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp = testutil.MakeRequest(teacher, http.MethodPut, "/courses/100/pages/designed", pageBody(map[string]any{"design": nil}))
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.NotEmpty(t, jsonMap(t, resp)["css"])
+}
+
+// The setting is the course's account's, not the caller's (an admin of
+// another account sees the course's rule, as course show reports it).
+func TestPageDesign_CustomCSSSettingFollowsCourseAccount(t *testing.T) {
+	f := newDesignFixture(t)
+	f.cssSetting = "false"
+	admin := f.app(8, 7, "TeacherEnrollment") // caller's account 7, course 100's is 1
+	resp := testutil.MakeRequest(admin, http.MethodPost, "/courses/100/pages",
+		pageBody(map[string]any{"title": "Plain", "css": "p{color:red}"}))
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	assert.Contains(t, f.lookupAccts, uint(1))
+	assert.NotContains(t, f.lookupAccts, uint(7))
+}
+
+// Restoring a revision with the setting off: a revision without a design
+// comes back without its hand-written stylesheet; one with a design keeps
+// the designer's CSS.
+func TestPageDesign_RevisionRestoreHonoursCustomCSSSetting(t *testing.T) {
+	f := newDesignFixture(t)
+	teacher := f.app(8, 1, "TeacherEnrollment")
+	resp := testutil.MakeRequest(teacher, http.MethodPost, "/courses/100/pages", pageBody(map[string]any{
+		"title": "Notes", "published": true, "css": "p{color:red}",
+	}))
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	resp = testutil.MakeRequest(teacher, http.MethodPut, "/courses/100/pages/notes",
+		pageBody(map[string]any{"css": "p{color:blue}", "design": designDoc("doc-r")}))
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	f.cssSetting = "false"
+	resp = testutil.MakeRequest(teacher, http.MethodPost, "/courses/100/pages/notes/revisions/1", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var page models.WikiPage
+	require.NoError(t, f.g.Where("url = 'notes'").First(&page).Error)
+	assert.Empty(t, page.CSS, "hand-written CSS must not come back with the setting off")
+	assert.Empty(t, page.CSSSource)
+	assert.True(t, page.Design.IsNull())
+
+	resp = testutil.MakeRequest(teacher, http.MethodPost, "/courses/100/pages/notes/revisions/2", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NoError(t, f.g.Where("url = 'notes'").First(&page).Error)
+	assert.NotEmpty(t, page.CSS, "designer CSS travels with its design")
+	assert.False(t, page.Design.IsNull())
 }
 
 func TestPageDesign_CrossTenantPageIsNotFound(t *testing.T) {

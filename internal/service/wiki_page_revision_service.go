@@ -6,7 +6,6 @@ import (
 
 	"github.com/EduThemes/paper-lms/internal/domain/models"
 	"github.com/EduThemes/paper-lms/internal/repository"
-	"github.com/EduThemes/paper-lms/internal/security/csssanitize"
 )
 
 // ErrRevisionNotFound is returned when a revision number does not exist
@@ -21,10 +20,20 @@ var ErrRevisionNotFound = errors.New("revision not found")
 type WikiPageRevisionService struct {
 	revisionRepo repository.WikiPageRevisionRepository
 	pageRepo     repository.PageRepository
+	// cssPolicy resolves pages.custom_css_enabled for the page's course on
+	// restore. Nil: on.
+	cssPolicy CourseCSSPolicy
 }
 
 func NewWikiPageRevisionService(revisionRepo repository.WikiPageRevisionRepository, pageRepo repository.PageRepository) *WikiPageRevisionService {
 	return &WikiPageRevisionService{revisionRepo: revisionRepo, pageRepo: pageRepo}
+}
+
+// SetCourseCSSPolicy attaches the pages.custom_css_enabled resolution a
+// restore applies.
+func (s *WikiPageRevisionService) SetCourseCSSPolicy(p CourseCSSPolicy) *WikiPageRevisionService {
+	s.cssPolicy = p
+	return s
 }
 
 func editorPtr(editedBy uint) *uint {
@@ -139,9 +148,10 @@ func (s *WikiPageRevisionService) LatestNumber(ctx context.Context, pageID uint)
 
 // RevertToRevision restores the page's title, body, stylesheet and design
 // from revision number and saves the page, recording the restore as a new
-// revision. The body and stylesheet are re-sanitized on the way back in:
-// they were sanitized when they were saved, but the policy may have
-// tightened since.
+// revision. The body, stylesheet and design are re-checked on the way back
+// in (they were checked when they were saved, but the policy may have
+// tightened since), and with pages.custom_css_enabled off for the course a
+// restored page without a design gets no stylesheet.
 func (s *WikiPageRevisionService) RevertToRevision(ctx context.Context, page *models.WikiPage, number int, userID uint) (*models.WikiPageRevision, error) {
 	if page == nil {
 		return nil, ErrRevisionNotFound
@@ -152,14 +162,10 @@ func (s *WikiPageRevisionService) RevertToRevision(ctx context.Context, page *mo
 	}
 	page.Title = target.Title
 	page.Body = SanitizeHTML(target.Body)
-	page.CSS = ""
-	if target.CSS != "" {
-		if css, err := csssanitize.Sanitize(target.CSS); err == nil {
-			page.CSS = css
-		}
-	}
+	page.CSS = target.CSS
 	page.CSSSource = target.CSSSource
 	page.Design = target.Design
+	cleanPageDesign(page, s.cssPolicy.Allowed(ctx, page.CourseID))
 	if err := s.pageRepo.Update(ctx, page); err != nil {
 		return nil, err
 	}

@@ -709,7 +709,7 @@ func (h *ConversationHandler) DownloadAttachment(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not locate file")
 	}
 	// fasthttp closes the reader after streaming (see FileHandler.DownloadFile).
-	c.Set("Content-Type", att.ContentType)
+	c.Set("Content-Type", service.ServedContentType(att.ContentType))
 	return c.SendStream(reader)
 }
 

@@ -58,6 +58,16 @@ type CommonsService struct {
 	groupRepo      repository.QuizQuestionGroupRepository
 	attachmentRepo repository.AttachmentRepository
 	files          *FileService
+
+	// cssPolicy resolves pages.custom_css_enabled for the import target
+	// (SetCourseCSSPolicy). Nil: on.
+	cssPolicy CourseCSSPolicy
+}
+
+// SetCourseCSSPolicy attaches the pages.custom_css_enabled resolution an
+// import applies to the pages it creates.
+func (s *CommonsService) SetCourseCSSPolicy(p CourseCSSPolicy) {
+	s.cssPolicy = p
 }
 
 // SetFileDeps wires quiz question groups and file copying into
@@ -446,6 +456,19 @@ type commonsImporter struct {
 	// Where the snapshot's files live (the source course and tenant).
 	sourceCourse  uint
 	sourceAccount uint
+
+	// cssAllowedCache memoizes the target course's pages.custom_css_enabled.
+	cssAllowedCache *bool
+}
+
+// cssAllowed reports whether hand-written page CSS is allowed in the
+// target course (resolved once per import).
+func (im *commonsImporter) cssAllowed(ctx context.Context) bool {
+	if im.cssAllowedCache == nil {
+		v := im.s.cssPolicy.Allowed(ctx, im.target)
+		im.cssAllowedCache = &v
+	}
+	return *im.cssAllowedCache
 }
 
 func (im *commonsImporter) note(err error) {
@@ -486,9 +509,9 @@ func (im *commonsImporter) page(ctx context.Context, raw json.RawMessage) error 
 	p.FrontPage = false
 	// The snapshot carries the page's stylesheet and design (Page
 	// Designer). Re-check both on the way in, as the body is: the snapshot
-	// was written by this server, but the policy may have tightened since.
-	p.CSS = resanitizePageCSS(p.CSS)
-	p.Design = revalidateDesign(p.Design)
+	// was written by this server, but the policy may have tightened since,
+	// and the target course's account may not allow hand-written CSS.
+	cleanPageDesign(&p, im.cssAllowed(ctx))
 	if err := im.s.pageRepo.Create(ctx, &p); err != nil {
 		return err
 	}

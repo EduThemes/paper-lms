@@ -982,7 +982,10 @@ func main() {
 	// handlers
 	discussionV2Handler := handlers.NewDiscussionV2Handler(discussionV2Service).SetParity(discussionParityService)
 	contentImportHandler := handlers.NewContentImportHandler(imsccParser, contentMigrationService, cfg.FileStoragePath)
-	contentLane := wireContentMigrationLane(database, fileService, cfg.FileStoragePath, cfg.FrontendURL, imsccParser, blueprintService, commonsService, contentMigrationHandler, contentImportHandler)
+	// Page Designer: pages.custom_css_enabled, resolved for a course's
+	// account, on every path that writes a page stylesheet.
+	pageCSSPolicy := service.NewCourseCSSPolicy(courseRepo, settingsLookup)
+	contentLane := wireContentMigrationLane(database, fileService, cfg.FileStoragePath, cfg.FrontendURL, imsccParser, blueprintService, commonsService, contentMigrationHandler, contentImportHandler, pageCSSPolicy)
 	batchHandler := handlers.NewBatchHandler(batchService, authz)
 	// handlers
 	coppaHandler := handlers.NewCOPPAHandler(coppaService).SetAuthorizer(authz)
@@ -1080,8 +1083,10 @@ func main() {
 	pagesFilesRoutes := wirePagesFiles(pagesFilesDeps{database: database, pageRepo: pageRepo, courseRepo: courseRepo, pageHandler: pageHandler,
 		fileService: fileService, fileHandler: fileHandler, settingsLookup: settingsLookup,
 		userHandler: userHandler, authz: authz, permMiddleware: permMiddleware, courseHandler: courseHandler, folderRepo: folderRepo})
-	designColourSchemeHandler := wirePageDesigner(pageDesignerDeps{database: database, courseRepo: courseRepo, attachmentRepo: attachmentRepo,
-		pageHandler: pageHandler, courseHandler: courseHandler, imsccParser: imsccParser, settingsLookup: settingsLookup, frontendURL: cfg.FrontendURL})
+	designColourSchemeHandler := wirePageDesigner(pageDesignerDeps{database: database, attachmentRepo: attachmentRepo,
+		pageHandler: pageHandler, courseHandler: courseHandler, imsccParser: imsccParser,
+		commons: commonsService, blueprints: blueprintService, batch: batchService,
+		settingsLookup: settingsLookup, cssPolicy: pageCSSPolicy, frontendURL: cfg.FrontendURL})
 
 	// Create router
 	router := &v1.Router{

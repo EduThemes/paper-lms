@@ -91,8 +91,12 @@ type scoper struct {
 //     ":root{--x:1}" -> "#r{--x:1}", "body h2" -> "#r h2". If that leading
 //     compound has qualifiers they stay on the real element, so the author's
 //     condition keeps its meaning: "html.dark p" -> "html.dark #r p",
-//     "body.rtl p" -> "body.rtl #r p". Selectors that would reach a sibling
-//     of the root (":root + p", "~ p") are dropped.
+//     "body.rtl p" -> "body.rtl #r p". Those qualifiers may only be classes
+//     and [attr] / [attr=value] tests; a selector with any other (a
+//     pseudo-class such as :has(), a function) is dropped, as are selectors
+//     that would reach a sibling of the root (":root + p", "~ p"). Sanitize
+//     already drops combinators inside :is() / :where() / :not() and any
+//     html, body, :root or :scope inside a selector function.
 //   - A rule aimed at the root itself may only set rootSubjectProperties
 //     and custom properties; other declarations are dropped from it.
 //   - @media (prefers-color-scheme: dark) rules are re-emitted with an
@@ -111,9 +115,9 @@ type scoper struct {
 //
 // The output is compact (no comments or optional whitespace). Scope returns
 // "" if root is not a single "#id" or ".class" selector or css is larger
-// than MaxBytes.
+// than MaxScopeBytes.
 func Scope(css, root string) string {
-	if !rootPattern.MatchString(root) || len(css) > MaxBytes {
+	if !rootPattern.MatchString(root) || len(css) > MaxScopeBytes {
 		return ""
 	}
 	nodes := sanitizeSheet(css)
@@ -270,19 +274,19 @@ func (s *scoper) scopeSelector(sel string, sch scheme) (scoped string, subjectIs
 	if len(toks) == 0 {
 		return "", false, false
 	}
-	var htmlQ, bodyQ string
+	var htmlQ, bodyQ []token
 	i := 0
 	htmlDone := false
 	switch {
 	case toks[0].ident("html"):
 		end := compoundEnd(toks, 0)
-		htmlQ, i, htmlDone = joinTokens(toks[1:end]), end, true
+		htmlQ, i, htmlDone = toks[1:end], end, true
 	case len(toks) > 1 && toks[0].is(css.ColonToken) && toks[1].ident("root"):
 		end := compoundEnd(toks, 0)
-		htmlQ, i, htmlDone = joinTokens(toks[2:end]), end, true
+		htmlQ, i, htmlDone = toks[2:end], end, true
 	case toks[0].ident("body"):
 		end := compoundEnd(toks, 0)
-		bodyQ, i = joinTokens(toks[1:end]), end
+		bodyQ, i = toks[1:end], end
 	}
 	if htmlDone {
 		// "html body", "html > body", ":root body".
@@ -294,8 +298,16 @@ func (s *scoper) scopeSelector(sel string, sch scheme) (scoped string, subjectIs
 		}
 		if separated && j < len(toks) && toks[j].ident("body") {
 			end := compoundEnd(toks, j)
-			bodyQ, i = joinTokens(toks[j+1:end]), end
+			bodyQ, i = toks[j+1:end], end
 		}
+	}
+	// Qualifiers stay on the real <html> / <body>, outside the page, so
+	// they may only be classes and attribute presence / equality tests:
+	// "html:has(input[value^=a]) p" would let the page test the rest of
+	// Paper's document, and a :has() on the root's own compound could look
+	// at its siblings.
+	if !simpleQualifiers(htmlQ) || !simpleQualifiers(bodyQ) {
+		return "", false, false
 	}
 	rest := trimWS(toks[i:])
 	if len(rest) > 0 && (rest[0].delim('+') || rest[0].delim('~')) {
@@ -310,12 +322,12 @@ func (s *scoper) scopeSelector(sel string, sch scheme) (scoped string, subjectIs
 	case schemeLight:
 		q = ":not(.dark)"
 	}
-	q += htmlQ
+	q += joinTokens(htmlQ)
 	if q != "" {
 		b.WriteString("html" + q + " ")
 	}
-	if bodyQ != "" {
-		b.WriteString("body" + bodyQ + " ")
+	if len(bodyQ) > 0 {
+		b.WriteString("body" + joinTokens(bodyQ) + " ")
 	}
 	b.WriteString(s.root)
 	if len(rest) == 0 {
@@ -323,6 +335,36 @@ func (s *scoper) scopeSelector(sel string, sch scheme) (scoped string, subjectIs
 	}
 	b.WriteString(" " + joinTokens(rest))
 	return b.String(), false, true
+}
+
+// simpleQualifiers reports whether toks (a compound's qualifiers after its
+// type selector) are only ".class", "[attr]" and "[attr=value]" selectors.
+func simpleQualifiers(toks []token) bool {
+	for i := 0; i < len(toks); {
+		switch {
+		case toks[i].delim('.') && i+1 < len(toks) && toks[i+1].is(css.IdentToken):
+			i += 2
+		case toks[i].is(css.LeftBracketToken):
+			j := i + 1
+			if j >= len(toks) || !toks[j].is(css.IdentToken) {
+				return false
+			}
+			j++
+			if j < len(toks) && toks[j].delim('=') {
+				if j+1 >= len(toks) || (!toks[j+1].is(css.IdentToken) && !toks[j+1].is(css.StringToken)) {
+					return false
+				}
+				j += 2
+			}
+			if j >= len(toks) || !toks[j].is(css.RightBracketToken) {
+				return false
+			}
+			i = j + 1
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // mediaQuery is one query of an @media prelude after looking for a

@@ -50,6 +50,15 @@ type BlueprintService struct {
 	// Optional (SetRubricDeps): rubric + rubric association sync.
 	rubricRepo      repository.RubricRepository
 	rubricAssocRepo repository.RubricAssociationRepository
+	// Optional (SetCourseCSSPolicy): pages.custom_css_enabled for each
+	// associated course. Nil: on.
+	cssPolicy CourseCSSPolicy
+}
+
+// SetCourseCSSPolicy attaches the pages.custom_css_enabled resolution a
+// sync applies to the pages it pushes into an associated course.
+func (s *BlueprintService) SetCourseCSSPolicy(p CourseCSSPolicy) {
+	s.cssPolicy = p
 }
 
 // SetDeps wires the optional association-authorization and sync

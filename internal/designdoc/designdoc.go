@@ -89,10 +89,29 @@ func compact(raw []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// ValidateDesign checks a page design (the engine's PageDoc): a JSON
-// object, at most MaxDesignBytes, with "version": 1 and a string "id"
-// matching ^[A-Za-z0-9_-]{1,100}$. The rest of the document is the
-// engine's business. Returns the compacted document.
+// ValidateDesign checks a page design (the engine's PageDoc) and returns it
+// cleaned. It must be a JSON object, at most MaxDesignBytes, with
+// "version": 1 and a string "id" matching ^[A-Za-z0-9_-]{1,100}$; anything
+// else is a ValidationError. The rest is cleaned rather than refused, against
+// the engine's schema (web/src/designer/engine/types.ts), because the
+// designer writes some fields straight into the page:
+//
+//   - Sections of an unknown type are dropped, as are members a section type
+//     does not define; at most MaxDesignSections sections and
+//     MaxDesignListItems entries per list are kept.
+//   - RichText fields (welcome/callout/text body, instructor bio) go through
+//     SanitizeRichText: p, strong, em, a[href], ul, ol, li, br.
+//   - Link targets (quick links, schedule and this-week items) are kept only
+//     if SafeHref accepts them; image addresses (banner customSrc, instructor
+//     photoSrc) only if SafeImageSrc does.
+//   - "palette" is kept only if it passes ValidatePalette.
+//   - Plain strings lose control characters and are cut to 200 (labels) or
+//     2,000 characters; "customCss" stays text (it is sanitized when it
+//     becomes the page stylesheet), cut to csssanitize.MaxBytes.
+//   - Unknown top-level members are dropped.
+//
+// A design the engine produced comes back with the same values, so the
+// page's data-pd-hash still matches it. Cleaning is idempotent.
 func ValidateDesign(raw []byte) ([]byte, error) {
 	if len(raw) > MaxDesignBytes {
 		return nil, invalid("design is larger than 256 KB")
@@ -108,7 +127,11 @@ func ValidateDesign(raw []byte) ([]byte, error) {
 	if !ok || !reDesignID.MatchString(id) {
 		return nil, invalid("design.id must be 1-100 letters, digits, '-' or '_'")
 	}
-	return compact(raw)
+	out, err := normalizeDesign(obj, id)
+	if err != nil {
+		return nil, invalid("design could not be read")
+	}
+	return out, nil
 }
 
 // LookColorKeys are the keys of courses.look colors / dark_colors.
