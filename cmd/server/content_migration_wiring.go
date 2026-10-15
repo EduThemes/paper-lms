@@ -29,6 +29,7 @@ func wireContentMigrationLane(
 	database *gorm.DB,
 	fileService *service.FileService,
 	fileStoragePath string,
+	frontendURL string,
 	parser *service.IMSCCParser,
 	blueprints *service.BlueprintService,
 	commons *service.CommonsService,
@@ -55,7 +56,7 @@ func wireContentMigrationLane(
 		groups, rubrics, rubricAssocs,
 		postgres.NewLearningOutcomeGroupRepository(database), postgres.NewLearningOutcomeRepository(database),
 		events, attachments, fileService,
-	)
+	).SetPublicBaseURL(frontendURL) // Page Designer asset/icon URLs in exported HTML
 	exports := service.NewContentExportService(postgres.NewContentExportRepository(database), exporter, fileService.StorageBackend(), "")
 
 	copier := service.NewCourseCopyService(service.CourseCopyDeps{
