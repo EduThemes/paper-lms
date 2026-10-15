@@ -49,9 +49,9 @@ function ActivityTab({ courseId }) {
   if (days.length === 0) {
     return (
       <div className="bg-surface-0 rounded-lg shadow p-8 text-center">
-        <Activity className="w-12 h-12 text-text-disabled mx-auto mb-3" aria-hidden="true" />
+        <Activity className="w-12 h-12 text-text-tertiary mx-auto mb-3" aria-hidden="true" />
         <p className="text-text-tertiary">No student activity recorded yet.</p>
-        <p className="text-text-disabled text-sm mt-1">Page views and participations appear here as students use the course.</p>
+        <p className="text-text-tertiary text-sm mt-1">Page views and participations appear here as students use the course.</p>
       </div>
     );
   }
@@ -76,7 +76,7 @@ function ActivityTab({ courseId }) {
           <div className="inline-flex rounded border border-border-strong overflow-hidden text-sm" role="group" aria-label="Group activity by">
             {['week', 'day'].map((g) => (
               <button key={g} type="button" aria-pressed={granularity === g} onClick={() => setGranularity(g)}
-                className={`px-3 py-1 ${granularity === g ? 'bg-brand-600 text-white' : 'bg-surface-0 text-text-secondary hover:bg-surface-1'}`}>
+                className={`px-3 py-1 ${granularity === g ? 'bg-brand-600 text-on-brand' : 'bg-surface-0 text-text-secondary hover:bg-surface-1'}`}>
                 {g === 'week' ? 'By week' : 'By day'}
               </button>
             ))}
@@ -111,7 +111,7 @@ function AssignmentsTab({ query }) {
   if (stats.length === 0) {
     return (
       <div className="bg-surface-0 rounded-lg shadow p-8 text-center">
-        <FileText className="w-12 h-12 text-text-disabled mx-auto mb-3" aria-hidden="true" />
+        <FileText className="w-12 h-12 text-text-tertiary mx-auto mb-3" aria-hidden="true" />
         <p className="text-text-tertiary">No published assignments yet.</p>
       </div>
     );
@@ -140,7 +140,7 @@ function AssignmentsTab({ query }) {
                 </td>
                 <td className="px-4 py-3 min-w-[220px]">
                   {s.median == null ? (
-                    <span className="text-xs text-text-disabled">No posted scores</span>
+                    <span className="text-xs text-text-tertiary">No posted scores</span>
                   ) : (
                     <div>
                       <div className="relative h-4 bg-surface-2 rounded" aria-hidden="true">
@@ -180,7 +180,7 @@ function StudentsTab({ courseId, query, onMessage }) {
   if (students.length === 0) {
     return (
       <div className="bg-surface-0 rounded-lg shadow p-8 text-center">
-        <Users className="w-12 h-12 text-text-disabled mx-auto mb-3" aria-hidden="true" />
+        <Users className="w-12 h-12 text-text-tertiary mx-auto mb-3" aria-hidden="true" />
         <p className="text-text-tertiary">No students enrolled.</p>
       </div>
     );
@@ -268,14 +268,14 @@ const AnalyticsPage = () => {
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-3 mt-2">
           <div className="flex items-center space-x-3">
-            <BarChart3 className="w-7 h-7 text-indigo-600" aria-hidden="true" />
+            <BarChart3 className="w-7 h-7 text-brand-600" aria-hidden="true" />
             <div>
               <h2 className="text-2xl font-bold text-text-primary">Course Analytics</h2>
               {course.data && <p className="text-text-tertiary text-sm">{course.data.name}</p>}
             </div>
           </div>
           <button type="button" onClick={() => setMessaging({})} disabled={!students.data?.length}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded bg-brand-600 text-on-brand hover:bg-brand-700 disabled:opacity-50">
             <Mail className="w-4 h-4" aria-hidden="true" /> Message students who…
           </button>
         </div>
@@ -288,7 +288,7 @@ const AnalyticsPage = () => {
             return (
               <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center space-x-2 py-3 px-1 border-b-2 text-sm font-medium transition-colors ${
-                  activeTab === tab.id ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-text-tertiary hover:text-text-secondary hover:border-border-strong'
+                  activeTab === tab.id ? 'border-brand-600 text-brand-600' : 'border-transparent text-text-tertiary hover:text-text-secondary hover:border-border-strong'
                 }`}>
                 <Icon className="w-4 h-4" aria-hidden="true" />
                 <span>{tab.label}</span>

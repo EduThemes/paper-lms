@@ -289,7 +289,7 @@ export const DeletePeerReviewButton = ({ courseId, assignmentId, review, onChang
           setBusy(false);
         }
       }}
-      className="text-text-disabled hover:text-accent-danger disabled:opacity-50"
+      className="text-text-tertiary hover:text-accent-danger disabled:opacity-50"
     >
       <Trash2 className="w-4 h-4" />
     </button>

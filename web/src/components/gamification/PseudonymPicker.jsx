@@ -132,7 +132,7 @@ export default function PseudonymPicker({ courseId, open, onClose, onSaved }) {
           )}
 
           {saveError && (
-            <div className="flex items-start gap-2 rounded-lg border border-accent-error bg-accent-error/10 p-3 text-accent-error">
+            <div className="flex items-start gap-2 rounded-lg border border-accent-danger bg-accent-danger/10 p-3 text-accent-danger">
               <AlertTriangle className="w-4 h-4 mt-0.5" aria-hidden="true" />
               <span>{saveError}</span>
             </div>

@@ -135,7 +135,7 @@ function ComingUpStrip({ items, onShow }) {
       <ul className="flex flex-wrap gap-x-3 gap-y-1">
         {items.slice(0, 6).map((c) => (
           <li key={c.name}>
-            <button type="button" className="text-brand-600 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-brand-300" onClick={() => onShow(c)}>
+            <button type="button" className="text-brand-600 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onShow(c)}>
               {c.name}
             </button>
           </li>
@@ -205,7 +205,7 @@ export function ThemeGallery({ ctx, kind, onKind, defaultAudience = 'all', colou
                     onClick={() => onKind(k)}
                     className={cn(
                       'w-full rounded-md px-2.5 py-1.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      k === kind ? 'bg-brand-50 font-semibold text-brand-700 dark:bg-brand-900/40 dark:text-brand-200' : 'text-text-secondary hover:bg-surface-1 hover:text-text-primary',
+                      k === kind ? 'bg-brand-50 font-semibold text-brand-700' : 'text-text-secondary hover:bg-surface-1 hover:text-text-primary',
                     )}
                   >
                     {t(`kind.${k}`)}
@@ -227,7 +227,7 @@ export function ThemeGallery({ ctx, kind, onKind, defaultAudience = 'all', colou
                 onClick={() => pickShelf(s)}
                 className={cn(
                   'flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  s === shelf ? 'bg-brand-50 font-semibold text-brand-700 dark:bg-brand-900/40 dark:text-brand-200' : 'text-text-secondary hover:bg-surface-1 hover:text-text-primary',
+                  s === shelf ? 'bg-brand-50 font-semibold text-brand-700' : 'text-text-secondary hover:bg-surface-1 hover:text-text-primary',
                 )}
               >
                 <span>{shelfName(s)}</span>
@@ -313,7 +313,7 @@ export function ThemeGallery({ ctx, kind, onKind, defaultAudience = 'all', colou
             {AUDIENCES.map((a) => (
               <label key={a} className="cursor-pointer">
                 <input type="radio" name="pd-audience" value={a} checked={audience === a} onChange={() => setAudience(a)} className="peer sr-only" />
-                <span className="inline-flex rounded-full border border-border px-3 py-1 text-sm text-text-secondary transition-colors peer-checked:border-brand-600 peer-checked:bg-brand-600 peer-checked:text-white peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 hover:border-border-strong">
+                <span className="inline-flex rounded-full border border-border px-3 py-1 text-sm text-text-secondary transition-colors peer-checked:border-brand-600 peer-checked:bg-brand-600 peer-checked:text-on-brand peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 hover:border-border-strong">
                   {t(`audience.${a}`)}
                 </span>
               </label>
@@ -327,7 +327,7 @@ export function ThemeGallery({ ctx, kind, onKind, defaultAudience = 'all', colou
           {query && (
             <>
               {' '}
-              <button type="button" className="text-brand-600 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-brand-300" onClick={() => setQuery('')}>
+              <button type="button" className="text-brand-600 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setQuery('')}>
                 {t('choose.clearSearch')}
               </button>
             </>

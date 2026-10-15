@@ -80,7 +80,7 @@ const NumericalEditor = ({ answers, onChange }) => {
   return (
     <div className="space-y-3">
       <label className="block text-xs font-medium text-text-secondary">
-        Accepted answers <span className="text-text-disabled">(a student matching any of them gets full credit)</span>
+        Accepted answers <span className="text-text-tertiary">(a student matching any of them gets full credit)</span>
       </label>
       {list.map((a, i) => {
         const problem = numericalAnswerProblem(a);
@@ -97,7 +97,7 @@ const NumericalEditor = ({ answers, onChange }) => {
               </select>
               <div className="flex-1" />
               {list.length > 1 && (
-                <button type="button" onClick={() => emit(list.filter((_, idx) => idx !== i))} className="p-1 text-text-disabled hover:text-accent-danger" aria-label={`Remove answer ${i + 1}`}>
+                <button type="button" onClick={() => emit(list.filter((_, idx) => idx !== i))} className="p-1 text-text-tertiary hover:text-accent-danger" aria-label={`Remove answer ${i + 1}`}>
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               )}

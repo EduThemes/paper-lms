@@ -49,7 +49,7 @@ const NotificationPolicyGrid = () => {
       <p className="text-sm text-text-secondary mb-4">
         Choose how often each kind of notification reaches each of your channels. Cells marked
         &ldquo;default&rdquo; follow the delivery policy above. Every notification also appears in your
-        {' '}<Link to="/notifications" className="text-brand-600 hover:underline">notification feed</Link>.
+        {' '}<Link to="/notifications" className="text-brand-600 underline underline-offset-2 hover:no-underline">notification feed</Link>.
       </p>
       {mutation.isError && (
         <p className="text-sm text-accent-danger mb-3" role="alert">{mutation.error?.message}</p>
@@ -59,7 +59,7 @@ const NotificationPolicyGrid = () => {
           You have no delivery channels yet. <Link to="/settings/notification_deliveries" className="text-brand-600 hover:underline">Add one</Link>.
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="min-w-full text-sm" aria-label="Notification preferences by type and channel">
             <thead>
               <tr className="border-b border-border-default">

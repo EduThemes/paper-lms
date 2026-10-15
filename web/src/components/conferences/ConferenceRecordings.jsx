@@ -28,7 +28,7 @@ export default function ConferenceRecordings({ conference, isTeacher, onClose })
     <div className="mt-6 bg-surface-0 rounded-lg shadow p-6">
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-semibold">Recordings - {conference.title}</h3>
-        <button onClick={onClose} className="text-text-disabled hover:text-text-secondary" aria-label="Close recordings">
+        <button onClick={onClose} className="text-text-tertiary hover:text-text-secondary" aria-label="Close recordings">
           <X className="w-5 h-5" />
         </button>
       </div>
@@ -76,7 +76,7 @@ export default function ConferenceRecordings({ conference, isTeacher, onClose })
                   <button
                     onClick={() => handleDelete(rec)}
                     disabled={del.isPending}
-                    className="p-1 text-text-disabled hover:text-accent-danger disabled:opacity-50"
+                    className="p-1 text-text-tertiary hover:text-accent-danger disabled:opacity-50"
                     title="Delete recording"
                   >
                     <Trash2 className="w-4 h-4" />

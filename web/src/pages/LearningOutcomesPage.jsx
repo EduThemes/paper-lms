@@ -359,13 +359,13 @@ const LearningOutcomesPage = () => {
         <Link to={`/courses/${courseId}`} className="text-brand-600 hover:underline text-sm">
           &larr; Back to Course
         </Link>
-        <div className="flex items-center justify-between mt-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
           <h2 className="text-2xl font-bold text-text-primary">Learning Outcomes</h2>
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-wrap items-center gap-2">
             {!canManage && (
               <Link
                 to={`/courses/${courseId}/outcomes/mastery`}
-                className="flex items-center space-x-2 px-4 py-2 rounded-md text-sm bg-brand-600 text-white hover:bg-brand-700"
+                className="flex items-center space-x-2 px-4 py-2 rounded-md text-sm bg-brand-600 text-on-brand hover:bg-brand-700"
               >
                 <Target className="w-4 h-4" />
                 <span>My Learning Mastery</span>
@@ -396,7 +396,7 @@ const LearningOutcomesPage = () => {
             {canManage && (
             <button
               onClick={() => setShowCreateGroup(!showCreateGroup)}
-              className="flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
+              className="flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
             >
               <Plus className="w-4 h-4" />
               <span>New Group</span>
@@ -446,7 +446,7 @@ const LearningOutcomesPage = () => {
             <div className="flex space-x-3">
               <button
                 type="submit"
-                className="bg-brand-600 text-white px-4 py-2 rounded hover:bg-brand-700 text-sm"
+                className="bg-brand-600 text-on-brand px-4 py-2 rounded hover:bg-brand-700 text-sm"
               >
                 Create Group
               </button>
@@ -495,7 +495,7 @@ const LearningOutcomesPage = () => {
                             <span className="block truncate" title={outcome.title}>
                               {outcome.title}
                             </span>
-                            <span className="text-text-disabled font-normal">
+                            <span className="text-text-tertiary font-normal">
                               {outcome.mastery_points || 3} pts
                             </span>
                           </th>
@@ -550,7 +550,7 @@ const LearningOutcomesPage = () => {
                                       </span>
                                     </div>
                                   ) : (
-                                    <span className="text-text-disabled">-</span>
+                                    <span className="text-text-tertiary">-</span>
                                   )}
                                 </td>
                               );
@@ -593,7 +593,7 @@ const LearningOutcomesPage = () => {
                               </span>
                               <div className="flex items-center space-x-1 flex-shrink-0">
                                 {!hasScore ? (
-                                  <span className="text-text-disabled text-xs">No data</span>
+                                  <span className="text-text-tertiary text-xs">No data</span>
                                 ) : (
                                   <>
                                     {isMastered ? (
@@ -634,7 +634,7 @@ const LearningOutcomesPage = () => {
         <div className="flex-1">
           {groups.length === 0 && !showCreateGroup ? (
             <div className="bg-surface-0 rounded-lg shadow p-8 text-center">
-              <Target className="w-12 h-12 text-text-disabled mx-auto mb-3" />
+              <Target className="w-12 h-12 text-text-tertiary mx-auto mb-3" />
               <p className="text-text-tertiary mb-4">No outcome groups yet.</p>
               {canManage && (
               <button
@@ -695,7 +695,7 @@ const LearningOutcomesPage = () => {
                       )}
                     </div>
                     <div className="flex items-center space-x-2">
-                      <span className="text-xs text-text-disabled">
+                      <span className="text-xs text-text-tertiary">
                         {(groupOutcomes[group.id] || []).length} outcomes
                       </span>
                       {canManage && (
@@ -704,7 +704,7 @@ const LearningOutcomesPage = () => {
                           e.stopPropagation();
                           startEditGroup(group);
                         }}
-                        className="text-text-disabled hover:text-brand-600 p-1"
+                        className="text-text-tertiary hover:text-brand-600 p-1"
                         title="Edit group"
                       >
                         <Edit2 className="w-4 h-4" />
@@ -730,7 +730,7 @@ const LearningOutcomesPage = () => {
                           e.stopPropagation();
                           handleDeleteGroup(group.id);
                         }}
-                        className="text-text-disabled hover:text-accent-danger p-1"
+                        className="text-text-tertiary hover:text-accent-danger p-1"
                         title="Delete group"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -856,7 +856,7 @@ const LearningOutcomesPage = () => {
                                       }
                                       className="w-20 border border-border-strong rounded px-2 py-1 text-sm"
                                     />
-                                    <span className="text-xs text-text-disabled">pts</span>
+                                    <span className="text-xs text-text-tertiary">pts</span>
                                     {newOutcomeRatings.length > 2 && (
                                       <button
                                         type="button"
@@ -881,7 +881,7 @@ const LearningOutcomesPage = () => {
                             <div className="flex space-x-3">
                               <button
                                 type="submit"
-                                className="bg-brand-600 text-white px-4 py-2 rounded hover:bg-brand-700 text-sm flex items-center space-x-1"
+                                className="bg-brand-600 text-on-brand px-4 py-2 rounded hover:bg-brand-700 text-sm flex items-center space-x-1"
                               >
                                 <Save className="w-3.5 h-3.5" />
                                 <span>Create Outcome</span>
@@ -900,7 +900,7 @@ const LearningOutcomesPage = () => {
 
                       {/* Outcomes */}
                       {(groupOutcomes[group.id] || []).length === 0 ? (
-                        <div className="px-4 py-6 text-center text-text-disabled text-sm">
+                        <div className="px-4 py-6 text-center text-text-tertiary text-sm">
                           No outcomes in this group.{' '}
                           {canManage && (
                           <button
@@ -955,7 +955,7 @@ const LearningOutcomesPage = () => {
                                         />
                                       ))}
                                     </div>
-                                    <span className="text-xs text-text-disabled whitespace-nowrap">
+                                    <span className="text-xs text-text-tertiary whitespace-nowrap">
                                       Mastery: {outcome.mastery_points ?? 3}
                                     </span>
                                     {canManage && (
@@ -964,7 +964,7 @@ const LearningOutcomesPage = () => {
                                         e.stopPropagation();
                                         handleDeleteOutcome(group.id, outcome.id);
                                       }}
-                                      className="text-text-disabled hover:text-accent-danger p-1"
+                                      className="text-text-tertiary hover:text-accent-danger p-1"
                                       aria-label={`Delete ${outcome.title}`}
                                     >
                                       <Trash2 className="w-3.5 h-3.5" />
@@ -994,7 +994,7 @@ const LearningOutcomesPage = () => {
                   <h3 className="font-semibold text-text-primary">Outcome Details</h3>
                   <button
                     onClick={() => setSelectedOutcome(null)}
-                    className="text-text-disabled hover:text-text-secondary"
+                    className="text-text-tertiary hover:text-text-secondary"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -1088,7 +1088,7 @@ const LearningOutcomesPage = () => {
                             <span className="text-sm font-semibold text-text-secondary">
                               {rating.points}
                             </span>
-                            <span className="text-xs text-text-disabled ml-1">pts</span>
+                            <span className="text-xs text-text-tertiary ml-1">pts</span>
                           </div>
                           {isMastery && (
                             <CheckCircle2 className="w-4 h-4 text-accent-success flex-shrink-0" />
@@ -1117,8 +1117,8 @@ const LearningOutcomesPage = () => {
                     })}
                   </div>
                   <div className="flex justify-between mt-1">
-                    <span className="text-xs text-text-disabled">Low</span>
-                    <span className="text-xs text-text-disabled">High</span>
+                    <span className="text-xs text-text-tertiary">Low</span>
+                    <span className="text-xs text-text-tertiary">High</span>
                   </div>
                 </div>
               </div>

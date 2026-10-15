@@ -120,7 +120,7 @@ export default function MFAVerifyPage() {
           <button
             type="submit"
             disabled={submitting || !pendingToken || !code}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-brand-600 hover:bg-brand-700 px-4 py-2 text-white font-medium disabled:opacity-50"
+            className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-brand-600 hover:bg-brand-700 px-4 py-2 text-on-brand font-medium disabled:opacity-50"
           >
             {recoveryMode ? <KeyRound className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
             {submitting ? 'Verifying…' : 'Verify'}

@@ -128,7 +128,7 @@ const AppointmentParticipantsPanel = ({ group }) => {
             />
           </div>
           <div className="flex justify-end">
-            <button type="submit" disabled={sending || !body.trim()} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
+            <button type="submit" disabled={sending || !body.trim()} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-on-brand hover:bg-brand-700 disabled:opacity-50">
               {sending ? t('common.saving') : t('calendarLane.participants.send')}
             </button>
           </div>

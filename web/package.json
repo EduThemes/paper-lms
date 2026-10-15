@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "axe": "node scripts/run-axe.mjs",
+    "axe:sweep": "node scripts/axe-sweep.mjs",
     "typecheck:designer": "tsc -p tsconfig.designer.json"
   },
   "dependencies": {

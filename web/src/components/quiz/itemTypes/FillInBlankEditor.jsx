@@ -22,7 +22,7 @@ const FillInBlankEditor = ({ answers, onChange }) => {
     <div>
       <label className="block text-xs font-medium text-text-secondary mb-2">
         Accepted Answers
-        <span className="text-text-disabled ml-1">(grading is case-insensitive; whitespace trimmed)</span>
+        <span className="text-text-tertiary ml-1">(grading is case-insensitive; whitespace trimmed)</span>
       </label>
       <div className="space-y-2">
         {list.map((a, i) => (
@@ -37,7 +37,7 @@ const FillInBlankEditor = ({ answers, onChange }) => {
             {list.length > 1 && (
               <button
                 onClick={() => removeAnswer(i)}
-                className="p-1 text-text-disabled hover:text-accent-danger"
+                className="p-1 text-text-tertiary hover:text-accent-danger"
                 aria-label={`Remove answer ${i + 1}`}
               >
                 <Trash2 className="w-3.5 h-3.5" />

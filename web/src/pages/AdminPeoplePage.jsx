@@ -112,7 +112,7 @@ const AdminPeoplePage = () => {
                   <button
                     type="button"
                     onClick={() => setShowAdd((v) => !v)}
-                    className="inline-flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
+                    className="inline-flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-on-brand hover:bg-brand-700"
                   >
                     <UserPlus className="w-4 h-4" /> Add user
                   </button>

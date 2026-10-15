@@ -135,7 +135,7 @@ const RubricsPage = () => {
                 if (showCreate) { resetForm(); }
                 setShowCreate(!showCreate);
               }}
-              className="flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
+              className="flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
             >
               {showCreate ? <Plus className="w-4 h-4 rotate-45" /> : <Plus className="w-4 h-4" />}
               <span>{showCreate ? 'Cancel' : 'New Rubric'}</span>
@@ -193,7 +193,7 @@ const RubricsPage = () => {
             </button>
 
             <div className="flex space-x-3">
-              <button type="submit" className="bg-brand-600 text-white px-4 py-2 rounded hover:bg-brand-700 text-sm">
+              <button type="submit" className="bg-brand-600 text-on-brand px-4 py-2 rounded hover:bg-brand-700 text-sm">
                 {editingId ? 'Update Rubric' : 'Create Rubric'}
               </button>
               <button type="button" onClick={() => { resetForm(); setShowCreate(false); }} className="text-text-tertiary hover:text-text-secondary text-sm">
@@ -221,14 +221,14 @@ const RubricsPage = () => {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => handleEdit(rubric)}
-                    className="text-text-disabled hover:text-brand-600"
+                    className="text-text-tertiary hover:text-brand-600"
                     title="Edit rubric"
                   >
                     <Edit2 className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => handleDelete(rubric.id)}
-                    className="text-text-disabled hover:text-accent-danger"
+                    className="text-text-tertiary hover:text-accent-danger"
                     title="Delete rubric"
                   >
                     <Trash2 className="w-4 h-4" />

@@ -173,7 +173,7 @@ const PageDetailPage = () => {
       <Layout>
         <CourseNav />
         <div className="text-center py-12">
-          <FileText className="w-12 h-12 text-text-disabled mx-auto mb-4" />
+          <FileText className="w-12 h-12 text-text-tertiary mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-text-secondary mb-2">Page Not Found</h2>
           <p className="text-text-tertiary mb-4">This page doesn't exist or has been deleted.</p>
           <Link to={`/courses/${courseId}/pages`} className="text-brand-600 hover:underline">
@@ -199,7 +199,7 @@ const PageDetailPage = () => {
           <div className="p-6 border-b space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-text-primary">{htmlMode ? 'Edit Page HTML' : 'Edit Page'}</h3>
-              <button type="button" onClick={stopEditing} aria-label="Close editor" className="text-text-disabled hover:text-text-secondary">
+              <button type="button" onClick={stopEditing} aria-label="Close editor" className="text-text-tertiary hover:text-text-secondary">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -283,7 +283,7 @@ const PageDetailPage = () => {
             <button
               type="submit"
               disabled={saving}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
             >
               <Save className="w-4 h-4" />
               {saving ? 'Saving...' : 'Save Page'}
@@ -296,7 +296,7 @@ const PageDetailPage = () => {
             <div>
               <h1 className="text-2xl font-bold text-text-primary">{page.title}</h1>
               {page.updated_at && (
-                <p className="text-sm text-text-disabled mt-1">
+                <p className="text-sm text-text-tertiary mt-1">
                   Last edited {new Date(page.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                 </p>
               )}
@@ -387,7 +387,7 @@ const PageDetailPage = () => {
                     </button>
                     <Link
                       to={designerPath(courseId, { page: slug })}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-brand-600 text-white hover:bg-brand-700"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-brand-600 text-on-brand hover:bg-brand-700"
                     >
                       <Paintbrush className="w-4 h-4" aria-hidden="true" />
                       Edit design
@@ -417,7 +417,7 @@ const PageDetailPage = () => {
               {page.body ? (
                 <PageContent page={page} fallback={<RichContentViewer content={page.body} />} />
               ) : (
-                <p className="text-text-disabled italic">This page has no content yet.</p>
+                <p className="text-text-tertiary italic">This page has no content yet.</p>
               )}
             </div>
           )}

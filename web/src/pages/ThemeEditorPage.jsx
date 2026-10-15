@@ -48,7 +48,8 @@ function Preview({ variables }) {
         <div className="w-8 h-8 rounded" style={{ backgroundColor: `rgb(${scale[600]})` }} />
         <span className="text-[10px]">Nav</span>
       </div>
-      <div className="flex-1 p-4 space-y-3 bg-surface-0">
+      {/* Account colours apply to the light theme, so the preview is always light. */}
+      <div className="flex-1 p-4 space-y-3" style={{ backgroundColor: '#FCFCFA', color: '#26292F' }}>
         <div className="flex gap-1">
           {Object.entries(scale).map(([step, rgb]) => (
             <div key={step} title={step} className="h-4 flex-1" style={{ backgroundColor: `rgb(${rgb})` }} />

@@ -147,7 +147,7 @@ function PeopleView({ courseId, caller, enrollments, sections, statusFilter, set
               <button
                 type="button"
                 onClick={() => setShowAddForm((v) => !v)}
-                className="inline-flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+                className="inline-flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
               >
                 {showAddForm ? <X className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
                 {showAddForm ? 'Cancel' : 'Add People'}
@@ -182,7 +182,7 @@ function PeopleView({ courseId, caller, enrollments, sections, statusFilter, set
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="relative flex-1 min-w-[12rem] max-w-xs">
-          <Search className="w-4 h-4 absolute start-3 top-1/2 -translate-y-1/2 text-text-disabled" />
+          <Search className="w-4 h-4 absolute start-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
           <input
             type="text"
             value={search}
@@ -232,7 +232,7 @@ function PeopleView({ courseId, caller, enrollments, sections, statusFilter, set
             {search ? 'No people match your search.' : 'No people here.'}
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="relative overflow-x-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-ring" tabIndex={0} role="region" aria-label="Course people">
             <table className="w-full">
               <thead className="bg-surface-1 border-b">
                 <tr>

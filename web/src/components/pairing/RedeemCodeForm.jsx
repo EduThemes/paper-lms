@@ -120,7 +120,7 @@ const RedeemCodeForm = ({ onSuccess, onError, autoFocus = true }) => {
                 className="w-20 rounded-md border border-border-strong bg-surface-0 px-2 py-2 text-center font-mono text-lg font-semibold uppercase tracking-widest text-text-primary focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
                 placeholder="XXX"
               />
-              {i < 2 && <span className="text-text-disabled">-</span>}
+              {i < 2 && <span className="text-text-tertiary">-</span>}
             </React.Fragment>
           ))}
         </div>
@@ -145,7 +145,7 @@ const RedeemCodeForm = ({ onSuccess, onError, autoFocus = true }) => {
       <button
         type="submit"
         disabled={!ready || loading}
-        className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-on-brand hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <Link2 className="h-4 w-4" />
         {loading ? 'Linking…' : 'Link account'}

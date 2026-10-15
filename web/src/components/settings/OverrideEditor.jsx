@@ -81,7 +81,7 @@ const OverrideEditor = ({ courseId, overrides, setOverrides }) => {
             )}
           </div>
         </div>
-        <button onClick={handleAdd} className="mt-3 flex items-center gap-1 bg-brand-600 text-white px-4 py-1.5 rounded text-sm hover:bg-brand-700">
+        <button onClick={handleAdd} className="mt-3 flex items-center gap-1 bg-brand-600 text-on-brand px-4 py-1.5 rounded text-sm hover:bg-brand-700">
           <Plus className="w-4 h-4" /> Add Override
         </button>
       </div>

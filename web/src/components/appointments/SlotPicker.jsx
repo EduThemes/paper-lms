@@ -103,7 +103,7 @@ const SlotPicker = ({ slots = [], reservedIds = new Set(), onReserve, onCancel, 
                         type="button"
                         onClick={() => onReserve && onReserve(slot)}
                         disabled={busy}
-                        className="w-full rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                        className="w-full rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-on-brand hover:bg-brand-700 disabled:opacity-50"
                       >
                         Reserve
                       </button>

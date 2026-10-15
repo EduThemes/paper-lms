@@ -39,7 +39,7 @@ const THEME_META = {
   clean_modern:       { label: 'Clean Modern',       color: 'bg-brand-500',   accent: 'text-brand-600',  ring: 'ring-blue-300' },
   creative_bold:      { label: 'Creative Bold',      color: 'bg-purple-600', accent: 'text-purple-600', ring: 'ring-purple-300' },
   academic_classic:   { label: 'Academic Classic',    color: 'bg-amber-600',  accent: 'text-accent-warning', ring: 'ring-amber-300' },
-  minimal_dark:       { label: 'Minimal Dark',        color: 'bg-gray-800',   accent: 'text-text-disabled',  ring: 'ring-gray-500' },
+  minimal_dark:       { label: 'Minimal Dark',        color: 'bg-gray-800',   accent: 'text-text-tertiary',  ring: 'ring-gray-500' },
   developer_portfolio:{ label: 'Developer Portfolio', color: 'bg-emerald-600', accent: 'text-accent-success', ring: 'ring-emerald-300' },
 };
 
@@ -262,7 +262,7 @@ const PortfoliosPage = () => {
           <p className="text-text-tertiary mb-6">{error}</p>
           <button
             onClick={() => { setError(null); setLoading(true); fetchPortfolios(); }}
-            className="px-5 py-2.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors font-medium"
+            className="px-5 py-2.5 bg-brand-600 text-on-brand rounded-lg hover:bg-brand-700 transition-colors font-medium"
           >
             Try Again
           </button>
@@ -299,7 +299,7 @@ const PortfoliosPage = () => {
           <div className="mt-6 flex flex-col sm:flex-row gap-3">
             {/* Search */}
             <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-disabled" aria-hidden="true" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" aria-hidden="true" />
               <input
                 type="search"
                 value={searchQuery}
@@ -358,7 +358,7 @@ const PortfoliosPage = () => {
             An ePortfolio is more than a collection of work -- it is a living testament to your growth,
             creativity, and unique perspective.
           </p>
-          <p className="text-text-disabled max-w-md mx-auto mb-8">
+          <p className="text-text-tertiary max-w-md mx-auto mb-8">
             Curate your best projects, reflect on what you have learned, and share a professional
             portfolio that makes employers and collaborators take notice.
           </p>
@@ -375,7 +375,7 @@ const PortfoliosPage = () => {
         <div className="text-center py-16">
           <Filter className="w-12 h-12 text-gray-300 mx-auto mb-4" aria-hidden="true" />
           <h3 className="text-lg font-semibold text-text-secondary mb-1">No portfolios found</h3>
-          <p className="text-text-disabled">
+          <p className="text-text-tertiary">
             {searchQuery ? 'Try a different search term.' : 'No portfolios match this filter.'}
           </p>
         </div>
@@ -421,12 +421,12 @@ const PortfoliosPage = () => {
                         <FileText className={`w-10 h-10 mx-auto mb-2 ${
                           portfolio.theme === 'minimal_dark' || portfolio.theme === 'developer_portfolio' || portfolio.theme === 'creative_bold'
                             ? 'text-white/40'
-                            : 'text-text-disabled/60'
+                            : 'text-text-tertiary/60'
                         }`} aria-hidden="true" />
                         <span className={`text-xs font-medium ${
                           portfolio.theme === 'minimal_dark' || portfolio.theme === 'developer_portfolio' || portfolio.theme === 'creative_bold'
                             ? 'text-white/30'
-                            : 'text-text-disabled/50'
+                            : 'text-text-tertiary/50'
                         }`}>
                           {theme.label}
                         </span>
@@ -438,7 +438,7 @@ const PortfoliosPage = () => {
                   <div className="absolute top-3 left-3">
                     <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold backdrop-blur-sm ${
                       isPublished
-                        ? 'bg-accent-success/90 text-white'
+                        ? 'bg-accent-success text-on-accent'
                         : isArchived
                         ? 'bg-gray-500/90 text-white'
                         : 'bg-surface-0/90 text-text-secondary ring-1 ring-gray-200'
@@ -483,7 +483,7 @@ const PortfoliosPage = () => {
                     <div className="relative shrink-0">
                       <button
                         onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === portfolio.id ? null : portfolio.id); }}
-                        className="p-1.5 rounded-lg text-text-disabled hover:text-text-secondary hover:bg-surface-2 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        className="p-1.5 rounded-lg text-text-tertiary hover:text-text-secondary hover:bg-surface-2 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500"
                         aria-label={`Actions for ${portfolio.title}`}
                         aria-haspopup="true"
                         aria-expanded={openMenuId === portfolio.id}
@@ -502,7 +502,7 @@ const PortfoliosPage = () => {
                             className="flex items-center gap-2.5 px-4 py-2 text-sm text-text-secondary hover:bg-surface-1 transition-colors"
                             role="menuitem"
                           >
-                            <Pencil className="w-4 h-4 text-text-disabled" aria-hidden="true" /> Edit
+                            <Pencil className="w-4 h-4 text-text-tertiary" aria-hidden="true" /> Edit
                           </Link>
                           {isPublished && (
                             <Link
@@ -512,7 +512,7 @@ const PortfoliosPage = () => {
                               className="flex items-center gap-2.5 px-4 py-2 text-sm text-text-secondary hover:bg-surface-1 transition-colors"
                               role="menuitem"
                             >
-                              <ExternalLink className="w-4 h-4 text-text-disabled" aria-hidden="true" /> View Public Page
+                              <ExternalLink className="w-4 h-4 text-text-tertiary" aria-hidden="true" /> View Public Page
                             </Link>
                           )}
                           <button
@@ -521,9 +521,9 @@ const PortfoliosPage = () => {
                             role="menuitem"
                           >
                             {isPublished ? (
-                              <><EyeOff className="w-4 h-4 text-text-disabled" aria-hidden="true" /> Unpublish</>
+                              <><EyeOff className="w-4 h-4 text-text-tertiary" aria-hidden="true" /> Unpublish</>
                             ) : (
-                              <><Globe className="w-4 h-4 text-text-disabled" aria-hidden="true" /> Publish</>
+                              <><Globe className="w-4 h-4 text-text-tertiary" aria-hidden="true" /> Publish</>
                             )}
                           </button>
                           <button
@@ -531,21 +531,21 @@ const PortfoliosPage = () => {
                             className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-text-secondary hover:bg-surface-1 transition-colors text-left"
                             role="menuitem"
                           >
-                            <Copy className="w-4 h-4 text-text-disabled" aria-hidden="true" /> Duplicate
+                            <Copy className="w-4 h-4 text-text-tertiary" aria-hidden="true" /> Duplicate
                           </button>
                           <button
                             onClick={() => handleExport(portfolio, 'html')}
                             className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-text-secondary hover:bg-surface-1 transition-colors text-left"
                             role="menuitem"
                           >
-                            <Download className="w-4 h-4 text-text-disabled" aria-hidden="true" /> Export as Website
+                            <Download className="w-4 h-4 text-text-tertiary" aria-hidden="true" /> Export as Website
                           </button>
                           <button
                             onClick={() => handleExport(portfolio, 'pdf')}
                             className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-text-secondary hover:bg-surface-1 transition-colors text-left"
                             role="menuitem"
                           >
-                            <FileText className="w-4 h-4 text-text-disabled" aria-hidden="true" /> Export as PDF
+                            <FileText className="w-4 h-4 text-text-tertiary" aria-hidden="true" /> Export as PDF
                           </button>
                           {!isArchived && (
                             <button
@@ -553,7 +553,7 @@ const PortfoliosPage = () => {
                               className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-text-secondary hover:bg-surface-1 transition-colors text-left"
                               role="menuitem"
                             >
-                              <Archive className="w-4 h-4 text-text-disabled" aria-hidden="true" /> Archive
+                              <Archive className="w-4 h-4 text-text-tertiary" aria-hidden="true" /> Archive
                             </button>
                           )}
                           <div className="border-t border-border-subtle my-1" />
@@ -573,7 +573,7 @@ const PortfoliosPage = () => {
                     <p className="text-sm text-text-tertiary line-clamp-2 mb-3">{portfolio.tagline}</p>
                   )}
 
-                  <div className="mt-auto pt-3 border-t border-gray-50 flex items-center justify-between text-xs text-text-disabled">
+                  <div className="mt-auto pt-3 border-t border-gray-50 flex items-center justify-between text-xs text-text-tertiary">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3.5 h-3.5" aria-hidden="true" />
                       {formatDate(portfolio.updated_at)}
@@ -612,7 +612,7 @@ const PortfoliosPage = () => {
                 <h2 id="create-portfolio-title" className="text-xl font-bold text-text-primary">Create New Portfolio</h2>
                 <button
                   onClick={() => setShowCreateModal(false)}
-                  className="p-2 rounded-lg text-text-disabled hover:text-text-secondary hover:bg-surface-2 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  className="p-2 rounded-lg text-text-tertiary hover:text-text-secondary hover:bg-surface-2 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500"
                   aria-label="Close"
                 >
                   <X className="w-5 h-5" />
@@ -656,9 +656,9 @@ const PortfoliosPage = () => {
                               : 'border-border-subtle hover:border-border-default bg-surface-0'
                           }`}
                         >
-                          <Icon className={`w-5 h-5 mb-1.5 ${createTemplate === tpl.id ? 'text-brand-600' : 'text-text-disabled'}`} aria-hidden="true" />
+                          <Icon className={`w-5 h-5 mb-1.5 ${createTemplate === tpl.id ? 'text-brand-600' : 'text-text-tertiary'}`} aria-hidden="true" />
                           <div className="text-sm font-semibold text-text-primary">{tpl.name}</div>
-                          <div className="text-xs text-text-disabled mt-0.5 line-clamp-2">{tpl.description}</div>
+                          <div className="text-xs text-text-tertiary mt-0.5 line-clamp-2">{tpl.description}</div>
                         </button>
                       );
                     })}
@@ -686,7 +686,7 @@ const PortfoliosPage = () => {
                       />
                     ))}
                   </div>
-                  <p className="text-xs text-text-disabled mt-1.5">
+                  <p className="text-xs text-text-tertiary mt-1.5">
                     {THEME_META[createTheme]?.label} -- you can change this later
                   </p>
                 </div>
@@ -745,7 +745,7 @@ const PortfoliosPage = () => {
               </button>
               <button
                 onClick={() => handleDelete(deleteConfirmId)}
-                className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-accent-danger rounded-xl hover:bg-accent-danger/90 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                className="flex-1 px-4 py-2.5 text-sm font-medium text-on-accent bg-accent-danger rounded-xl hover:bg-accent-danger/90 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
               >
                 Delete Forever
               </button>

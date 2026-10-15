@@ -47,7 +47,7 @@ const ReplyForm = ({ initial = '', submitLabel, onSubmit, onCancel, pending, aut
             Cancel
           </button>
         )}
-        <button type="submit" disabled={pending || !text.trim()} className="px-3 py-1.5 text-sm bg-brand-600 text-white rounded-md hover:bg-brand-700 disabled:opacity-50">
+        <button type="submit" disabled={pending || !text.trim()} className="px-3 py-1.5 text-sm bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 disabled:opacity-50">
           {pending ? 'Saving...' : submitLabel}
         </button>
       </div>
@@ -68,7 +68,7 @@ const ReplyItem = ({ reply, depth, ctx }) => {
       <div className="py-2">
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs font-medium text-text-secondary">
-            {reply.user_name || `User #${reply.user_id}`} <span className="text-text-disabled font-normal">&middot; {formatDate(reply.created_at)}</span>
+            {reply.user_name || `User #${reply.user_id}`} <span className="text-text-tertiary font-normal">&middot; {formatDate(reply.created_at)}</span>
           </p>
           <div className="flex items-center gap-1">
             {canReply && depth < 3 && (

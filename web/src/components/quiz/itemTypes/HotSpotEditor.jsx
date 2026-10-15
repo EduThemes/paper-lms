@@ -103,7 +103,7 @@ const HotSpotEditor = ({ answers, onChange, courseId }) => {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <label className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-brand-600 text-white rounded hover:bg-brand-700 cursor-pointer">
+        <label className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-brand-600 text-on-brand rounded hover:bg-brand-700 cursor-pointer">
           <Upload className="w-3.5 h-3.5" />
           {cfg.image_url ? 'Replace image' : 'Upload image'}
           <input
@@ -144,14 +144,14 @@ const HotSpotEditor = ({ answers, onChange, courseId }) => {
                 height: `${r.h * 100}%`,
               }}
             >
-              <span className="absolute -top-5 -left-0.5 text-[10px] font-mono bg-accent-success text-white px-1 rounded">
+              <span className="absolute -top-5 -left-0.5 text-[10px] font-mono bg-accent-success text-on-accent px-1 rounded">
                 {i + 1}
               </span>
               <button
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={() => removeRegion(r.id)}
                 type="button"
-                className="absolute -top-2 -right-2 bg-accent-danger text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100"
+                className="absolute -top-2 -right-2 bg-accent-danger text-on-accent rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100"
                 aria-label={`Remove region ${i + 1}`}
               >
                 <Trash2 className="w-3 h-3" />
@@ -172,7 +172,7 @@ const HotSpotEditor = ({ answers, onChange, courseId }) => {
         </div>
       ) : (
         <div className="border border-dashed border-border-strong rounded p-6 text-center bg-surface-1">
-          <ImageIcon className="w-8 h-8 mx-auto text-text-disabled mb-2" />
+          <ImageIcon className="w-8 h-8 mx-auto text-text-tertiary mb-2" />
           <p className="text-xs text-text-tertiary">Upload an image to begin defining hot-spot regions.</p>
         </div>
       )}

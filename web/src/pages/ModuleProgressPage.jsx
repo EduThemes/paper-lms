@@ -14,13 +14,13 @@ const STATE_ICON = {
   completed: { Icon: CheckCircle2, className: 'text-accent-success' },
   started: { Icon: CircleDot, className: 'text-brand-600' },
   unlocked: { Icon: Circle, className: 'text-text-tertiary' },
-  locked: { Icon: Lock, className: 'text-text-disabled' },
+  locked: { Icon: Lock, className: 'text-text-tertiary' },
 };
 
 function StateCell({ state }) {
   const cfg = STATE_ICON[state];
   const label = progressStateLabel(state);
-  if (!cfg) return <span className="text-text-disabled">{label}</span>;
+  if (!cfg) return <span className="text-text-tertiary">{label}</span>;
   const { Icon, className } = cfg;
   return (
     <span className={cn('inline-flex items-center gap-1 text-xs', className)} title={label}>
@@ -58,7 +58,7 @@ function StudentDetail({ courseId, student, onClose }) {
                   <li key={it.item_id} className="text-xs text-text-secondary flex items-center gap-2">
                     {it.completed
                       ? <CheckCircle2 className="w-3.5 h-3.5 text-accent-success" aria-label="Completed" />
-                      : <Circle className="w-3.5 h-3.5 text-text-disabled" aria-label="Not completed" />}
+                      : <Circle className="w-3.5 h-3.5 text-text-tertiary" aria-label="Not completed" />}
                     <span>{it.title || `Item #${it.item_id}`}: {requirementLabel(it.requirement_type, it.min_score)}</span>
                     {it.score !== undefined && it.score !== null && <span>(score {it.score})</span>}
                   </li>

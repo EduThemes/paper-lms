@@ -152,7 +152,7 @@ const AdminSettingsPage = () => {
                   Looking for leaderboard / pseudonym / tenant-mode settings? They moved to{' '}
                   <a
                     href="/admin/gamification/settings"
-                    className="text-brand-600 hover:underline"
+                    className="text-brand-600 underline underline-offset-2 hover:no-underline"
                   >
                     Admin → Gamification → Settings
                   </a>
@@ -175,7 +175,7 @@ const AdminSettingsPage = () => {
                   <button
                     type="submit"
                     disabled={updateSetting.isPending}
-                    className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                    className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-on-brand hover:bg-brand-700 disabled:opacity-50"
                   >
                     <Save className="w-4 h-4" />
                     {updateSetting.isPending ? 'Saving…' : 'Save'}

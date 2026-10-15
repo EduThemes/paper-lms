@@ -54,7 +54,7 @@ export default function FolderSettingsDialog({ folder, tree, open, onOpenChange,
           {error && <p role="alert" className="text-sm text-accent-danger">{error}</p>}
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => onOpenChange(false)} className="px-4 py-2 text-sm text-text-secondary">Cancel</button>
-            <button type="submit" disabled={saving} className="px-4 py-2 bg-brand-600 text-white rounded-md text-sm font-medium disabled:opacity-50">
+            <button type="submit" disabled={saving} className="px-4 py-2 bg-brand-600 text-on-brand rounded-md text-sm font-medium disabled:opacity-50">
               {saving ? 'Saving…' : 'Save'}
             </button>
           </div>

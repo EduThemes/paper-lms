@@ -434,7 +434,7 @@ const AssignmentPage = () => {
         <form onSubmit={handleSaveEdit} className="bg-surface-0 rounded-lg shadow p-6 mb-6 space-y-4">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-lg font-semibold text-text-primary">Edit Assignment</h3>
-            <button type="button" onClick={() => { setEditing(false); setIsDirty(false); }} className="text-text-disabled hover:text-text-secondary">
+            <button type="button" onClick={() => { setEditing(false); setIsDirty(false); }} className="text-text-tertiary hover:text-text-secondary">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -608,7 +608,7 @@ const AssignmentPage = () => {
               <div className="mt-2 ml-6">
                 <label className="block text-sm font-medium text-text-secondary mb-1">Group Category</label>
                 {groupCategories.length === 0 ? (
-                  <p className="text-sm text-text-disabled">No group categories found for this course. Create one on the Groups page first.</p>
+                  <p className="text-sm text-text-tertiary">No group categories found for this course. Create one on the Groups page first.</p>
                 ) : (
                   <select
                     value={editForm.group_category_id}
@@ -644,7 +644,7 @@ const AssignmentPage = () => {
             <button
               type="submit"
               disabled={saving}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
             >
               <Save className="w-4 h-4" />
               {saving ? 'Saving...' : 'Save Changes'}
@@ -691,7 +691,7 @@ const AssignmentPage = () => {
               <Calendar className="w-4 h-4" />
               <span>Due: {formatDate(!isTeacher && myDates ? myDates.due_at : assignment.due_at)}</span>
               {!isTeacher && myDates?.extra_days > 0 && (
-                <span className="ml-1 text-xs text-text-disabled">(includes a {myDates.extra_days}-day extension)</span>
+                <span className="ml-1 text-xs text-text-tertiary">(includes a {myDates.extra_days}-day extension)</span>
               )}
             </div>
             {assignment.only_visible_to_overrides && isTeacher && (
@@ -738,7 +738,7 @@ const AssignmentPage = () => {
               <span className="text-xs">File types: {assignment.allowed_extensions.join(', ')}</span>
             )}
             {assignment.submission_types && (
-              <div className="text-text-disabled">
+              <div className="text-text-tertiary">
                 Type: {(() => {
                   const typeLabels = {
                     online_text_entry: 'Text Entry',
@@ -775,7 +775,7 @@ const AssignmentPage = () => {
             <Users className="w-4 h-4" />
             <span>Section Due Dates</span>
           </h3>
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-border-default">
             {overrides.map((override) => {
               const section = sections.find((s) => s.id === override.course_section_id);
               const label = override.title || section?.name || `Section ${override.course_section_id || ''}`;
@@ -793,7 +793,7 @@ const AssignmentPage = () => {
                       <span className="text-xs">Locks: {formatDate(override.lock_at)}</span>
                     )}
                     {!override.due_at && !override.unlock_at && !override.lock_at && (
-                      <span className="text-xs text-text-disabled">No dates set</span>
+                      <span className="text-xs text-text-tertiary">No dates set</span>
                     )}
                   </div>
                 </div>
@@ -853,7 +853,7 @@ const AssignmentPage = () => {
               })}
             </div>
           ) : (
-            <p className="text-sm text-text-disabled mb-3">No outcomes aligned to this assignment yet.</p>
+            <p className="text-sm text-text-tertiary mb-3">No outcomes aligned to this assignment yet.</p>
           )}
 
           {/* Add alignment dropdown */}
@@ -884,7 +884,7 @@ const AssignmentPage = () => {
             </div>
           )}
           {courseOutcomes.length === 0 && (
-            <p className="text-xs text-text-disabled">
+            <p className="text-xs text-text-tertiary">
               No outcomes found for this course. <Link to={`/courses/${courseId}/outcomes`} className="text-brand-600 hover:underline">Create outcomes</Link> first.
             </p>
           )}
@@ -1014,7 +1014,7 @@ const AssignmentPage = () => {
                     <div key={review.id} className="p-4">
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-3">
-                          <User className="w-5 h-5 text-text-disabled" />
+                          <User className="w-5 h-5 text-text-tertiary" />
                           <span className="text-sm font-medium text-text-primary">
                             Review for: {review.reviewee_name || review.submission?.user_name || `Student ${review.reviewee_id || review.user_id || ''}`}
                           </span>
@@ -1116,7 +1116,7 @@ const AssignmentPage = () => {
               )}
               <Link
                 to={`/courses/${courseId}/assignments/${assignmentId}/speedgrader`}
-                className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+                className="inline-flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
               >
                 <Zap className="w-4 h-4" />
                 <span>SpeedGrader</span>
@@ -1134,7 +1134,7 @@ const AssignmentPage = () => {
                   <div key={submission.id || submission.user_id} className="p-4">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center space-x-3">
-                        <User className="w-5 h-5 text-text-disabled" />
+                        <User className="w-5 h-5 text-text-tertiary" />
                         <span className="font-medium text-text-primary">
                           {getStudentName(submission)}
                         </span>
@@ -1144,7 +1144,7 @@ const AssignmentPage = () => {
                       </div>
                       <div className="flex items-center space-x-3">
                         {submission.submitted_at && (
-                          <span className="text-xs text-text-disabled">
+                          <span className="text-xs text-text-tertiary">
                             {formatDate(submission.submitted_at)}
                           </span>
                         )}
@@ -1238,9 +1238,9 @@ const AssignmentPage = () => {
                     return (
                       <div key={review.id} className="p-3 flex items-center justify-between">
                         <div className="flex items-center gap-2 text-sm">
-                          <User className="w-4 h-4 text-text-disabled" />
+                          <User className="w-4 h-4 text-text-tertiary" />
                           <span className="font-medium text-text-primary">{reviewerName}</span>
-                          <ArrowRight className="w-4 h-4 text-text-disabled" />
+                          <ArrowRight className="w-4 h-4 text-text-tertiary" />
                           <span className="text-text-secondary">{revieweeName}</span>
                         </div>
                         <div className="flex items-center gap-2">

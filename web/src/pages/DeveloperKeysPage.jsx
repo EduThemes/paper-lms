@@ -143,7 +143,7 @@ const DeveloperKeysPage = () => {
             setShowForm(!showForm);
             setNewKeyData(null);
           }}
-          className="flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
+          className="flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
         >
           <Plus className="w-4 h-4" />
           Add Developer Key
@@ -209,7 +209,7 @@ const DeveloperKeysPage = () => {
                 </div>
               </div>
             </div>
-            <button onClick={() => setNewKeyData(null)} className="text-text-disabled hover:text-text-secondary">
+            <button onClick={() => setNewKeyData(null)} className="text-text-tertiary hover:text-text-secondary">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -297,7 +297,7 @@ const DeveloperKeysPage = () => {
               <button
                 type="submit"
                 disabled={creating}
-                className="bg-accent-success text-white px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50"
+                className="bg-accent-success text-on-accent px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50"
               >
                 {creating ? 'Creating...' : 'Create Key'}
               </button>
@@ -332,7 +332,7 @@ const DeveloperKeysPage = () => {
               <button
                 onClick={() => handleDelete(deleteConfirm)}
                 disabled={deleting}
-                className="bg-accent-danger text-white px-4 py-2 rounded-md hover:bg-accent-danger/90 text-sm disabled:opacity-50"
+                className="bg-accent-danger text-on-accent px-4 py-2 rounded-md hover:bg-accent-danger/90 text-sm disabled:opacity-50"
               >
                 {deleting ? 'Deleting...' : 'Delete Key'}
               </button>
@@ -349,7 +349,7 @@ const DeveloperKeysPage = () => {
 </div>
       ) : keys.length === 0 ? (
         <div className="bg-surface-0 rounded-lg shadow p-12 text-center">
-          <KeyRound className="w-12 h-12 text-text-disabled mx-auto mb-4" />
+          <KeyRound className="w-12 h-12 text-text-tertiary mx-auto mb-4" />
           <h3 className="text-lg font-medium text-text-primary mb-1">No Developer Keys</h3>
           <p className="text-text-tertiary text-sm">
             No developer keys have been created yet. Create one to enable OAuth2 integrations.
@@ -388,7 +388,7 @@ const DeveloperKeysPage = () => {
                 <tr key={key.id} className="hover:bg-surface-1">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center gap-2">
-                      <KeyRound className="w-4 h-4 text-text-disabled flex-shrink-0" />
+                      <KeyRound className="w-4 h-4 text-text-tertiary flex-shrink-0" />
                       <div>
                         <span className="text-sm font-medium text-text-primary">{key.name || 'Unnamed'}</span>
                         {key.email && (
@@ -445,7 +445,7 @@ const DeveloperKeysPage = () => {
                         {key.workflow_state === 'active' ? (
                           <ToggleRight className="w-5 h-5 text-accent-success" />
                         ) : (
-                          <ToggleLeft className="w-5 h-5 text-text-disabled" />
+                          <ToggleLeft className="w-5 h-5 text-text-tertiary" />
                         )}
                       </button>
                       <button

@@ -368,7 +368,7 @@ const CustomRolesPage = () => {
               if (!showCreateForm) applyBaseDefaults('teacher', accountId, setFormData);
               setShowCreateForm(!showCreateForm);
             }}
-            className="flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+            className="flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
             aria-expanded={showCreateForm}
           >
             <Plus className="w-4 h-4" aria-hidden="true" />
@@ -395,7 +395,7 @@ const CustomRolesPage = () => {
           <div className="bg-surface-0 rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">Clone Role: {showCloneModal.name}</h3>
-              <button onClick={() => setShowCloneModal(null)} className="text-text-disabled hover:text-text-secondary" aria-label="Close dialog">
+              <button onClick={() => setShowCloneModal(null)} className="text-text-tertiary hover:text-text-secondary" aria-label="Close dialog">
                 <X className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
@@ -422,7 +422,7 @@ const CustomRolesPage = () => {
               </button>
               <button
                 onClick={handleClone}
-                className="bg-brand-600 text-white px-4 py-2 rounded-md text-sm hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+                className="bg-brand-600 text-on-brand px-4 py-2 rounded-md text-sm hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
               >
                 Clone Role
               </button>
@@ -521,7 +521,7 @@ const CustomRolesPage = () => {
                 </span>
               </div>
               <div className="relative mb-3">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-disabled" aria-hidden="true" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" aria-hidden="true" />
                 <input
                   type="text"
                   value={permSearch}
@@ -533,7 +533,7 @@ const CustomRolesPage = () => {
                 {permSearch && (
                   <button
                     onClick={() => setPermSearch('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-text-disabled hover:text-text-secondary"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-secondary"
                     aria-label="Clear search"
                   >
                     <X className="w-4 h-4" aria-hidden="true" />
@@ -584,12 +584,12 @@ const CustomRolesPage = () => {
                                 {formData.permissions[perm.name] ? (
                                   <ToggleRight className="w-8 h-5 text-brand-600" aria-hidden="true" />
                                 ) : (
-                                  <ToggleLeft className="w-8 h-5 text-text-disabled" aria-hidden="true" />
+                                  <ToggleLeft className="w-8 h-5 text-text-tertiary" aria-hidden="true" />
                                 )}
                               </button>
                               <div className="min-w-0">
                                 <span className="text-sm font-medium text-text-primary">{perm.label}</span>
-                                <span className="ml-2 text-xs text-text-disabled font-mono">{perm.name}</span>
+                                <span className="ml-2 text-xs text-text-tertiary font-mono">{perm.name}</span>
                               </div>
                             </div>
                             <div className="relative flex-shrink-0">
@@ -599,7 +599,7 @@ const CustomRolesPage = () => {
                                 onMouseLeave={() => setTooltipPerm(null)}
                                 onFocus={() => setTooltipPerm(perm.name)}
                                 onBlur={() => setTooltipPerm(null)}
-                                className="text-text-disabled hover:text-text-secondary p-1 focus:outline-none focus:ring-2 focus:ring-brand-500 rounded"
+                                className="text-text-tertiary hover:text-text-secondary p-1 focus:outline-none focus:ring-2 focus:ring-brand-500 rounded"
                                 aria-label={`Info about ${perm.label}`}
                               >
                                 <Info className="w-4 h-4" aria-hidden="true" />
@@ -627,7 +627,7 @@ const CustomRolesPage = () => {
             <div className="flex items-center space-x-3">
               <button
                 type="submit"
-                className="bg-brand-600 text-white px-4 py-2 rounded-md text-sm hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+                className="bg-brand-600 text-on-brand px-4 py-2 rounded-md text-sm hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
               >
                 {editingRole ? 'Update Role' : 'Create Role'}
               </button>
@@ -646,8 +646,8 @@ const CustomRolesPage = () => {
       {/* Roles List */}
       {roles.length === 0 ? (
         <div className="bg-surface-0 rounded-lg shadow p-12 text-center">
-          <Shield className="w-12 h-12 text-text-disabled mx-auto mb-4" aria-hidden="true" />
-          <h3 className="text-lg font-medium text-text-primary mb-1">No custom roles</h3>
+          <Shield className="w-12 h-12 text-text-tertiary mx-auto mb-4" aria-hidden="true" />
+          <h2 className="text-lg font-medium text-text-primary mb-1">No custom roles</h2>
           <p className="text-text-tertiary text-sm">Create your first custom role to grant granular permissions beyond the default Canvas roles.</p>
         </div>
       ) : (
@@ -698,7 +698,7 @@ const CustomRolesPage = () => {
                     <div className="flex items-center justify-end space-x-2">
                       <button
                         onClick={() => handleEdit(role)}
-                        className="text-text-disabled hover:text-brand-600 p-1 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        className="text-text-tertiary hover:text-brand-600 p-1 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
                         aria-label={`Edit ${role.name}`}
                         title="Edit role"
                       >
@@ -706,7 +706,7 @@ const CustomRolesPage = () => {
                       </button>
                       <button
                         onClick={() => { setShowCloneModal(role); setCloneName(role.name + ' (Copy)'); }}
-                        className="text-text-disabled hover:text-indigo-600 p-1 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="text-text-tertiary hover:text-indigo-600 p-1 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         aria-label={`Clone ${role.name}`}
                         title="Clone role"
                       >
@@ -714,7 +714,7 @@ const CustomRolesPage = () => {
                       </button>
                       <button
                         onClick={() => handleDelete(role.id)}
-                        className="text-text-disabled hover:text-accent-danger p-1 rounded focus:outline-none focus:ring-2 focus:ring-accent-danger"
+                        className="text-text-tertiary hover:text-accent-danger p-1 rounded focus:outline-none focus:ring-2 focus:ring-accent-danger"
                         aria-label={`Delete ${role.name}`}
                         title="Delete role"
                       >

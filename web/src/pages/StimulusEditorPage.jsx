@@ -134,7 +134,7 @@ const StimulusEditorPage = () => {
           </p>
         </div>
         {!isEditing && (
-          <button onClick={handleCreate} className="inline-flex items-center gap-1 px-3 py-1.5 bg-brand-600 text-white rounded hover:bg-brand-700 text-sm font-medium">
+          <button onClick={handleCreate} className="inline-flex items-center gap-1 px-3 py-1.5 bg-brand-600 text-on-brand rounded hover:bg-brand-700 text-sm font-medium">
             <Plus className="w-4 h-4" /> {t('stimulusEditor.newStimulus')}
           </button>
         )}
@@ -180,7 +180,7 @@ const StimulusEditorPage = () => {
             </div>
             <div className="flex items-center gap-2">
               <button onClick={handleSave} disabled={saving}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
+                className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-on-brand rounded hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
                 <Save className="w-4 h-4" /> {saving
                   ? t('common.saving')
                   : isNew
@@ -243,11 +243,11 @@ const StimulusEditorPage = () => {
                     </td>
                     <td className="px-2 py-2 text-right">
                       <Link to={`/courses/${courseId}/stimuli/${s.id}`}
-                            className="inline-block p-1 text-text-disabled hover:text-brand-600" aria-label={t('stimulusEditor.editStimulusAria')}>
+                            className="inline-block p-1 text-text-tertiary hover:text-brand-600" aria-label={t('stimulusEditor.editStimulusAria')}>
                         <Pencil className="w-3.5 h-3.5" />
                       </Link>
                       <button onClick={() => handleDelete(s)}
-                              className="inline-block p-1 text-text-disabled hover:text-accent-danger" aria-label={t('stimulusEditor.deleteStimulusAria')}>
+                              className="inline-block p-1 text-text-tertiary hover:text-accent-danger" aria-label={t('stimulusEditor.deleteStimulusAria')}>
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </td>

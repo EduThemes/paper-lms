@@ -27,13 +27,13 @@ export const ChoiceEditor = ({ answers, onChange, fixed = false }) => {
   const setText = (i, text) => onChange(list.map((a, idx) => (idx === i ? { ...a, text } : a)));
   return (
     <div>
-      <span className="block text-xs font-medium text-text-secondary mb-2">Answers <span className="text-text-disabled">(mark the correct one)</span></span>
+      <span className="block text-xs font-medium text-text-secondary mb-2">Answers <span className="text-text-tertiary">(mark the correct one)</span></span>
       <div className="space-y-2">
         {list.map((a, i) => (
           <div key={a.id || i} className="flex items-center gap-2">
             <button type="button" onClick={() => markCorrect(i)} aria-pressed={a.weight > 0}
               aria-label={`Mark answer ${i + 1} correct`}
-              className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${a.weight > 0 ? 'border-accent-success bg-accent-success text-white' : 'border-border-strong'}`}>
+              className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${a.weight > 0 ? 'border-accent-success bg-accent-success text-on-accent' : 'border-border-strong'}`}>
               {a.weight > 0 && <Check className="w-3 h-3" />}
             </button>
             <input type="text" value={a.text ?? ''} readOnly={fixed} onChange={(e) => setText(i, e.target.value)}
@@ -41,7 +41,7 @@ export const ChoiceEditor = ({ answers, onChange, fixed = false }) => {
               placeholder={`Answer ${i + 1}`} aria-label={`Answer ${i + 1}`} />
             {!fixed && list.length > 2 && (
               <button type="button" onClick={() => onChange(list.filter((_, idx) => idx !== i))}
-                className="p-1 text-text-disabled hover:text-accent-danger" aria-label={`Remove answer ${i + 1}`}>
+                className="p-1 text-text-tertiary hover:text-accent-danger" aria-label={`Remove answer ${i + 1}`}>
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             )}
@@ -63,7 +63,7 @@ export const AcceptedAnswersEditor = ({ answers, onChange }) => {
   const list = Array.isArray(answers) ? answers : [];
   return (
     <div>
-      <span className="block text-xs font-medium text-text-secondary mb-2">Acceptable answers <span className="text-text-disabled">(case-insensitive)</span></span>
+      <span className="block text-xs font-medium text-text-secondary mb-2">Acceptable answers <span className="text-text-tertiary">(case-insensitive)</span></span>
       <div className="space-y-2">
         {list.map((a, i) => (
           <div key={a.id || i} className="flex items-center gap-2">
@@ -72,7 +72,7 @@ export const AcceptedAnswersEditor = ({ answers, onChange }) => {
               placeholder="Acceptable answer" aria-label={`Acceptable answer ${i + 1}`} />
             {list.length > 1 && (
               <button type="button" onClick={() => onChange(list.filter((_, idx) => idx !== i))}
-                className="p-1 text-text-disabled hover:text-accent-danger" aria-label={`Remove acceptable answer ${i + 1}`}>
+                className="p-1 text-text-tertiary hover:text-accent-danger" aria-label={`Remove acceptable answer ${i + 1}`}>
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             )}

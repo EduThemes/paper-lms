@@ -467,12 +467,12 @@ const CourseSettingsPage = () => {
         </div>
 
         <div className="md:flex md:gap-6">
-          <aside
-            className="hidden md:block w-48 flex-shrink-0 sticky top-4 self-start"
+          <div
+            className="hidden md:flex md:flex-col gap-1 w-48 flex-shrink-0 sticky top-4 self-start"
             role="tablist"
             aria-label="Settings sections"
+            aria-orientation="vertical"
           >
-            <nav className="flex flex-col gap-1">
               {TABS.map((tab) => (
                 <button
                   key={tab.id}
@@ -496,8 +496,7 @@ const CourseSettingsPage = () => {
                   )}
                 </button>
               ))}
-            </nav>
-          </aside>
+          </div>
 
           <div className={cn('flex-1 min-w-0', isDirty && 'pb-20')}>
           {/* General */}

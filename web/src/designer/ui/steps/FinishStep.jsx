@@ -193,7 +193,7 @@ export function FinishStep() {
         <button
           type="button"
           onClick={() => setStep('customize')}
-          className="text-sm font-medium text-brand-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-brand-300"
+          className="text-sm font-medium text-brand-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {t('finish.keepEditing')}
         </button>

@@ -1,4 +1,5 @@
 import * as React from 'react';
+import PropTypes from 'prop-types';
 import { cn } from '@/lib/utils';
 
 const Card = React.forwardRef(({ className, ...props }, ref) => (
@@ -15,14 +16,16 @@ const CardHeader = React.forwardRef(({ className, ...props }, ref) => (
 ));
 CardHeader.displayName = 'CardHeader';
 
-const CardTitle = React.forwardRef(({ className, ...props }, ref) => (
-  <h3
+// `as` sets the heading level so a card can sit at the right place in the page outline.
+const CardTitle = React.forwardRef(({ className, as: Heading = 'h3', ...props }, ref) => (
+  <Heading
     ref={ref}
     className={cn('text-2xl font-semibold leading-none tracking-tight', className)}
     {...props}
   />
 ));
 CardTitle.displayName = 'CardTitle';
+CardTitle.propTypes = { as: PropTypes.elementType, className: PropTypes.string };
 
 const CardDescription = React.forwardRef(({ className, ...props }, ref) => (
   <p ref={ref} className={cn('text-sm text-muted-foreground', className)} {...props} />

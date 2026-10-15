@@ -67,7 +67,7 @@ const AccommodationExtensionsPanel = ({ courseId, assignmentId, students }) => {
                 <td className="py-1">{nameOf(r.user_id)}</td>
                 <td className="py-1">{fmt(r.original_due_at)}</td>
                 <td className="py-1">
-                  {fmt(r.adjusted_due_at)} <span className="text-text-disabled">(+{r.extra_days}d)</span>
+                  {fmt(r.adjusted_due_at)} <span className="text-text-tertiary">(+{r.extra_days}d)</span>
                 </td>
               </tr>
             ))}

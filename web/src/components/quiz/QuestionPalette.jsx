@@ -9,7 +9,7 @@ const QuestionButton = ({ idx, current, answered, onClick }) => (
     aria-label={`Question ${idx + 1}${answered ? ', answered' : ', unanswered'}${current ? ', current' : ''}`}
     className={`w-9 h-9 rounded text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-1 transition-colors ${
       current
-        ? 'bg-brand-600 text-white'
+        ? 'bg-brand-600 text-on-brand'
         : answered
         ? 'bg-accent-success/20 text-accent-success border border-green-300 hover:bg-green-200'
         : 'bg-surface-2 text-text-secondary border border-border-strong hover:bg-border-default'

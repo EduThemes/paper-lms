@@ -51,7 +51,7 @@ export default function OutcomeAlignments({ courseId, outcomeId, canManage }) {
                 {byId.get(Number(a.assignment_id))?.name || `Assignment ${a.assignment_id}`}
               </Link>
               {canManage && (
-                <button type="button" aria-label="Remove alignment" onClick={() => unalign.mutate(a.id)} className="p-0.5 text-text-disabled hover:text-accent-danger">
+                <button type="button" aria-label="Remove alignment" onClick={() => unalign.mutate(a.id)} className="p-0.5 text-text-tertiary hover:text-accent-danger">
                   <X className="w-3.5 h-3.5" />
                 </button>
               )}
@@ -65,7 +65,7 @@ export default function OutcomeAlignments({ courseId, outcomeId, canManage }) {
             <option value="">Align an assignment…</option>
             {available.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
-          <button type="button" disabled={!pick || align.isPending} onClick={() => align.mutate(pick)} className="px-3 py-1 text-sm rounded bg-brand-600 text-white disabled:opacity-50">Align</button>
+          <button type="button" disabled={!pick || align.isPending} onClick={() => align.mutate(pick)} className="px-3 py-1 text-sm rounded bg-brand-600 text-on-brand disabled:opacity-50">Align</button>
         </div>
       )}
       {err && <p role="alert" className="text-xs text-accent-danger mt-1">{err.message}</p>}

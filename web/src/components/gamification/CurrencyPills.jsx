@@ -85,9 +85,10 @@ export default function CurrencyPills({ mode = 'strip' }) {
 
   const content =
     mode === 'strip' ? (
-      <div className="flex justify-end items-center h-10 px-6 border-b border-surface-raised bg-surface-0">
+      // A landmark of its own: the strip sits above <main>, outside the page content.
+      <aside aria-label="Currency balances" className="flex justify-end items-center h-10 px-6 border-b border-surface-raised bg-surface-0">
         {pillRow}
-      </div>
+      </aside>
     ) : (
       pillRow
     );

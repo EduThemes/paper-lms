@@ -57,7 +57,7 @@ const AttachmentPreview = ({ file, height = 480, showLink = true }) => {
         >
           {kind === 'other' ? <FileText className="w-4 h-4" /> : <Download className="w-3.5 h-3.5" />}
           <span className="truncate">{name}</span>
-          {file.size ? <span className="text-xs text-text-disabled">({formatSize(file.size)})</span> : null}
+          {file.size ? <span className="text-xs text-text-tertiary">({formatSize(file.size)})</span> : null}
         </a>
       )}
     </div>

@@ -131,12 +131,14 @@ const NotificationPreferencesPage = () => {
             <div className="bg-surface-0 rounded-lg shadow p-6">
               <div className="flex items-center gap-2 mb-4">
                 <Settings className="w-5 h-5 text-text-tertiary" />
-                <h3 className="text-lg font-semibold text-text-primary">{t('notificationPreferences.deliveryPolicy')}</h3>
+                <h3 id="notif-policy-label" className="text-lg font-semibold text-text-primary">{t('notificationPreferences.deliveryPolicy')}</h3>
               </div>
-              <p className="text-sm text-text-secondary mb-4">
+              <p id="notif-policy-desc" className="text-sm text-text-secondary mb-4">
                 {t('notificationPreferences.deliveryPolicyDescription')}
               </p>
               <select
+                aria-labelledby="notif-policy-label"
+                aria-describedby="notif-policy-desc"
                 value={preferences.policy}
                 onChange={handlePolicyChange}
                 className="w-full sm:w-64 rounded-md border border-border-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
@@ -158,20 +160,23 @@ const NotificationPreferencesPage = () => {
               <p className="text-sm text-text-secondary mb-4">
                 {t('notificationPreferences.notificationTypesDescription')}
               </p>
-              <div className="divide-y divide-gray-100">
+              <div className="divide-y divide-border-default">
                 {NOTIFICATION_TYPES.map((type) => (
                   <div key={type.key} className="flex items-center justify-between py-4 first:pt-0 last:pb-0">
                     <div>
-                      <p className="text-sm font-medium text-text-primary">{type.label}</p>
-                      <p className="text-xs text-text-tertiary mt-0.5">{type.description}</p>
+                      <p id={`notif-${type.key}-label`} className="text-sm font-medium text-text-primary">{type.label}</p>
+                      <p id={`notif-${type.key}-desc`} className="text-xs text-text-tertiary mt-0.5">{type.description}</p>
                     </div>
                     <button
+                      type="button"
                       onClick={() => handleToggle(type.key)}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 ${
-                        preferences[type.key] ? 'bg-brand-600' : 'bg-border-default'
+                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 ${
+                        preferences[type.key] ? 'bg-brand-600' : 'bg-text-tertiary'
                       }`}
                       role="switch"
-                      aria-checked={preferences[type.key]}
+                      aria-checked={!!preferences[type.key]}
+                      aria-labelledby={`notif-${type.key}-label`}
+                      aria-describedby={`notif-${type.key}-desc`}
                     >
                       <span
                         className={`inline-block h-4 w-4 transform rounded-full bg-surface-0 transition-transform ${
@@ -189,7 +194,7 @@ const NotificationPreferencesPage = () => {
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="flex items-center gap-2 bg-brand-600 text-white px-6 py-2.5 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50 transition-colors"
+                className="flex items-center gap-2 bg-brand-600 text-on-brand px-6 py-2.5 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50 transition-colors"
               >
                 {saving ? (
                   <>{t('common.saving')}</>

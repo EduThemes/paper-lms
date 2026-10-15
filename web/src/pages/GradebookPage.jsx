@@ -178,7 +178,7 @@ const SetDefaultGradeDialog = ({ open, onOpenChange, assignment, students, getCe
           <button
             onClick={handleConfirm}
             disabled={submitting || ungraded.length === 0}
-            className="px-4 py-2 text-sm bg-brand-600 text-white rounded-md hover:bg-brand-700 disabled:opacity-50"
+            className="px-4 py-2 text-sm bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 disabled:opacity-50"
           >
             {submitting ? 'Applying…' : `Apply to ${ungraded.length}`}
           </button>
@@ -293,7 +293,7 @@ const CurveDialog = ({ open, onOpenChange, assignment, students, getCellData, on
           <button
             onClick={handleConfirm}
             disabled={submitting || stats.count === 0}
-            className="px-4 py-2 text-sm bg-brand-600 text-white rounded-md hover:bg-brand-700 disabled:opacity-50"
+            className="px-4 py-2 text-sm bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 disabled:opacity-50"
           >
             {submitting ? 'Curving…' : `Curve ${stats.count} scores`}
           </button>
@@ -423,7 +423,7 @@ const MessageStudentsDialog = ({ open, onOpenChange, assignment, students, getCe
           <button
             onClick={handleSend}
             disabled={submitting || recipients.length === 0 || !subject || !body}
-            className="px-4 py-2 text-sm bg-brand-600 text-white rounded-md hover:bg-brand-700 disabled:opacity-50"
+            className="px-4 py-2 text-sm bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 disabled:opacity-50"
           >
             {submitting ? 'Sending…' : `Send to ${recipients.length}`}
           </button>
@@ -462,7 +462,7 @@ const KeyboardShortcutsDialog = ({ open, onOpenChange }) => (
       <DialogFooter>
         <button
           onClick={() => onOpenChange(false)}
-          className="px-4 py-2 text-sm bg-brand-600 text-white rounded-md hover:bg-brand-700"
+          className="px-4 py-2 text-sm bg-brand-600 text-on-brand rounded-md hover:bg-brand-700"
         >
           Close
         </button>
@@ -590,9 +590,9 @@ const GradebookCell = memo(function GradebookCell({
         />
       )}
       {anonymized ? (
-        <span className="text-xs text-text-disabled italic" title="Grades are hidden while students are anonymized">Anonymous</span>
+        <span className="text-xs text-text-tertiary italic" title="Grades are hidden while students are anonymized">Anonymous</span>
       ) : isExcused ? (
-        <span className="text-xs text-text-disabled italic">EX</span>
+        <span className="text-xs text-text-tertiary italic">EX</span>
       ) : (
         <div
           className={isMissing ? 'line-through text-accent-danger' : ''}
@@ -693,7 +693,7 @@ const StudentRowHeader = memo(function StudentRowHeader({
             )}
           </span>
         ) : (
-          <span className="text-text-disabled">&mdash;</span>
+          <span className="text-text-tertiary">&mdash;</span>
         )}
       </div>
     </div>
@@ -1086,7 +1086,7 @@ const Legend = () => (
     <Badge className="border-green-300 bg-accent-success/10 text-accent-success">Graded</Badge>
     <Badge className="border-yellow-300 bg-accent-warning/10 text-accent-warning">Submitted</Badge>
     <Badge className="border-red-300 bg-accent-danger/10 text-accent-danger">Missing</Badge>
-    <Badge className="border-amber-300 bg-accent-warning/10 text-amber-800">
+    <Badge className="border-accent-warning/40 bg-accent-warning/10 text-accent-warning">
       <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-danger mr-1" />
       Late
     </Badge>

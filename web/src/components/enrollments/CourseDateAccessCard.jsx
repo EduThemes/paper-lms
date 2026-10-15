@@ -60,7 +60,7 @@ export default function CourseDateAccessCard({ courseId, course, onSaved }) {
           type="button"
           disabled={!dirty || save.isPending}
           onClick={() => { setMessage(null); save.mutate(); }}
-          className="px-3 py-1.5 rounded-md bg-brand-600 text-white text-sm font-medium hover:bg-brand-700 disabled:opacity-50"
+          className="px-3 py-1.5 rounded-md bg-brand-600 text-on-brand text-sm font-medium hover:bg-brand-700 disabled:opacity-50"
         >
           {save.isPending ? 'Saving...' : 'Save participation settings'}
         </button>

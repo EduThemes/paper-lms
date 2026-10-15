@@ -217,7 +217,7 @@ export default function MathInputDialog({ open, onClose, onInsert, initialLatex 
             aria-label="LaTeX source"
             rows={4}
             autoFocus
-            className="w-full rounded-md border border-border-default bg-surface-0 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-brand-500"
+            className="w-full rounded-md border border-border-default bg-surface-0 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-brand-500"
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(); }}
           />
         ) : (

@@ -337,7 +337,7 @@ const SISImportPage = () => {
                 <button
                   type="submit"
                   disabled={uploading || !file}
-                  className="flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Upload className="w-4 h-4" />
                   {uploading ? 'Uploading...' : 'Upload & Import'}
@@ -372,7 +372,7 @@ const SISImportPage = () => {
 </div>
             ) : batches.length === 0 ? (
               <div className="text-center py-12">
-                <Upload className="w-12 h-12 text-text-disabled mx-auto mb-4" />
+                <Upload className="w-12 h-12 text-text-tertiary mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-text-primary mb-1">No Imports Yet</h3>
                 <p className="text-text-tertiary text-sm">
                   Upload a CSV file above to start importing data.
@@ -463,7 +463,7 @@ const SISImportPage = () => {
                   </h3>
                   <button
                     onClick={() => { setSelectedBatch(null); setBatchErrors([]); }}
-                    className="text-text-disabled hover:text-text-secondary"
+                    className="text-text-tertiary hover:text-text-secondary"
                   >
                     <X className="w-5 h-5" />
                   </button>

@@ -136,7 +136,7 @@ const QuizDeliverySettings = ({ courseId, quizId, quiz, onSaved }) => {
       <div className="flex items-center gap-3 mt-4">
         <button type="button" onClick={() => mutation.mutate()}
           disabled={!dirty || mutation.isPending || ipProblems.length > 0 || codeMissing}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
+          className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-on-brand rounded hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
           <Save className="w-4 h-4" /> {mutation.isPending ? 'Saving…' : 'Save Delivery Settings'}
         </button>
         {mutation.isError && <span className="text-sm text-accent-danger" role="alert">{mutation.error?.message || 'Could not save'}</span>}

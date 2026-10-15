@@ -463,7 +463,7 @@ const BlueprintPage = () => {
               <button
                 type="submit"
                 disabled={savingTemplate}
-                className="flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Settings className="w-4 h-4" />
                 {savingTemplate ? 'Saving...' : 'Save Settings'}
@@ -499,7 +499,7 @@ const BlueprintPage = () => {
               <button
                 type="submit"
                 disabled={addingCourse || !newCourseId.trim()}
-                className="flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Plus className="w-4 h-4" />
                 {addingCourse ? 'Adding...' : 'Add Course'}
@@ -620,7 +620,7 @@ const BlueprintPage = () => {
               <button
                 type="submit"
                 disabled={syncing}
-                className="flex items-center gap-2 bg-accent-success text-white px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 bg-accent-success text-on-accent px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
                 {syncing ? 'Syncing...' : 'Sync Now'}

@@ -92,15 +92,15 @@ export default function PasskeyListPage() {
         )}
 
         {loading ? (
-          <p className="text-gray-500">{t('common.loading')}</p>
+          <p className="text-text-tertiary">{t('common.loading')}</p>
         ) : rows.length === 0 ? (
-          <div className="rounded border border-dashed border-gray-300 p-8 text-center">
-            <p className="text-gray-600">
+          <div className="rounded border border-dashed border-border-strong p-8 text-center">
+            <p className="text-text-secondary">
               {t('passkeyListPage.emptyState')}
             </p>
           </div>
         ) : (
-          <ul className="divide-y divide-gray-200 rounded border border-gray-200">
+          <ul className="divide-y divide-border-default rounded border border-border-default">
             {rows.map((p) => (
               <li key={p.id} className="p-4 flex items-center justify-between gap-4">
                 <div className="flex-1">
@@ -110,7 +110,7 @@ export default function PasskeyListPage() {
                         type="text"
                         value={draftName}
                         onChange={(e) => setDraftName(e.target.value)}
-                        className="px-2 py-1 border border-gray-300 rounded flex-1"
+                        className="px-2 py-1 border border-border-strong rounded flex-1"
                         maxLength={80}
                       />
                       <button
@@ -122,7 +122,7 @@ export default function PasskeyListPage() {
                       </button>
                       <button
                         onClick={() => setEditingId(null)}
-                        className="p-1 text-gray-500 hover:bg-gray-50 rounded"
+                        className="p-1 text-text-tertiary hover:bg-surface-1 rounded"
                         aria-label={t('common.cancel')}
                       >
                         <X size={18} />
@@ -131,7 +131,7 @@ export default function PasskeyListPage() {
                   ) : (
                     <div className="flex items-center gap-2">
                       <div className="font-medium">
-                        {p.nickname || <span className="text-gray-400">{t('passkeyListPage.unnamed')}</span>}
+                        {p.nickname || <span className="text-text-tertiary">{t('passkeyListPage.unnamed')}</span>}
                       </div>
                       {p.backup_state && (
                         <span className="inline-flex items-center gap-1 text-xs text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
@@ -143,14 +143,14 @@ export default function PasskeyListPage() {
                           setEditingId(p.id);
                           setDraftName(p.nickname || '');
                         }}
-                        className="p-1 text-gray-500 hover:bg-gray-100 rounded"
+                        className="p-1 text-text-tertiary hover:bg-surface-2 rounded"
                         aria-label={t('passkeyListPage.rename')}
                       >
                         <Pencil size={14} />
                       </button>
                     </div>
                   )}
-                  <div className="text-xs text-gray-500 mt-1">
+                  <div className="text-xs text-text-tertiary mt-1">
                     {t('passkeyListPage.addedOn', { date: new Date(p.created_at).toLocaleDateString() })}
                     {p.last_used_at
                       ? ` · ${t('passkeyListPage.lastUsed', { date: new Date(p.last_used_at).toLocaleDateString() })}`

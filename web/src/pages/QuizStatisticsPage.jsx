@@ -208,10 +208,10 @@ const QuestionCard = ({ question, index, formatPercent, getDifficultyColor, getD
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <span className="text-sm font-semibold text-text-tertiary">Q{index + 1}</span>
-              <span className="text-xs text-text-disabled px-2 py-0.5 bg-surface-2 rounded">
+              <span className="text-xs text-text-tertiary px-2 py-0.5 bg-surface-2 rounded">
                 {typeLabel[q.question_type] || q.question_type}
               </span>
-              <span className="text-xs text-text-disabled">{q.points_possible} pt{q.points_possible !== 1 ? 's' : ''}</span>
+              <span className="text-xs text-text-tertiary">{q.points_possible} pt{q.points_possible !== 1 ? 's' : ''}</span>
             </div>
             <SafeHTML className="text-sm text-text-primary" html={q.question_text} />
           </div>
@@ -219,7 +219,7 @@ const QuestionCard = ({ question, index, formatPercent, getDifficultyColor, getD
             <span className={`inline-block text-xs font-semibold px-2 py-1 rounded ${getDifficultyColor(q.difficulty_index)}`}>
               {formatPercent(q.difficulty_index)} correct
             </span>
-            <p className="text-xs text-text-disabled mt-0.5">{getDifficultyLabel(q.difficulty_index)}</p>
+            <p className="text-xs text-text-tertiary mt-0.5">{getDifficultyLabel(q.difficulty_index)}</p>
           </div>
         </div>
       </div>
@@ -273,7 +273,7 @@ const QuestionCard = ({ question, index, formatPercent, getDifficultyColor, getD
                   </div>
                   <div className="text-right flex-shrink-0 min-w-[70px]">
                     <span className="text-sm font-semibold text-text-secondary">{ans.count}</span>
-                    <span className="text-xs text-text-disabled ml-1">({formatPercent(ans.percent)})</span>
+                    <span className="text-xs text-text-tertiary ml-1">({formatPercent(ans.percent)})</span>
                   </div>
                 </div>
               );
@@ -283,10 +283,10 @@ const QuestionCard = ({ question, index, formatPercent, getDifficultyColor, getD
 
         {/* No answer distribution available for non-MC types */}
         {!hasAnswerDistribution && q.question_type !== 'essay' && (
-          <p className="text-xs text-text-disabled italic">Answer distribution not available for this question type.</p>
+          <p className="text-xs text-text-tertiary italic">Answer distribution not available for this question type.</p>
         )}
         {q.question_type === 'essay' && (
-          <p className="text-xs text-text-disabled italic">Essay questions require manual grading.</p>
+          <p className="text-xs text-text-tertiary italic">Essay questions require manual grading.</p>
         )}
       </div>
     </div>

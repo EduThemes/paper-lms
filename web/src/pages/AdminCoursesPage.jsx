@@ -77,7 +77,7 @@ const AdminCoursesPage = () => {
           </div>
           <button
             onClick={() => setShowCreate((v) => !v)}
-            className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+            className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-on-brand hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
           >
             <Plus className="w-4 h-4" />
             New Course
@@ -96,7 +96,7 @@ const AdminCoursesPage = () => {
                 <label htmlFor="course-code" className="block text-xs font-medium text-text-secondary mb-1">Course code</label>
                 <input id="course-code" name="course_code" required className="w-full rounded-md border border-border-strong bg-surface-0 px-3 py-2 text-sm" placeholder="MATH101" />
               </div>
-              <button type="submit" disabled={creating} className="rounded-md bg-accent-success px-4 py-2 text-sm font-medium text-white hover:bg-accent-success/90 disabled:opacity-50">
+              <button type="submit" disabled={creating} className="rounded-md bg-accent-success px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent-success/90 disabled:opacity-50">
                 {creating ? 'Creating…' : 'Create'}
               </button>
               <button type="button" onClick={() => setShowCreate(false)} className="px-3 py-2 text-sm text-text-tertiary hover:text-text-secondary">
@@ -136,7 +136,7 @@ const AdminCoursesPage = () => {
             </p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-lg border border-border-default bg-surface-0">
+          <div className="relative overflow-x-auto rounded-lg border border-border-default bg-surface-0">
             <table className="w-full text-sm">
               <thead className="bg-surface-1 text-text-secondary">
                 <tr>
@@ -145,7 +145,7 @@ const AdminCoursesPage = () => {
                   <th className="px-4 py-2 text-left font-medium">Teachers</th>
                   <th className="px-4 py-2 text-right font-medium">Students</th>
                   <th className="px-4 py-2 text-left font-medium">State</th>
-                  <th className="px-4 py-2"></th>
+                  <th className="px-4 py-2"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>

@@ -18,7 +18,7 @@ const SortableRow = ({ item, index, onChange, onRemove, canRemove }) => {
         type="button"
         {...attributes}
         {...listeners}
-        className="cursor-grab active:cursor-grabbing text-text-disabled hover:text-text-secondary touch-none"
+        className="cursor-grab active:cursor-grabbing text-text-tertiary hover:text-text-secondary touch-none"
         aria-label={`Drag handle for item ${index + 1}`}
       >
         <GripVertical className="w-4 h-4" />
@@ -34,7 +34,7 @@ const SortableRow = ({ item, index, onChange, onRemove, canRemove }) => {
       {canRemove && (
         <button
           onClick={onRemove}
-          className="p-1 text-text-disabled hover:text-accent-danger"
+          className="p-1 text-text-tertiary hover:text-accent-danger"
           aria-label={`Remove item ${index + 1}`}
           type="button"
         >
@@ -79,7 +79,7 @@ const OrderingEditor = ({ answers, onChange }) => {
   return (
     <div>
       <label className="block text-xs font-medium text-text-secondary mb-2">
-        Items in correct order <span className="text-text-disabled">(drag to reorder)</span>
+        Items in correct order <span className="text-text-tertiary">(drag to reorder)</span>
       </label>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={list.map(i => i.id)} strategy={verticalListSortingStrategy}>

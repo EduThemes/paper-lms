@@ -36,7 +36,7 @@ export function StepHeader() {
         </div>
 
         <nav aria-label={t('steps.label')}>
-          <ol className="flex items-center gap-1">
+          <ol className="flex flex-wrap items-center gap-1">
             {STEPS.map((s, i) => {
               const current = state.step === s;
               return (
@@ -49,7 +49,7 @@ export function StepHeader() {
                     onClick={() => setStep(s)}
                     className={cn(
                       'inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
-                      current ? 'bg-brand-600 text-white dark:text-surface-0' : 'text-text-secondary hover:bg-surface-1 hover:text-text-primary',
+                      current ? 'bg-brand-600 text-on-brand' : 'text-text-secondary hover:bg-surface-1 hover:text-text-primary',
                     )}
                   >
                     <span

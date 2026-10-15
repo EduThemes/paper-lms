@@ -53,7 +53,7 @@ export default function PackageImportPanel({ courseId }) {
   return (
     <form onSubmit={submit} className="space-y-5" aria-label={t('contentImport.uploadAPackage')}>
       <div className={`border-2 border-dashed rounded-lg p-6 text-center ${upload.isPending ? 'border-brand-300 bg-brand-50' : 'border-border-strong'}`}>
-        <FileArchive className="w-10 h-10 text-text-disabled mx-auto mb-2" />
+        <FileArchive className="w-10 h-10 text-text-tertiary mx-auto mb-2" />
         <p className="text-text-secondary font-medium mb-1">
           {file ? file.name : t('contentImport.uploadAPackage')}
         </p>
@@ -106,7 +106,7 @@ export default function PackageImportPanel({ courseId }) {
       <button
         type="submit"
         disabled={!file || upload.isPending || !!dsProblem || exclude.length === PACKAGE_TYPES.length}
-        className="inline-flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="inline-flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md text-sm font-medium hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <Upload className="w-4 h-4" />
         {upload.isPending ? t('contentImport.uploading') : t('contentMigration.package.submit', 'Import package')}

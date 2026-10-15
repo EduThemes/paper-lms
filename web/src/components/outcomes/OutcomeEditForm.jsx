@@ -102,7 +102,7 @@ export default function OutcomeEditForm({ outcome, onSave, onCancel }) {
             <input aria-label={`Rating ${idx + 1} points`} type="number" min="0" step="0.5" className="w-20 border border-border-strong rounded px-2 py-1.5 text-sm" value={r.points}
               onChange={(e) => setRatings((p) => p.map((x, i) => (i === idx ? { ...x, points: e.target.value } : x)))} />
             <button type="button" aria-label={`Remove rating ${idx + 1}`} disabled={ratings.length <= 2}
-              onClick={() => setRatings((p) => p.filter((_, i) => i !== idx))} className="p-1 text-text-disabled hover:text-accent-danger disabled:opacity-40">
+              onClick={() => setRatings((p) => p.filter((_, i) => i !== idx))} className="p-1 text-text-tertiary hover:text-accent-danger disabled:opacity-40">
               <Trash2 className="w-4 h-4" />
             </button>
           </div>
@@ -112,7 +112,7 @@ export default function OutcomeEditForm({ outcome, onSave, onCancel }) {
         </button>
       </fieldset>
       <div className="flex gap-2">
-        <button type="submit" disabled={saving} className="px-3 py-1.5 text-sm rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
+        <button type="submit" disabled={saving} className="px-3 py-1.5 text-sm rounded bg-brand-600 text-on-brand hover:bg-brand-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
         <button type="button" onClick={onCancel} className="px-3 py-1.5 text-sm rounded text-text-secondary hover:bg-surface-1">Cancel</button>
       </div>
     </form>

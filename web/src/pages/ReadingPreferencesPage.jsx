@@ -79,7 +79,7 @@ export default function ReadingPreferencesPage() {
         {/* Live preview */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Live preview</CardTitle>
+            <CardTitle as="h2" className="text-lg">Live preview</CardTitle>
             <CardDescription>Updates instantly as you change settings below.</CardDescription>
           </CardHeader>
           <CardContent>
@@ -91,7 +91,7 @@ export default function ReadingPreferencesPage() {
           {/* Typography */}
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg"><Type className="h-5 w-5" /> Typography</CardTitle>
+              <CardTitle as="h2" className="flex items-center gap-2 text-lg"><Type className="h-5 w-5" /> Typography</CardTitle>
               <CardDescription>Font face and size.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -115,17 +115,19 @@ export default function ReadingPreferencesPage() {
               </div>
               <div className="flex items-center justify-between rounded-md border border-input p-3">
                 <div>
-                  <Label className="text-sm font-medium">Disable italics</Label>
-                  <p className="text-xs text-muted-foreground">Recommended for dyslexic readers.</p>
+                  <Label id="rp-no-italic-label" className="text-sm font-medium">Disable italics</Label>
+                  <p id="rp-no-italic-desc" className="text-xs text-muted-foreground">Recommended for dyslexic readers.</p>
                 </div>
                 <button
                   type="button"
                   role="switch"
-                  aria-checked={prefs.noItalic}
+                  aria-checked={!!prefs.noItalic}
+                  aria-labelledby="rp-no-italic-label"
+                  aria-describedby="rp-no-italic-desc"
                   onClick={() => setPrefs({ noItalic: !prefs.noItalic })}
                   className={[
                     'relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-                    prefs.noItalic ? 'bg-primary' : 'bg-muted',
+                    prefs.noItalic ? 'bg-primary' : 'bg-text-tertiary',
                   ].join(' ')}
                 >
                   <span className={['absolute top-0.5 h-5 w-5 rounded-full bg-surface-0 shadow transition-transform', prefs.noItalic ? 'translate-x-5' : 'translate-x-0.5'].join(' ')} />
@@ -137,7 +139,7 @@ export default function ReadingPreferencesPage() {
           {/* Spacing */}
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg"><AlignLeft className="h-5 w-5" /> Spacing</CardTitle>
+              <CardTitle as="h2" className="flex items-center gap-2 text-lg"><AlignLeft className="h-5 w-5" /> Spacing</CardTitle>
               <CardDescription>How loose the text feels.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -159,7 +161,7 @@ export default function ReadingPreferencesPage() {
           {/* Background */}
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg"><Palette className="h-5 w-5" /> Background</CardTitle>
+              <CardTitle as="h2" className="flex items-center gap-2 text-lg"><Palette className="h-5 w-5" /> Background</CardTitle>
               <CardDescription>Reduces glare and improves contrast.</CardDescription>
             </CardHeader>
             <CardContent>
@@ -183,23 +185,25 @@ export default function ReadingPreferencesPage() {
           {/* Read aloud */}
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg"><Volume2 className="h-5 w-5" /> Read-aloud</CardTitle>
+              <CardTitle as="h2" className="flex items-center gap-2 text-lg"><Volume2 className="h-5 w-5" /> Read-aloud</CardTitle>
               <CardDescription>Hear pages spoken aloud.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex items-center justify-between rounded-md border border-input p-3">
                 <div>
-                  <Label className="text-sm font-medium">Show read-aloud button</Label>
-                  <p className="text-xs text-muted-foreground">Adds a speaker icon to readable content.</p>
+                  <Label id="rp-tts-label" className="text-sm font-medium">Show read-aloud button</Label>
+                  <p id="rp-tts-desc" className="text-xs text-muted-foreground">Adds a speaker icon to readable content.</p>
                 </div>
                 <button
                   type="button"
                   role="switch"
-                  aria-checked={prefs.ttsEnabled}
+                  aria-checked={!!prefs.ttsEnabled}
+                  aria-labelledby="rp-tts-label"
+                  aria-describedby="rp-tts-desc"
                   onClick={() => setPrefs({ ttsEnabled: !prefs.ttsEnabled })}
                   className={[
                     'relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-                    prefs.ttsEnabled ? 'bg-primary' : 'bg-muted',
+                    prefs.ttsEnabled ? 'bg-primary' : 'bg-text-tertiary',
                   ].join(' ')}
                 >
                   <span className={['absolute top-0.5 h-5 w-5 rounded-full bg-surface-0 shadow transition-transform', prefs.ttsEnabled ? 'translate-x-5' : 'translate-x-0.5'].join(' ')} />

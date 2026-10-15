@@ -30,7 +30,7 @@ export default function AssignmentQuizBanner({ courseId, assignment, isTeacher }
       </p>
       <Link
         to={`/courses/${courseId}/quizzes/${quiz.id}/${isTeacher ? 'edit' : 'take'}`}
-        className="inline-flex items-center px-3 py-1.5 rounded bg-brand-600 text-white text-sm font-medium hover:bg-brand-700"
+        className="inline-flex items-center px-3 py-1.5 rounded bg-brand-600 text-on-brand text-sm font-medium hover:bg-brand-700"
       >
         {isTeacher ? 'Edit quiz' : 'Go to quiz'}
       </Link>

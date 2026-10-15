@@ -90,6 +90,7 @@ const NotificationsPage = () => {
           <h2 className="text-2xl font-bold text-text-primary">{t('notificationsPage.title')}</h2>
           <div className="flex items-center gap-3">
             <select
+              aria-label="Filter notifications"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               className="border border-border-strong rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -126,12 +127,12 @@ const NotificationsPage = () => {
           <p className="text-text-tertiary text-lg mb-1">
             {filter === 'unread' ? t('notificationsPage.noUnreadNotifications') : t('notificationsPage.noNotifications')}
           </p>
-          <p className="text-text-disabled text-sm">
+          <p className="text-text-tertiary text-sm">
             {t('notificationsPage.emptyHint')}
           </p>
         </div>
       ) : (
-        <div className="bg-surface-0 rounded-lg shadow divide-y divide-gray-100">
+        <div className="bg-surface-0 rounded-lg shadow divide-y divide-border-default">
           {notifications.map((n) => {
             const link = getNotificationLink(n);
             const icon = NOTIFICATION_ICONS[n.notification_type] || '🔔';
@@ -161,12 +162,12 @@ const NotificationsPage = () => {
                       {n.message && (
                         <p className="text-sm text-text-tertiary mt-0.5">{n.message}</p>
                       )}
-                      <p className="text-xs text-text-disabled mt-1">{formatTime(n.created_at)}</p>
+                      <p className="text-xs text-text-tertiary mt-1">{formatTime(n.created_at)}</p>
                     </div>
                     {!n.is_read && (
                       <button
                         onClick={() => handleMarkAsRead(n.id)}
-                        className="p-1.5 text-text-disabled hover:text-brand-600 hover:bg-brand-50 rounded flex-shrink-0"
+                        className="p-1.5 text-text-tertiary hover:text-brand-600 hover:bg-brand-50 rounded flex-shrink-0"
                         title={t('notificationsPage.markAsRead')}
                       >
                         <Check className="w-4 h-4" />

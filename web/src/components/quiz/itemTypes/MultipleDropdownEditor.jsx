@@ -93,7 +93,7 @@ const MultipleDropdownEditor = ({ answers, onChange, questionText }) => {
         <div key={blank_id} className="border border-border-default rounded p-3 bg-surface-1">
           <div className="text-xs font-medium text-text-secondary mb-2">
             Blank: <code className="font-mono">[{blank_id}]</code>
-            <span className="text-text-disabled font-normal ml-2">(click circle to mark correct)</span>
+            <span className="text-text-tertiary font-normal ml-2">(click circle to mark correct)</span>
           </div>
           <div className="space-y-2">
             {options.map((opt) => {
@@ -105,7 +105,7 @@ const MultipleDropdownEditor = ({ answers, onChange, questionText }) => {
                     onClick={() => setCorrect(blank_id, opt._idx)}
                     className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
                       correct
-                        ? 'border-accent-success bg-accent-success text-white'
+                        ? 'border-accent-success bg-accent-success text-on-accent'
                         : 'border-border-strong hover:border-accent-success/60'
                     }`}
                     aria-pressed={correct}
@@ -121,7 +121,7 @@ const MultipleDropdownEditor = ({ answers, onChange, questionText }) => {
                   />
                   <button
                     onClick={() => removeOption(opt._idx)}
-                    className="p-1 text-text-disabled hover:text-accent-danger"
+                    className="p-1 text-text-tertiary hover:text-accent-danger"
                     aria-label="Remove option"
                   >
                     <Trash2 className="w-3.5 h-3.5" />

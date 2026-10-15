@@ -227,7 +227,7 @@ export function SectionEditor({ section, onDone }) {
       <button
         type="button"
         onClick={onDone}
-        className="inline-flex items-center gap-1 rounded text-sm font-medium text-brand-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-brand-300"
+        className="inline-flex items-center gap-1 rounded text-sm font-medium text-brand-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <ChevronLeft className="h-4 w-4" aria-hidden="true" />
         {t('customize.doneEditing')}

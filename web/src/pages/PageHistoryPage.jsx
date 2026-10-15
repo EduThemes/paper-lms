@@ -16,7 +16,7 @@ const formatWhen = (iso) => (iso
   : '');
 
 function DiffView({ parts }) {
-  if (!parts.length) return <p className="text-sm text-text-disabled italic">No text.</p>;
+  if (!parts.length) return <p className="text-sm text-text-tertiary italic">No text.</p>;
   return (
     <div className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary" data-testid="revision-diff">
       {parts.map((p, i) => {
@@ -94,7 +94,7 @@ export default function PageHistoryPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-[18rem_1fr] gap-4">
               <nav aria-label="Revisions" className="bg-surface-0 rounded-lg shadow divide-y max-h-[70vh] overflow-y-auto">
-                {revisionsQuery.isLoading && <p className="p-4 text-sm text-text-disabled">Loading revisions…</p>}
+                {revisionsQuery.isLoading && <p className="p-4 text-sm text-text-tertiary">Loading revisions…</p>}
                 {revisionsQuery.isError && <p className="p-4 text-sm text-accent-danger">{revisionsQuery.error.message}</p>}
                 {revisions.map((rev) => {
                   const active = current && rev.revision_id === current.revision_id;
@@ -145,7 +145,7 @@ export default function PageHistoryPage() {
                                 restore.mutate(current.revision_id);
                               }
                             }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-brand-600 text-on-brand hover:bg-brand-700 disabled:opacity-50"
                           >
                             <RotateCcw className="w-4 h-4" aria-hidden="true" />
                             {restore.isPending ? 'Restoring…' : 'Restore this revision'}
@@ -159,7 +159,7 @@ export default function PageHistoryPage() {
                         previous ? <DiffView parts={diff} /> : <p className="text-sm text-text-tertiary mb-2">First revision: nothing to compare with.</p>
                       ) : null}
                       {(mode === 'view' || !previous) && (
-                        current.body ? <RichContentViewer content={current.body} /> : <p className="text-text-disabled italic">Empty page.</p>
+                        current.body ? <RichContentViewer content={current.body} /> : <p className="text-text-tertiary italic">Empty page.</p>
                       )}
                     </div>
                   </>
