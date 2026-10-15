@@ -232,7 +232,7 @@ describe('render with a custom palette', () => {
     const evil = { ...derivePalette({ primary: '#7a1fa2' }, 'x'), primary: 'red;background:url(https://evil.test/x)' };
     const html = renderPage({ ...doc, palette: evil as Palette }, theme, opts);
     expect(html).not.toContain('evil.test');
-    const noHash = (h: string) => h.replace(/data-rmt-hash="[^"]+"/, '');
+    const noHash = (h: string) => h.replace(/data-pd-hash="[^"]+"/, '');
     expect(noHash(html)).toBe(noHash(renderPage(doc, theme, opts)));
   });
 });

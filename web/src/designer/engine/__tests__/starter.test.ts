@@ -56,7 +56,7 @@ describe('createPage', () => {
     for (const L of LAYOUTS) {
       const doc = createPage(THEMES[2], 'overview', 'en', L.id);
       expect(doc.layout).toBe(L.id);
-      expect(renderPage(doc, THEMES[2], { assetBase: 'https://a.org' })).toContain(`rmt-layout-${L.id}`);
+      expect(renderPage(doc, THEMES[2], { assetBase: 'https://a.org' })).toContain(`paper-design--${L.id}`);
     }
   });
 });

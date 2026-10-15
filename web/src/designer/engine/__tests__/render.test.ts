@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createPage, LAYOUTS, renderPage, SECTION_TYPES, shortHash } from '../index';
+import { createPage, LAYOUTS, renderDesign, renderPage, SECTION_TYPES, shortHash } from '../index';
 import { attr, parseHtml, walk } from '../html';
 import type { LayoutId, PageKind, Theme } from '../types';
-import { canvasViolations } from './canvas-rules';
+import { canvasViolations, paperViolations } from './canvas-rules';
 import { THEMES } from './fixtures/themes';
 import { everySection } from './helpers';
 
@@ -17,9 +17,10 @@ describe('render matrix: every layout × kind × theme', () => {
           const doc = createPage(theme, kind, 'en', L.id);
           const html = renderPage(doc, theme, opts);
           expect(html.length).toBeGreaterThan(1500);
+          expect(paperViolations(html)).toEqual([]);
           expect(canvasViolations(html)).toEqual([]);
           // every section with content made it into the output
-          for (const s of doc.sections) expect(html).toContain(`data-rmt-section="${s.id}"`);
+          for (const s of doc.sections) expect(html).toContain(`data-pd-section="${s.id}"`);
         });
 });
 
@@ -34,10 +35,11 @@ describe('every section type in every layout', () => {
         for (const theme of THEMES) {
           const doc = { ...everySection(theme, L.id), options: { ...opt } };
           const html = renderPage(doc, theme, opts);
+          expect(paperViolations(html)).toEqual([]);
           expect(canvasViolations(html)).toEqual([]);
           const types = new Set<string>();
           walk(parseHtml(html), el => {
-            const t = attr(el, 'data-rmt-type');
+            const t = attr(el, 'data-pd-type');
             if (t) types.add(t);
           });
           for (const st of SECTION_TYPES) expect(types, `${st.type} missing`).toContain(st.type);
@@ -46,26 +48,33 @@ describe('every section type in every layout', () => {
 });
 
 describe('root wrapper and re-edit markers', () => {
-  it('carries id, data-rmt-doc, version, hash of the doc JSON, lang and paired colours', () => {
+  it('carries id, class, data-pd-doc, version, hash of the doc JSON, lang and paired colours', () => {
     const theme = THEMES[0];
     const doc = createPage(theme, 'home', 'pt', 'editorial');
     const html = renderPage(doc, theme, opts);
     const root = parseHtml(html)[0];
     expect(root.type).toBe('el');
     if (root.type !== 'el') return;
-    expect(attr(root, 'id')).toBe(`rmt-${doc.id}`);
-    expect(attr(root, 'data-rmt-doc')).toBe(doc.id);
-    expect(attr(root, 'data-rmt-v')).toBe('1');
-    expect(attr(root, 'data-rmt-hash')).toBe(shortHash(JSON.stringify(doc)));
+    expect(attr(root, 'id')).toBe(`pd-${doc.id}`);
+    expect(attr(root, 'class')).toBe('paper-design paper-design--editorial');
+    expect(attr(root, 'data-pd-doc')).toBe(doc.id);
+    expect(attr(root, 'data-pd-v')).toBe('1');
+    expect(attr(root, 'data-pd-hash')).toBe(shortHash(JSON.stringify(doc)));
+    expect(attr(root, 'data-pd-theme')).toBe(theme.id);
+    expect(attr(root, 'data-pd-layout')).toBe('editorial');
+    expect(attr(root, 'data-pd-kind')).toBe('home');
     expect(attr(root, 'lang')).toBe('pt');
-    expect(attr(root, 'style')).toMatch(/background:#ffffff; color:#222b2f/);
+    expect(attr(root, 'style')).toMatch(/background:var\(--pd-c\d+, #ffffff\); color:var\(--pd-c\d+, #222b2f\)/);
+    // without the dark colourway: plain hex
+    const plain = parseHtml(renderPage(doc, theme, { ...opts, dark: false }))[0];
+    if (plain.type === 'el') expect(attr(plain, 'style')).toMatch(/background:#ffffff; color:#222b2f/);
   });
   it('hash changes when the doc changes', () => {
     const theme = THEMES[0];
     const doc = createPage(theme, 'home', 'en');
     const a = renderPage(doc, theme, opts);
     const b = renderPage({ ...doc, options: { ...doc.options, density: 'compact' } }, theme, opts);
-    expect(/data-rmt-hash="(\w+)"/.exec(a)![1]).not.toBe(/data-rmt-hash="(\w+)"/.exec(b)![1]);
+    expect(/data-pd-hash="(\w+)"/.exec(a)![1]).not.toBe(/data-pd-hash="(\w+)"/.exec(b)![1]);
   });
 });
 
@@ -115,6 +124,7 @@ describe('images', () => {
     let html = renderPage(doc, theme, opts);
     expect(html).toContain('src="https://example.org/b.jpg"');
     expect(html).toMatch(/width:100%; height:auto/);
+    expect(html).not.toMatch(/srcset="https:\/\/example\.org/); // a teacher's own banner has no @2x twin
     if (b?.type === 'banner') b.customSrc = 'data:image/png;base64,AAAA';
     html = renderPage(doc, theme, opts);
     expect(html).not.toContain('data:image');
@@ -123,6 +133,30 @@ describe('images', () => {
     const theme: Theme = THEMES[2];
     const html = renderPage(createPage(theme, 'home', 'en', 'classic-band'), theme, opts);
     expect(html).toMatch(/\/icons\/outline\/[a-z-]+\.svg\?fg=[0-9a-f]{6}&amp;bg=[0-9a-f]{6}/);
+  });
+  it('icons come from iconBase when given', () => {
+    const theme: Theme = THEMES[2];
+    const html = renderPage(createPage(theme, 'home', 'en', 'classic-band'), theme, { ...opts, iconBase: '/api/v1/design/icons' });
+    expect(html).toMatch(/src="\/api\/v1\/design\/icons\/outline\/[a-z-]+\.svg\?fg=[0-9a-f]{6}&amp;bg=[0-9a-f]{6}"/);
+    expect(html).not.toContain('/assets/icons/');
+  });
+  it('theme art carries its @2x twin; the banner is eager, spots and icons lazy', () => {
+    const theme: Theme = THEMES[0];
+    const html = renderPage(createPage(theme, 'home', 'en', 'classic-band'), theme, opts);
+    expect(html).toContain(`srcset="${opts.assetBase}/themes/${theme.id}/banner.jpg 1x, ${opts.assetBase}/themes/${theme.id}/banner@2x.jpg 2x"`);
+    const banner = /<img[^>]*data-pd-art="banner"[^>]*>/.exec(html)![0];
+    expect(banner).not.toContain('loading=');
+    walk(parseHtml(html), el => {
+      if (el.name === 'img' && attr(el, 'data-pd-art') !== 'banner') expect(attr(el, 'loading')).toBe('lazy');
+    });
+  });
+  it('rich-text lists keep their markers and headings set their weight (Paper resets both)', () => {
+    const theme = THEMES[0];
+    const html = renderPage(everySection(theme, 'classic-band'), theme, opts);
+    expect(html).toMatch(/<ul style="[^"]*list-style:disc outside;/);
+    walk(parseHtml(html), el => {
+      if (/^h[2-6]$/.test(el.name)) expect(attr(el, 'style'), el.name).toMatch(/font-weight:(600|700)/);
+    });
   });
 });
 
@@ -143,16 +177,20 @@ describe('layout specifics', () => {
       expect(html).toMatch(/<h2[^>]*>\[Course name\]<\/h2>/);
     }
   });
-  it('heading font only for display faces, never Canvas’s own Lato stack', () => {
+  it('heading font lives in the stylesheet (so a reader’s font wins), only for display faces', () => {
     const lato = { ...THEMES[0], headingFont: "'Lato Extended', Lato, sans-serif" };
-    expect(renderPage(createPage(lato, 'home', 'en'), lato, opts)).not.toContain('font-family');
-    expect(renderPage(createPage(THEMES[2], 'home', 'en'), THEMES[2], opts)).toContain('font-family:Georgia');
+    const a = renderDesign(createPage(lato, 'home', 'en'), lato, opts);
+    expect(a.html + a.css).not.toContain('font-family');
+    const b = renderDesign(createPage(THEMES[2], 'home', 'en', 'editorial'), THEMES[2], opts);
+    expect(b.html).not.toContain('font-family');
+    expect(b.css).toContain(':root h2,:root h3,:root h4,:root [data-pd-font]{font-family:var(--reading-font-choice, Georgia');
+    expect(b.html).toContain('data-pd-font="1"');
   });
   it('a theme without art leaves no empty banner wrapper in any layout', () => {
     const bare: Theme = { ...THEMES[0], images: [] };
     for (const L of LAYOUTS) {
       const html = renderPage(createPage(THEMES[0], 'home', 'en', L.id), bare, opts);
-      expect(html, L.id).not.toContain('data-rmt-type="banner"');
+      expect(html, L.id).not.toContain('data-pd-type="banner"');
       expect(canvasViolations(html), L.id).toEqual([]);
     }
   });
