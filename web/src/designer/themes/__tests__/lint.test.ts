@@ -1,8 +1,10 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createPage, LAYOUTS, renderPage, type PageKind } from '@/designer/engine';
 import { THEME_ENTRIES } from '../index';
 import type { ThemeEntry } from '../define';
-import { ACCENT_IN_LAYOUT, lintTheme, paletteProblems, personIn } from '../lint';
+import { ACCENT_IN_LAYOUT, DESIGN_ASSET_DIR, lintTheme, paletteProblems, personIn } from '../lint';
 import { seedPalette } from '../scripts/lib';
 
 const KINDS: PageKind[] = ['home', 'start-here', 'overview', 'module', 'instructor'];
@@ -83,5 +85,28 @@ describe('theme:new scaffold palettes', () => {
     // spec.md: secondary is a light companion with a dark onSecondary of its own hue.
     expect(p.onSecondary.toLowerCase()).not.toBe('#ffffff');
     expect(lintTheme(variant({ palettes: [p, ...kintsugi.theme.palettes.slice(1)] })).filter((f) => f.severity === 'error')).toEqual([]);
+  });
+});
+
+describe('image-asset', () => {
+  it('finds every theme image and its @2x twin under public/design-assets/themes', () => {
+    expect(existsSync(path.join(DESIGN_ASSET_DIR, 'kintsugi', 'banner@2x.webp'))).toBe(true);
+    expect(lintTheme(kintsugi).filter((f) => f.rule === 'image-asset')).toEqual([]);
+  });
+  it('reports missing art, and can be skipped while drafting', () => {
+    const draft = variant({ id: 'not-generated-yet' });
+    const f = lintTheme(draft).find((x) => x.rule === 'image-asset');
+    expect(f?.message).toContain('banner.webp, banner@2x.webp');
+    expect(lintTheme(draft, { assetDir: false }).filter((x) => x.rule === 'image-asset')).toEqual([]);
+  });
+});
+
+describe('palette-dark', () => {
+  it('rejects hand-tuned dark colours that are not hex', () => {
+    const [a, b, c] = kintsugi.theme.palettes;
+    const bad = { ...a, dark: { primary: 'red' } };
+    expect(lintTheme(variant({ palettes: [bad, b, c] })).map((x) => x.rule)).toContain('palette-dark-hex');
+    const ok = { ...a, dark: { primary: '#e8b04a' } };
+    expect(lintTheme(variant({ palettes: [ok, b, c] })).filter((x) => x.rule.startsWith('palette-dark'))).toEqual([]);
   });
 });

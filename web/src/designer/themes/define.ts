@@ -5,17 +5,22 @@
  * subject per image; `defineTheme` turns that into the seven `ThemeImage`s with prompts that
  * share the same style sentence word for word, so the set reads as one family.
  */
-import type { Audience, CollectionId, IconName, Observance, IconStyle, LayoutId, Palette, QuickLinkSlot, Theme, ThemeImage } from '@/designer/engine';
+import type { Audience, CollectionId, IconName, Observance, IconStyle, LayoutId, QuickLinkSlot, Theme, ThemeImage, ThemePalette } from '@/designer/engine';
 
-/** Font stacks Canvas can actually render. Single quotes only, so they survive inside style="…". */
+/**
+ * Heading font stacks. Paper loads no third-party font CDN, so each stack is system faces first, then an OFL
+ * look-alike (used only if Paper bundles it, see web/public/design-assets/fonts/), then the metric-compatible
+ * faces ChromeOS and Linux ship (Tinos, Cousine), then a generic family. Single quotes only.
+ * The engine skips the Lato and Helvetica stacks (they read as the default UI face).
+ */
 export const FONTS = {
   /** Canvas's own face. "Lato Extended" only exists on Canvas web; the apps embed plain "Lato". */
   lato: "'Lato Extended', Lato, 'Helvetica Neue', Helvetica, Arial, sans-serif",
   helvetica: "'Helvetica Neue', Helvetica, Arial, sans-serif",
-  georgia: "Georgia, 'Times New Roman', Times, serif",
-  trebuchet: "'Trebuchet MS', 'Lucida Grande', 'Lucida Sans Unicode', Arial, sans-serif",
-  verdana: 'Verdana, Geneva, Tahoma, sans-serif',
-  courier: "'Courier New', Courier, monospace",
+  georgia: "Georgia, Gelasio, 'Times New Roman', Tinos, Times, serif",
+  trebuchet: "'Trebuchet MS', 'Fira Sans', 'Lucida Grande', 'Lucida Sans Unicode', Arial, sans-serif",
+  verdana: "Verdana, 'DejaVu Sans', Geneva, Tahoma, sans-serif",
+  courier: "'Courier New', 'Courier Prime', Cousine, Courier, monospace",
 } as const;
 
 export interface SpotSpec {
@@ -50,7 +55,8 @@ export interface ThemeSpec {
   audiences: Audience[];
   tags: string[];
   defaultLayout: LayoutId;
-  palettes: Palette[];
+  /** [0] matches the art. Each may hand-tune its dark twin with `dark` (merged over darkPalette, then fixed). */
+  palettes: ThemePalette[];
   iconStyle: IconStyle;
   headingFont?: string;
   corners: Theme['corners'];

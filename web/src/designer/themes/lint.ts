@@ -11,7 +11,9 @@
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
+  at2x,
   checkPalette,
   contrastRatio,
   fixPalette,
@@ -20,6 +22,7 @@ import {
   luminance,
   nudgeLightness,
   PALETTE_KEYS,
+  themeDarkPalette,
   type Audience,
   type LayoutId,
   type Palette,
@@ -44,7 +47,15 @@ export interface LintFinding {
 export interface LintOptions {
   /** Whether a Lucide icon exists. Defaults to looking in lucide-static/icons. */
   iconExists?: (name: string) => boolean;
+  /**
+   * Where theme art lives (`<dir>/<themeId>/<file>` plus its `@2x` twin). Defaults to DESIGN_ASSET_DIR;
+   * false skips the check (a theme whose art isn't generated yet).
+   */
+  assetDir?: string | false;
 }
+
+/** web/public/design-assets/themes: theme art, WebP at 1x and @2x, served at /design-assets/themes/. */
+export const DESIGN_ASSET_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../public/design-assets/themes');
 
 /* ------------------------------------------------------------------ thresholds */
 
@@ -294,6 +305,11 @@ export function lintTheme(entry: ThemeEntry, opts: LintOptions = {}): LintFindin
       };
     };
     for (const pr of paletteProblems(p)) err(pr.rule, pr.message, fixFor(pr.keys));
+    // Dark mode: hand-tuned colours must be hex, and the dark twin must pass (it is fixed, so this guards the fixer).
+    const badDark = Object.entries(p.dark ?? {}).filter(([k, v]) => !(PALETTE_KEYS as readonly string[]).includes(k) || !HEX6.test(v ?? ''));
+    if (badDark.length) err('palette-dark-hex', `${p.id}: dark colours must be 6-digit hex palette keys: ${badDark.map(([k, v]) => `${k} "${v}"`).join(', ')}`);
+    const darkFails = checkPalette(themeDarkPalette(p)).filter((r) => !r.pass);
+    if (darkFails.length) err('palette-dark', `${p.id}: dark colourway fails ${darkFails.map((r) => `${r.id} ${r.ratio.toFixed(2)}:1`).join(', ')}`, { fix: 'hand-tune the palette\'s `dark` colours' });
     // Links underlined by Canvas still need to stand apart from body text by more than hue alone.
     const lt = contrastRatio(p.link, p.text);
     if (lt < LINK_VS_TEXT)
@@ -340,6 +356,12 @@ export function lintTheme(entry: ThemeEntry, opts: LintOptions = {}): LintFindin
     if (img.alt.length >= 120) err('image-alt', `${img.id}: alt text is ${img.alt.length} characters, keep it under 120`);
   }
   if (t.images.find((i) => i.id === 'spot-instructor')?.alt === '') err('image-alt', 'spot-instructor needs alt text (it stands in for the teacher)');
+  const assetDir = opts.assetDir ?? DESIGN_ASSET_DIR;
+  if (assetDir) {
+    const missing = t.images.flatMap((img) => [img.file, at2x(img.file)]).filter((f) => !existsSync(path.join(assetDir, t.id, f)));
+    if (missing.length)
+      err('image-asset', `art missing under public/design-assets/themes/${t.id}/: ${missing.join(', ')}`, { fix: 'generate the art (WebP at 1x and @2x) or pass assetDir: false while drafting' });
+  }
 
   // ---- prompts
   const medium = entry.art.medium.replace(/\.$/, '');
@@ -380,7 +402,7 @@ export function lintTheme(entry: ThemeEntry, opts: LintOptions = {}): LintFindin
   // ---- fonts
   const elementary = t.audiences.some((a) => a === 'early-elementary' || a === 'upper-elementary');
   if (elementary && t.headingFont !== undefined)
-    err('heading-font-elementary', 'K-5 themes leave headingFont undefined (it overrides Canvas for Elementary and OpenDyslexic)');
+    err('heading-font-elementary', 'K-5 themes leave headingFont undefined (young readers get the default face, or their own reading font)');
   else if (t.headingFont !== undefined) {
     if (!(Object.values(FONTS) as string[]).includes(t.headingFont)) err('heading-font', `headingFont is not one of FONTS: ${t.headingFont}`);
     if (t.headingFont.includes('"')) err('heading-font', 'headingFont uses double quotes; it must survive inside style="…"');
