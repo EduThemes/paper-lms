@@ -70,6 +70,21 @@ type Definition struct {
 	//
 	// Closes Wave 6 audit H2 (write-time RPID/origins coupling).
 	Validate ValidatorFunc `json:"-"`
+
+	// OffLocksBelow (bool keys only) changes how the account chain
+	// resolves: instead of "nearest explicit row wins", an explicit
+	// false at the instance or at any account in the chain wins over
+	// every true beneath it. A sub-account can turn the setting off
+	// under a parent that allows it, but can't turn it back on under a
+	// parent (or the instance) that turned it off. Get, and so every
+	// consumer of the settings lookup, applies this.
+	OffLocksBelow bool
+
+	// AccountAdminEditable puts the key on the account-admin settings
+	// API (GET/PUT /api/v1/accounts/:account_id/settings), where a
+	// tenant admin sets or clears their own account's row. Keys without
+	// it stay super-admin only. Requires ScopeAccount in Scopes.
+	AccountAdminEditable bool
 }
 
 // ValidatorFunc is the signature for catalog-level write-time
@@ -359,11 +374,26 @@ var Catalog = []Definition{
 	// ── Pages ───────────────────────────────────────────────────────
 	{
 		Key: "pages.custom_css_enabled", Group: "Pages", Label: "Hand-written page CSS",
-		Description: "Let teachers write their own CSS for a wiki page (docs/page-designer). When off, a page stylesheet is accepted only together with a Page Designer design, so designed pages keep their generated CSS but ordinary pages cannot carry hand-written CSS.",
+		Description: "Let teachers write their own CSS for a wiki page (docs/page-designer). When off, a page stylesheet is accepted only together with a Page Designer design, so designed pages keep their generated CSS but ordinary pages cannot carry hand-written CSS. Off anywhere above wins: turning it off at the instance or for an account turns it off for every account beneath, and they can't turn it back on.",
 		ValueType:   TypeBool,
 		Scopes:      []ScopeType{ScopeInstance, ScopeAccount},
 		Default:     "true",
+
+		OffLocksBelow:        true,
+		AccountAdminEditable: true,
 	},
+}
+
+// AccountAdminKeys returns the catalog entries a tenant admin may set for
+// their own account (Definition.AccountAdminEditable), in catalog order.
+func AccountAdminKeys() []Definition {
+	var out []Definition
+	for _, d := range Catalog {
+		if d.AccountAdminEditable && d.AllowsScope(ScopeAccount) {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // PagesCustomCSSEnabled is the catalog key for the page-stylesheet switch
