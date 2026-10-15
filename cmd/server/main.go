@@ -1184,6 +1184,7 @@ func main() {
 		QuizStatisticsHandler:     quizStatisticsHandler,
 		SetupHandler:              setupHandler,
 		SuperAdminSettingsHandler: superAdminSettingsHandler,
+		AccountSettingsHandler:    handlers.NewAccountSettingsHandler(settingsService, accountRepo),
 		PagesFiles:                pagesFilesRoutes,
 		LearnerHandler:            learnerHandler,
 
