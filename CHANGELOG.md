@@ -37,6 +37,11 @@ one look. See [docs/page-designer](./docs/page-designer/README.md).
   draw over Paper's own interface.
 - **Fixed**: image alt text and titles containing `:`, `?`, `&`, quotes or
   an em dash were silently dropped on save.
+- **Content headings start at Heading 2**, as in Canvas: Heading 1 is the
+  page title. The block menu already offered 2–6; now `Mod+Alt+1` and the
+  `# ` Markdown shortcut no longer create an `<h1>` either. Existing or
+  pasted `<h1>` content is kept, and the accessibility checker offers the
+  fix.
 - **Security hardening** (audit follow-ups): the server cleans every stored
   design against the engine schema (rich text, links, images, palette,
   lengths); `design` and `css_source` go to course staff only;

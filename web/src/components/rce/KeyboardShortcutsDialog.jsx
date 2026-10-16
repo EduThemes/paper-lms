@@ -20,7 +20,7 @@ export const RCE_SHORTCUTS = [
   { keys: `${MOD}+K`, action: 'Insert or edit a link' },
   { keys: `${MOD}+,`, action: 'Subscript' },
   { keys: `${MOD}+.`, action: 'Superscript' },
-  { keys: `${MOD}+Alt+1 … 6`, action: 'Heading 1 to 6' },
+  { keys: `${MOD}+Alt+2 … 6`, action: 'Heading 2 to 6 (Heading 1 is the page title)' },
   { keys: `${MOD}+Alt+0`, action: 'Paragraph' },
   { keys: `${MOD}+Shift+7 / 8`, action: 'Numbered / bulleted list' },
   { keys: 'Tab / Shift+Tab', action: 'Indent / outdent a list item' },

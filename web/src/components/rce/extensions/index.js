@@ -18,6 +18,7 @@ import { TextStyle, Subscript, Superscript, InlineTag } from './InlineFormatting
 import { Container, Details, DetailsSummary, RawHtmlBlock } from './BlockNodes';
 import { RceTable, RceTableHeader } from './RceTable';
 import RceImage from './RceImage';
+import ContentHeading from './ContentHeading';
 
 /**
  * The single extension list for RichContentEditorV2 (and its tests), so the
@@ -31,8 +32,10 @@ export function buildRceExtensions({ placeholder = '' } = {}) {
       // StarterKit v3 already includes Underline + Link; configured below.
       link: false,
       underline: false,
+      heading: false,
       codeBlock: { HTMLAttributes: { class: 'rce-code-block' } },
     }),
+    ContentHeading,
     Underline,
     Link.configure({
       openOnClick: false,
