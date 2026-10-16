@@ -4,6 +4,8 @@ import { BookOpen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import SafeHTML from '../components/SafeHTML';
+import { PageContent } from '../components/pages/DesignedPageView';
+import { isDesignedPage } from '../utils/pageDesign';
 
 const PublicPageView = () => {
   const { t } = useTranslation();
@@ -46,18 +48,22 @@ const PublicPageView = () => {
     );
   }
 
+  // Designed pages (Page Designer) render as designed, with no prose
+  // wrapper; pages with their own CSS get it scoped to the page.
+  const designed = isDesignedPage(page);
+
   // Website mode: full-width, no sidebar, clean layout
   if (page.website_mode) {
     return (
       <div className="min-h-screen bg-surface-0 flex flex-col">
-        <main className="flex-1 max-w-4xl mx-auto px-6 py-12 w-full">
+        <main className={`flex-1 ${designed ? 'max-w-5xl' : 'max-w-4xl'} mx-auto px-6 py-12 w-full`}>
           <h1 className="text-3xl font-bold text-text-primary mb-8">{page.title}</h1>
-          <SafeHTML
-            className="prose prose-lg max-w-none"
-            html={page.body}
+          <PageContent
+            page={page}
+            fallback={<SafeHTML className="prose prose-lg max-w-none" html={page.body} />}
           />
         </main>
-        <footer className="border-t border-border-default py-4 text-center text-sm text-text-disabled">
+        <footer className="border-t border-border-default py-4 text-center text-sm text-text-tertiary">
           {t('publicPage.poweredBy')}
         </footer>
       </div>
@@ -78,10 +84,10 @@ const PublicPageView = () => {
       <div className="flex-1 ml-16">
         <main className="max-w-4xl mx-auto px-6 py-8">
           <h1 className="text-2xl font-bold text-text-primary mb-6">{page.title}</h1>
-          <div className="bg-surface-0 rounded-lg shadow p-6">
-            <SafeHTML
-              className="prose max-w-none"
-              html={page.body}
+          <div className={`bg-surface-0 rounded-lg shadow ${designed ? 'overflow-hidden' : 'p-6'}`}>
+            <PageContent
+              page={page}
+              fallback={<SafeHTML className="prose max-w-none" html={page.body} />}
             />
           </div>
         </main>

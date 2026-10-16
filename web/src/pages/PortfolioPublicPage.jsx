@@ -729,7 +729,7 @@ const PortfolioPublicPage = () => {
               <img src={portfolio.avatar_url} alt={portfolio.user_name || 'Portfolio author'} className="w-full h-full object-cover" />
             ) : (
               <div className="w-full h-full flex items-center justify-center">
-                <User className="w-14 h-14 text-text-disabled" aria-hidden="true" />
+                <User className="w-14 h-14 text-text-tertiary" aria-hidden="true" />
               </div>
             )}
           </div>
@@ -912,7 +912,7 @@ const PortfolioPublicPage = () => {
           <div className="relative w-full max-w-sm bg-surface-0 rounded-2xl shadow-2xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-text-primary">Share Portfolio</h3>
-              <button onClick={() => setShowShare(false)} className="p-2 rounded-lg text-text-disabled hover:text-text-secondary hover:bg-surface-2 focus:outline-none" aria-label="Close">
+              <button onClick={() => setShowShare(false)} className="p-2 rounded-lg text-text-tertiary hover:text-text-secondary hover:bg-surface-2 focus:outline-none" aria-label="Close">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -929,7 +929,7 @@ const PortfolioPublicPage = () => {
                 />
                 <button
                   onClick={handleCopyLink}
-                  className="px-3 py-1.5 bg-brand-600 text-white rounded-lg text-xs font-medium hover:bg-brand-700 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  className="px-3 py-1.5 bg-brand-600 text-on-brand rounded-lg text-xs font-medium hover:bg-brand-700 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500"
                 >
                   {copied ? 'Copied!' : 'Copy'}
                 </button>

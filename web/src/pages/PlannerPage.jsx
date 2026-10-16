@@ -236,7 +236,7 @@ export default function PlannerPage() {
 
               {groups.length === 0 ? (
                 <div className="rounded-lg border border-border-default bg-surface-0 px-6 py-12 text-center">
-                  <CalendarDays className="mx-auto mb-2 h-8 w-8 text-text-disabled" aria-hidden="true" />
+                  <CalendarDays className="mx-auto mb-2 h-8 w-8 text-text-tertiary" aria-hidden="true" />
                   <p className="text-sm text-text-secondary">Nothing planned for these two weeks.</p>
                 </div>
               ) : (

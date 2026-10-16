@@ -65,6 +65,8 @@ export default {
           800: 'rgb(var(--color-brand-800) / <alpha-value>)',
           900: 'rgb(var(--color-brand-900) / <alpha-value>)',
         },
+        'on-brand':  'rgb(var(--color-on-brand)  / <alpha-value>)',
+        'on-accent': 'rgb(var(--color-on-accent) / <alpha-value>)',
         accent: {
           info:    'rgb(var(--color-accent-info)    / <alpha-value>)',
           success: 'rgb(var(--color-accent-success) / <alpha-value>)',
@@ -77,6 +79,10 @@ export default {
           tooltip:      'rgb(var(--color-chrome-tooltip)    / <alpha-value>)',
           'tooltip-fg': 'rgb(var(--color-chrome-tooltip-fg) / <alpha-value>)',
         },
+      },
+      // Focus-ring offsets take the page colour, not white (a white halo in dark mode).
+      ringOffsetColor: {
+        DEFAULT: 'hsl(var(--background))',
       },
       borderRadius: {
         control: '0.5rem',

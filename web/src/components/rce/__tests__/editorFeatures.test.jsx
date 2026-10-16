@@ -257,3 +257,37 @@ describe('RichContentEditorV2 pasted images (G006)', () => {
     expect(handled).toBeFalsy();
   });
 });
+
+describe('RichContentEditorV2 editing surface containment', () => {
+  it('makes the ProseMirror root a containment box, keeping its classes and textbox role', () => {
+    const editor = mount('<p style="position: absolute; z-index: 100; top: -400px">cover the chrome</p>');
+    const pm = container.querySelector('.ProseMirror');
+    expect(pm.editor).toBe(editor);
+    expect(pm.style.contain).toBe('layout paint');
+    expect(pm.style.isolation).toBe('isolate');
+    expect(pm.style.position).toBe('relative');
+    expect(pm).toHaveClass('rce-v2-content', 'prose', 'paper-contained');
+    expect(pm).toHaveAttribute('role', 'textbox');
+    expect(pm).toHaveAttribute('aria-label', 'Rich content editor');
+    expect(pm).toHaveAttribute('contenteditable', 'true');
+    // The content is inside the box; the toolbar is not.
+    expect(pm.textContent).toContain('cover the chrome');
+    expect(pm.contains(byLabel('Bold (Ctrl+B)'))).toBe(false);
+  });
+
+  it('keeps the bubble and floating menus outside the box, so it never clips them', () => {
+    const editor = mount('<p>Hello</p>');
+    const pm = container.querySelector('.ProseMirror');
+    // jsdom has no focus/layout for the menus' own show logic, so show them
+    // the way their plugin views do and see where Tiptap mounts them.
+    const menuViews = editor.view.pluginViews.filter((v) => typeof v.show === 'function' && v.element);
+    expect(menuViews).toHaveLength(2); // BubbleMenu + FloatingMenu
+    act(() => menuViews.forEach((v) => v.show()));
+    for (const { element } of menuViews) {
+      expect(element.isConnected).toBe(true);
+      expect(element.parentElement).toBe(pm.parentElement);
+      expect(pm.contains(element)).toBe(false);
+    }
+    act(() => menuViews.forEach((v) => v.hide()));
+  });
+});

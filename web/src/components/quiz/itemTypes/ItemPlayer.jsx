@@ -37,7 +37,7 @@ const SortableItem = ({ id, text, index }) => {
     <div ref={setNodeRef} style={style}
       className="flex items-center gap-2 bg-surface-0 border border-border-default rounded px-3 py-2">
       <button type="button" {...attributes} {...listeners}
-        className="cursor-grab active:cursor-grabbing text-text-disabled hover:text-text-secondary touch-none"
+        className="cursor-grab active:cursor-grabbing text-text-tertiary hover:text-text-secondary touch-none"
         aria-label="Reorder">
         <GripVertical className="w-4 h-4" />
       </button>

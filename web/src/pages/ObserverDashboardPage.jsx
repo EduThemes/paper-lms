@@ -127,7 +127,7 @@ const ChildSwitcher = ({ kids, selectedId, onSelect }) => {
             onClick={() => onSelect(k.id)}
             className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors border ${
               active
-                ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                ? 'bg-brand-600 text-on-brand border-brand-600 shadow-sm'
                 : 'bg-surface-0 text-text-secondary border-border-default hover:border-blue-300 hover:bg-brand-50'
             }`}
           >
@@ -166,7 +166,7 @@ const EmptyState = ({ icon: Icon, title, body }) => (
   <div className="text-center py-6">
     <Icon className="w-10 h-10 text-gray-200 mx-auto mb-2" />
     <p className="text-text-secondary text-sm font-medium">{title}</p>
-    {body && <p className="text-text-disabled text-xs mt-1">{body}</p>}
+    {body && <p className="text-text-tertiary text-xs mt-1">{body}</p>}
   </div>
 );
 
@@ -390,7 +390,7 @@ const ObserverDashboardPage = () => {
             <CardTitle className="text-base">Link a child</CardTitle>
             <button
               onClick={() => setShowLinkForm(false)}
-              className="text-text-disabled hover:text-text-secondary"
+              className="text-text-tertiary hover:text-text-secondary"
               aria-label="Close"
             >
               <X className="w-4 h-4" />
@@ -471,7 +471,7 @@ const ObserverDashboardPage = () => {
                     body="When your child gets enrolled, classes show up here."
                   />
                 ) : (
-                  <ul className="divide-y divide-gray-100">
+                  <ul className="divide-y divide-border-default">
                     {overview.courses.map((c, idx) => (
                       <li key={c.course_id} className={idx === 0 ? 'pb-3' : 'py-3'}>
                         <Link
@@ -604,7 +604,7 @@ const ObserverDashboardPage = () => {
                         >
                           {g.score != null ? g.score : '—'}
                           {g.points_possible != null && (
-                            <span className="text-text-disabled font-normal">
+                            <span className="text-text-tertiary font-normal">
                               {' '}
                               / {g.points_possible}
                             </span>
@@ -694,7 +694,7 @@ const ObserverDashboardPage = () => {
               <h3 className="text-lg font-semibold text-text-primary">Unlink Child</h3>
               <button
                 onClick={() => setUnlinkTarget(null)}
-                className="text-text-disabled hover:text-text-secondary"
+                className="text-text-tertiary hover:text-text-secondary"
                 disabled={unlinkLoading}
               >
                 <X className="w-5 h-5" />
@@ -728,7 +728,7 @@ const ObserverDashboardPage = () => {
               <Button
                 onClick={handleUnlinkStudent}
                 disabled={unlinkLoading}
-                className="bg-accent-danger hover:bg-accent-danger/90 text-white"
+                className="bg-accent-danger hover:bg-accent-danger/90 text-on-accent"
               >
                 <UserMinus className="w-4 h-4 mr-2" />
                 {unlinkLoading ? 'Unlinking…' : 'Unlink Child'}

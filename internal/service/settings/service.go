@@ -32,6 +32,11 @@ var ErrScopeNotAllowed = errors.New("settings: scope not allowed for key")
 // (e.g. "abc" for ValueType=int, "yeah" for ValueType=bool).
 var ErrInvalidValue = errors.New("settings: invalid value for type")
 
+// ErrLocked is returned (via *LockedError) when an account tries to turn
+// an OffLocksBelow key on while the instance or a parent account has it
+// off.
+var ErrLocked = errors.New("settings: turned off above this account")
+
 // ── Public shapes ──────────────────────────────────────────────────
 
 // Source labels where in the resolution chain a value came from. Drives
@@ -169,6 +174,19 @@ func (s *Service) Get(ctx context.Context, key string, hints ScopeHints) (Effect
 		}
 	}
 
+	// 2–3. Keys where "off anywhere above wins" resolve the account
+	// chain and the instance together (Definition.OffLocksBelow).
+	if def.OffLocksBelow {
+		ev, found, err := s.resolveOffLocks(ctx, def, hints.AccountID)
+		if err != nil {
+			return EffectiveValue{}, err
+		}
+		if found {
+			return ev, nil
+		}
+		return s.fallback(def), nil
+	}
+
 	// 2. Account scope — walk the parent chain to root.
 	if def.AllowsScope(ScopeAccount) && hints.AccountID != 0 {
 		ev, found, err := s.walkAccountChain(ctx, def, hints.AccountID)
@@ -189,6 +207,12 @@ func (s *Service) Get(ctx context.Context, key string, hints ScopeHints) (Effect
 		}
 	}
 
+	return s.fallback(def), nil
+}
+
+// fallback is the tail of the chain once no explicit row applies: the
+// env var, then the catalog default, then "nothing set".
+func (s *Service) fallback(def Definition) EffectiveValue {
 	// 4. Env-var fallback.
 	if def.EnvFallback != "" {
 		if envVal := s.getEnv(def.EnvFallback); envVal != "" {
@@ -198,7 +222,7 @@ func (s *Service) Get(ctx context.Context, key string, hints ScopeHints) (Effect
 				HasValue: true,
 				IsSecret: def.IsSecret(),
 				Source:   SourceEnv,
-			}, nil
+			}
 		}
 	}
 
@@ -210,7 +234,7 @@ func (s *Service) Get(ctx context.Context, key string, hints ScopeHints) (Effect
 			HasValue: true,
 			IsSecret: def.IsSecret(),
 			Source:   SourceDefault,
-		}, nil
+		}
 	}
 
 	// 6. Nothing in the chain.
@@ -219,7 +243,7 @@ func (s *Service) Get(ctx context.Context, key string, hints ScopeHints) (Effect
 		IsSecret: def.IsSecret(),
 		Source:   SourceNone,
 		HasValue: false,
-	}, nil
+	}
 }
 
 // GetEffective returns every setting in the given UI group, each
@@ -281,42 +305,253 @@ func (s *Service) readScope(ctx context.Context, def Definition, scope ScopeType
 }
 
 // walkAccountChain starts at accountID and follows parent_account_id
-// to the root, returning the first explicit setting it finds. Capped
-// by maxAncestryDepth so a self-referential parent (operator bug)
-// can't loop forever.
+// to the root, returning the first explicit setting it finds.
 func (s *Service) walkAccountChain(ctx context.Context, def Definition, accountID uint) (EffectiveValue, bool, error) {
+	var out EffectiveValue
+	var found bool
+	err := s.forEachAccount(ctx, accountID, func(id uint) (bool, error) {
+		ev, ok, err := s.readScope(ctx, def, ScopeAccount, id)
+		if err != nil {
+			return true, err
+		}
+		if ok {
+			out, found = ev, true
+			return true, nil
+		}
+		return false, nil
+	})
+	if err != nil {
+		return EffectiveValue{}, false, err
+	}
+	return out, found, nil
+}
+
+// forEachAccount calls fn for accountID and then each ancestor up to the
+// root (parent_account_id), stopping when fn returns stop=true or an
+// error. Capped by maxAncestryDepth, and a parent already visited ends
+// the walk, so a circular parent_account_id (operator bug) can't loop
+// forever. A missing account row ends the walk silently: the instance /
+// env / default fallback still runs. Treating it as a hard error would
+// mean a stale parent_account_id (rare but possible after a tenant
+// delete) breaks reads for every setting, which is worse.
+func (s *Service) forEachAccount(ctx context.Context, accountID uint, fn func(id uint) (stop bool, err error)) error {
 	current := accountID
 	seen := map[uint]struct{}{}
 	for depth := 0; depth < s.maxAncestryDepth && current != 0; depth++ {
 		if _, loop := seen[current]; loop {
-			break
+			return nil
 		}
 		seen[current] = struct{}{}
 
-		if ev, found, err := s.readScope(ctx, def, ScopeAccount, current); err != nil {
-			return EffectiveValue{}, false, err
-		} else if found {
-			return ev, true, nil
+		stop, err := fn(current)
+		if err != nil || stop {
+			return err
 		}
 
 		if s.ancestry == nil {
-			break
+			return nil
 		}
 		acct, err := s.ancestry.FindByID(ctx, current)
-		if err != nil {
-			// A missing account row aborts the walk silently — the
-			// instance/env/default fallback still runs. Treating this
-			// as a hard error would mean a stale parent_account_id
-			// (rare but possible after a tenant delete) breaks reads
-			// for every setting, which is worse than the alternative.
-			return EffectiveValue{}, false, nil
-		}
-		if acct.ParentAccountID == nil {
-			break
+		if err != nil || acct == nil || acct.ParentAccountID == nil {
+			return nil
 		}
 		current = *acct.ParentAccountID
 	}
-	return EffectiveValue{}, false, nil
+	return nil
+}
+
+// ── Account chain (explicit levels, locks) ─────────────────────────
+
+// Level is one explicit row of a key along an account's resolution
+// chain: an account (ScopeID = the account id) or the instance
+// (ScopeID 0).
+type Level struct {
+	Scope     ScopeType
+	ScopeID   uint
+	Value     string
+	UpdatedAt *time.Time
+	UpdatedBy *uint
+}
+
+// Chain returns the explicit rows for key along accountID's chain,
+// nearest first: the account itself, each ancestor up to the root, then
+// the instance. Levels with no row, and scopes the catalog doesn't allow
+// for key, are left out; accountID 0 yields at most the instance level.
+// Values are plaintext (secret keys included), like Get.
+func (s *Service) Chain(ctx context.Context, key string, accountID uint) ([]Level, error) {
+	def, ok := Find(key)
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", ErrUnknownKey, key)
+	}
+	return s.chain(ctx, def, accountID)
+}
+
+func (s *Service) chain(ctx context.Context, def Definition, accountID uint) ([]Level, error) {
+	var levels []Level
+	add := func(ev EffectiveValue, scope ScopeType, id uint) {
+		levels = append(levels, Level{Scope: scope, ScopeID: id, Value: ev.Value, UpdatedAt: ev.UpdatedAt, UpdatedBy: ev.UpdatedBy})
+	}
+	if def.AllowsScope(ScopeAccount) && accountID != 0 {
+		err := s.forEachAccount(ctx, accountID, func(id uint) (bool, error) {
+			ev, found, err := s.readScope(ctx, def, ScopeAccount, id)
+			if err != nil {
+				return true, err
+			}
+			if found {
+				add(ev, ScopeAccount, id)
+			}
+			return false, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	if def.AllowsScope(ScopeInstance) {
+		ev, found, err := s.readScope(ctx, def, ScopeInstance, 0)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			add(ev, ScopeInstance, 0)
+		}
+	}
+	return levels, nil
+}
+
+// isOff reports whether a stored bool value is false. Bool values are
+// validated as true/false (any case) on write.
+func isOff(v string) bool {
+	return strings.EqualFold(strings.TrimSpace(v), "false")
+}
+
+// topOff returns the highest level in levels (nearest first) that holds
+// the value off, skipping the level skip points to; nil if none does.
+// "Highest" is the instance, then the root-most account: the level no
+// account beneath it can override.
+func topOff(levels []Level, skip *Level) *Level {
+	for i := len(levels) - 1; i >= 0; i-- {
+		l := levels[i]
+		if skip != nil && l.Scope == skip.Scope && l.ScopeID == skip.ScopeID {
+			continue
+		}
+		if isOff(l.Value) {
+			return &levels[i]
+		}
+	}
+	return nil
+}
+
+func (l Level) effective(def Definition) EffectiveValue {
+	src := SourceInstance
+	if l.Scope == ScopeAccount {
+		src = SourceAccount
+	}
+	return EffectiveValue{
+		Key: def.Key, Value: l.Value, HasValue: true, IsSecret: def.IsSecret(),
+		Source: src, ScopeID: l.ScopeID, UpdatedAt: l.UpdatedAt, UpdatedBy: l.UpdatedBy,
+	}
+}
+
+// resolveOffLocks resolves an OffLocksBelow key for accountID: an
+// explicit false anywhere in the chain wins (reported at the highest
+// level holding it); otherwise the nearest explicit true. found=false
+// means no explicit row at all (fall back to env / default).
+func (s *Service) resolveOffLocks(ctx context.Context, def Definition, accountID uint) (EffectiveValue, bool, error) {
+	levels, err := s.chain(ctx, def, accountID)
+	if err != nil {
+		return EffectiveValue{}, false, err
+	}
+	if len(levels) == 0 {
+		return EffectiveValue{}, false, nil
+	}
+	if off := topOff(levels, nil); off != nil {
+		return off.effective(def), true, nil
+	}
+	return levels[0].effective(def), true, nil
+}
+
+// AccountView is one key as an account admin sees it: the account's own
+// explicit row (nil = inherits), the effective value, and for an
+// OffLocksBelow key the level above the account that holds it off
+// (LockedBy; nil = the account may turn it on).
+type AccountView struct {
+	Def       Definition
+	Own       *Level
+	Effective EffectiveValue
+	LockedBy  *Level
+}
+
+// ViewForAccount resolves key for accountID with its own row and lock.
+func (s *Service) ViewForAccount(ctx context.Context, key string, accountID uint) (AccountView, error) {
+	def, ok := Find(key)
+	if !ok {
+		return AccountView{}, fmt.Errorf("%w: %q", ErrUnknownKey, key)
+	}
+	if accountID == 0 {
+		return AccountView{}, fmt.Errorf("%w: account scope requires a non-zero scope_id", ErrScopeNotAllowed)
+	}
+	levels, err := s.chain(ctx, def, accountID)
+	if err != nil {
+		return AccountView{}, err
+	}
+	view := AccountView{Def: def}
+	if len(levels) > 0 && levels[0].Scope == ScopeAccount && levels[0].ScopeID == accountID {
+		own := levels[0]
+		view.Own = &own
+	}
+	if def.OffLocksBelow {
+		if off := topOff(levels, view.Own); off != nil {
+			l := *off
+			view.LockedBy = &l
+		}
+	}
+	ev, err := s.Get(ctx, key, ScopeHints{AccountID: accountID})
+	if err != nil {
+		return AccountView{}, err
+	}
+	view.Effective = ev
+	return view, nil
+}
+
+// LockedError is returned (wrapping ErrLocked) when an account tries to
+// turn an OffLocksBelow key on beneath a level that turned it off.
+type LockedError struct {
+	Key string
+	By  Level
+}
+
+func (e *LockedError) Error() string {
+	if e.By.Scope == ScopeInstance {
+		return fmt.Sprintf("settings: %q is turned off for the whole instance", e.Key)
+	}
+	return fmt.Sprintf("settings: %q is turned off by account %d", e.Key, e.By.ScopeID)
+}
+
+func (e *LockedError) Unwrap() error { return ErrLocked }
+
+// SetForAccount sets (value non-nil) or clears (nil) accountID's own row
+// for key. For an OffLocksBelow key it refuses to turn the value on while
+// a level above the account holds it off (*LockedError, errors.Is
+// ErrLocked); turning it off or clearing is always allowed. Set / Clear
+// emit the setting_change audit row with byUserID.
+func (s *Service) SetForAccount(ctx context.Context, accountID uint, key string, value *string, byUserID uint) error {
+	if value == nil {
+		return s.Clear(ctx, ScopeAccount, accountID, key, byUserID)
+	}
+	def, ok := Find(key)
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrUnknownKey, key)
+	}
+	if def.OffLocksBelow && !isOff(*value) {
+		view, err := s.ViewForAccount(ctx, key, accountID)
+		if err != nil {
+			return err
+		}
+		if view.LockedBy != nil {
+			return &LockedError{Key: key, By: *view.LockedBy}
+		}
+	}
+	return s.Set(ctx, ScopeAccount, accountID, key, *value, byUserID)
 }
 
 // decodeRow extracts the storage value from a setting row. Secret

@@ -656,6 +656,13 @@
     "vi": "Tiếng Việt",
     "languageLabel": "Language"
   },
+  "designHome": {
+    "title": "Design your home page",
+    "body": "Pick a theme and a layout, write straight onto the page, and publish a home page your students will want to open. No HTML needed.",
+    "designHome": "Design your home page",
+    "makeover": "Give the whole course a makeover",
+    "dismiss": "Dismiss"
+  },
   "publicPage": {
     "notFoundTitle": "Page Not Found",
     "notFoundDescription": "This page doesn't exist or is not publicly available.",
@@ -835,6 +842,27 @@
     "hide": "Hide",
     "show": "Show"
   },
+  "adminSettingsPage": {
+    "pages": {
+      "title": "Pages",
+      "description": "What teachers can do on course pages.",
+      "cssLabel": "Let teachers write their own page CSS",
+      "cssHelp": "Designed pages (Page Designer) keep their colours, dark mode and layout either way. This controls hand-written CSS: Page CSS on ordinary pages and Custom CSS in the designer's Advanced tab. Everything is sanitized and scoped to the page, so it can't change the rest of Paper.",
+      "on": "On",
+      "off": "Off",
+      "lockedByInstance": "Turned off by your Paper administrator",
+      "lockedByAccount": "Turned off by {{name}}",
+      "lockedByParent": "Turned off by a parent account",
+      "inherited": "Using the default ({{state}}).",
+      "explicit": "Set for this account.",
+      "useDefault": "Use the default",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "loadError": "Couldn't load the page settings.",
+      "retry": "Try again",
+      "loading": "Loading page settings"
+    }
+  },
   "contentImport": {
     "title": "Import Content",
     "backToCourse": "← Back to Course",
@@ -993,6 +1021,17 @@
       "spanish": "Spanish",
       "currentLabel": "Current language",
       "savedToast": "Language updated"
+    },
+    "detachDesign": {
+      "title": "Edit this page as HTML?",
+      "body": "This page was made with the page designer. When you save HTML edits, the page is detached from its design: it keeps how it looks now, but it can no longer be opened in the designer.",
+      "bodyCssOff": "This page was made with the page designer. When you save HTML edits, the page is detached from its design and can no longer be opened in the designer.",
+      "cssRemoved": "Custom CSS is turned off for this account, so the page's stylesheet is removed when it is detached, and the page may look different (for example, it no longer follows dark mode).",
+      "undo": "To undo, restore an earlier version from the page history.",
+      "cancel": "Cancel",
+      "confirm": "Edit as HTML",
+      "htmlHelp": "Saving detaches this page from its design. Its look stays; the designer can no longer open it.",
+      "htmlHelpCssOff": "Saving detaches this page from its design and removes its stylesheet, so it may look different; the designer can no longer open it."
     }
   },
   "languagePreferencesPage": {

@@ -129,7 +129,7 @@ const DocViewerPage = () => {
   if (!hasViewableContent()) {
     return (
       <Layout>
-        <div className="flex flex-col items-center justify-center h-[calc(100vh-120px)] text-text-disabled">
+        <div className="flex flex-col items-center justify-center h-[calc(100vh-120px)] text-text-tertiary">
           <FileText className="w-16 h-16 mb-4" />
           <p className="text-xl font-medium text-text-secondary">No Viewable Content</p>
           <p className="text-sm text-text-tertiary mt-2 max-w-md text-center">

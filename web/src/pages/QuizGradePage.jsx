@@ -124,7 +124,7 @@ function EventLog({ courseId, quizId, submissionId }) {
             <li key={e.id} className="py-1.5 flex items-start justify-between gap-3">
               <span>
                 {describeQuizEvent(e)}
-                {e.source === 'client' && <span className="ml-2 text-xs text-text-disabled">(reported by browser)</span>}
+                {e.source === 'client' && <span className="ml-2 text-xs text-text-tertiary">(reported by browser)</span>}
               </span>
               <time className="text-xs text-text-tertiary whitespace-nowrap" dateTime={e.created_at}>
                 {new Date(e.client_timestamp || e.created_at).toLocaleTimeString()}
@@ -227,7 +227,7 @@ export default function QuizGradePage() {
                     type="button"
                     onClick={onSave}
                     disabled={!dirty || save.isPending}
-                    className="ml-auto inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+                    className="ml-auto inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-on-brand rounded hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
                   >
                     <Save className="w-4 h-4" aria-hidden="true" /> {save.isPending ? 'Saving…' : 'Save scores'}
                   </button>

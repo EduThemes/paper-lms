@@ -49,7 +49,7 @@ const StatusIcon = ({ status }) => {
     return <CheckCircle className="h-5 w-5 text-accent-success" aria-label="Completed" />;
   if (status === 'in_progress')
     return <Clock className="h-5 w-5 text-amber-500" aria-label="In progress" />;
-  return <AlertCircle className="h-5 w-5 text-slate-400" aria-label="Not started" />;
+  return <AlertCircle className="h-5 w-5 text-text-tertiary" aria-label="Not started" />;
 };
 
 const emptyForm = {
@@ -152,7 +152,7 @@ const DiscussionCheckpointsPanel = ({
       <Card>
         <CardContent className="flex items-center justify-center p-8">
           <svg
-            className="h-6 w-6 animate-spin text-slate-400"
+            className="h-6 w-6 animate-spin text-text-tertiary"
             viewBox="0 0 24 24"
             fill="none"
             aria-label="Loading"
@@ -197,7 +197,7 @@ const DiscussionCheckpointsPanel = ({
         )}
 
         {checkpoints.length === 0 && !error && (
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-text-tertiary">
             No checkpoints configured for this discussion.
           </p>
         )}
@@ -219,14 +219,14 @@ const DiscussionCheckpointsPanel = ({
                 {!isTeacher && <StatusIcon status={status} />}
                 <div>
                   <div className="text-sm font-medium">{typeLabel(cp.checkpoint_type)}</div>
-                  <div className="text-xs text-slate-500">
+                  <div className="text-xs text-text-tertiary">
                     Due {formatDate(cp.due_at)} - {cp.points_possible} pts
                     {cp.checkpoint_type === 'reply_to_entry' && (
                       <> - {cp.required_replies} replies required</>
                     )}
                   </div>
                   {!isTeacher && (
-                    <div className="mt-1 text-xs text-slate-600">
+                    <div className="mt-1 text-xs text-text-secondary">
                       {cp.checkpoint_type === 'reply_to_topic'
                         ? status === 'completed'
                           ? 'Initial post: done'

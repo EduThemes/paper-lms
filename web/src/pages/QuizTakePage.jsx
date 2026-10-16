@@ -467,7 +467,7 @@ const QuizTakePage = () => {
             {submission?.id && (
               <Link
                 to={`/courses/${courseId}/quizzes/${quizId}/submissions/${submission.id}/review`}
-                className="bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+                className="bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
               >
                 Review Answers
               </Link>
@@ -497,9 +497,9 @@ const QuizTakePage = () => {
         </div>
         <div className="bg-surface-0 rounded-lg shadow overflow-hidden">
           <div className="bg-brand-600 px-6 py-5">
-            <h2 className="text-2xl font-bold text-white">{quiz?.title}</h2>
+            <h2 className="text-2xl font-bold text-on-brand">{quiz?.title}</h2>
             {quiz?.quiz_type && (
-              <span className="text-brand-100 text-sm capitalize">{quiz.quiz_type.replace('_', ' ')}</span>
+              <span className="text-on-brand text-sm capitalize">{quiz.quiz_type.replace('_', ' ')}</span>
             )}
           </div>
           <div className="p-6">
@@ -590,7 +590,7 @@ const QuizTakePage = () => {
                   <button
                     onClick={handleBeginQuiz}
                     disabled={starting || (quiz?.requires_access_code && !accessCode.trim())}
-                    className="inline-flex items-center gap-2 bg-brand-600 text-white px-8 py-3 rounded-lg hover:bg-brand-700 disabled:opacity-50 text-lg font-semibold transition-colors"
+                    className="inline-flex items-center gap-2 bg-brand-600 text-on-brand px-8 py-3 rounded-lg hover:bg-brand-700 disabled:opacity-50 text-lg font-semibold transition-colors"
                   >
                     {starting ? <>Starting...</> : previousAttempts > 0 ? <><RotateCcw className="w-5 h-5" /> Retake Quiz</> : <><FileText className="w-5 h-5" /> Begin Quiz</>}
                   </button>
@@ -703,7 +703,7 @@ const QuizTakePage = () => {
                 <button
                   onClick={handleSubmit}
                   disabled={submitting}
-                  className="px-6 py-2 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50 text-sm font-semibold"
+                  className="px-6 py-2 bg-brand-600 text-on-brand rounded hover:bg-brand-700 disabled:opacity-50 text-sm font-semibold"
                 >
                   {submitting ? t('quizTakePage.submitting') : t('quizTakePage.submitQuiz')}
                 </button>
@@ -716,7 +716,7 @@ const QuizTakePage = () => {
               <button
                 onClick={handleSubmit}
                 disabled={submitting}
-                className="px-6 py-2 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50 text-sm font-semibold"
+                className="px-6 py-2 bg-brand-600 text-on-brand rounded hover:bg-brand-700 disabled:opacity-50 text-sm font-semibold"
               >
                 {submitting ? 'Submitting...' : 'Submit Quiz'}
               </button>

@@ -29,9 +29,9 @@ const StepIndicator = ({ currentStep }) => (
         <div
           className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
             step === currentStep
-              ? 'bg-brand-600 text-white'
+              ? 'bg-brand-600 text-on-brand'
               : step < currentStep
-              ? 'bg-accent-success text-white'
+              ? 'bg-accent-success text-on-accent'
               : 'bg-border-default text-text-tertiary'
           }`}
         >
@@ -130,7 +130,7 @@ const SetupWizardPage = ({ onSetupComplete }) => {
               </p>
               <button
                 onClick={() => setStep(2)}
-                className="w-full py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+                className="w-full py-3 bg-brand-600 text-on-brand rounded-lg font-medium hover:bg-brand-700 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
               >
                 Get Started
               </button>
@@ -215,12 +215,12 @@ const SetupWizardPage = ({ onSetupComplete }) => {
                     className="w-full px-3 py-2 border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                     placeholder="Paper LMS"
                   />
-                  <p className="text-xs text-text-disabled mt-1">The name displayed across your LMS instance.</p>
+                  <p className="text-xs text-text-tertiary mt-1">The name displayed across your LMS instance.</p>
                 </div>
 
                 <div>
                   <label htmlFor="setup_token" className="block text-sm font-medium text-text-secondary mb-1">
-                    Setup Token <span className="text-text-disabled">(optional)</span>
+                    Setup Token <span className="text-text-tertiary">(optional)</span>
                   </label>
                   <input
                     id="setup_token"
@@ -232,7 +232,7 @@ const SetupWizardPage = ({ onSetupComplete }) => {
                     className="w-full px-3 py-2 border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                     placeholder=""
                   />
-                  <p className="text-xs text-text-disabled mt-1">Required only when your deploy operator set SETUP_BOOTSTRAP_TOKEN. Leave blank otherwise.</p>
+                  <p className="text-xs text-text-tertiary mt-1">Required only when your deploy operator set SETUP_BOOTSTRAP_TOKEN. Leave blank otherwise.</p>
                 </div>
 
                 <div className="flex space-x-3 pt-2">
@@ -246,7 +246,7 @@ const SetupWizardPage = ({ onSetupComplete }) => {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="flex-1 py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                    className="flex-1 py-3 bg-brand-600 text-on-brand rounded-lg font-medium hover:bg-brand-700 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                   >
                     {loading ? <Spinner /> : 'Complete Setup'}
                   </button>
@@ -283,7 +283,7 @@ const SetupWizardPage = ({ onSetupComplete }) => {
 
               <button
                 onClick={handleGoToLogin}
-                className="w-full py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+                className="w-full py-3 bg-brand-600 text-on-brand rounded-lg font-medium hover:bg-brand-700 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
               >
                 Go to Login
               </button>
@@ -291,7 +291,7 @@ const SetupWizardPage = ({ onSetupComplete }) => {
           )}
         </div>
 
-        <p className="text-center text-xs text-text-disabled mt-6">Paper LMS &mdash; Open-source learning management</p>
+        <p className="text-center text-xs text-text-tertiary mt-6">Paper LMS &mdash; Open-source learning management</p>
       </div>
     </div>
   );

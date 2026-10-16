@@ -4,6 +4,12 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import App from './App.jsx'
 import './index.css'
+// After index.css so the accessibility font / size / line-height overrides
+// win against Tailwind's base styles (equal specificity → source order).
+import './styles/reading-prefs.css'
+// Page Designer heading fonts (look-alikes for Georgia, Trebuchet, Verdana,
+// Courier New).
+import './styles/design-fonts.css'
 import './i18n'
 import { AuthProvider } from './contexts/AuthContext'
 import ErrorBoundary from './components/ErrorBoundary'

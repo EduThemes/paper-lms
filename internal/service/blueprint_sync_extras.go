@@ -170,8 +170,21 @@ func (s *BlueprintService) syncSettings(ctx context.Context, sourceCourseID uint
 	if err != nil || child == nil {
 		return nil
 	}
+	// The Page Designer course look; a banner that is a blueprint file is
+	// re-pointed at the child's synced copy.
+	rw := &copier{
+		source:  &models.Course{ID: sc.source},
+		target:  &models.Course{ID: sc.child},
+		idMap:   sc.idMap,
+		slugMap: sc.slugMap,
+	}
+	look := src.Look
+	if rewritten, ok := rw.rewriteJSON(look); ok {
+		look = rewritten
+	}
 	if child.DefaultView == src.DefaultView && child.ApplyGroupWeights == src.ApplyGroupWeights &&
-		child.License == src.License && child.NavigationTabs == src.NavigationTabs && child.UIMode == src.UIMode {
+		child.License == src.License && child.NavigationTabs == src.NavigationTabs && child.UIMode == src.UIMode &&
+		jsonValuesEqual(child.Look, look) {
 		return nil
 	}
 	// The syllabus' downstream-change check reads the course row's
@@ -184,6 +197,7 @@ func (s *BlueprintService) syncSettings(ctx context.Context, sourceCourseID uint
 	child.License = src.License
 	child.NavigationTabs = src.NavigationTabs
 	child.UIMode = src.UIMode
+	child.Look = look
 	if err := s.courseRepo.Update(ctx, child); err != nil {
 		return err
 	}

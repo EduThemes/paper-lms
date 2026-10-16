@@ -26,7 +26,7 @@ const K2Layout = ({ children }) => {
           className="w-16 h-16 rounded-full bg-brand-500 flex items-center justify-center shadow-lg hover:bg-brand-600 transition-colors"
           aria-label="Home"
         >
-          <Home className="w-8 h-8 text-white" />
+          <Home className="w-8 h-8 text-on-brand" />
         </Link>
       </header>
 

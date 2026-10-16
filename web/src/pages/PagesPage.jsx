@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { FileText, Plus, Eye, EyeOff, Home, Trash2 } from 'lucide-react';
+import { FileText, Plus, Eye, EyeOff, Home, Trash2, Paintbrush } from 'lucide-react';
 import { canDeletePage, canUnpublishPage } from '../utils/pageManagement';
+import { designerPath } from '../utils/pageDesign';
 import { api } from '../services/api';
 import useIsTeacher from '../hooks/useIsTeacher';
 import Layout from '../components/Layout';
@@ -145,13 +146,22 @@ const PagesPage = () => {
         <div className="flex items-center justify-between mt-2">
           <h2 className="text-2xl font-bold text-text-primary">Pages</h2>
           {isTeacher && (
-            <button
-              onClick={() => setShowCreate(!showCreate)}
-              className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Page</span>
-            </button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Link
+                to={designerPath(courseId)}
+                className="inline-flex items-center gap-2 border border-border-strong bg-surface-0 text-text-primary px-4 py-2 rounded-md hover:bg-surface-1 text-sm font-medium"
+              >
+                <Paintbrush className="w-4 h-4" aria-hidden="true" />
+                <span>Design a page</span>
+              </Link>
+              <button
+                onClick={() => setShowCreate(!showCreate)}
+                className="inline-flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Page</span>
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -194,7 +204,7 @@ const PagesPage = () => {
             <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary">
               Cancel
             </button>
-            <button type="submit" disabled={creating} className="px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
+            <button type="submit" disabled={creating} className="px-4 py-2 bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
               {creating ? 'Creating...' : 'Create Page'}
             </button>
           </div>
@@ -216,7 +226,7 @@ const PagesPage = () => {
                   to={`/courses/${courseId}/pages/${page.url}`}
                   className="flex items-center space-x-3 min-w-0 flex-1"
                 >
-                  <FileText className="w-5 h-5 text-text-disabled flex-shrink-0" />
+                  <FileText className="w-5 h-5 text-text-tertiary flex-shrink-0" />
                   <div className="min-w-0">
                     <span className="font-medium text-text-primary truncate block">
                       {page.title}
@@ -225,9 +235,14 @@ const PagesPage = () => {
                           <Home className="w-3 h-3" aria-hidden="true" /> Front Page
                         </span>
                       )}
+                      {isTeacher && page.has_design && (
+                        <span className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-text-secondary bg-surface-2 px-2 py-0.5 rounded-full align-middle">
+                          <Paintbrush className="w-3 h-3" aria-hidden="true" /> Designed
+                        </span>
+                      )}
                     </span>
                     {page.updated_at && (
-                      <span className="text-xs text-text-disabled">
+                      <span className="text-xs text-text-tertiary">
                         Last edited {formatDate(page.updated_at)}
                       </span>
                     )}
@@ -257,7 +272,7 @@ const PagesPage = () => {
                       disabled={busyId === page.page_id || !canDeletePage(page)}
                       aria-label={`Delete ${page.title}`}
                       title={!canDeletePage(page) ? 'Choose another front page before deleting this one' : 'Delete page'}
-                      className="p-1 text-text-disabled hover:text-accent-danger disabled:opacity-40"
+                      className="p-1 text-text-tertiary hover:text-accent-danger disabled:opacity-40"
                     >
                       <Trash2 className="w-4 h-4" aria-hidden="true" />
                     </button>

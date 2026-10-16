@@ -262,7 +262,7 @@ const IndividualGradebookPage = () => {
                     <input id="ig-grade" type="number" step="any" min="0" value={grade} onChange={(e) => setGrade(e.target.value)} disabled={!!cell?.excused}
                       className="w-28 border border-border-strong rounded-md px-3 py-2 text-sm" />
                     <span className="text-sm text-text-tertiary">/ {assignment.points_possible ?? 0}</span>
-                    <button type="submit" disabled={saving || !!cell?.excused} className="px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
+                    <button type="submit" disabled={saving || !!cell?.excused} className="px-4 py-2 bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
                       {saving ? 'Saving...' : 'Save grade'}
                     </button>
                     <label className="flex items-center gap-2 text-sm text-text-secondary">

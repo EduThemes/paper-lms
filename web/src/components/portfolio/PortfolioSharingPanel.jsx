@@ -95,7 +95,7 @@ export default function PortfolioSharingPanel({ portfolio, onPortfolioChange }) 
           </div>
         ) : (
           <button type="button" onClick={() => createLink.mutate()} disabled={createLink.isPending}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-brand-600 text-on-brand hover:bg-brand-700 disabled:opacity-50">
             <Link2 className="w-4 h-4" aria-hidden="true" /> Create private link
           </button>
         )}
@@ -124,7 +124,7 @@ export default function PortfolioSharingPanel({ portfolio, onPortfolioChange }) 
                   </p>
                   <p className="text-text-secondary whitespace-pre-line break-words">{c.content}</p>
                 </div>
-                <button type="button" aria-label="Delete feedback" onClick={() => deleteComment.mutate(c.id)} className="p-1 text-text-disabled hover:text-accent-danger">
+                <button type="button" aria-label="Delete feedback" onClick={() => deleteComment.mutate(c.id)} className="p-1 text-text-tertiary hover:text-accent-danger">
                   <Trash2 className="w-4 h-4" />
                 </button>
               </li>

@@ -116,6 +116,8 @@ function AvatarControls({ profile }) {
         accept="image/png,image/jpeg,image/gif,image/webp"
         className="sr-only"
         id="avatar-upload"
+        tabIndex={-1}
+        aria-label="Profile picture file"
         onChange={(e) => {
           const f = e.target.files?.[0];
           setError('');

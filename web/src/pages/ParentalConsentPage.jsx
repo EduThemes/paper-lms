@@ -155,7 +155,7 @@ const ParentalConsentPage = () => {
               <li>{t('parentalConsentPage.consentGrantedItem3')}</li>
             </ul>
           </div>
-          <p className="text-xs text-text-disabled">{t('parentalConsentPage.mayCloseWindow')}</p>
+          <p className="text-xs text-text-tertiary">{t('parentalConsentPage.mayCloseWindow')}</p>
         </div>
       </div>
     );
@@ -195,9 +195,9 @@ const ParentalConsentPage = () => {
         {/* Header */}
         <div className="bg-surface-0 rounded-2xl shadow-lg overflow-hidden">
           <div className="bg-brand-600 px-6 py-8 text-center">
-            <ShieldIcon className="w-12 h-12 text-white mx-auto mb-3" />
-            <h1 className="text-2xl font-bold text-white">{t('parentalConsentPage.requestTitle')}</h1>
-            <p className="text-brand-100 mt-1 text-sm">{t('parentalConsentPage.subtitle')}</p>
+            <ShieldIcon className="w-12 h-12 text-on-brand mx-auto mb-3" />
+            <h1 className="text-2xl font-bold text-on-brand">{t('parentalConsentPage.requestTitle')}</h1>
+            <p className="text-on-brand mt-1 text-sm">{t('parentalConsentPage.subtitle')}</p>
           </div>
 
           <div className="p-6 sm:p-8">
@@ -268,7 +268,7 @@ const ParentalConsentPage = () => {
                 type="button"
                 onClick={handleGrant}
                 disabled={submitting}
-                className="flex-1 bg-accent-success text-white py-3 px-6 rounded-lg font-semibold hover:bg-accent-success/90 focus:outline-none focus:ring-2 focus:ring-accent-success focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 bg-accent-success text-on-accent py-3 px-6 rounded-lg font-semibold hover:bg-accent-success/90 focus:outline-none focus:ring-2 focus:ring-accent-success focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-label={t('parentalConsentPage.grantAria')}
               >
                 {submitting ? t('parentalConsentPage.processing') : t('parentalConsentPage.giveConsent')}
@@ -277,7 +277,7 @@ const ParentalConsentPage = () => {
                 type="button"
                 onClick={handleDeny}
                 disabled={submitting}
-                className="flex-1 bg-accent-danger text-white py-3 px-6 rounded-lg font-semibold hover:bg-accent-danger/90 focus:outline-none focus:ring-2 focus:ring-accent-danger focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 bg-accent-danger text-on-accent py-3 px-6 rounded-lg font-semibold hover:bg-accent-danger/90 focus:outline-none focus:ring-2 focus:ring-accent-danger focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-label={t('parentalConsentPage.denyAria')}
               >
                 {submitting ? t('parentalConsentPage.processing') : t('parentalConsentPage.doNotConsent')}
@@ -286,10 +286,10 @@ const ParentalConsentPage = () => {
 
             {/* Footer Links */}
             <div className="border-t border-border-subtle pt-5">
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-text-disabled">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-text-tertiary">
                 <a
                   href="/privacy"
-                  className="text-brand-500 hover:underline focus:underline focus:outline-none"
+                  className="text-brand-600 underline underline-offset-2 hover:no-underline rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {t('parentalConsentPage.readPrivacyPolicy')}
                 </a>
@@ -297,7 +297,7 @@ const ParentalConsentPage = () => {
                   {t('parentalConsentPage.questionsContact')}{' '}
                   <a
                     href="mailto:privacy@paperlms.com"
-                    className="text-brand-500 hover:underline focus:underline focus:outline-none"
+                    className="text-brand-600 underline underline-offset-2 hover:no-underline rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     privacy@paperlms.com
                   </a>
@@ -308,7 +308,7 @@ const ParentalConsentPage = () => {
         </div>
 
         {/* Trust footer */}
-        <p className="text-center text-xs text-text-disabled mt-6">
+        <p className="text-center text-xs text-text-tertiary mt-6">
           {t('parentalConsentPage.trustFooter')}
         </p>
       </div>

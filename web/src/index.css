@@ -2,10 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Reading-prefs styles must load AFTER Tailwind's typography plugin so the
- * accessibility font / size / line-height overrides win against `.prose`'s
- * defaults (equal specificity → source order decides). */
-@import './styles/reading-prefs.css';
+/* Reading-prefs and Page Designer font styles are imported from main.jsx,
+ * right after this file: an @import here, after the @tailwind directives,
+ * is invalid CSS and Vite silently dropped it from every build. */
 
 /* =========================================================
    Paper LMS design tokens.
@@ -38,8 +37,8 @@
   /* Text — Canvas-style deep gray, never pitch black */
   --color-text-primary:   38 41 47;      /* #26292F */
   --color-text-secondary: 75 81 92;
-  --color-text-tertiary:  118 124 134;
-  --color-text-disabled:  165 170 178;
+  --color-text-tertiary:  100 106 116;  /* #646A74 — AA (4.5:1+) on every light surface */
+  --color-text-disabled:  165 170 178;  /* disabled controls only; never for readable text */
 
   /* Brand — restrained Canvas-style blue.
      Anchored at brand-600 (#1B6EB1), close to Canvas's #008EE2
@@ -55,11 +54,20 @@
   --color-brand-800: 22 70 110;
   --color-brand-900: 24 56 86;
 
-  /* Accents — muted; status colors must read on grayscale */
-  --color-accent-info:    27 110 177;     /* same as brand */
-  --color-accent-success: 47 122 65;      /* muted forest */
-  --color-accent-warning: 156 109 33;     /* ochre, not neon */
-  --color-accent-danger:  171 60 36;      /* Canvas-red brick */
+  /* Text and icons on a solid brand or accent fill (bg-brand-500/600/700,
+     bg-accent-*). White here; in dark mode the fills lift to light tints, so
+     this flips to graphite. Use text-on-brand / text-on-accent, never
+     text-white, on those fills: white on the dark-mode brand is 2.4:1. */
+  --color-on-brand:  255 255 255;
+  --color-on-accent: 255 255 255;
+
+  /* Accents — muted; status colors must read on grayscale.
+     Each meets AA as text on surfaces and on its own /10 and /20 tint, and
+     with white text on the solid fill. */
+  --color-accent-info:    24 99 159;      /* brand, one step deeper so it is AA on its own /20 tint */
+  --color-accent-success: 42 110 59;      /* muted forest */
+  --color-accent-warning: 128 89 26;      /* ochre, not neon */
+  --color-accent-danger:  162 57 34;      /* Canvas-red brick */
 
   /* Chrome — persistent app shell; matches Canvas chrome */
   --color-chrome-sidebar:    45 59 69;    /* #2D3B45 */
@@ -80,7 +88,7 @@
   --secondary:         60 9% 95%;
   --secondary-foreground: 220 10% 17%;
   --muted:             60 8% 94%;
-  --muted-foreground:  220 8% 49%;
+  --muted-foreground:  217 7% 42%;      /* = text-tertiary */
   --accent:            60 9% 95%;
   --accent-foreground: 220 10% 17%;
   --destructive:       12 65% 41%;
@@ -108,8 +116,8 @@
   /* Text */
   --color-text-primary:   240 239 232;    /* warm white */
   --color-text-secondary: 196 195 188;
-  --color-text-tertiary:  140 140 134;
-  --color-text-disabled:  90 92 96;
+  --color-text-tertiary:  160 160 154;   /* AA on every dark surface and brand-50 */
+  --color-text-disabled:  90 92 96;     /* disabled controls only */
 
   /* Brand — lifted ~2 stops so it reads on dark surfaces */
   --color-brand-50:  24 56 86;
@@ -123,11 +131,15 @@
   --color-brand-800: 213 229 244;
   --color-brand-900: 235 243 250;
 
+  /* Light fills need dark text: graphite on brand-600 is 7.5:1. */
+  --color-on-brand:  24 24 27;
+  --color-on-accent: 24 24 27;
+
   /* Accents — slightly lifted for legibility on dark, still muted */
   --color-accent-info:    121 175 215;
-  --color-accent-success: 86 167 102;
+  --color-accent-success: 111 180 125;
   --color-accent-warning: 200 159 76;
-  --color-accent-danger:  207 102 80;
+  --color-accent-danger:  220 140 122;
 
   /* Chrome — lift the sidebar so it reads as a distinct layer */
   --color-chrome-sidebar:    18 18 21;
@@ -151,9 +163,46 @@
   --accent:            240 4% 16%;
   --accent-foreground: 45 12% 92%;
   --destructive:       12 55% 56%;
-  --destructive-foreground: 45 12% 92%;
+  --destructive-foreground: 240 4% 10%;  /* light fill → dark text (warm white was 3.4:1) */
   --input:             240 4% 22%;
   --ring:              207 50% 66%;
+}
+
+/* Base text and form colours. Without these, anything that sets no colour
+   of its own inherits the browser's black (invisible on dark surfaces), and
+   @tailwindcss/forms paints inputs white in both themes. The selectors match
+   the plugin's own (type selector + :where), so they win by source order and
+   any bg-* / text-* utility on the element still wins over them. */
+@layer base {
+  body {
+    background-color: rgb(var(--color-surface-1));
+    color: rgb(var(--color-text-primary));
+  }
+  input:where([type='text'], :not([type]), [type='email'], [type='url'], [type='password'],
+    [type='number'], [type='date'], [type='datetime-local'], [type='month'], [type='search'],
+    [type='tel'], [type='time'], [type='week']),
+  select,
+  textarea {
+    background-color: rgb(var(--color-surface-raised));
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: rgb(var(--color-text-tertiary));
+  }
+  /* After a route change RouteAnnouncer moves focus to the page's h1 (or
+     <main>) so screen readers start there. It is not a control and is not in
+     the tab order, so it gets no focus ring (the browser drew a heavy box
+     round the heading). */
+  [data-route-focus]:focus {
+    outline: none;
+  }
+  /* A link inside running text must not rely on colour alone (WCAG 1.4.1):
+     underline it. :where() keeps this at the lowest specificity, so a
+     no-underline utility on a link that is styled as a button still wins. */
+  :where(p) a {
+    text-decoration-line: underline;
+    text-underline-offset: 2px;
+  }
 }
 
 /* Sidebar scrollbar — slim, ink-on-paper, only appears on hover.
@@ -373,4 +422,76 @@
   border: 0;
   border-top: 1px solid rgb(var(--color-border-default));
   margin: 1.5em 0;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Rich-content containment (components/contentContainment.js)
+
+   Every rich-content root is a containment box (contain: layout paint;
+   isolation: isolate, set inline). Paint containment clips at the root's
+   edge, so a wide table or display equation would be cut off; let it scroll
+   sideways instead. Vertical overflow stays clipped: that is what keeps
+   absolutely positioned content from covering Paper's own interface.
+   ───────────────────────────────────────────────────────────────────────── */
+.paper-contained {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.paper-contained .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Course look (utils/courseLook.js): the course header and dashboard card
+   take the banner art and colours a teacher picked in the Page Designer.
+   The component sets --look-* custom properties inline; these rules pick the
+   light or dark colourway from Paper's own theme (the `dark` class on html),
+   so they follow the user's toggle, not just the OS.
+   ───────────────────────────────────────────────────────────────────────── */
+.course-look {
+  --look-bg: var(--look-primary);
+  --look-bg-rgb: var(--look-primary-rgb);
+  --look-fg: var(--look-on-primary);
+  --look-shadow: var(--look-text-shadow);
+  background-color: var(--look-bg);
+  color: var(--look-fg);
+}
+.dark .course-look {
+  --look-bg: var(--look-primary-dark);
+  --look-bg-rgb: var(--look-primary-dark-rgb);
+  --look-fg: var(--look-on-primary-dark);
+  --look-shadow: var(--look-text-shadow-dark);
+}
+/* Scrim between banner art and header text. On phones the text spans the
+   whole header, so the scrim is even; from sm up the text sits on the left
+   and the art shows through on the right. The scrim colour is the look's
+   primary, whose on-primary text colour the theme catalog checks for AA. */
+.course-look-scrim {
+  background: rgb(var(--look-bg-rgb) / 0.86);
+}
+@media (min-width: 640px) {
+  .course-look-scrim {
+    background: linear-gradient(
+      90deg,
+      rgb(var(--look-bg-rgb) / 0.95) 0%,
+      rgb(var(--look-bg-rgb) / 0.9) 50%,
+      rgb(var(--look-bg-rgb) / 0.55) 78%,
+      rgb(var(--look-bg-rgb) / 0.25) 100%
+    );
+  }
+}
+.course-look-text {
+  color: var(--look-fg);
+  text-shadow: var(--look-shadow);
+}
+
+/* Designed pages (components/pages/DesignedPageView.jsx) bring their own
+   typography but keep a reader's own font and spacing choices. The reading
+   font is published as --reading-font-choice only when the reader picked one
+   (ReadingPrefsContext); the designer writes headings as
+   var(--reading-font-choice, <theme font>). */
+.paper-page {
+  font-family: var(--reading-font-choice, inherit);
+  letter-spacing: var(--reading-letter-spacing, normal);
 }

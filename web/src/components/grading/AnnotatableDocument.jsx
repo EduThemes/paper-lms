@@ -59,13 +59,13 @@ const AnnotationSubmission = ({ courseId, assignmentId, userId, onSubmit, disabl
   if (!session) {
     return (
       <div className="border-2 border-dashed border-border-strong rounded-lg p-6 text-center space-y-2">
-        <PenLine className="w-8 h-8 text-text-disabled mx-auto" />
+        <PenLine className="w-8 h-8 text-text-tertiary mx-auto" />
         <p className="text-sm text-text-secondary">Annotate the document your instructor provided, then submit it.</p>
         <button
           type="button"
           onClick={start}
           disabled={starting || disabled}
-          className="inline-flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+          className="inline-flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
         >
           {starting ? 'Opening...' : 'Open document to annotate'}
         </button>
@@ -92,7 +92,7 @@ const AnnotationSubmission = ({ courseId, assignmentId, userId, onSubmit, disabl
           type="button"
           onClick={submit}
           disabled={submitting || disabled}
-          className="inline-flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+          className="inline-flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
         >
           <Send className="w-4 h-4" />
           {submitting ? 'Submitting...' : 'Submit annotations'}

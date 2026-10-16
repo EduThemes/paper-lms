@@ -118,7 +118,7 @@ export default function PasswordResetRequiredPage() {
           <button
             type="submit"
             disabled={submitting || !hasPendingToken || !newPassword || !confirmPassword}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-brand-600 hover:bg-brand-700 px-4 py-2 text-white font-medium disabled:opacity-50"
+            className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-brand-600 hover:bg-brand-700 px-4 py-2 text-on-brand font-medium disabled:opacity-50"
           >
             <ShieldCheck className="w-4 h-4" aria-hidden="true" />
             {submitting ? '…' : t('pages.passwordReset.submitButton')}

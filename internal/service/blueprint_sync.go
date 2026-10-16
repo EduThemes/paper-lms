@@ -775,6 +775,10 @@ func applyPageFields(dst, src *models.WikiPage) {
 	dst.EditingRoles = src.EditingRoles
 	dst.Public = src.Public
 	dst.WebsiteMode = src.WebsiteMode
+	// Page Designer stylesheet and design travel with the page.
+	dst.CSS = src.CSS
+	dst.CSSSource = src.CSSSource
+	dst.Design = src.Design
 }
 
 func (s *BlueprintService) syncPages(ctx context.Context, sourceCourseID uint, sc *syncCtx) error {
@@ -796,6 +800,9 @@ func (s *BlueprintService) syncPages(ctx context.Context, sourceCourseID uint, s
 		}
 	}
 
+	// The child course's account decides whether hand-written page CSS
+	// may come along (Page Designer).
+	cssAllowed := s.cssPolicy.Allowed(ctx, sc.child)
 	live := map[uint]bool{}
 	for i := range sourcePages.Items {
 		src := &sourcePages.Items[i]
@@ -816,6 +823,7 @@ func (s *BlueprintService) syncPages(ctx context.Context, sourceCourseID uint, s
 			}
 			np := &models.WikiPage{CourseID: sc.child, URL: src.URL, FrontPage: src.FrontPage}
 			applyPageFields(np, src)
+			cleanPageDesign(np, cssAllowed)
 			if err := s.pageRepo.Create(ctx, np); err != nil {
 				return fmt.Errorf("create page %q: %w", src.Title, err)
 			}
@@ -823,6 +831,7 @@ func (s *BlueprintService) syncPages(ctx context.Context, sourceCourseID uint, s
 			pushed = true
 		case sc.shouldPush(src.UpdatedAt, tag, child.UpdatedAt, sc.locked("WikiPage", src.ID)):
 			applyPageFields(child, src)
+			cleanPageDesign(child, cssAllowed)
 			if err := s.pageRepo.Update(ctx, child); err != nil {
 				return fmt.Errorf("update page %q: %w", src.Title, err)
 			}
@@ -1295,8 +1304,7 @@ func (s *BlueprintService) rewritePushedLinks(ctx context.Context, sc *syncCtx) 
 			}
 		case "WikiPage":
 			if pg, err := s.pageRepo.FindByID(ctx, p.childID, 0); err == nil && pg != nil {
-				if body := rw.rewriteHTML(pg.Body); body != pg.Body {
-					pg.Body = body
+				if rw.rewritePage(pg) {
 					if err := s.pageRepo.Update(ctx, pg); err != nil {
 						return err
 					}

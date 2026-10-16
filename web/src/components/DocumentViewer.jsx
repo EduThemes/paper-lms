@@ -341,7 +341,7 @@ const DocumentViewer = ({
                   <span className="text-xs font-medium text-text-secondary">
                     {annotation.user?.name || `User ${annotation.user_id}`}
                   </span>
-                  <span className="text-xs text-text-disabled">{formatTimestamp(annotation.created_at)}</span>
+                  <span className="text-xs text-text-tertiary">{formatTimestamp(annotation.created_at)}</span>
                 </div>
                 <p className="text-sm text-text-primary">{annotation.content}</p>
               </div>
@@ -381,7 +381,7 @@ const DocumentViewer = ({
   // Render text highlights inline
   const renderHighlightedContent = () => {
     if (!documentContent) {
-      return <p className="text-text-disabled italic text-center py-8">No document content available</p>;
+      return <p className="text-text-tertiary italic text-center py-8">No document content available</p>;
     }
 
     // For simplicity, we render the document content as HTML with highlight markers
@@ -423,7 +423,7 @@ const DocumentViewer = ({
               }}
               className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
                 isActive
-                  ? 'bg-brand-600 text-white shadow-sm'
+                  ? 'bg-brand-600 text-on-brand shadow-sm'
                   : 'bg-surface-0 text-text-secondary hover:bg-surface-2 border border-border-default'
               }`}
               title={`${config.label} (${type})`}
@@ -508,7 +508,7 @@ const DocumentViewer = ({
               setPendingAnnotation(null);
               setCommentText('');
             }}
-            className="text-text-disabled hover:text-text-secondary"
+            className="text-text-tertiary hover:text-text-secondary"
           >
             <X className="w-4 h-4" />
           </button>
@@ -540,7 +540,7 @@ const DocumentViewer = ({
           </button>
           <button
             onClick={handleSaveAnnotation}
-            className="px-3 py-1.5 text-xs bg-brand-600 text-white rounded hover:bg-brand-700"
+            className="px-3 py-1.5 text-xs bg-brand-600 text-on-brand rounded hover:bg-brand-700"
           >
             Save
           </button>
@@ -561,7 +561,7 @@ const DocumentViewer = ({
             </h3>
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`p-1 rounded transition-colors ${showFilters ? 'bg-brand-100 text-brand-600' : 'text-text-disabled hover:text-text-secondary'}`}
+              className={`p-1 rounded transition-colors ${showFilters ? 'bg-brand-100 text-brand-600' : 'text-text-tertiary hover:text-text-secondary'}`}
             >
               <Filter className="w-4 h-4" />
             </button>
@@ -609,9 +609,9 @@ const DocumentViewer = ({
         {/* Annotation list */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
-            <div className="p-4 text-center text-text-disabled text-sm">Loading annotations...</div>
+            <div className="p-4 text-center text-text-tertiary text-sm">Loading annotations...</div>
           ) : filteredAnnotations.length === 0 ? (
-            <div className="p-4 text-center text-text-disabled text-sm">
+            <div className="p-4 text-center text-text-tertiary text-sm">
               {annotations.length === 0
                 ? 'No annotations yet'
                 : 'No annotations match filters'}
@@ -646,7 +646,7 @@ const DocumentViewer = ({
                           <span className="text-xs font-medium text-text-secondary truncate">
                             {annotation.user?.name || `User ${annotation.user_id}`}
                           </span>
-                          <span className="text-xs text-text-disabled flex-shrink-0 ml-2">
+                          <span className="text-xs text-text-tertiary flex-shrink-0 ml-2">
                             {formatTimestamp(annotation.created_at)}
                           </span>
                         </div>
@@ -654,16 +654,16 @@ const DocumentViewer = ({
                           <p className="text-sm text-text-secondary line-clamp-2">{annotation.content}</p>
                         )}
                         {!annotation.content && annotation.annotation_type === 'highlight' && (
-                          <p className="text-xs text-text-disabled italic">Text highlight</p>
+                          <p className="text-xs text-text-tertiary italic">Text highlight</p>
                         )}
                         {!annotation.content && annotation.annotation_type === 'strikethrough' && (
-                          <p className="text-xs text-text-disabled italic">Strikethrough</p>
+                          <p className="text-xs text-text-tertiary italic">Strikethrough</p>
                         )}
                         {!annotation.content && annotation.annotation_type === 'freehand' && (
-                          <p className="text-xs text-text-disabled italic">Freehand drawing</p>
+                          <p className="text-xs text-text-tertiary italic">Freehand drawing</p>
                         )}
                         <div className="flex items-center gap-2 mt-1.5">
-                          <span className="text-xs text-text-disabled">
+                          <span className="text-xs text-text-tertiary">
                             p.{annotation.page_number}
                           </span>
                           {isResolved && (
@@ -720,7 +720,7 @@ const DocumentViewer = ({
                                 <span className="text-xs font-medium text-text-secondary">
                                   {reply.user?.name || `User ${reply.user_id}`}
                                 </span>
-                                <span className="text-xs text-text-disabled">
+                                <span className="text-xs text-text-tertiary">
                                   {formatTimestamp(reply.created_at)}
                                 </span>
                               </div>
@@ -749,7 +749,7 @@ const DocumentViewer = ({
                           <button
                             onClick={() => handleReply(annotation.id)}
                             disabled={!replyText.trim()}
-                            className="text-xs bg-brand-600 text-white px-2 py-1 rounded hover:bg-brand-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                            className="text-xs bg-brand-600 text-on-brand px-2 py-1 rounded hover:bg-brand-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
                           >
                             Reply
                           </button>

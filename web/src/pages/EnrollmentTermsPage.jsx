@@ -238,7 +238,7 @@ const EnrollmentTermsPage = () => {
           </div>
           <button
             onClick={() => { resetForm(); setShowForm(!showForm); }}
-            className="flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+            className="flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
             aria-expanded={showForm}
           >
             <Plus className="w-4 h-4" aria-hidden="true" />
@@ -331,7 +331,7 @@ const EnrollmentTermsPage = () => {
             <div className="flex items-center space-x-3">
               <button
                 type="submit"
-                className="bg-brand-600 text-white px-4 py-2 rounded-md text-sm hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+                className="bg-brand-600 text-on-brand px-4 py-2 rounded-md text-sm hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
               >
                 {editingTerm ? 'Update Term' : 'Create Term'}
               </button>
@@ -349,8 +349,8 @@ const EnrollmentTermsPage = () => {
 
       {terms.length === 0 ? (
         <div className="bg-surface-0 rounded-lg shadow p-12 text-center">
-          <Calendar className="w-12 h-12 text-text-disabled mx-auto mb-4" aria-hidden="true" />
-          <h3 className="text-lg font-medium text-text-primary mb-1">No enrollment terms</h3>
+          <Calendar className="w-12 h-12 text-text-tertiary mx-auto mb-4" aria-hidden="true" />
+          <h2 className="text-lg font-medium text-text-primary mb-1">No enrollment terms</h2>
           <p className="text-text-tertiary text-sm">Create your first enrollment term to organize courses by academic period.</p>
         </div>
       ) : (
@@ -388,7 +388,7 @@ const EnrollmentTermsPage = () => {
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-text-tertiary">
                       <div className="flex items-center space-x-1">
-                        <Clock className="w-3.5 h-3.5 text-text-disabled" aria-hidden="true" />
+                        <Clock className="w-3.5 h-3.5 text-text-tertiary" aria-hidden="true" />
                         <span>{formatDate(term.start_at)}</span>
                       </div>
                     </td>
@@ -405,7 +405,7 @@ const EnrollmentTermsPage = () => {
                       <div className="flex items-center justify-end space-x-2">
                         <button
                           onClick={() => handleEdit(term)}
-                          className="text-text-disabled hover:text-brand-600 p-1 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
+                          className="text-text-tertiary hover:text-brand-600 p-1 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
                           aria-label={`Edit ${term.name}`}
                           title="Edit term"
                         >
@@ -413,7 +413,7 @@ const EnrollmentTermsPage = () => {
                         </button>
                         <button
                           onClick={() => handleDelete(term.id)}
-                          className="text-text-disabled hover:text-accent-danger p-1 rounded focus:outline-none focus:ring-2 focus:ring-accent-danger"
+                          className="text-text-tertiary hover:text-accent-danger p-1 rounded focus:outline-none focus:ring-2 focus:ring-accent-danger"
                           aria-label={`Delete ${term.name}`}
                           title="Delete term"
                         >

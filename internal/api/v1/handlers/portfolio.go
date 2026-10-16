@@ -978,7 +978,7 @@ func (h *PortfolioHandler) streamPortfolioFile(c *fiber.Ctx, portfolio *models.P
 	// No defer Close: fasthttp streams the body after the handler returns
 	// and closes the reader itself (io.Closer). Closing it here sent an
 	// empty/failed download from local storage.
-	c.Set("Content-Type", attachment.ContentType)
+	c.Set("Content-Type", service.ServedContentType(attachment.ContentType))
 	return c.SendStream(reader)
 }
 

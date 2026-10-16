@@ -656,6 +656,13 @@
     "vi": "Tiếng Việt",
     "languageLabel": "Idioma"
   },
+  "designHome": {
+    "title": "Diseña la página de inicio",
+    "body": "Elige un tema y una distribución, escribe directamente en la página y publica una página de inicio que tus estudiantes querrán abrir. Sin HTML.",
+    "designHome": "Diseñar la página de inicio",
+    "makeover": "Renovar el diseño de todo el curso",
+    "dismiss": "Descartar"
+  },
   "publicPage": {
     "notFoundTitle": "Página no encontrada",
     "notFoundDescription": "Esta página no existe o no está disponible públicamente.",
@@ -835,6 +842,27 @@
     "hide": "Ocultar",
     "show": "Mostrar"
   },
+  "adminSettingsPage": {
+    "pages": {
+      "title": "Páginas",
+      "description": "Lo que los profesores pueden hacer en las páginas del curso.",
+      "cssLabel": "Permitir que los profesores escriban su propio CSS de página",
+      "cssHelp": "Las páginas diseñadas (Diseñador de páginas) conservan sus colores, el modo oscuro y la distribución en cualquier caso. Esto controla el CSS escrito a mano: el CSS de página en las páginas normales y el CSS personalizado en la pestaña Avanzado del diseñador. Todo se depura y se limita a la página, así que no puede cambiar el resto de Paper.",
+      "on": "Activado",
+      "off": "Desactivado",
+      "lockedByInstance": "Desactivado por el administrador de Paper",
+      "lockedByAccount": "Desactivado por {{name}}",
+      "lockedByParent": "Desactivado por una cuenta superior",
+      "inherited": "Se usa el valor predeterminado ({{state}}).",
+      "explicit": "Configurado para esta cuenta.",
+      "useDefault": "Usar el valor predeterminado",
+      "saving": "Guardando…",
+      "saved": "Guardado",
+      "loadError": "No se pudo cargar la configuración de páginas.",
+      "retry": "Intentar de nuevo",
+      "loading": "Cargando la configuración de páginas"
+    }
+  },
   "contentImport": {
     "title": "Importar contenido",
     "backToCourse": "← Volver al curso",
@@ -993,6 +1021,17 @@
       "spanish": "Español",
       "currentLabel": "Idioma actual",
       "savedToast": "Idioma actualizado"
+    },
+    "detachDesign": {
+      "title": "¿Editar esta página como HTML?",
+      "body": "Esta página se hizo con el Diseñador de páginas. Al guardar cambios en el HTML, la página se separa de su diseño: conserva su aspecto actual, pero ya no se puede abrir en el diseñador.",
+      "bodyCssOff": "Esta página se hizo con el Diseñador de páginas. Al guardar cambios en el HTML, la página se separa de su diseño y ya no se puede abrir en el diseñador.",
+      "cssRemoved": "El CSS personalizado está desactivado en esta cuenta, así que al separarla se elimina la hoja de estilos de la página, y puede verse distinta (por ejemplo, deja de seguir el modo oscuro).",
+      "undo": "Para deshacerlo, restaure una versión anterior desde el historial de la página.",
+      "cancel": "Cancelar",
+      "confirm": "Editar como HTML",
+      "htmlHelp": "Al guardar, esta página se separa de su diseño. Conserva su aspecto; el diseñador ya no podrá abrirla.",
+      "htmlHelpCssOff": "Al guardar, esta página se separa de su diseño y se elimina su hoja de estilos, así que puede verse distinta; el diseñador ya no podrá abrirla."
     }
   },
   "languagePreferencesPage": {

@@ -195,7 +195,7 @@ const SubmissionForm = ({
                     >
                       <Paperclip className="w-3.5 h-3.5 flex-shrink-0" />
                       <span>{att.display_name || att.filename}</span>
-                      {att.size ? <span className="text-xs text-text-disabled">({formatSize(att.size)})</span> : null}
+                      {att.size ? <span className="text-xs text-text-tertiary">({formatSize(att.size)})</span> : null}
                     </a>
                   )
                 ))}
@@ -300,7 +300,7 @@ const SubmissionForm = ({
                   <li key={`${f.name}-${i}`} className="flex items-center gap-3">
                     <Upload className="w-4 h-4 text-brand-600" />
                     <span className="text-sm text-text-primary font-medium truncate">{f.name}</span>
-                    <span className="text-xs text-text-disabled">({(f.size / 1024).toFixed(1)} KB)</span>
+                    <span className="text-xs text-text-tertiary">({(f.size / 1024).toFixed(1)} KB)</span>
                     <button
                       type="button"
                       onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
@@ -314,11 +314,11 @@ const SubmissionForm = ({
               </ul>
             )}
             <label className="cursor-pointer block">
-              <Upload className="w-8 h-8 text-text-disabled mx-auto mb-2" />
+              <Upload className="w-8 h-8 text-text-tertiary mx-auto mb-2" />
               <p className="text-sm text-text-secondary">
                 {files.length > 0 ? 'Add another file' : 'Click to choose files or drag and drop'}
               </p>
-              <p className="text-xs text-text-disabled mt-1">
+              <p className="text-xs text-text-tertiary mt-1">
                 {allowedExtensions.length > 0
                   ? `Allowed file types: ${allowedExtensions.join(', ')}`
                   : 'PDF, Word, images, or other supported formats'}
@@ -383,14 +383,14 @@ const SubmissionForm = ({
         )}
         <div className="flex items-center justify-between mt-2">
           {existingSubmission && existingSubmission.attempt > 0 && (
-            <span className="text-xs text-text-disabled">
+            <span className="text-xs text-text-tertiary">
               Current attempt: {existingSubmission.attempt}
             </span>
           )}
           <button
             type="submit"
             disabled={submitting || !isValid() || outOfAttempts || activeTab === 'external_tool'}
-            className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium ml-auto"
+            className="inline-flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium ml-auto"
           >
             <Send className="w-4 h-4" />
             <span>{submitting ? 'Submitting...' : 'Submit Assignment'}</span>

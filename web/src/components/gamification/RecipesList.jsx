@@ -108,7 +108,7 @@ export default function RecipesList({ courseId }) {
             setEditing(null);
             setEditorOpen(true);
           }}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-brand-600 text-white hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-400/60"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-brand-600 text-on-brand hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-400/60"
         >
           <Plus className="w-4 h-4" /> New recipe
         </button>

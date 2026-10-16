@@ -990,7 +990,7 @@ const SpeedGraderPage = () => {
                     <Grid className="w-4 h-4" />
                     <span>Rubric ({rubricCriteria.length} criteria)</span>
                   </h3>
-                  {rubricExpanded ? <ChevronUp className="w-4 h-4 text-text-disabled" /> : <ChevronDown className="w-4 h-4 text-text-disabled" />}
+                  {rubricExpanded ? <ChevronUp className="w-4 h-4 text-text-tertiary" /> : <ChevronDown className="w-4 h-4 text-text-tertiary" />}
                 </button>
                 {rubricExpanded && (
                   <div className="p-3 space-y-4">

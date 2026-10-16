@@ -52,6 +52,15 @@ function applyPrefs(prefs) {
   const palette = BG_PALETTE[prefs.bg] || BG_PALETTE.white;
 
   root.style.setProperty('--reading-font-family', FONT_STACKS[prefs.fontFamily] || FONT_STACKS.system);
+  // --reading-font-choice is set only when the reader picked a font of their
+  // own (not the system default). Designed pages write their theme's heading
+  // font as var(--reading-font-choice, <theme font>), so the theme font shows
+  // unless the reader asked for, say, OpenDyslexic.
+  if (prefs.fontFamily && prefs.fontFamily !== 'system' && FONT_STACKS[prefs.fontFamily]) {
+    root.style.setProperty('--reading-font-choice', FONT_STACKS[prefs.fontFamily]);
+  } else {
+    root.style.removeProperty('--reading-font-choice');
+  }
   root.style.setProperty('--reading-font-scale', String(prefs.fontScale));
   root.style.setProperty('--reading-line-height', String(prefs.lineHeight));
   root.style.setProperty('--reading-letter-spacing', `${prefs.letterSpacing}em`);

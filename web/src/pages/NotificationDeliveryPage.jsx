@@ -249,7 +249,7 @@ const NotificationDeliveryPage = () => {
               const Icon = config.icon;
               return (
                 <div key={status} className="bg-surface-0 rounded-lg shadow p-4 text-center">
-                  <Icon className="w-5 h-5 mx-auto mb-1 text-text-disabled" />
+                  <Icon className="w-5 h-5 mx-auto mb-1 text-text-tertiary" />
                   <p className="text-2xl font-bold text-text-primary">{stats[status] || 0}</p>
                   <p className="text-xs text-text-tertiary capitalize">{config.label}</p>
                 </div>
@@ -261,7 +261,7 @@ const NotificationDeliveryPage = () => {
               <button
                 onClick={handleRetryFailed}
                 disabled={retrying}
-                className="inline-flex items-center gap-2 bg-accent-danger text-white px-4 py-2 rounded-md hover:bg-accent-danger/90 text-sm font-medium disabled:opacity-50 transition-colors"
+                className="inline-flex items-center gap-2 bg-accent-danger text-on-accent px-4 py-2 rounded-md hover:bg-accent-danger/90 text-sm font-medium disabled:opacity-50 transition-colors"
               >
                 <RefreshCw className={`w-4 h-4 ${retrying ? 'animate-spin' : ''}`} />
                 {retrying ? 'Retrying...' : 'Retry Failed Deliveries'}
@@ -322,7 +322,7 @@ const NotificationDeliveryPage = () => {
                 <button
                   type="submit"
                   disabled={addingChannel}
-                  className="bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50 transition-colors"
+                  className="bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50 transition-colors"
                 >
                   {addingChannel ? 'Adding...' : 'Add'}
                 </button>
@@ -336,13 +336,13 @@ const NotificationDeliveryPage = () => {
             No communication channels configured. Notifications will be sent to your account email.
           </div>
         ) : (
-          <div className="bg-surface-0 rounded-lg shadow divide-y divide-gray-100">
+          <div className="bg-surface-0 rounded-lg shadow divide-y divide-border-default">
             {channels.map((ch) => {
               const Icon = CHANNEL_ICONS[ch.channel_type] || Mail;
               return (
                 <div key={ch.id} className="flex items-center justify-between px-4 py-3">
                   <div className="flex items-center gap-3">
-                    <Icon className="w-5 h-5 text-text-disabled" />
+                    <Icon className="w-5 h-5 text-text-tertiary" />
                     <div>
                       <p className="text-sm font-medium text-text-primary">{ch.address}</p>
                       <p className="text-xs text-text-tertiary capitalize">{ch.channel_type} &middot; Position {ch.position}</p>
@@ -379,7 +379,7 @@ const NotificationDeliveryPage = () => {
                   </div>
                   <button
                     onClick={() => handleDeleteChannel(ch.id)}
-                    className="text-text-disabled hover:text-accent-danger transition-colors p-1"
+                    className="text-text-tertiary hover:text-accent-danger transition-colors p-1"
                     title="Remove channel"
                     aria-label={`Remove ${ch.channel_type} channel ${ch.address}`}
                   >
@@ -422,7 +422,7 @@ const NotificationDeliveryPage = () => {
         ) : (
           <>
             <div className="bg-surface-0 rounded-lg shadow overflow-hidden">
-              <div className="overflow-x-auto">
+              <div className="relative overflow-x-auto">
                 <table className="min-w-full divide-y divide-border-default">
                   <thead className="bg-surface-1">
                     <tr>
@@ -434,7 +434,7 @@ const NotificationDeliveryPage = () => {
                       <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-text-tertiary uppercase tracking-wider">Retries</th>
                     </tr>
                   </thead>
-                  <tbody className="bg-surface-0 divide-y divide-gray-100">
+                  <tbody className="bg-surface-0 divide-y divide-border-default">
                     {deliveries.map((d) => {
                       const ChIcon = CHANNEL_ICONS[d.channel_type] || Mail;
                       return (

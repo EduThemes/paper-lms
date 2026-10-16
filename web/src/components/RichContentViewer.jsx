@@ -6,6 +6,7 @@ import { enhanceUserContent } from '../utils/enhanceUserContent';
 import { Volume2, Square } from 'lucide-react';
 import { ReadingPrefsContext } from '../contexts/ReadingPrefsContext';
 import { htmlToText } from '../utils/html';
+import { CONTENT_CONTAINMENT, CONTAINED_CLASS } from './contentContainment';
 
 /* --- DOMPurify Configuration ---------------------------------------------- */
 
@@ -74,7 +75,9 @@ const purifyConfig = {
     // Anchors / links
     'download', 'hreflang', 'type', 'referrerpolicy',
     // Images / picture / video / audio / iframe
-    'srcset', 'sizes', 'loading', 'decoding', 'crossorigin', 'usemap',
+    'srcset', 'sizes', 'loading', 'decoding', 'fetchpriority', 'crossorigin', 'usemap',
+    // <picture><source media=… srcset=…> art direction (designed pages)
+    'media',
     'controls', 'autoplay', 'loop', 'muted', 'playsinline', 'preload', 'poster',
     'allowfullscreen', 'allow', 'frameborder', 'sandbox', 'longdesc',
     // Form-control attributes (no form/formaction/formmethod/formtarget:
@@ -126,8 +129,13 @@ function getPurifier() {
       && !IFRAME_ALLOW_RE.test(node.getAttribute('allow'))) {
       node.removeAttribute('allow');
     }
-    // Inline styles may not pin content over the application chrome.
-    if (node.style && /^(fixed|sticky)$/i.test(node.style.position || '')) {
+    // Inline styles may not pin content over the application chrome: only
+    // static / relative / absolute positioning survives. An allowlist, not a
+    // fixed|sticky blocklist, so -webkit-sticky, var(--p) (which could resolve
+    // to fixed) and other spellings go too. Absolute boxes stay inside the
+    // content root, which is a containment box (contentContainment.js).
+    if (node.style && node.style.position
+      && !/^(static|relative|absolute)$/i.test(node.style.position.trim())) {
       node.style.removeProperty('position');
       if (!node.getAttribute('style')) node.removeAttribute('style');
     }
@@ -247,11 +255,14 @@ export default function RichContentViewer({ content, className }) {
           'prose-hr:border-border-strong',
           // Custom class
           className,
+          // Containment box: nothing in the content can draw over Paper's UI.
+          CONTAINED_CLASS,
         ].filter(Boolean).join(' ')}
         dangerouslySetInnerHTML={{ __html: sanitized }}
         style={{
           /* Embedded video responsive wrappers */
           '--tw-prose-body': '#374151',
+          ...CONTENT_CONTAINMENT,
         }}
       />
     </div>

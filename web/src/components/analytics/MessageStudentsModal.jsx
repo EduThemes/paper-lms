@@ -53,7 +53,7 @@ export default function MessageStudentsModal({ students, assignments, initialStu
               Sent {result.sent} message{result.sent === 1 ? '' : 's'}.
               {result.failed.length > 0 && ` ${result.failed.length} could not be sent.`}
             </p>
-            <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded bg-brand-600 text-white hover:bg-brand-700">Done</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded bg-brand-600 text-on-brand hover:bg-brand-700">Done</button>
           </div>
         ) : (
           <form onSubmit={send} className="p-5 space-y-4">
@@ -113,7 +113,7 @@ export default function MessageStudentsModal({ students, assignments, initialStu
             <p className="text-xs text-text-tertiary">Each student receives a separate message and can&apos;t see who else got it.</p>
             <div className="flex justify-end gap-2">
               <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded border border-border-strong hover:bg-surface-1">Cancel</button>
-              <button type="submit" disabled={sending || recipients.length === 0} className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+              <button type="submit" disabled={sending || recipients.length === 0} className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded bg-brand-600 text-on-brand hover:bg-brand-700 disabled:opacity-50">
                 <Send className="w-4 h-4" /> {sending ? 'Sending…' : 'Send'}
               </button>
             </div>

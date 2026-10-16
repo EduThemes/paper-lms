@@ -205,7 +205,7 @@ const AssignmentsPage = () => {
       className="flex items-center justify-between p-4 hover:bg-surface-1"
     >
       <div className="flex items-center space-x-3 min-w-0">
-        <FileCheck className="w-5 h-5 text-text-disabled flex-shrink-0" />
+        <FileCheck className="w-5 h-5 text-text-tertiary flex-shrink-0" />
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-medium text-text-primary truncate">{assignment.name}</span>
@@ -219,7 +219,7 @@ const AssignmentsPage = () => {
               <span className="text-xs px-1.5 py-0.5 rounded bg-border-default text-text-tertiary">Unpublished</span>
             )}
           </div>
-          <div className="flex items-center space-x-3 text-xs text-text-disabled mt-0.5">
+          <div className="flex items-center space-x-3 text-xs text-text-tertiary mt-0.5">
             {assignment.due_at && (
               <span>Due {formatDate(assignment.due_at)}</span>
             )}
@@ -241,7 +241,7 @@ const AssignmentsPage = () => {
           className={`flex-shrink-0 p-1.5 rounded-md transition-colors ${
             assignment.published !== false
               ? 'text-accent-success hover:bg-accent-success/10'
-              : 'text-text-disabled hover:bg-surface-2'
+              : 'text-text-tertiary hover:bg-surface-2'
           }`}
           title={assignment.published !== false ? 'Unpublish' : 'Publish'}
         >
@@ -263,7 +263,7 @@ const AssignmentsPage = () => {
           {isTeacher && (
             <button
               onClick={() => setShowCreate(!showCreate)}
-              className="inline-flex items-center px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium"
+              className="inline-flex items-center px-4 py-2 bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 text-sm font-medium"
             >
               <Plus className="w-4 h-4 mr-1" />
               Assignment
@@ -275,7 +275,7 @@ const AssignmentsPage = () => {
       {/* Search and Filter */}
       <div className="flex items-center gap-3 mb-4">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-disabled" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" />
           <input
             type="text"
             value={searchQuery}
@@ -286,6 +286,7 @@ const AssignmentsPage = () => {
           />
         </div>
         <select
+          aria-label="Filter assignments by status"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
           className="border border-border-strong rounded-md px-3 py-2 text-sm text-text-secondary"
@@ -451,9 +452,9 @@ const AssignmentsPage = () => {
               <div className="mt-2 ml-6">
                 <label className="block text-sm font-medium text-text-secondary mb-1">Group Category</label>
                 {loadingGroupCategories ? (
-                  <p className="text-sm text-text-disabled">Loading group categories...</p>
+                  <p className="text-sm text-text-tertiary">Loading group categories...</p>
                 ) : groupCategories.length === 0 ? (
-                  <p className="text-sm text-text-disabled">No group categories found for this course. Create one on the Groups page first.</p>
+                  <p className="text-sm text-text-tertiary">No group categories found for this course. Create one on the Groups page first.</p>
                 ) : (
                   <select
                     value={newAssignment.group_category_id}
@@ -473,7 +474,7 @@ const AssignmentsPage = () => {
             <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary">
               Cancel
             </button>
-            <button type="submit" disabled={creating} className="px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
+            <button type="submit" disabled={creating} className="px-4 py-2 bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50">
               {creating ? 'Creating...' : 'Create Assignment'}
             </button>
           </div>
@@ -504,12 +505,12 @@ const AssignmentsPage = () => {
                 >
                   <div className="flex items-center space-x-2">
                     {isCollapsed ? (
-                      <ChevronRight className="w-4 h-4 text-text-disabled" />
+                      <ChevronRight className="w-4 h-4 text-text-tertiary" />
                     ) : (
-                      <ChevronDown className="w-4 h-4 text-text-disabled" />
+                      <ChevronDown className="w-4 h-4 text-text-tertiary" />
                     )}
                     <h3 className="font-semibold text-text-primary">{group.name}</h3>
-                    <span className="text-xs text-text-disabled">
+                    <span className="text-xs text-text-tertiary">
                       ({groupAssignments.length} assignment{groupAssignments.length !== 1 ? 's' : ''})
                     </span>
                   </div>

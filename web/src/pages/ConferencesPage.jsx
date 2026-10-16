@@ -205,7 +205,7 @@ const ConferencesPage = () => {
           {isTeacher && (
           <button
             onClick={() => { if (showForm) { resetForm(); } else { setShowForm(true); } }}
-            className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+            className="inline-flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
           >
             {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
             <span>{showForm ? 'Cancel' : 'New Conference'}</span>
@@ -307,7 +307,7 @@ const ConferencesPage = () => {
               <button
                 type="submit"
                 disabled={submitting}
-                className="bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+                className="bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
               >
                 {submitting ? 'Saving...' : (editingId ? 'Update Conference' : 'Create Conference')}
               </button>
@@ -342,7 +342,7 @@ const ConferencesPage = () => {
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3 min-w-0">
-                      <Video className="w-5 h-5 text-text-disabled flex-shrink-0" />
+                      <Video className="w-5 h-5 text-text-tertiary flex-shrink-0" />
                       <div className="min-w-0">
                         <div className="flex items-center space-x-2">
                           <span className="font-medium text-text-primary truncate">{conf.title}</span>
@@ -362,17 +362,17 @@ const ConferencesPage = () => {
                           <p className="text-sm text-text-tertiary truncate">{conf.description}</p>
                         )}
                         <div className="flex items-center space-x-4 mt-1">
-                          <span className="text-xs text-text-disabled">
+                          <span className="text-xs text-text-tertiary">
                             Created {formatDate(conf.created_at)}
                           </span>
                           {conf.duration > 0 && (
-                            <span className="text-xs text-text-disabled">{conf.duration} min</span>
+                            <span className="text-xs text-text-tertiary">{conf.duration} min</span>
                           )}
                           {conf.started_at && (
-                            <span className="text-xs text-text-disabled">Started {formatDate(conf.started_at)}</span>
+                            <span className="text-xs text-text-tertiary">Started {formatDate(conf.started_at)}</span>
                           )}
                           {conf.ended_at && (
-                            <span className="text-xs text-text-disabled">Ended {formatDate(conf.ended_at)}</span>
+                            <span className="text-xs text-text-tertiary">Ended {formatDate(conf.ended_at)}</span>
                           )}
                         </div>
                       </div>
@@ -381,7 +381,7 @@ const ConferencesPage = () => {
                       {isTeacher && !conf.started_at && !conf.ended_at && (
                         <button
                           onClick={() => handleStart(conf.id)}
-                          className="inline-flex items-center space-x-1 px-3 py-1.5 bg-accent-success text-white rounded-md hover:bg-accent-success/90 text-xs font-medium"
+                          className="inline-flex items-center space-x-1 px-3 py-1.5 bg-accent-success text-on-accent rounded-md hover:bg-accent-success/90 text-xs font-medium"
                           title="Start and Join"
                         >
                           <Play className="w-3.5 h-3.5" />
@@ -392,7 +392,7 @@ const ConferencesPage = () => {
                         <>
                           <button
                             onClick={() => handleJoin(conf.id)}
-                            className="inline-flex items-center space-x-1 px-3 py-1.5 bg-accent-success text-white rounded-md hover:bg-accent-success/90 text-xs font-medium"
+                            className="inline-flex items-center space-x-1 px-3 py-1.5 bg-accent-success text-on-accent rounded-md hover:bg-accent-success/90 text-xs font-medium"
                             title="Join Conference"
                           >
                             <LogIn className="w-3.5 h-3.5" />
@@ -401,7 +401,7 @@ const ConferencesPage = () => {
                           {isTeacher && (
                           <button
                             onClick={() => handleEnd(conf.id)}
-                            className="inline-flex items-center space-x-1 px-3 py-1.5 bg-accent-danger text-white rounded-md hover:bg-accent-danger/90 text-xs font-medium"
+                            className="inline-flex items-center space-x-1 px-3 py-1.5 bg-accent-danger text-on-accent rounded-md hover:bg-accent-danger/90 text-xs font-medium"
                             title="End Conference"
                           >
                             <Square className="w-3.5 h-3.5" />
@@ -412,7 +412,7 @@ const ConferencesPage = () => {
                       )}
                       <button
                         onClick={() => handleViewRecordings(conf)}
-                        className="p-1.5 text-text-disabled hover:text-purple-600 hover:bg-purple-50 rounded"
+                        className="p-1.5 text-text-tertiary hover:text-purple-600 hover:bg-purple-50 rounded"
                         title="Recordings"
                       >
                         <Film className="w-4 h-4" />
@@ -421,14 +421,14 @@ const ConferencesPage = () => {
                       <>
                       <button
                         onClick={() => handleEdit(conf)}
-                        className="p-1.5 text-text-disabled hover:text-brand-600 hover:bg-brand-50 rounded"
+                        className="p-1.5 text-text-tertiary hover:text-brand-600 hover:bg-brand-50 rounded"
                         title="Edit"
                       >
                         <Pencil className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleDelete(conf.id)}
-                        className="p-1.5 text-text-disabled hover:text-accent-danger hover:bg-accent-danger/10 rounded"
+                        className="p-1.5 text-text-tertiary hover:text-accent-danger hover:bg-accent-danger/10 rounded"
                         title="Delete"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -460,7 +460,7 @@ const ConferencesPage = () => {
             <h3 className="font-semibold">Participants - {selectedConference.title}</h3>
             <button
               onClick={() => { setParticipants(null); setSelectedConference(null); }}
-              className="text-text-disabled hover:text-text-secondary"
+              className="text-text-tertiary hover:text-text-secondary"
             >
               <X className="w-5 h-5" />
             </button>

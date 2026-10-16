@@ -598,7 +598,7 @@ const AuthProvidersPage = () => {
               setShowForm(true);
             }
           }}
-          className="flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
+          className="flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
         >
           <Plus className="w-4 h-4" />
           Add Provider
@@ -699,7 +699,7 @@ const AuthProvidersPage = () => {
               <button
                 type="submit"
                 disabled={submitting}
-                className="bg-accent-success text-white px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50"
+                className="bg-accent-success text-on-accent px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50"
               >
                 {submitting ? 'Saving...' : editingId ? 'Update Provider' : 'Create Provider'}
               </button>
@@ -734,7 +734,7 @@ const AuthProvidersPage = () => {
               <button
                 onClick={() => handleDelete(deleteConfirm)}
                 disabled={deleting}
-                className="bg-accent-danger text-white px-4 py-2 rounded-md hover:bg-accent-danger/90 text-sm disabled:opacity-50"
+                className="bg-accent-danger text-on-accent px-4 py-2 rounded-md hover:bg-accent-danger/90 text-sm disabled:opacity-50"
               >
                 {deleting ? 'Deleting...' : 'Delete Provider'}
               </button>
@@ -751,7 +751,7 @@ const AuthProvidersPage = () => {
 </div>
       ) : providers.length === 0 ? (
         <div className="bg-surface-0 rounded-lg shadow p-12 text-center">
-          <Shield className="w-12 h-12 text-text-disabled mx-auto mb-4" />
+          <Shield className="w-12 h-12 text-text-tertiary mx-auto mb-4" />
           <h3 className="text-lg font-medium text-text-primary mb-1">No Authentication Providers</h3>
           <p className="text-text-tertiary text-sm">
             No authentication providers have been configured. Add a SAML, LDAP, or CAS provider to enable single sign-on.
@@ -819,7 +819,7 @@ const AuthProvidersPage = () => {
                     {provider.jit_provisioning ? (
                       <span className="text-accent-success">Enabled</span>
                     ) : (
-                      <span className="text-text-disabled">Disabled</span>
+                      <span className="text-text-tertiary">Disabled</span>
                     )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">

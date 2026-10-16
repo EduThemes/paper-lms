@@ -136,19 +136,19 @@ const CommonsPublishPage = () => {
       <div className="p-6 max-w-3xl mx-auto">
         <div className="flex items-center gap-2 mb-1">
           <Library className="w-5 h-5 text-indigo-600" />
-          <h1 className="text-2xl font-bold text-slate-900">Publish to Commons</h1>
+          <h1 className="text-2xl font-bold text-text-primary">Publish to Commons</h1>
         </div>
-        <p className="text-sm text-slate-500 mb-6">
+        <p className="text-sm text-text-tertiary mb-6">
           Share course content with other teachers in your district.
         </p>
 
-        <form onSubmit={handleSubmit} className="space-y-5 bg-surface-0 border border-slate-200 rounded-lg p-6">
+        <form onSubmit={handleSubmit} className="space-y-5 bg-surface-0 border border-border-default rounded-lg p-6">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">What do you want to publish?</label>
+            <label className="block text-sm font-medium text-text-secondary mb-1">What do you want to publish?</label>
             <select
               value={resourceType}
               onChange={(e) => setResourceType(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded text-sm bg-surface-0"
+              className="w-full px-3 py-2 border border-border-default rounded text-sm bg-surface-0"
             >
               {RESOURCE_TYPES.map((rt) => (
                 <option key={rt.value} value={rt.value}>{rt.label}</option>
@@ -158,11 +158,11 @@ const CommonsPublishPage = () => {
 
           {resourceType !== 'course' && (
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Pick the resource</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">Pick the resource</label>
               <select
                 value={resourceId}
                 onChange={(e) => setResourceId(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-200 rounded text-sm bg-surface-0"
+                className="w-full px-3 py-2 border border-border-default rounded text-sm bg-surface-0"
                 disabled={loadingOptions}
               >
                 <option value="">{loadingOptions ? 'Loading...' : 'Select...'}</option>
@@ -174,35 +174,35 @@ const CommonsPublishPage = () => {
           )}
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Title</label>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Title</label>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded text-sm"
+              className="w-full px-3 py-2 border border-border-default rounded text-sm"
               placeholder="e.g. 2nd-Grade Fractions Unit"
               required
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Description</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={4}
-              className="w-full px-3 py-2 border border-slate-200 rounded text-sm"
+              className="w-full px-3 py-2 border border-border-default rounded text-sm"
               placeholder="What's in this content? Who is it for?"
             />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Subject</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">Subject</label>
               <select
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-200 rounded text-sm bg-surface-0"
+                className="w-full px-3 py-2 border border-border-default rounded text-sm bg-surface-0"
               >
                 {SUBJECTS.map((s) => (
                   <option key={s || 'none'} value={s}>{s || 'Choose...'}</option>
@@ -210,11 +210,11 @@ const CommonsPublishPage = () => {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Grade level</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">Grade level</label>
               <select
                 value={gradeLevel}
                 onChange={(e) => setGradeLevel(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-200 rounded text-sm bg-surface-0"
+                className="w-full px-3 py-2 border border-border-default rounded text-sm bg-surface-0"
               >
                 {GRADE_LEVELS.map((g) => (
                   <option key={g || 'none'} value={g}>{g || 'Choose...'}</option>
@@ -224,33 +224,33 @@ const CommonsPublishPage = () => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Tags (comma-separated)</label>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Tags (comma-separated)</label>
             <input
               type="text"
               value={tagsRaw}
               onChange={(e) => setTagsRaw(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded text-sm"
+              className="w-full px-3 py-2 border border-border-default rounded text-sm"
               placeholder="e.g. fractions, hands-on, station"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Thumbnail URL (optional)</label>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Thumbnail URL (optional)</label>
             <input
               type="url"
               value={thumbnailURL}
               onChange={(e) => setThumbnailURL(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded text-sm"
+              className="w-full px-3 py-2 border border-border-default rounded text-sm"
               placeholder="https://..."
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Visibility</label>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Visibility</label>
             <select
               value={visibility}
               onChange={(e) => setVisibility(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded text-sm bg-surface-0"
+              className="w-full px-3 py-2 border border-border-default rounded text-sm bg-surface-0"
             >
               <option value="account">My district only</option>
               <option value="public">Public</option>
@@ -272,7 +272,7 @@ const CommonsPublishPage = () => {
             <button
               type="button"
               onClick={() => navigate(-1)}
-              className="px-4 py-2 text-sm border border-slate-200 rounded hover:bg-slate-50"
+              className="px-4 py-2 text-sm border border-border-default rounded hover:bg-surface-1"
             >
               Cancel
             </button>

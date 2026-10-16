@@ -25,7 +25,7 @@ const MultipleAnswerEditor = ({ answers, onChange }) => {
   return (
     <div>
       <label className="block text-xs font-medium text-text-secondary mb-2">
-        Answers <span className="text-text-disabled">(check box to mark correct — any number)</span>
+        Answers <span className="text-text-tertiary">(check box to mark correct — any number)</span>
       </label>
       <div className="space-y-2">
         {list.map((a, i) => {
@@ -37,7 +37,7 @@ const MultipleAnswerEditor = ({ answers, onChange }) => {
                 onClick={() => toggleCorrect(i)}
                 className={`w-6 h-6 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
                   correct
-                    ? 'border-accent-success bg-accent-success text-white'
+                    ? 'border-accent-success bg-accent-success text-on-accent'
                     : 'border-border-strong hover:border-accent-success/60'
                 }`}
                 aria-pressed={correct}
@@ -55,7 +55,7 @@ const MultipleAnswerEditor = ({ answers, onChange }) => {
               {list.length > 2 && (
                 <button
                   onClick={() => removeAnswer(i)}
-                  className="p-1 text-text-disabled hover:text-accent-danger"
+                  className="p-1 text-text-tertiary hover:text-accent-danger"
                   aria-label={`Remove answer ${i + 1}`}
                 >
                   <Trash2 className="w-3.5 h-3.5" />

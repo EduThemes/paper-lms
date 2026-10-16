@@ -338,7 +338,7 @@ const OneRosterPage = () => {
               setShowForm(true);
             }
           }}
-          className="flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
+          className="flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
         >
           <Plus className="w-4 h-4" />
           Add Connection
@@ -509,7 +509,7 @@ const OneRosterPage = () => {
               <button
                 type="submit"
                 disabled={submitting}
-                className="bg-accent-success text-white px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50"
+                className="bg-accent-success text-on-accent px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50"
               >
                 {submitting ? 'Saving...' : editingId ? 'Update Connection' : 'Create Connection'}
               </button>
@@ -544,7 +544,7 @@ const OneRosterPage = () => {
               <button
                 onClick={() => handleDelete(deleteConfirm)}
                 disabled={deleting}
-                className="bg-accent-danger text-white px-4 py-2 rounded-md hover:bg-accent-danger/90 text-sm disabled:opacity-50"
+                className="bg-accent-danger text-on-accent px-4 py-2 rounded-md hover:bg-accent-danger/90 text-sm disabled:opacity-50"
               >
                 {deleting ? 'Deleting...' : 'Delete Connection'}
               </button>
@@ -561,14 +561,14 @@ const OneRosterPage = () => {
 </div>
       ) : connections.length === 0 && !showForm ? (
         <div className="bg-surface-0 rounded-lg shadow p-12 text-center">
-          <Database className="w-12 h-12 text-text-disabled mx-auto mb-4" />
+          <Database className="w-12 h-12 text-text-tertiary mx-auto mb-4" />
           <h3 className="text-lg font-medium text-text-primary mb-1">No OneRoster Connections</h3>
           <p className="text-text-tertiary text-sm mb-4">
             Connect your Student Information System (SIS) via OneRoster 1.1 to automatically sync rosters, users, and enrollments.
           </p>
           <button
             onClick={() => setShowForm(true)}
-            className="inline-flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
+            className="inline-flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
           >
             <Plus className="w-4 h-4" />
             Add Your First Connection
@@ -586,9 +586,9 @@ const OneRosterPage = () => {
                 <div className="flex items-center gap-4 flex-1 min-w-0">
                   <div className="flex-shrink-0">
                     {selectedConnection && selectedConnection.id === conn.id ? (
-                      <ChevronDown className="w-5 h-5 text-text-disabled" />
+                      <ChevronDown className="w-5 h-5 text-text-tertiary" />
                     ) : (
-                      <ChevronRight className="w-5 h-5 text-text-disabled" />
+                      <ChevronRight className="w-5 h-5 text-text-tertiary" />
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -609,7 +609,7 @@ const OneRosterPage = () => {
                     <div className="flex items-center gap-4 mt-1">
                       <p className="text-xs text-text-tertiary truncate">{conn.base_url}</p>
                       {conn.last_sync_at && (
-                        <p className="text-xs text-text-disabled flex items-center gap-1 flex-shrink-0">
+                        <p className="text-xs text-text-tertiary flex items-center gap-1 flex-shrink-0">
                           <Clock className="w-3 h-3" />
                           Last sync: {formatDate(conn.last_sync_at)}
                         </p>
@@ -673,11 +673,11 @@ const OneRosterPage = () => {
                   <h4 className="text-sm font-semibold text-text-secondary mb-3">Sync History</h4>
 
                   {syncLogsLoading ? (
-                    <div className="text-center py-4 text-text-disabled text-sm">Loading sync history...</div>
+                    <div className="text-center py-4 text-text-tertiary text-sm">Loading sync history...</div>
                   ) : syncLogs.length === 0 ? (
-                    <div className="text-center py-4 text-text-disabled text-sm">No sync history yet. Run a sync to see results here.</div>
+                    <div className="text-center py-4 text-text-tertiary text-sm">No sync history yet. Run a sync to see results here.</div>
                   ) : (
-                    <div className="overflow-x-auto">
+                    <div className="relative overflow-x-auto">
                       <table className="min-w-full text-sm">
                         <thead>
                           <tr className="text-start text-xs text-text-tertiary uppercase tracking-wider">
@@ -735,7 +735,7 @@ const OneRosterPage = () => {
                                     {log.errors > 0 ? (
                                       <span className="text-accent-danger font-medium">{log.errors}</span>
                                     ) : (
-                                      <span className="text-text-disabled">0</span>
+                                      <span className="text-text-tertiary">0</span>
                                     )}
                                   </td>
                                   <td className="py-2 pe-4 text-text-tertiary text-xs whitespace-nowrap">

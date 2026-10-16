@@ -193,7 +193,7 @@ const ExternalToolsPage = () => {
                 setEditingTool(null);
                 setShowForm(!showForm);
               }}
-              className="flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
+              className="flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm"
             >
               <Plus className="w-4 h-4" />
               Install New Tool
@@ -300,7 +300,7 @@ const ExternalToolsPage = () => {
               <button
                 type="submit"
                 disabled={saving}
-                className="bg-accent-success text-white px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50"
+                className="bg-accent-success text-on-accent px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50"
               >
                 {saving
                   ? editingTool
@@ -341,7 +341,7 @@ const ExternalToolsPage = () => {
               <button
                 onClick={() => handleDelete(deleteConfirm)}
                 disabled={deleting}
-                className="bg-accent-danger text-white px-4 py-2 rounded-md hover:bg-accent-danger/90 text-sm disabled:opacity-50"
+                className="bg-accent-danger text-on-accent px-4 py-2 rounded-md hover:bg-accent-danger/90 text-sm disabled:opacity-50"
               >
                 {deleting ? 'Removing...' : 'Remove Tool'}
               </button>
@@ -358,7 +358,7 @@ const ExternalToolsPage = () => {
 </div>
       ) : tools.length === 0 ? (
         <div className="bg-surface-0 rounded-lg shadow p-12 text-center">
-          <Puzzle className="w-12 h-12 text-text-disabled mx-auto mb-4" />
+          <Puzzle className="w-12 h-12 text-text-tertiary mx-auto mb-4" />
           <h3 className="text-lg font-medium text-text-primary mb-1">No External Tools Installed</h3>
           <p className="text-text-tertiary text-sm">
             No LTI tools have been installed in this course yet.

@@ -55,7 +55,7 @@ const SubmissionStatusMenu = ({ courseId, assignmentId, student, cell, onUpdated
           type="button"
           disabled={busy}
           aria-label={`Status options for ${student.name}`}
-          className="absolute bottom-0.5 right-0.5 rounded p-0.5 text-text-disabled opacity-60 hover:opacity-100 hover:bg-surface-2 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+          className="absolute bottom-0.5 right-0.5 rounded p-0.5 text-text-tertiary opacity-60 hover:opacity-100 hover:bg-surface-2 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
         >
           <MoreHorizontal className="h-3 w-3" />
         </button>

@@ -371,7 +371,7 @@ const ComposeDialog = ({ mode, source, onClose, onSent, selfId }) => {
           <button
             type="submit"
             disabled={sending || recipients.length === 0}
-            className="bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+            className="bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
           >
             {sending ? t('inboxPage.sending') : t('inboxPage.send')}
           </button>
@@ -389,7 +389,7 @@ const MessageBubble = ({ msg, isOwn, participants, onReply, onReplyAll, onForwar
   const nameOf = (id) => participants.find((p) => p.id === id)?.name || `User #${id}`;
   return (
     <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
-      <div className={`max-w-[80%] rounded-lg px-4 py-2 ${isOwn ? 'bg-brand-600 text-white' : 'bg-surface-2 text-text-primary'}`}>
+      <div className={`max-w-[80%] rounded-lg px-4 py-2 ${isOwn ? 'bg-brand-600 text-on-brand' : 'bg-surface-2 text-text-primary'}`}>
         <div className="flex items-center justify-between gap-3 mb-1">
           <p className={`text-xs font-medium ${isOwn ? 'text-blue-100' : 'text-text-tertiary'}`}>
             {isOwn ? 'You' : (msg.user_name || `User #${msg.user_id}`)}
@@ -427,7 +427,7 @@ const MessageBubble = ({ msg, isOwn, participants, onReply, onReplyAll, onForwar
             ))}
           </ul>
         )}
-        <p className={`text-xs mt-1 ${isOwn ? 'text-blue-200' : 'text-text-disabled'}`}>{formatDate(msg.created_at)}</p>
+        <p className={`text-xs mt-1 ${isOwn ? 'text-blue-200' : 'text-text-tertiary'}`}>{formatDate(msg.created_at)}</p>
       </div>
     </div>
   );
@@ -582,7 +582,7 @@ const Thread = ({ conversation, selfId, onBack, onAction, onForward }) => {
         ) : messagesQuery.isError ? (
           <div className="text-center text-accent-danger py-8 text-sm" role="alert">{messagesQuery.error?.message}</div>
         ) : messages.length === 0 ? (
-          <div className="text-center text-text-disabled py-8 text-sm">No messages yet. Start the conversation!</div>
+          <div className="text-center text-text-tertiary py-8 text-sm">No messages yet. Start the conversation!</div>
         ) : (
           <>
             {oldestPage > 1 && (
@@ -635,7 +635,7 @@ const Thread = ({ conversation, selfId, onBack, onAction, onForward }) => {
                 }
               }}
             />
-            <button type="submit" disabled={sending || !replyText.trim()} className="bg-brand-600 text-white p-2 rounded-md hover:bg-brand-700 disabled:opacity-50" aria-label="Send message" title="Send message">
+            <button type="submit" disabled={sending || !replyText.trim()} className="bg-brand-600 text-on-brand p-2 rounded-md hover:bg-brand-700 disabled:opacity-50" aria-label="Send message" title="Send message">
               <Send className="w-5 h-5" />
             </button>
           </div>
@@ -745,14 +745,14 @@ const InboxPage = () => {
           <Mail className="w-6 h-6" />
           {t('inboxPage.title')}
           {unread > 0 && (
-            <span className="ml-1 inline-flex items-center justify-center rounded-full bg-brand-600 text-white text-xs font-semibold px-2 py-0.5" aria-label={`${unread} unread conversations`}>
+            <span className="ml-1 inline-flex items-center justify-center rounded-full bg-brand-600 text-on-brand text-xs font-semibold px-2 py-0.5" aria-label={`${unread} unread conversations`}>
               {unread}
             </span>
           )}
         </h2>
         <button
           onClick={() => setCompose(compose ? null : { mode: 'new' })}
-          className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+          className="inline-flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
           aria-label={t('inboxPage.compose')}
         >
           {compose ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
@@ -790,7 +790,7 @@ const InboxPage = () => {
               role="tab"
               aria-selected={scope === s}
               onClick={() => { setScope(s); setSelectedId(null); }}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium ${scope === s ? 'bg-brand-600 text-white' : 'bg-surface-0 text-text-secondary hover:bg-surface-2'}`}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium ${scope === s ? 'bg-brand-600 text-on-brand' : 'bg-surface-0 text-text-secondary hover:bg-surface-2'}`}
             >
               {SCOPE_LABELS[s]}
               {s === 'unread' && unread > 0 ? ` (${unread})` : ''}
@@ -801,7 +801,7 @@ const InboxPage = () => {
             role="tab"
             aria-selected={submissionScope}
             onClick={() => { setScope(SUBMISSION_COMMENTS); setSelectedId(null); }}
-            className={`px-3 py-1.5 rounded-md text-sm font-medium ${submissionScope ? 'bg-brand-600 text-white' : 'bg-surface-0 text-text-secondary hover:bg-surface-2'}`}
+            className={`px-3 py-1.5 rounded-md text-sm font-medium ${submissionScope ? 'bg-brand-600 text-on-brand' : 'bg-surface-0 text-text-secondary hover:bg-surface-2'}`}
           >
             Submission comments
           </button>
@@ -869,7 +869,7 @@ const InboxPage = () => {
               {scope === 'inbox' && !filter && !search ? 'No conversations yet.' : 'No conversations match.'}
             </div>
           ) : (
-            <ul className="divide-y divide-gray-100" aria-label="Conversations">
+            <ul className="divide-y divide-border-default" aria-label="Conversations">
               {visible.map((conv) => {
                 const unreadRow = isUnread(conv);
                 return (
@@ -887,7 +887,7 @@ const InboxPage = () => {
                           {unreadRow && <span className="inline-block w-2 h-2 rounded-full bg-brand-600 mr-1.5 align-middle" aria-label="Unread" />}
                           {participantNames(conv, user?.id)}
                         </p>
-                        <span className="text-xs text-text-disabled flex-shrink-0">{formatDate(conv.last_message_at)}</span>
+                        <span className="text-xs text-text-tertiary flex-shrink-0">{formatDate(conv.last_message_at)}</span>
                       </div>
                       <p className={`text-sm truncate ${unreadRow ? 'font-semibold' : ''} text-text-secondary`}>
                         {conv.subject || '(No subject)'}
@@ -937,7 +937,7 @@ const InboxPage = () => {
               onForward={(source) => setCompose({ mode: 'forward', source })}
             />
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-text-disabled">
+            <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary">
               <Mail className="w-12 h-12 mb-3" />
               <p className="text-sm">Select a conversation to view messages</p>
             </div>

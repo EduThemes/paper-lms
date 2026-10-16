@@ -80,7 +80,7 @@ export default function LanguagePreferencesPage() {
           </p>
         </header>
 
-        <section
+        <div
           className="border border-surface-raised rounded-lg bg-surface-0"
           role="radiogroup"
           aria-label={t('languagePreferencesPage.currentLabel')}
@@ -135,7 +135,7 @@ export default function LanguagePreferencesPage() {
               );
             })}
           </ul>
-        </section>
+        </div>
 
         {savedAt && (
           <div

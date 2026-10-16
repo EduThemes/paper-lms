@@ -345,7 +345,7 @@ const AppointmentGroupEditorPage = () => {
                         type="button"
                         onClick={() => deleteExistingSlot(slot)}
                         aria-label={t('calendarLane.scheduler.deleteSlot')}
-                        className="text-text-disabled hover:text-accent-danger"
+                        className="text-text-tertiary hover:text-accent-danger"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -410,7 +410,7 @@ const AppointmentGroupEditorPage = () => {
                   type="button"
                   onClick={addGenerated}
                   disabled={!generated.length}
-                  className="inline-flex items-center gap-1 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                  className="inline-flex items-center gap-1 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-on-brand hover:bg-brand-700 disabled:opacity-50"
                 >
                   <Plus className="h-4 w-4" /> {t('appointmentGroupEditor.addToGroup')}
                 </button>
@@ -426,7 +426,7 @@ const AppointmentGroupEditorPage = () => {
                       <button
                         type="button"
                         onClick={() => removeSlot(idx)}
-                        className="text-text-disabled hover:text-accent-danger"
+                        className="text-text-tertiary hover:text-accent-danger"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -448,7 +448,7 @@ const AppointmentGroupEditorPage = () => {
             <button
               type="submit"
               disabled={saving}
-              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-on-brand hover:bg-brand-700 disabled:opacity-50"
             >
               {saving
                 ? t('common.saving')

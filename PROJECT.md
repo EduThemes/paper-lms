@@ -164,6 +164,13 @@ See `make help` for the rest (`dex-up`, `dex-down`, `dex-logs`, `backup`,
 - Error states: always include "Try Again" button
 - Brand mark: single `<BrandLogo />` (`web/src/components/brand/BrandLogo.jsx`)
   fed by `web/public/brand/paper-logo.svg` — swap one file to rebrand.
+- Colour (WCAG 2.1 AA in light and dark): use the theme tokens in `web/src/index.css`, not
+  Tailwind's fixed palette (`text-gray-500`, `bg-white`), which does not follow dark mode.
+  Text on a solid `bg-brand-500/600/700` or `bg-accent-*` fill is `text-on-brand` /
+  `text-on-accent`, never `text-white` (the dark-mode fills are light). The faintest readable
+  text is `text-text-tertiary`; `text-text-disabled` is for disabled controls only.
+  `src/styles/__tests__/tokenContrast.test.js` checks the tokens; `npm run axe:sweep` scans
+  the signed-in app in both themes.
 
 ## Environment Variables
 | Variable | Default | Description |

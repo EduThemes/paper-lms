@@ -135,7 +135,7 @@ const AccommodationCard = ({ accommodation, onEdit, onDeactivate }) => {
           <button
             type="button"
             onClick={() => onEdit(accommodation)}
-            className="p-1.5 text-text-disabled hover:text-brand-600 rounded-lg hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            className="p-1.5 text-text-tertiary hover:text-brand-600 rounded-lg hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500"
             aria-label={`Edit ${type.label} accommodation`}
           >
             <Edit3 className="w-4 h-4" aria-hidden="true" />
@@ -144,7 +144,7 @@ const AccommodationCard = ({ accommodation, onEdit, onDeactivate }) => {
             <button
               type="button"
               onClick={() => onDeactivate(accommodation.id)}
-              className="p-1.5 text-text-disabled hover:text-accent-danger rounded-lg hover:bg-accent-danger/10 focus:outline-none focus:ring-2 focus:ring-red-500"
+              className="p-1.5 text-text-tertiary hover:text-accent-danger rounded-lg hover:bg-accent-danger/10 focus:outline-none focus:ring-2 focus:ring-red-500"
               aria-label={`Deactivate ${type.label} accommodation`}
             >
               <Trash2 className="w-4 h-4" aria-hidden="true" />
@@ -191,7 +191,7 @@ const ApplicationLog = ({ userId }) => {
   }
 
   return (
-    <div className="divide-y divide-gray-100">
+    <div className="divide-y divide-border-default">
       {logs.map((log, i) => (
         <div key={i} className="py-3 flex items-start gap-3">
           <div className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-2 shrink-0" aria-hidden="true" />
@@ -484,7 +484,7 @@ const AccommodationsPage = () => {
               ) : (
                 <>
                   <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-disabled" aria-hidden="true" />
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" aria-hidden="true" />
                     <input
                       id="student-search"
                       type="text"
@@ -568,7 +568,7 @@ const AccommodationsPage = () => {
                 <button
                   type="button"
                   onClick={() => { setShowForm(true); setEditingId(null); setFormData({ ...EMPTY_FORM }); }}
-                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-lg hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-on-brand bg-brand-600 rounded-lg hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
                 >
                   <Plus className="w-4 h-4" aria-hidden="true" />
                   Add Accommodation
@@ -632,7 +632,7 @@ const AccommodationsPage = () => {
                   <button
                     type="button"
                     onClick={resetForm}
-                    className="text-text-disabled hover:text-text-secondary focus:outline-none"
+                    className="text-text-tertiary hover:text-text-secondary focus:outline-none"
                     aria-label="Close form"
                   >
                     <X className="w-5 h-5" aria-hidden="true" />
@@ -769,7 +769,7 @@ const AccommodationsPage = () => {
                     <button
                       type="submit"
                       disabled={submitting}
-                      className="px-6 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-6 py-2 bg-brand-600 text-on-brand text-sm font-medium rounded-lg hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {submitting ? 'Saving...' : editingId ? 'Update Accommodation' : 'Create Accommodation'}
                     </button>
@@ -811,7 +811,7 @@ const AccommodationsPage = () => {
                 <button
                   type="button"
                   onClick={confirmDeactivate}
-                  className="px-4 py-2 text-sm font-medium text-white bg-accent-danger rounded-lg hover:bg-accent-danger/90 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="px-4 py-2 text-sm font-medium text-on-accent bg-accent-danger rounded-lg hover:bg-accent-danger/90 focus:outline-none focus:ring-2 focus:ring-red-500"
                 >
                   Deactivate
                 </button>

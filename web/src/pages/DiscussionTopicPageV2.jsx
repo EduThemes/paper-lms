@@ -294,7 +294,7 @@ const DeleteConfirmModal = ({ onConfirm, onCancel }) => {
           </button>
           <button
             onClick={onConfirm}
-            className="px-4 py-2 text-sm font-medium text-white bg-accent-danger hover:bg-accent-danger/90 rounded-md transition-colors"
+            className="px-4 py-2 text-sm font-medium text-on-accent bg-accent-danger hover:bg-accent-danger/90 rounded-md transition-colors"
           >
             Delete
           </button>
@@ -436,7 +436,7 @@ const EntryItem = ({
                 {entry.user_name || `User ${entry.user_id}`}
               </span>
               <span
-                className="text-xs text-text-disabled"
+                className="text-xs text-text-tertiary"
                 title={fullDate(entry.created_at)}
               >
                 {relativeTime(entry.created_at)}
@@ -445,7 +445,7 @@ const EntryItem = ({
                 <button
                   onClick={handleShowVersions}
                   disabled={loadingVersions}
-                  className="text-xs text-text-disabled hover:text-brand-600 italic inline-flex items-center gap-0.5 transition-colors"
+                  className="text-xs text-text-tertiary hover:text-brand-600 italic inline-flex items-center gap-0.5 transition-colors"
                   aria-label="View edit history"
                 >
                   {loadingVersions ? (
@@ -1067,7 +1067,7 @@ const DiscussionTopicPageV2 = () => {
                   <CheckCheck className="w-4 h-4" />
                 )}
                 Mark All Read
-                <span className="ml-1 px-1.5 py-0.5 bg-brand-500 text-white text-xs rounded-full font-semibold">
+                <span className="ml-1 px-1.5 py-0.5 bg-brand-500 text-on-brand text-xs rounded-full font-semibold">
                   {unreadCount}
                 </span>
               </button>
@@ -1098,11 +1098,11 @@ const DiscussionTopicPageV2 = () => {
           {/* Header bar */}
           <div className="flex items-center justify-between px-6 py-3 border-b border-border-default">
             <h2 className="font-semibold text-text-primary flex items-center gap-2">
-              <MessageSquare className="w-5 h-5 text-text-disabled" />
+              <MessageSquare className="w-5 h-5 text-text-tertiary" />
               Replies
-              <span className="text-sm font-normal text-text-disabled">({totalEntries})</span>
+              <span className="text-sm font-normal text-text-tertiary">({totalEntries})</span>
               {unreadCount > 0 && (
-                <span className="px-2 py-0.5 bg-brand-500 text-white text-xs rounded-full font-semibold" aria-label={`${unreadCount} unread`}>
+                <span className="px-2 py-0.5 bg-brand-500 text-on-brand text-xs rounded-full font-semibold" aria-label={`${unreadCount} unread`}>
                   {unreadCount} unread
                 </span>
               )}
@@ -1112,7 +1112,7 @@ const DiscussionTopicPageV2 = () => {
             ) : !canPost ? null : (
             <button
               onClick={() => setShowNewEntryForm(!showNewEntryForm)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors"
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 text-on-brand text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors"
               aria-expanded={showNewEntryForm}
             >
               <MessageSquare className="w-4 h-4" />
@@ -1149,7 +1149,7 @@ const DiscussionTopicPageV2 = () => {
             <GroupTopicsList topic={topic} courseId={courseId} isTeacher={!!isTeacher} />
           ) : entries.length === 0 ? (
             <div className="py-16 text-center" role="status">
-              <MessageSquare className="w-12 h-12 text-text-disabled mx-auto mb-3" />
+              <MessageSquare className="w-12 h-12 text-text-tertiary mx-auto mb-3" />
               <p className="text-text-tertiary text-sm">No replies yet. Be the first to respond!</p>
               {!showNewEntryForm && canPost && (
                 <button
@@ -1192,7 +1192,7 @@ const DiscussionTopicPageV2 = () => {
           <div className="bg-surface-0 rounded-xl shadow-sm border border-border-default overflow-hidden mb-6">
             <div className="px-6 py-4">
               <h3 className="font-semibold text-text-primary mb-3 flex items-center gap-2">
-                <Send className="w-4 h-4 text-text-disabled" />
+                <Send className="w-4 h-4 text-text-tertiary" />
                 Post a Reply
               </h3>
               <DiscussionComposer

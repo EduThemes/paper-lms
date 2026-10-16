@@ -99,15 +99,16 @@ const AdminNav = () => {
     `;
 
   return (
-    <aside
-      className="fixed inset-y-0 left-16 z-20 w-[216px] bg-surface-0 border-r border-border-default overflow-y-auto"
-      role="navigation"
+    <nav
+      // Phones: in the page flow above the content (clear of the menu button), not a fixed
+      // panel over it. md+: the fixed column beside the global sidebar.
+      className="w-full pt-14 border-b border-border-default bg-surface-0 md:pt-0 md:border-b-0 md:fixed md:inset-y-0 md:left-16 md:z-20 md:w-[216px] md:border-r md:overflow-y-auto"
       aria-label="Admin navigation"
     >
       <div className="px-4 py-4 border-b border-border-default">
         <h2 className="text-sm font-semibold text-text-primary uppercase tracking-wider">{t('adminNav.title')}</h2>
       </div>
-      <nav className="py-2">
+      <div className="py-2">
         {frequentLinks.map(({ to, icon: Icon, label }) => (
           <Link key={to} to={to} className={linkClasses(isActive(to))}>
             <Icon className="w-4 h-4 flex-shrink-0" />
@@ -158,8 +159,8 @@ const AdminNav = () => {
             </div>
           </PopoverContent>
         </Popover>
-      </nav>
-    </aside>
+      </div>
+    </nav>
   );
 };
 

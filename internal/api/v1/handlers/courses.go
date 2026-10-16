@@ -28,6 +28,10 @@ type CourseHandler struct {
 	// canvasAPI adds Canvas course fields / include[] (G137); see
 	// canvas_course_includes.go. Nil leaves the JSON as is.
 	canvasAPI *service.CanvasAPIService
+	// Page Designer (course_look.go): banner files of the course and the
+	// custom_css_enabled setting. See SetPageDesigner.
+	lookFiles      repository.AttachmentRepository
+	settingsLookup service.SettingsLookupFunc
 }
 
 // SetUserRepo wires the user repository used for the admin check on
@@ -75,6 +79,8 @@ func courseToJSON(c *models.Course) fiber.Map {
 		"restrict_enrollments_to_course_dates": c.RestrictEnrollmentsToCourseDates,
 		"restrict_student_future_view":         c.RestrictStudentFutureView,
 		"restrict_student_past_view":           c.RestrictStudentPastView,
+		// Page Designer course look (null = Paper's generated header).
+		"look": c.Look,
 	}
 }
 
@@ -155,6 +161,7 @@ func (h *CourseHandler) GetCourse(c *fiber.Ctx) error {
 	}
 
 	out := h.courseJSONWithQuota(c, course.ID, courseToJSON(course))
+	h.withDesignerFields(c, course, out)
 	h.applyCourseIncludes(c, []models.Course{*course}, []fiber.Map{out})
 	return c.JSON(out)
 }
@@ -191,6 +198,9 @@ func (h *CourseHandler) CreateCourse(c *fiber.Ctx) error {
 	}
 
 	course := &models.Course{
+		// The course belongs to the creating admin's account. Without this
+		// it took the column default (account 1), landing in another tenant.
+		AccountID:        callerAccountID(c),
 		Name:             input.Course.Name,
 		CourseCode:       input.Course.CourseCode,
 		EnrollmentTermID: input.Course.EnrollmentTermID,
@@ -250,6 +260,8 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 			RestrictEnrollmentsToCourseDates *bool `json:"restrict_enrollments_to_course_dates"`
 			RestrictStudentFutureView        *bool `json:"restrict_student_future_view"`
 			RestrictStudentPastView          *bool `json:"restrict_student_past_view"`
+			// Page Designer course look; null clears it (course_look.go).
+			Look json.RawMessage `json:"look"`
 		} `json:"course"`
 	}
 
@@ -319,12 +331,15 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 		}
 	}
 	applyCourseDateAccessSettings(course, input.Course.RestrictEnrollmentsToCourseDates, input.Course.RestrictStudentFutureView, input.Course.RestrictStudentPastView)
+	if wrote, lerr := h.applyCourseLook(c, course, input.Course.Look); wrote {
+		return lerr
+	}
 
 	if err := h.courseService.Update(c.Context(), course); err != nil {
 		return responses.InternalError(c, "Could not update course")
 	}
 
-	return c.JSON(h.courseJSONWithQuota(c, course.ID, courseToJSON(course)))
+	return c.JSON(h.withDesignerFields(c, course, h.courseJSONWithQuota(c, course.ID, courseToJSON(course))))
 }
 
 func (h *CourseHandler) DeleteCourse(c *fiber.Ctx) error {

@@ -35,13 +35,17 @@ import CourseNav from '../components/CourseNav';
 import HomeEngine from '../components/home/HomeEngine';
 import K2Layout from '../components/home/K2Layout';
 import SafeHTML from '../components/SafeHTML';
-import { CourseFrontPageView, CourseAnnouncementsView } from '../components/home/CourseHomeViews';
+import { CourseFrontPageView, CourseAnnouncementsView, DesignedFrontPage } from '../components/home/CourseHomeViews';
+import CourseHero from '../components/home/CourseHero';
+import DesignHomeCallout from '../components/home/DesignHomeCallout';
+import { useCourseFrontPage } from '../services/apiQueries';
+import { isDesignedPage } from '../utils/pageDesign';
 import CourseStaffBar from '../components/CourseStaffBar';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Skeleton } from '../components/ui/skeleton';
-import { Avatar, AvatarFallback, AvatarImage } from '../components/ui/avatar';
+import { Avatar, AvatarFallback } from '../components/ui/avatar';
 import { Separator } from '../components/ui/separator';
 import { cn } from '@/lib/utils';
 import { withoutQuizAssignments } from '../components/quiz/quizLifecycle';
@@ -52,15 +56,6 @@ const ITEM_ICONS = {
   Quiz: HelpCircle,
   ExternalUrl: ExternalLink,
   SubHeader: Minus,
-};
-
-const hashHue = (id) => {
-  const s = String(id ?? '0');
-  let h = 0;
-  for (let i = 0; i < s.length; i++) {
-    h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  }
-  return h % 360;
 };
 
 const initialsOf = (name) => {
@@ -96,123 +91,6 @@ const formatDueLabel = (days) => {
   if (days === 0) return 'Due today';
   if (days === 1) return 'Due tomorrow';
   return `Due in ${days}d`;
-};
-
-const ProgressRing = ({ value = 0, size = 92, stroke = 8, label = 'Course progress' }) => {
-  const pct = Math.max(0, Math.min(100, value));
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  const offset = c - (pct / 100) * c;
-  return (
-    <div
-      role="img"
-      aria-label={`${label}: ${Math.round(pct)} percent`}
-      className="relative inline-flex items-center justify-center"
-      style={{ width: size, height: size }}
-    >
-      <svg width={size} height={size} className="-rotate-90">
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          stroke="rgba(255,255,255,0.25)"
-          strokeWidth={stroke}
-          fill="none"
-        />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          stroke="white"
-          strokeWidth={stroke}
-          strokeLinecap="round"
-          fill="none"
-          strokeDasharray={c}
-          strokeDashoffset={offset}
-          style={{ transition: 'stroke-dashoffset 600ms cubic-bezier(.2,.8,.2,1)' }}
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
-        <span className="text-xl font-semibold leading-none">{Math.round(pct)}%</span>
-        <span className="text-[10px] uppercase tracking-wider opacity-80 mt-1">Complete</span>
-      </div>
-    </div>
-  );
-};
-
-const DotGrid = () => (
-  <svg
-    aria-hidden="true"
-    className="absolute inset-0 h-full w-full opacity-20 pointer-events-none"
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    <defs>
-      <pattern id="dotgrid" width="20" height="20" patternUnits="userSpaceOnUse">
-        <circle cx="2" cy="2" r="1.2" fill="white" />
-      </pattern>
-    </defs>
-    <rect width="100%" height="100%" fill="url(#dotgrid)" />
-  </svg>
-);
-
-const CourseHero = ({ course, courseId, instructors, progress }) => {
-  const hue = useMemo(() => hashHue(courseId), [courseId]);
-  const gradient = `linear-gradient(135deg, hsl(${hue} 70% 42%) 0%, hsl(${(hue + 40) % 360} 70% 32%) 60%, hsl(${(hue + 80) % 360} 65% 28%) 100%)`;
-  const term = course?.term?.name || course?.enrollment_term_id ? (course?.term?.name || `Term ${course?.enrollment_term_id ?? ''}`).trim() : null;
-  const teachers = instructors?.length ? instructors : [];
-  const teacherNames = teachers.slice(0, 2).map((t) => t.user?.name || t.name).filter(Boolean).join(', ');
-  const extraTeachers = Math.max(0, teachers.length - 2);
-
-  return (
-    <Card className="relative h-48 overflow-hidden border-0 text-white rounded-card shadow-md">
-      <div className="absolute inset-0" style={{ background: gradient }} />
-      <DotGrid />
-      <div className="relative z-10 flex h-full items-center justify-between gap-6 p-6">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 mb-2">
-            {course?.course_code && (
-              <span className="inline-flex items-center rounded-pill bg-surface-0/20 px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm">
-                {course.course_code}
-              </span>
-            )}
-            {term && (
-              <span className="inline-flex items-center rounded-pill bg-surface-0/15 px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm">
-                {term}
-              </span>
-            )}
-          </div>
-          <h1 className="font-display text-3xl md:text-4xl font-bold leading-tight tracking-tight truncate">
-            {course?.name || 'Course'}
-          </h1>
-          {teachers.length > 0 && (
-            <div className="mt-3 flex items-center gap-3">
-              <div className="flex -space-x-2">
-                {teachers.slice(0, 3).map((t, i) => {
-                  const name = t.user?.name || t.name || 'Instructor';
-                  const avatar = t.user?.avatar_url || t.avatar_url;
-                  return (
-                    <Avatar key={t.id ?? i} className="h-7 w-7 ring-2 ring-white/70">
-                      {avatar && <AvatarImage src={avatar} alt={name} />}
-                      <AvatarFallback className="bg-surface-0/30 text-white text-[10px] font-semibold">
-                        {initialsOf(name)}
-                      </AvatarFallback>
-                    </Avatar>
-                  );
-                })}
-              </div>
-              <p className="text-sm text-white/90 truncate">
-                Taught by {teacherNames || 'your instructor'}
-                {extraTeachers > 0 && ` +${extraTeachers} more`}
-              </p>
-            </div>
-          )}
-        </div>
-        <div className="hidden sm:block shrink-0">
-          <ProgressRing value={progress} />
-        </div>
-      </div>
-    </Card>
-  );
 };
 
 const QuickActionRow = ({ courseId, isTeacher }) => {
@@ -539,7 +417,7 @@ const ModuleList = ({ courseId, modules }) => {
         {getItemIcon(item.type)}
         <span className="text-sm flex-1">{item.title}</span>
         {isAssignment && item.content_details && (
-          <div className="flex items-center space-x-3 text-xs text-text-disabled">
+          <div className="flex items-center space-x-3 text-xs text-text-tertiary">
             {item.content_details.points_possible !== undefined && (
               <span className="flex items-center space-x-1">
                 <Award className="w-3 h-3" />
@@ -616,9 +494,9 @@ const ModuleList = ({ courseId, modules }) => {
               >
                 <span className="font-medium">{module.name}</span>
                 {expandedModules[module.id] ? (
-                  <ChevronDown className="w-5 h-5 text-text-disabled" />
+                  <ChevronDown className="w-5 h-5 text-text-tertiary" />
                 ) : (
-                  <ChevronRight className="w-5 h-5 text-text-disabled" />
+                  <ChevronRight className="w-5 h-5 text-text-tertiary" />
                 )}
               </button>
 
@@ -626,7 +504,7 @@ const ModuleList = ({ courseId, modules }) => {
                 <div className="bg-surface-1 border-t">
                   {module.items.map((item) => renderModuleItem(item))}
                   {module.items.length === 0 && (
-                    <div className="py-3 px-6 text-sm text-text-disabled">No items</div>
+                    <div className="py-3 px-6 text-sm text-text-tertiary">No items</div>
                   )}
                 </div>
               )}
@@ -710,6 +588,10 @@ const CoursePage = () => {
   }, [courseId]);
 
   const landing = useCourseLandingData(courseId);
+  // The "Front Page" home view: fetched here too (same react-query key as
+  // CourseFrontPageView, so one request) because a designed front page
+  // changes the layout: it takes the full width under the course nav.
+  const frontPageQuery = useCourseFrontPage(courseId, { enabled: course?.default_view === 'wiki' });
   const landingLoading =
     landing.assignments === null ||
     landing.quizzes === null ||
@@ -857,6 +739,12 @@ const CoursePage = () => {
   }
 
   const defaultView = course.default_view || 'modules';
+  const designedHome = defaultView === 'wiki' && isDesignedPage(frontPageQuery.data);
+  // Teachers are invited to design a home page when the course home isn't a
+  // front page, or there is no front page yet.
+  const showDesignCallout = isTeacher === true && (
+    defaultView !== 'wiki' || (frontPageQuery.isSuccess && !frontPageQuery.data)
+  );
 
   if (isSimplified && defaultView === 'home_engine') {
     return (
@@ -873,7 +761,7 @@ const CoursePage = () => {
       // B147: "Front Page" and "Announcements" home settings render their
       // own content instead of silently falling back to modules.
       case 'wiki':
-        return <CourseFrontPageView courseId={courseId} />;
+        return <CourseFrontPageView courseId={courseId} isTeacher={Boolean(isTeacher)} />;
       case 'announcements':
         return <CourseAnnouncementsView courseId={courseId} />;
       case 'syllabus':
@@ -938,6 +826,15 @@ const CoursePage = () => {
 
         <CourseNav />
 
+        {/* A designed front page is the course's own home page: it spans the
+            full width right under the course nav, and the up-next list and
+            activity feed sit side by side below it. */}
+        {designedHome && (
+          <DesignedFrontPage page={frontPageQuery.data} courseId={courseId} isTeacher={Boolean(isTeacher)} />
+        )}
+
+        {showDesignCallout && <DesignHomeCallout courseId={courseId} />}
+
         {showSetup && (
           <SetupChecklistCard
             courseId={courseId}
@@ -947,15 +844,26 @@ const CoursePage = () => {
           />
         )}
 
-        <div className="grid gap-6 md:grid-cols-3">
-          <div className="md:col-span-2 space-y-6">
-            <UpNextList courseId={courseId} items={upNext} loading={landingLoading} />
-            {renderMainContent()}
+        {designedHome ? (
+          <div className="grid gap-6 md:grid-cols-3">
+            <div className="md:col-span-2">
+              <UpNextList courseId={courseId} items={upNext} loading={landingLoading} />
+            </div>
+            <div>
+              <ActivityFeed items={activity} loading={landingLoading} />
+            </div>
           </div>
-          <div className="space-y-6">
-            <ActivityFeed items={activity} loading={landingLoading} />
+        ) : (
+          <div className="grid gap-6 md:grid-cols-3">
+            <div className="md:col-span-2 space-y-6">
+              <UpNextList courseId={courseId} items={upNext} loading={landingLoading} />
+              {renderMainContent()}
+            </div>
+            <div className="space-y-6">
+              <ActivityFeed items={activity} loading={landingLoading} />
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </Layout>
   );

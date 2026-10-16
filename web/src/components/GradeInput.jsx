@@ -89,7 +89,7 @@ const GradeInput = ({ value, pointsPossible, onSave, studentName, gradingType = 
           onKeyDown={handleKeyDown}
           className="w-16 text-sm border border-blue-400 rounded px-1.5 py-0.5 text-center focus:ring-2 focus:ring-brand-500 focus:outline-none"
         />
-        {!textMode && <span className="text-xs text-text-disabled">/{pointsPossible}</span>}
+        {!textMode && <span className="text-xs text-text-tertiary">/{pointsPossible}</span>}
       </div>
     );
   }
@@ -108,10 +108,10 @@ const GradeInput = ({ value, pointsPossible, onSave, studentName, gradingType = 
       }`}
       onClick={() => !saving && setEditing(true)}
     >
-      <span className={`text-sm ${value !== null && value !== undefined ? 'font-medium' : 'text-text-disabled'}`}>
+      <span className={`text-sm ${value !== null && value !== undefined ? 'font-medium' : 'text-text-tertiary'}`}>
         {saving ? '...' : (value !== null && value !== undefined ? value : '-')}
       </span>
-      {!textMode && <span className="text-xs text-text-disabled">/{pointsPossible}</span>}
+      {!textMode && <span className="text-xs text-text-tertiary">/{pointsPossible}</span>}
     </button>
   );
 };

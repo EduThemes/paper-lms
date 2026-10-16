@@ -67,7 +67,7 @@ const CoursesPage = () => {
               {canCreate && (
                 <button
                   onClick={() => setShowCreate((v) => !v)}
-                  className="flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                  className="flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
                 >
                   <Plus className="w-4 h-4" />
                   New Course
@@ -87,7 +87,7 @@ const CoursesPage = () => {
                     <label htmlFor="course-code" className="block text-sm font-medium text-text-secondary mb-1">Course Code</label>
                     <input id="course-code" name="course_code" required className="w-full rounded-md border border-border-strong px-3 py-2 text-sm" placeholder="MATH101" />
                   </div>
-                  <button type="submit" disabled={createCourse.isPending} className="bg-accent-success text-white px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50">
+                  <button type="submit" disabled={createCourse.isPending} className="bg-accent-success text-on-accent px-4 py-2 rounded-md hover:bg-accent-success/90 text-sm disabled:opacity-50">
                     {createCourse.isPending ? 'Creating...' : 'Create'}
                   </button>
                   <button type="button" onClick={() => setShowCreate(false)} className="text-text-tertiary hover:text-text-secondary px-4 py-2 text-sm">
@@ -119,7 +119,7 @@ const CoursesPage = () => {
                   {canCreate && (
                     <button
                       onClick={() => setShowCreate(true)}
-                      className="inline-flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                      className="inline-flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
                     >
                       <Plus className="w-4 h-4" />
                       Create your first course

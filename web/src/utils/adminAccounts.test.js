@@ -1,5 +1,6 @@
+import { describe, it, expect } from 'vitest';
 import {
-  brandScaleFromHex, buildBrandCss, parseRoleChoice, roleChoiceValue, formatBytes,
+  brandScaleFromHex, buildBrandCss, onBrandFor, parseRoleChoice, roleChoiceValue, formatBytes,
   customRoleTabDecision, extractTerms, reportRunning, sisBatchRunning, isHexColor,
 } from './adminAccounts';
 
@@ -17,10 +18,19 @@ describe('theme helpers (G118)', () => {
     const css = buildBrandCss({ brand_primary: '#0A7B3E', nav_background: '#112233', button_primary: '#FF0000' });
     expect(css.startsWith(':root:not(.dark) {')).toBe(true);
     expect(css).toContain('--color-brand-600: 10 123 62;');
+    expect(css).toContain('--color-on-brand: 255 255 255;');
     expect(css).toContain('--color-chrome-sidebar: 17 34 51;');
     expect(css).toContain('--primary: 0 100% 50%;');
     expect(css).not.toContain('display:none');
     expect(isHexColor('#12345')).toBe(false);
+  });
+});
+
+describe('on-brand text colour', () => {
+  it('stays white on a dark brand and turns near-black on a light one', () => {
+    expect(onBrandFor(brandScaleFromHex('#1B6EB1'))).toEqual([255, 255, 255]);
+    expect(onBrandFor(brandScaleFromHex('#F2C94C'))).toEqual([24, 24, 27]);
+    expect(buildBrandCss({ brand_primary: '#F2C94C' })).toContain('--color-on-brand: 24 24 27;');
   });
 });
 

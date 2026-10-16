@@ -37,7 +37,7 @@ function TopicRow({ topic, courseId, isTeacher, onEdit, onDelete, onTogglePublis
   return (
     <li className="flex items-center justify-between p-4 hover:bg-surface-1 group">
       <Link to={`/courses/${courseId}/discussions/${topic.id}`} className="flex items-start gap-3 min-w-0 flex-1">
-        <MessageSquare className={`w-5 h-5 mt-0.5 flex-shrink-0 ${unread > 0 ? 'text-brand-500' : 'text-text-disabled'}`} aria-hidden="true" />
+        <MessageSquare className={`w-5 h-5 mt-0.5 flex-shrink-0 ${unread > 0 ? 'text-brand-500' : 'text-text-tertiary'}`} aria-hidden="true" />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`text-text-primary truncate ${unread > 0 ? 'font-semibold' : 'font-medium'}`}>{topic.title}</span>
@@ -48,11 +48,11 @@ function TopicRow({ topic, courseId, isTeacher, onEdit, onDelete, onTogglePublis
               </span>
             ))}
           </div>
-          <div className="flex flex-wrap items-center gap-x-3 text-xs text-text-disabled mt-0.5">
+          <div className="flex flex-wrap items-center gap-x-3 text-xs text-text-tertiary mt-0.5">
             {typeLabel && <span>{typeLabel}</span>}
             <span>{replies} {replies === 1 ? 'reply' : 'replies'}</span>
             {unread > 0 && (
-              <span className="px-1.5 rounded-full bg-brand-500 text-white font-semibold" aria-label={`${unread} unread`}>
+              <span className="px-1.5 rounded-full bg-brand-500 text-on-brand font-semibold" aria-label={`${unread} unread`}>
                 {unread} unread
               </span>
             )}
@@ -62,7 +62,7 @@ function TopicRow({ topic, courseId, isTeacher, onEdit, onDelete, onTogglePublis
         </div>
       </Link>
       <div className="flex items-center gap-2 flex-shrink-0 ml-4">
-        <span className="text-xs text-text-disabled hidden sm:inline">{formatDate(topic.created_at)}</span>
+        <span className="text-xs text-text-tertiary hidden sm:inline">{formatDate(topic.created_at)}</span>
         {isTeacher && (
           <>
             <button
@@ -75,7 +75,7 @@ function TopicRow({ topic, courseId, isTeacher, onEdit, onDelete, onTogglePublis
             <button
               type="button"
               onClick={() => onEdit(topic)}
-              className="p-1 text-text-disabled hover:text-brand-600 opacity-0 group-hover:opacity-100 focus:opacity-100"
+              className="p-1 text-text-tertiary hover:text-brand-600 opacity-0 group-hover:opacity-100 focus:opacity-100"
               aria-label={`Edit ${topic.title}`}
             >
               <Edit2 className="w-4 h-4" />
@@ -83,7 +83,7 @@ function TopicRow({ topic, courseId, isTeacher, onEdit, onDelete, onTogglePublis
             <button
               type="button"
               onClick={() => onDelete(topic)}
-              className="p-1 text-text-disabled hover:text-accent-danger opacity-0 group-hover:opacity-100 focus:opacity-100"
+              className="p-1 text-text-tertiary hover:text-accent-danger opacity-0 group-hover:opacity-100 focus:opacity-100"
               aria-label={`Delete ${topic.title}`}
             >
               <Trash2 className="w-4 h-4" />
@@ -164,7 +164,7 @@ const DiscussionsPage = () => {
             <button
               type="button"
               onClick={() => setEditor(editor ? null : {})}
-              className="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+              className="inline-flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
             >
               {editor ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
               <span>{editor ? 'Cancel' : 'New Discussion'}</span>
@@ -188,7 +188,7 @@ const DiscussionsPage = () => {
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="relative flex-1 min-w-[12rem]">
-          <Search className="w-4 h-4 text-text-disabled absolute left-2.5 top-2.5" aria-hidden="true" />
+          <Search className="w-4 h-4 text-text-tertiary absolute left-2.5 top-2.5" aria-hidden="true" />
           <input
             type="search"
             value={searchInput}
@@ -211,7 +211,7 @@ const DiscussionsPage = () => {
                 setPage(1);
               }}
               aria-pressed={filter === value}
-              className={`px-3 py-2 text-sm ${filter === value ? 'bg-brand-600 text-white' : 'bg-surface-0 text-text-secondary hover:bg-surface-1'}`}
+              className={`px-3 py-2 text-sm ${filter === value ? 'bg-brand-600 text-on-brand' : 'bg-surface-0 text-text-secondary hover:bg-surface-1'}`}
             >
               {label}
             </button>

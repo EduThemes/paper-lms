@@ -65,7 +65,7 @@ const QuizReviewPage = () => {
   }
 
   const getAnswerIcon = (answer) => {
-    if (!answer) return <MinusCircle className="w-5 h-5 text-text-disabled" />;
+    if (!answer) return <MinusCircle className="w-5 h-5 text-text-tertiary" />;
     if (answer.correct === true) return <CheckCircle className="w-5 h-5 text-accent-success" />;
     if (answer.correct === false) return <XCircle className="w-5 h-5 text-accent-danger" />;
     return <HelpCircle className="w-5 h-5 text-accent-warning" />;

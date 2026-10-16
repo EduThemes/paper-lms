@@ -36,6 +36,8 @@ export const ROUTE_TITLES = [
   ['/courses/:courseId/modules', 'Modules'],
   ['/courses/:courseId/people', 'People'],
   ['/courses/:courseId/sections', 'Sections'],
+  ['/courses/:courseId/designer/makeover', 'Course makeover'],
+  ['/courses/:courseId/designer', 'Page designer'],
   ['/courses/:courseId/pages/:slug/revisions', 'Page history'],
   ['/courses/:courseId/pages/:slug', 'Page'],
   ['/courses/:courseId/pages', 'Pages'],

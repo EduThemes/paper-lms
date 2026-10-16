@@ -136,7 +136,7 @@ const CommentThread = ({
       {loading ? (
         <div className="text-sm text-text-tertiary py-2">Loading comments...</div>
       ) : comments.length === 0 ? (
-        <div className="text-sm text-text-disabled py-2">No comments yet.</div>
+        <div className="text-sm text-text-tertiary py-2">No comments yet.</div>
       ) : (
         <ul className="space-y-3">
           {comments.map((comment) => (
@@ -159,8 +159,8 @@ const CommentThread = ({
                   {comment.draft && (
                     <span className="text-xs bg-yellow-200 text-accent-warning px-1.5 py-0.5 rounded">Draft</span>
                   )}
-                  {comment.attempt ? <span className="text-xs text-text-disabled">Attempt {comment.attempt}</span> : null}
-                  <span className="text-xs text-text-disabled">
+                  {comment.attempt ? <span className="text-xs text-text-tertiary">Attempt {comment.attempt}</span> : null}
+                  <span className="text-xs text-text-tertiary">
                     {comment.created_at ? new Date(comment.created_at).toLocaleString() : ''}
                   </span>
                 </div>
@@ -231,7 +231,7 @@ const CommentThread = ({
             type="submit"
             disabled={submitting || (!text.trim() && files.length === 0)}
             aria-label="Send comment"
-            className="self-end inline-flex items-center space-x-1 bg-brand-600 text-white px-3 py-2 rounded-lg hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+            className="self-end inline-flex items-center space-x-1 bg-brand-600 text-on-brand px-3 py-2 rounded-lg hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
           >
             <Send className="w-4 h-4" />
           </button>

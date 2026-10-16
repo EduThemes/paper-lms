@@ -176,7 +176,7 @@ function LoginsSection({ user }) {
       <ErrorNote error={mutation.error} />
       <table className="w-full text-sm mb-4">
         <thead className="text-text-secondary text-left">
-          <tr><th className="py-1">Login</th><th>SIS ID</th><th>Sign-in</th><th>Status</th><th>Last used</th><th /></tr>
+          <tr><th className="py-1">Login</th><th>SIS ID</th><th>Sign-in</th><th>Status</th><th>Last used</th><th><span className="sr-only">Actions</span></th></tr>
         </thead>
         <tbody>
           <tr className="border-t border-border-default">
@@ -352,7 +352,7 @@ function HistorySection({ userId }) {
             role="tab"
             aria-selected={tab === k}
             onClick={() => setTab(k)}
-            className={`px-3 py-1 rounded-full text-xs font-medium ${tab === k ? 'bg-brand-600 text-white' : 'bg-surface-1 text-text-secondary'}`}
+            className={`px-3 py-1 rounded-full text-xs font-medium ${tab === k ? 'bg-brand-600 text-on-brand' : 'bg-surface-1 text-text-secondary'}`}
           >
             {label}
           </button>

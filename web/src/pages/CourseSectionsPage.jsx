@@ -77,7 +77,7 @@ function SectionsView({ courseId, sections, counts }) {
           <button
             type="button"
             onClick={() => setEditing({})}
-            className="inline-flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
+            className="inline-flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium"
           >
             <Plus className="w-4 h-4" />
             Add Section
@@ -212,7 +212,7 @@ function SectionDialog({ section, pending, onClose, onSave }) {
           {error && <p role="alert" className="text-sm text-accent-danger">{error}</p>}
           <DialogFooter>
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-md text-sm border border-border-strong">Cancel</button>
-            <button type="submit" disabled={pending} className="px-4 py-2 rounded-md text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+            <button type="submit" disabled={pending} className="px-4 py-2 rounded-md text-sm bg-brand-600 text-on-brand hover:bg-brand-700 disabled:opacity-50">
               {pending ? 'Saving...' : 'Save'}
             </button>
           </DialogFooter>
@@ -251,7 +251,7 @@ function CrosslistDialog({ section, pending, onClose, onConfirm }) {
           </div>
           <DialogFooter>
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-md text-sm border border-border-strong">Cancel</button>
-            <button type="submit" disabled={pending || !target} className="px-4 py-2 rounded-md text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+            <button type="submit" disabled={pending || !target} className="px-4 py-2 rounded-md text-sm bg-brand-600 text-on-brand hover:bg-brand-700 disabled:opacity-50">
               {pending ? 'Moving...' : 'Cross-list'}
             </button>
           </DialogFooter>

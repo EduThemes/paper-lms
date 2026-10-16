@@ -31,7 +31,10 @@ func NewWikiPageRevisionHandler(pages *PageHandler, revisionService *service.Wik
 	return &WikiPageRevisionHandler{pages: pages, revisionService: revisionService}
 }
 
-func revisionToJSON(r *models.WikiPageRevision, page *models.WikiPage, latest int, includeBody bool) fiber.Map {
+// revisionToJSON is one revision. With includeBody it carries the body and
+// the stored stylesheet; the Page Designer document (design) only for course
+// staff (staff), like page show. css_source is never sent.
+func revisionToJSON(r *models.WikiPageRevision, page *models.WikiPage, latest int, includeBody, staff bool) fiber.Map {
 	out := fiber.Map{
 		"revision_id":     r.RevisionNumber,
 		"revision_number": r.RevisionNumber,
@@ -42,9 +45,16 @@ func revisionToJSON(r *models.WikiPageRevision, page *models.WikiPage, latest in
 		"updated_at":      r.CreatedAt,
 		"created_at":      r.CreatedAt,
 		"latest":          r.RevisionNumber == latest,
+		"has_design":      !r.Design.IsNull(),
 	}
 	if includeBody {
 		out["body"] = r.Body
+		// Page Designer snapshot (stored, unscoped stylesheet; the PageDoc
+		// for staff only).
+		out["css"] = r.CSS
+		if staff {
+			out["design"] = r.Design
+		}
 	}
 	return out
 }
@@ -87,9 +97,10 @@ func (h *WikiPageRevisionHandler) ListRevisions(c *fiber.Ctx) error {
 	// The list carries bodies too: the history view diffs neighbours, and
 	// a page of 10–50 revisions is small.
 	includeBody := c.Query("summary") != "true"
+	staff := canViewUnpublishedContent(c)
 	revisions := make([]fiber.Map, len(result.Items))
 	for i := range result.Items {
-		revisions[i] = revisionToJSON(&result.Items[i], page, latest, includeBody)
+		revisions[i] = revisionToJSON(&result.Items[i], page, latest, includeBody, staff)
 	}
 	return c.JSON(revisions)
 }
@@ -114,7 +125,7 @@ func (h *WikiPageRevisionHandler) GetRevision(c *fiber.Ctx) error {
 		return responses.NotFound(c, "revision")
 	}
 	latest := h.revisionService.LatestNumber(c.Context(), page.ID)
-	return c.JSON(revisionToJSON(revision, page, latest, c.Query("summary") != "true"))
+	return c.JSON(revisionToJSON(revision, page, latest, c.Query("summary") != "true", canViewUnpublishedContent(c)))
 }
 
 func (h *WikiPageRevisionHandler) RevertToRevision(c *fiber.Ctx) error {
@@ -139,5 +150,5 @@ func (h *WikiPageRevisionHandler) RevertToRevision(c *fiber.Ctx) error {
 		return responses.InternalError(c, "Could not restore revision")
 	}
 
-	return c.JSON(revisionToJSON(revision, page, revision.RevisionNumber, true))
+	return c.JSON(revisionToJSON(revision, page, revision.RevisionNumber, true, true)) // restore is staff-only
 }

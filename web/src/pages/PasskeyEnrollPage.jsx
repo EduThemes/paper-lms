@@ -86,7 +86,7 @@ export default function PasskeyEnrollPage() {
             <AlertTriangle className="text-amber-600 mt-0.5" />
             <div>
               <h2 className="font-medium">Passkeys are not supported on this browser.</h2>
-              <p className="text-sm text-gray-700 mt-1">
+              <p className="text-sm text-text-secondary mt-1">
                 Try Chrome, Safari, Edge, or Firefox on a recent OS. Passkeys
                 require a device with biometric or PIN unlock.
               </p>
@@ -105,7 +105,7 @@ export default function PasskeyEnrollPage() {
             <ShieldCheck className="text-green-600" />
             <h1 className="text-2xl font-semibold">Passkey added</h1>
           </div>
-          <p className="text-gray-700">
+          <p className="text-text-secondary">
             You can now sign in to Paper LMS by tapping &ldquo;Sign in with a passkey&rdquo;
             on the login page. Your device&apos;s biometric or PIN unlocks the credential.
           </p>
@@ -118,7 +118,7 @@ export default function PasskeyEnrollPage() {
             </button>
             <button
               onClick={() => navigate('/')}
-              className="px-4 py-2 rounded border border-gray-300 hover:bg-gray-50"
+              className="px-4 py-2 rounded border border-border-strong hover:bg-surface-1"
             >
               Done
             </button>
@@ -135,22 +135,22 @@ export default function PasskeyEnrollPage() {
           <KeyRound className="text-blue-600" />
           <h1 className="text-2xl font-semibold">Add a passkey</h1>
         </div>
-        <p className="text-gray-700">
+        <p className="text-text-secondary">
           A passkey replaces your password. Your device&apos;s biometric (Touch ID,
           Face ID, Windows Hello) or PIN is the second factor — no separate code needed.
         </p>
         <form onSubmit={doEnroll} className="space-y-4">
           <label className="block">
-            <span className="text-sm font-medium text-gray-700">Name this passkey</span>
+            <span className="text-sm font-medium text-text-secondary">Name this passkey</span>
             <input
               type="text"
               value={nickname}
               onChange={(e) => setNickname(e.target.value)}
               placeholder="MacBook Touch ID"
-              className="mt-1 w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none"
+              className="mt-1 w-full rounded border border-border-strong px-3 py-2 focus:border-blue-500 focus:outline-none"
               maxLength={80}
             />
-            <span className="text-xs text-gray-500 mt-1 block">
+            <span className="text-xs text-text-tertiary mt-1 block">
               Optional — helps you tell devices apart when you add more.
             </span>
           </label>

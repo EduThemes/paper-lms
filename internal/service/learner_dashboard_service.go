@@ -76,6 +76,9 @@ type DashboardCard struct {
 	Published       bool     `json:"published"`
 	EnrollmentTypes []string `json:"enrollmentTypes"`
 	IsStaff         bool     `json:"isStaff"`
+	// Look is the course's Page Designer look (courses.look; null when
+	// unset), so the card can use the course banner and colours.
+	Look models.NullJSON `json:"look"`
 }
 
 // userCourses returns the caller's active enrollments grouped by course and
@@ -181,6 +184,7 @@ func (s *LearnerDashboardService) Cards(ctx context.Context, userID, accountID u
 			Href:         fmt.Sprintf("/courses/%d", c.ID),
 			IsFavorited:  fav,
 			Published:    c.WorkflowState == models.CourseAvailable,
+			Look:         c.Look,
 		}
 		if c.EnrollmentTermID != nil {
 			card.Term = termName[*c.EnrollmentTermID]

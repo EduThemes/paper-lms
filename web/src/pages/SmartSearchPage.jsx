@@ -47,14 +47,14 @@ const TYPE_META = {
 const FALLBACK_META = {
   label: 'Result',
   Icon: Sparkles,
-  color: 'bg-slate-50 text-slate-700 ring-slate-200',
+  color: 'bg-surface-1 text-text-secondary ring-border-default',
   href: (courseId) => `/courses/${courseId}`,
 };
 
 // Small inline animated SVG spinner (PROJECT.md convention — no plain "Loading..." text).
 const Spinner = () => (
   <svg
-    className="animate-spin h-5 w-5 text-slate-500"
+    className="animate-spin h-5 w-5 text-text-tertiary"
     xmlns="http://www.w3.org/2000/svg"
     fill="none"
     viewBox="0 0 24 24"
@@ -73,7 +73,7 @@ const ScoreChip = ({ score }) => {
   // Score is cosine similarity in [-1, 1]; show as percent for human eyes.
   const pct = Math.max(0, Math.min(100, Math.round(((score ?? 0) + 1) * 50)));
   return (
-    <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-200">
+    <span className="inline-flex items-center rounded-full bg-surface-2 px-2 py-0.5 text-xs font-medium text-text-secondary ring-1 ring-inset ring-border-default">
       {pct}% match
     </span>
   );
@@ -144,18 +144,18 @@ const SmartSearchPage = () => {
       <CourseNav courseId={courseId} />
       <div className="p-6 max-w-4xl mx-auto">
         <header className="mb-6">
-          <h1 className="text-2xl font-semibold text-slate-900 flex items-center gap-2">
+          <h1 className="text-2xl font-semibold text-text-primary flex items-center gap-2">
             <Sparkles className="h-6 w-6 text-indigo-500" aria-hidden="true" />
             Smart Search
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <p className="text-sm text-text-tertiary mt-1">
             Search announcements, assignments, pages, and discussions in this course.
           </p>
         </header>
 
         <div className="relative mb-6">
           <Search
-            className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none"
+            className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-tertiary pointer-events-none"
             aria-hidden="true"
           />
           <Input
@@ -169,7 +169,7 @@ const SmartSearchPage = () => {
         </div>
 
         {loading && (
-          <div className="flex items-center gap-2 text-slate-500 text-sm">
+          <div className="flex items-center gap-2 text-text-tertiary text-sm">
             <Spinner /> Searching…
           </div>
         )}
@@ -194,7 +194,7 @@ const SmartSearchPage = () => {
         )}
 
         {!loading && !error && hasSearched && results.length === 0 && (
-          <div className="text-center py-12 text-slate-500">
+          <div className="text-center py-12 text-text-tertiary">
             No matching content found.
           </div>
         )}
@@ -208,7 +208,7 @@ const SmartSearchPage = () => {
                 <section key={type} aria-labelledby={`group-${type}`}>
                   <h2
                     id={`group-${type}`}
-                    className="flex items-center gap-2 text-sm font-semibold text-slate-700 mb-2"
+                    className="flex items-center gap-2 text-sm font-semibold text-text-secondary mb-2"
                   >
                     <span
                       className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ${color}`}
@@ -216,7 +216,7 @@ const SmartSearchPage = () => {
                       <Icon className="h-3.5 w-3.5" aria-hidden="true" />
                       {label}
                     </span>
-                    <span className="text-slate-400 font-normal">{items.length}</span>
+                    <span className="text-text-tertiary font-normal">{items.length}</span>
                   </h2>
                   <ul className="space-y-2">
                     {items.map((r) => (
@@ -226,12 +226,12 @@ const SmartSearchPage = () => {
                             <div className="min-w-0">
                               <Link
                                 to={meta.href(courseId, r.content_id)}
-                                className="text-base font-medium text-slate-900 hover:text-indigo-600 truncate block"
+                                className="text-base font-medium text-text-primary hover:text-indigo-600 truncate block"
                               >
                                 {r.title || '(untitled)'}
                               </Link>
                               {r.excerpt && (
-                                <p className="text-sm text-slate-600 mt-1 line-clamp-2">
+                                <p className="text-sm text-text-secondary mt-1 line-clamp-2">
                                   {r.excerpt}
                                 </p>
                               )}

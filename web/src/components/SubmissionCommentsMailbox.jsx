@@ -43,7 +43,7 @@ const SubmissionCommentsMailbox = ({ filter = '' }) => {
   }
 
   return (
-    <ul className="divide-y divide-gray-100" aria-label="Submission comments">
+    <ul className="divide-y divide-border-default" aria-label="Submission comments">
       {threads.map((t) => (
         <li key={t.submission_id}>
           <Link to={submissionThreadLink(t)} className="block p-3 hover:bg-surface-1">
@@ -52,7 +52,7 @@ const SubmissionCommentsMailbox = ({ filter = '' }) => {
                 {t.assignment_name}
                 {!t.caller_is_student && t.student_name && <span className="text-text-tertiary font-normal"> &middot; {t.student_name}</span>}
               </p>
-              <span className="text-xs text-text-disabled flex-shrink-0">{formatDate(t.last_comment_at)}</span>
+              <span className="text-xs text-text-tertiary flex-shrink-0">{formatDate(t.last_comment_at)}</span>
             </div>
             <p className="text-xs text-text-tertiary truncate mt-0.5">
               {t.last_author_name ? `${t.last_author_name}: ` : ''}{t.last_comment}

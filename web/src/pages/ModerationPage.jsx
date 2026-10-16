@@ -114,7 +114,7 @@ const ModerationPage = () => {
               type="button"
               onClick={publish}
               disabled={busy === 'publish'}
-              className="inline-flex items-center gap-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
+              className="inline-flex items-center gap-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm font-medium disabled:opacity-50"
             >
               {busy === 'publish' ? 'Publishing...' : 'Release grades'}
             </button>
@@ -187,7 +187,7 @@ const ModerationPage = () => {
                               {scoreOf(pg)}
                             </label>
                           ) : (
-                            <span className="text-text-disabled">—</span>
+                            <span className="text-text-tertiary">—</span>
                           )}
                         </td>
                       );

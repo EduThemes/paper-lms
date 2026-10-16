@@ -134,7 +134,7 @@ func (h *PageHandler) loadCoursePage(c *fiber.Ctx, courseID uint, urlOrID string
 	return page, false, nil
 }
 
-func (h *PageHandler) recordRevision(c *fiber.Ctx, page *models.WikiPage, prevTitle, prevBody string, created bool) {
+func (h *PageHandler) recordRevision(c *fiber.Ctx, page *models.WikiPage, prev service.PageSnapshot, created bool) {
 	if h.revisionService == nil || page == nil {
 		return
 	}
@@ -142,7 +142,7 @@ func (h *PageHandler) recordRevision(c *fiber.Ctx, page *models.WikiPage, prevTi
 	if created {
 		err = h.revisionService.RecordCreate(c.Context(), page, actingUserID(c))
 	} else {
-		err = h.revisionService.RecordSave(c.Context(), page, prevTitle, prevBody, actingUserID(c))
+		err = h.revisionService.RecordSave(c.Context(), page, prev, actingUserID(c))
 	}
 	if err != nil {
 		// History is best-effort: the page itself is saved.
@@ -166,6 +166,10 @@ func (h *PageHandler) CreatePage(c *fiber.Ctx) error {
 			Public       bool            `json:"public"`
 			WebsiteMode  bool            `json:"website_mode"`
 			TodoDate     json.RawMessage `json:"todo_date"`
+			// Page Designer (docs/page-designer): the page stylesheet and
+			// the PageDoc; see applyPageDesignInput.
+			CSS    *string         `json:"css"`
+			Design json.RawMessage `json:"design"`
 		} `json:"wiki_page"`
 	}
 
@@ -212,6 +216,9 @@ func (h *PageHandler) CreatePage(c *fiber.Ctx) error {
 		WorkflowState: state,
 		TodoDate:      todoDate,
 	}
+	if wrote, derr := h.applyPageDesignInput(c, page, input.WikiPage.CSS, input.WikiPage.Design); wrote {
+		return derr
+	}
 
 	if err := h.pageService.Create(c.Context(), page); err != nil {
 		return responses.BadRequest(c, err.Error())
@@ -219,16 +226,17 @@ func (h *PageHandler) CreatePage(c *fiber.Ctx) error {
 	if err := h.pageService.EnsureSingleFrontPage(c.Context(), page); err != nil {
 		return responses.InternalError(c, "Could not set front page")
 	}
-	h.recordRevision(c, page, "", "", true)
+	h.recordRevision(c, page, service.PageSnapshot{}, true)
 
-	return c.Status(fiber.StatusCreated).JSON(pageToJSON(page))
+	return c.Status(fiber.StatusCreated).JSON(pageDetailJSON(c, page))
 }
 
 // UpdatePage handles PUT /courses/:course_id/pages/:url_or_id. The route
 // is open to every enrolled user (G074): course staff may change any
 // field, while a student may change only the title and body of a
 // published page whose editing_roles admit students (Canvas
-// :update_content). Anything else is refused.
+// :update_content). Anything else — including the Page Designer's css
+// and design — is refused with 403.
 func (h *PageHandler) UpdatePage(c *fiber.Ctx) error {
 	courseID, err := c.ParamsInt("course_id")
 	if err != nil {
@@ -261,6 +269,9 @@ func (h *PageHandler) UpdatePage(c *fiber.Ctx) error {
 			Public       *bool           `json:"public"`
 			WebsiteMode  *bool           `json:"website_mode"`
 			TodoDate     json.RawMessage `json:"todo_date"`
+			// Page Designer: course staff only; null design clears it.
+			CSS    *string         `json:"css"`
+			Design json.RawMessage `json:"design"`
 		} `json:"wiki_page"`
 	}
 
@@ -270,11 +281,12 @@ func (h *PageHandler) UpdatePage(c *fiber.Ctx) error {
 	in := input.WikiPage
 
 	if !isManager && (in.EditingRoles != nil || in.Published != nil || in.FrontPage != nil ||
-		in.Public != nil || in.WebsiteMode != nil || len(in.TodoDate) > 0) {
+		in.Public != nil || in.WebsiteMode != nil || len(in.TodoDate) > 0 ||
+		in.CSS != nil || len(in.Design) > 0) {
 		return responses.Forbidden(c, "You may only change the title and content of this page")
 	}
 
-	prevTitle, prevBody := page.Title, page.Body
+	prev := service.SnapshotOf(page)
 
 	if in.Title != nil {
 		if strings.TrimSpace(*in.Title) == "" {
@@ -284,6 +296,9 @@ func (h *PageHandler) UpdatePage(c *fiber.Ctx) error {
 	}
 	if in.Body != nil {
 		page.Body = service.SanitizeHTML(*in.Body)
+	}
+	if wrote, derr := h.applyPageDesignInput(c, page, in.CSS, in.Design); wrote {
+		return derr
 	}
 	if in.EditingRoles != nil {
 		roles, ok := normalizeEditingRoles(*in.EditingRoles)
@@ -327,9 +342,9 @@ func (h *PageHandler) UpdatePage(c *fiber.Ctx) error {
 			return responses.InternalError(c, "Could not set front page")
 		}
 	}
-	h.recordRevision(c, page, prevTitle, prevBody, false)
+	h.recordRevision(c, page, prev, false)
 
-	return c.JSON(pageToJSON(page))
+	return c.JSON(pageDetailJSON(c, page))
 }
 
 func (h *PageHandler) DeletePage(c *fiber.Ctx) error {

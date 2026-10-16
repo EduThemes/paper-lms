@@ -235,7 +235,7 @@ export default function ScopedEntityEditor({
             <button
               type="submit"
               disabled={!formValid || saving}
-              className="px-3 py-1.5 rounded-md text-sm font-medium bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-3 py-1.5 rounded-md text-sm font-medium bg-brand-600 text-on-brand hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? 'Saving…' : isEdit ? 'Save changes' : `Create ${entityName}`}
             </button>

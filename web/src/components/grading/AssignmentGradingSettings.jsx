@@ -81,7 +81,7 @@ const Field = ({ id, label, children, hint }) => (
   <div>
     <label htmlFor={id} className="block text-sm font-medium text-text-secondary mb-1">{label}</label>
     {children}
-    {hint && <p className="text-xs text-text-disabled mt-1">{hint}</p>}
+    {hint && <p className="text-xs text-text-tertiary mt-1">{hint}</p>}
   </div>
 );
 

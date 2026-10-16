@@ -102,7 +102,7 @@ export function MonthView({ items, range, anchor, colorIndex, onSelect, onDayCli
               <div className="flex items-center justify-between mb-0.5">
                 <span
                   className={`text-xs font-medium w-6 h-6 flex items-center justify-center rounded-full ${
-                    key === todayKey ? 'bg-brand-600 text-white' : inMonth ? 'text-text-secondary' : 'text-text-disabled'
+                    key === todayKey ? 'bg-brand-600 text-on-brand' : inMonth ? 'text-text-secondary' : 'text-text-tertiary'
                   }`}
                 >
                   {keyDayOfMonth(key)}
@@ -113,7 +113,7 @@ export function MonthView({ items, range, anchor, colorIndex, onSelect, onDayCli
                   <ItemChip key={item.id} item={item} colorIndex={colorIndex} onSelect={onSelect} compact />
                 ))}
                 {list.length > 4 && (
-                  <div className="text-xs text-text-disabled px-1">{t('calendarLane.more', { count: list.length - 4 })}</div>
+                  <div className="text-xs text-text-tertiary px-1">{t('calendarLane.more', { count: list.length - 4 })}</div>
                 )}
               </div>
             </div>
@@ -140,13 +140,13 @@ export function WeekView({ items, range, colorIndex, onSelect, onDayClick }) {
               type="button"
               onClick={() => onDayClick && onDayClick(keyStart(key, tz))}
               className={`w-full px-2 py-2 text-start text-xs font-medium border-b border-border-subtle ${
-                key === todayKey ? 'bg-brand-600 text-white' : 'bg-surface-1 text-text-secondary hover:bg-brand-50'
+                key === todayKey ? 'bg-brand-600 text-on-brand' : 'bg-surface-1 text-text-secondary hover:bg-brand-50'
               }`}
             >
               {formatDayKey(key, { weekday: 'short', month: 'short', day: 'numeric' })}
             </button>
             <div className="p-1 space-y-1">
-              {list.length === 0 && <div className="text-xs text-text-disabled px-1 py-2 md:hidden">{t('calendarLane.nothing')}</div>}
+              {list.length === 0 && <div className="text-xs text-text-tertiary px-1 py-2 md:hidden">{t('calendarLane.nothing')}</div>}
               {list.map((item) => (
                 <button
                   key={item.id}

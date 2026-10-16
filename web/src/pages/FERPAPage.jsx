@@ -312,8 +312,8 @@ const FERPAPage = () => {
       )}
 
       {/* Tabs */}
-      <div className="border-b border-border-default mb-6" role="tablist" aria-label="FERPA compliance tabs">
-        <nav className="flex space-x-8">
+      <div className="border-b border-border-default mb-6">
+        <div className="flex space-x-8" role="tablist" aria-label="FERPA compliance tabs">
           <button
             role="tab"
             aria-selected={activeTab === TAB_DELETION}
@@ -356,7 +356,7 @@ const FERPAPage = () => {
             <Download className="w-4 h-4" aria-hidden="true" />
             <span>Data Export</span>
           </button>
-        </nav>
+        </div>
       </div>
 
       {/* ═══════════════════════════════════════════════════════ */}
@@ -384,15 +384,15 @@ const FERPAPage = () => {
             </div>
           ) : deletionRequests.length === 0 ? (
             <div className="bg-surface-0 rounded-lg shadow-sm p-8 text-center">
-              <Trash2 className="w-12 h-12 text-text-disabled mx-auto mb-3" aria-hidden="true" />
+              <Trash2 className="w-12 h-12 text-text-tertiary mx-auto mb-3" aria-hidden="true" />
               <p className="text-text-tertiary font-medium">No pending deletion requests</p>
-              <p className="text-text-disabled text-sm mt-1">
+              <p className="text-text-tertiary text-sm mt-1">
                 Deletion requests will appear here when users submit them.
               </p>
             </div>
           ) : (
             <div className="bg-surface-0 rounded-lg shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
+              <div className="relative overflow-x-auto">
                 <table className="min-w-full divide-y divide-border-default" aria-label="Data deletion requests">
                   <thead className="bg-surface-1">
                     <tr>
@@ -417,7 +417,7 @@ const FERPAPage = () => {
                           {req.user_email && req.user_name && (
                             <div className="text-xs text-text-tertiary">{req.user_email}</div>
                           )}
-                          <div className="text-xs text-text-disabled">ID: {req.user_id}</div>
+                          <div className="text-xs text-text-tertiary">ID: {req.user_id}</div>
                         </td>
                         <td className="px-4 py-3 text-sm text-text-secondary max-w-xs">
                           <p className="truncate" title={req.reason}>
@@ -436,7 +436,7 @@ const FERPAPage = () => {
                               <button
                                 onClick={() => handleApproveDeletion(req.id)}
                                 disabled={approvingId === req.id || denyingId === req.id}
-                                className="inline-flex items-center space-x-1 px-3 py-1.5 bg-accent-danger text-white text-sm rounded-md hover:bg-accent-danger/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-accent-danger focus:ring-offset-2"
+                                className="inline-flex items-center space-x-1 px-3 py-1.5 bg-accent-danger text-on-accent text-sm rounded-md hover:bg-accent-danger/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-accent-danger focus:ring-offset-2"
                                 aria-label={`Approve deletion request #${req.id}`}
                               >
                                 {approvingId === req.id ? (
@@ -454,7 +454,7 @@ const FERPAPage = () => {
                               <button
                                 onClick={() => handleDenyDeletion(req.id)}
                                 disabled={approvingId === req.id || denyingId === req.id}
-                                className="inline-flex items-center space-x-1 px-3 py-1.5 bg-surface-tertiary text-text-primary text-sm rounded-md hover:bg-surface-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-text-tertiary focus:ring-offset-2"
+                                className="inline-flex items-center space-x-1 px-3 py-1.5 bg-surface-2 text-text-primary text-sm rounded-md hover:bg-surface-1 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-text-tertiary focus:ring-offset-2"
                                 aria-label={`Deny deletion request #${req.id}`}
                               >
                                 {denyingId === req.id ? (
@@ -530,7 +530,7 @@ const FERPAPage = () => {
             </p>
             <button
               onClick={() => { resetPolicyForm(); setShowPolicyForm(!showPolicyForm); }}
-              className="flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+              className="flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
               aria-expanded={showPolicyForm}
             >
               <Plus className="w-4 h-4" aria-hidden="true" />
@@ -605,7 +605,7 @@ const FERPAPage = () => {
                         {policyForm.active ? (
                           <ToggleRight className="w-8 h-5 text-brand-600" aria-hidden="true" />
                         ) : (
-                          <ToggleLeft className="w-8 h-5 text-text-disabled" aria-hidden="true" />
+                          <ToggleLeft className="w-8 h-5 text-text-tertiary" aria-hidden="true" />
                         )}
                       </button>
                       <span className="text-sm font-medium text-text-secondary">
@@ -630,7 +630,7 @@ const FERPAPage = () => {
                 <div className="flex items-center space-x-3">
                   <button
                     type="submit"
-                    className="bg-brand-600 text-white px-4 py-2 rounded-md text-sm hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+                    className="bg-brand-600 text-on-brand px-4 py-2 rounded-md text-sm hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
                   >
                     {editingPolicy ? 'Update Policy' : 'Create Policy'}
                   </button>
@@ -653,15 +653,15 @@ const FERPAPage = () => {
             </div>
           ) : policies.length === 0 ? (
             <div className="bg-surface-0 rounded-lg shadow-sm p-8 text-center">
-              <Clock className="w-12 h-12 text-text-disabled mx-auto mb-3" aria-hidden="true" />
+              <Clock className="w-12 h-12 text-text-tertiary mx-auto mb-3" aria-hidden="true" />
               <p className="text-text-tertiary font-medium">No retention policies configured</p>
-              <p className="text-text-disabled text-sm mt-1">
+              <p className="text-text-tertiary text-sm mt-1">
                 Create retention policies to define how long different types of data should be kept.
               </p>
             </div>
           ) : (
             <div className="bg-surface-0 rounded-lg shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
+              <div className="relative overflow-x-auto">
                 <table className="min-w-full divide-y divide-border-default" aria-label="Retention policies">
                   <thead className="bg-surface-1">
                     <tr>
@@ -686,10 +686,10 @@ const FERPAPage = () => {
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm text-text-secondary">
                           <div className="flex items-center space-x-1">
-                            <Clock className="w-3.5 h-3.5 text-text-disabled" aria-hidden="true" />
+                            <Clock className="w-3.5 h-3.5 text-text-tertiary" aria-hidden="true" />
                             <span>{policy.retention_period_days} days</span>
                             {policy.retention_period_days >= 365 && (
-                              <span className="text-text-disabled text-xs">
+                              <span className="text-text-tertiary text-xs">
                                 ({(policy.retention_period_days / 365).toFixed(1)} years)
                               </span>
                             )}
@@ -715,7 +715,7 @@ const FERPAPage = () => {
                           <div className="flex items-center justify-end space-x-2">
                             <button
                               onClick={() => handleEditPolicy(policy)}
-                              className="text-text-disabled hover:text-brand-600 p-1 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
+                              className="text-text-tertiary hover:text-brand-600 p-1 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
                               aria-label={`Edit policy ${policy.name}`}
                               title="Edit policy"
                             >
@@ -723,7 +723,7 @@ const FERPAPage = () => {
                             </button>
                             <button
                               onClick={() => handleDeletePolicy(policy.id)}
-                              className="text-text-disabled hover:text-accent-danger p-1 rounded focus:outline-none focus:ring-2 focus:ring-accent-danger"
+                              className="text-text-tertiary hover:text-accent-danger p-1 rounded focus:outline-none focus:ring-2 focus:ring-accent-danger"
                               aria-label={`Delete policy ${policy.name}`}
                               title="Delete policy"
                             >
@@ -783,7 +783,7 @@ const FERPAPage = () => {
                   User ID <span className="text-accent-danger">*</span>
                 </label>
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-disabled" aria-hidden="true" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" aria-hidden="true" />
                   <input
                     id="export-user-id"
                     type="text"
@@ -799,7 +799,7 @@ const FERPAPage = () => {
               <button
                 type="submit"
                 disabled={exportLoading || !exportUserId.trim()}
-                className="flex items-center space-x-2 bg-brand-600 text-white px-4 py-2 rounded-md hover:bg-brand-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+                className="flex items-center space-x-2 bg-brand-600 text-on-brand px-4 py-2 rounded-md hover:bg-brand-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
               >
                 {exportLoading ? (
                   <>
@@ -814,7 +814,7 @@ const FERPAPage = () => {
                 )}
               </button>
             </form>
-            <p className="mt-2 text-xs text-text-disabled">
+            <p className="mt-2 text-xs text-text-tertiary">
               This will generate a comprehensive data package containing all educational records for the specified user.
             </p>
           </div>
@@ -824,9 +824,9 @@ const FERPAPage = () => {
             <h3 className="text-sm font-medium text-text-secondary mb-3">Recent Export Requests</h3>
             {exportRequests.length === 0 ? (
               <div className="bg-surface-0 rounded-lg shadow-sm p-8 text-center">
-                <FileText className="w-12 h-12 text-text-disabled mx-auto mb-3" aria-hidden="true" />
+                <FileText className="w-12 h-12 text-text-tertiary mx-auto mb-3" aria-hidden="true" />
                 <p className="text-text-tertiary font-medium">No export requests yet</p>
-                <p className="text-text-disabled text-sm mt-1">
+                <p className="text-text-tertiary text-sm mt-1">
                   Submit a user ID above to create a data export request.
                 </p>
               </div>
@@ -839,7 +839,7 @@ const FERPAPage = () => {
                   >
                     <div className="flex items-center space-x-4">
                       <div className="flex-shrink-0">
-                        <FileText className="w-8 h-8 text-text-disabled" aria-hidden="true" />
+                        <FileText className="w-8 h-8 text-text-tertiary" aria-hidden="true" />
                       </div>
                       <div>
                         <div className="flex items-center space-x-2">
@@ -863,7 +863,7 @@ const FERPAPage = () => {
                       {(exportReq.status === 'completed' || exportReq.status === 'ready') && exportReq.download_url && (
                         <a
                           href={exportReq.download_url}
-                          className="inline-flex items-center space-x-1 px-3 py-1.5 bg-accent-success text-white text-sm rounded-md hover:bg-accent-success/90 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-success focus:ring-offset-2"
+                          className="inline-flex items-center space-x-1 px-3 py-1.5 bg-accent-success text-on-accent text-sm rounded-md hover:bg-accent-success/90 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-success focus:ring-offset-2"
                           target="_blank"
                           rel="noopener noreferrer"
                           aria-label={`Download export #${exportReq.id}`}

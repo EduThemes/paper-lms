@@ -169,7 +169,7 @@ export default function SuperAdminSettingsPage() {
                     onClick={() => setActiveGroup(name)}
                     className={`w-full text-left px-3 py-2 rounded text-sm ${
                       activeGroup === name
-                        ? 'bg-surface-3 text-text-primary font-medium'
+                        ? 'bg-surface-2 text-text-primary font-medium'
                         : 'text-text-secondary hover:bg-surface-2'
                     }`}
                     aria-current={activeGroup === name ? 'true' : undefined}
@@ -391,7 +391,7 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
 
       {/* Editor */}
       {canEditAtScope && (
-        <div className="mt-3 pt-3 border-t border-surface-3">
+        <div className="mt-3 pt-3 border-t border-border-default">
           {localError && (
             <div role="alert" className="mb-2 text-sm text-red-800">{localError}</div>
           )}
@@ -400,7 +400,7 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
               <button
                 type="button"
                 onClick={() => { setShowSecretInput(true); setDraft(''); }}
-                className="text-sm px-3 py-1.5 rounded border border-surface-3 hover:bg-surface-2"
+                className="text-sm px-3 py-1.5 rounded border border-border-default hover:bg-surface-2"
               >
                 {hasValue ? t('superAdminSettings.replace') : t('superAdminSettings.setEllipsis')}
               </button>
@@ -430,7 +430,7 @@ function SettingRow({ def, value, scope, scopeID, onChanged }) {
                 type="button"
                 onClick={handleSave}
                 disabled={saving || draft === ''}
-                className="text-sm px-3 py-1.5 rounded bg-surface-3 hover:bg-surface-4 disabled:opacity-50 flex items-center gap-1"
+                className="text-sm px-3 py-1.5 rounded bg-surface-2 hover:bg-surface-1 border border-border-default disabled:opacity-50 flex items-center gap-1"
               >
                 <Save size={14} /> {saving ? t('common.saving') : t('common.save')}
               </button>

@@ -19,6 +19,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -113,10 +114,20 @@ type CourseCopyDeps struct {
 // CourseCopyService copies content between two courses of one account.
 type CourseCopyService struct {
 	d CourseCopyDeps
+	// cssPolicy resolves pages.custom_css_enabled for the target course
+	// (Page Designer). Nil: on.
+	cssPolicy CourseCSSPolicy
 }
 
 func NewCourseCopyService(d CourseCopyDeps) *CourseCopyService {
 	return &CourseCopyService{d: d}
+}
+
+// SetCourseCSSPolicy attaches the pages.custom_css_enabled resolution a
+// copy applies to the pages it creates.
+func (s *CourseCopyService) SetCourseCSSPolicy(p CourseCSSPolicy) *CourseCopyService {
+	s.cssPolicy = p
+	return s
 }
 
 // CourseCopyResult reports what a copy created.
@@ -402,6 +413,9 @@ func (c *copier) copyCourseSettings(ctx context.Context) error {
 		c.target.License = c.source.License
 		c.target.NavigationTabs = c.source.NavigationTabs
 		c.target.UIMode = c.source.UIMode
+		// Page Designer course look. A banner that is a source-course file
+		// is re-pointed at the copied file in rewriteLinks.
+		c.target.Look = c.source.Look
 		changed = true
 		c.result.Counts[CopyTypeCourseSettings] = 1
 	}
@@ -772,6 +786,7 @@ func (c *copier) copyPages(ctx context.Context) error {
 	if fp, err := c.s.d.Pages.FindFrontPage(ctx, c.target.ID); err == nil && fp != nil {
 		hasFront = true
 	}
+	cssAllowed := c.s.cssPolicy.Allowed(ctx, c.target.ID)
 	for _, src := range pages.Items {
 		if !c.sel.wants(CopyTypePages, src.ID) {
 			continue
@@ -784,6 +799,7 @@ func (c *copier) copyPages(ctx context.Context) error {
 		if p.FrontPage && hasFront {
 			p.FrontPage = false
 		}
+		cleanPageDesign(&p, cssAllowed)
 		if err := c.s.d.Pages.Create(ctx, &p); err != nil {
 			c.warn("page %q could not be copied: %v", src.Title, err)
 			continue
@@ -1008,13 +1024,56 @@ func (c *copier) rewriteHTML(html string) string {
 	})
 }
 
+// rewriteJSON is rewriteHTML for a JSON document (a page design or a
+// course look); a result that is no longer valid JSON is dropped.
+func (c *copier) rewriteJSON(doc models.NullJSON) (models.NullJSON, bool) {
+	if doc.IsNull() {
+		return doc, false
+	}
+	out := c.rewriteHTML(string(doc))
+	if out == string(doc) || !json.Valid([]byte(out)) {
+		return doc, false
+	}
+	return models.NullJSON(out), true
+}
+
+// rewritePage rewrites links in a copied page's body, stylesheet and
+// design, and reports whether anything changed.
+func (c *copier) rewritePage(p *models.WikiPage) bool {
+	changed := false
+	if body := c.rewriteHTML(p.Body); body != p.Body {
+		p.Body = body
+		changed = true
+	}
+	if css := c.rewriteHTML(p.CSS); css != p.CSS {
+		p.CSS = css
+		changed = true
+	}
+	if design, ok := c.rewriteJSON(p.Design); ok {
+		// Re-clean the rewritten design like any other stored one.
+		p.Design = revalidateDesign(design)
+		changed = true
+	}
+	return changed
+}
+
 func (c *copier) rewriteLinks(ctx context.Context) error {
+	courseChanged := false
 	if c.result.Counts[CopyTypeSyllabus] > 0 {
 		if body := c.rewriteHTML(c.target.SyllabusBody); body != c.target.SyllabusBody {
 			c.target.SyllabusBody = body
-			if err := c.s.d.Courses.Update(ctx, c.target); err != nil {
-				return err
-			}
+			courseChanged = true
+		}
+	}
+	if c.result.Counts[CopyTypeCourseSettings] > 0 {
+		if look, ok := c.rewriteJSON(c.target.Look); ok {
+			c.target.Look = look
+			courseChanged = true
+		}
+	}
+	if courseChanged {
+		if err := c.s.d.Courses.Update(ctx, c.target); err != nil {
+			return err
 		}
 	}
 	// accountID=0 below: auth-internal — every ref is a row this copy
@@ -1050,8 +1109,7 @@ func (c *copier) rewriteLinks(ctx context.Context) error {
 			}
 		case "WikiPage":
 			if p, err := c.s.d.Pages.FindByID(ctx, ref.ID, 0); err == nil && p != nil {
-				if body := c.rewriteHTML(p.Body); body != p.Body {
-					p.Body = body
+				if c.rewritePage(p) {
 					if err := c.s.d.Pages.Update(ctx, p); err != nil {
 						return err
 					}

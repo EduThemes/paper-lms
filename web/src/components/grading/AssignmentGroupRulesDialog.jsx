@@ -112,7 +112,7 @@ const AssignmentGroupRulesDialog = ({ open, onOpenChange, courseId, group, assig
             Cancel
           </button>
           <button type="button" onClick={save} disabled={busy}
-            className="px-4 py-2 text-sm bg-brand-600 text-white rounded-md hover:bg-brand-700 disabled:opacity-50">
+            className="px-4 py-2 text-sm bg-brand-600 text-on-brand rounded-md hover:bg-brand-700 disabled:opacity-50">
             {busy ? 'Saving…' : 'Save'}
           </button>
         </DialogFooter>

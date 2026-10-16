@@ -164,6 +164,9 @@ type Router struct {
 	// which is the only authorized place to attach /superadmin/*
 	// routes; that helper carries the RequireSuperAdmin gate.
 	SuperAdminSettingsHandler *handlers.SuperAdminSettingsHandler
+	// AccountSettingsHandler — the account-admin slice of the Settings
+	// Engine (routes_account_settings.go).
+	AccountSettingsHandler *handlers.AccountSettingsHandler
 
 	// Pages, files and course shell (routes_pages_files.go).
 	PagesFiles *PagesFilesRoutes
@@ -179,6 +182,9 @@ type Router struct {
 	LearnerHandler *handlers.LearnerHandler
 	// Rich content editor: per-user autosave draft key (routes_rce_editor.go)
 	RCEDraftKeyHandler *handlers.RCEDraftKeyHandler
+	// Page Designer: saved colour schemes (routes_design.go). The public
+	// icon route needs no handler state.
+	DesignColourSchemeHandler *handlers.DesignColourSchemeHandler
 
 	// Middleware
 	AuthMiddleware *middleware.AuthMiddleware
@@ -222,6 +228,7 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerLTIToolRoutes(api, enrolled, instructor, authLimit)
 	r.registerLearnerOutcomesPublicRoutes(api)
 	r.registerCalendarPublicRoutes(api)
+	r.registerDesignPublicRoutes(api)
 
 	// Protected routes (authentication required)
 	protected := api.Group("", r.AuthMiddleware.Protected(), middleware.CSRFProtection())
@@ -898,10 +905,12 @@ func (r *Router) Register(app *fiber.App) {
 	r.registerGroupsConferencesRoutes(protected, enrolled)
 	r.registerAdminEnrollmentRoutes(protected, instructor)
 	r.registerAdminAccountsRoutes(protected, admin, enrolled, instructor)
+	r.registerAccountSettingsRoutes(protected, admin)
 	r.registerLTIRoutes(protected, admin, enrolled, instructor)
 	r.registerAPICompatRoutes(app, protected, authLimit, admin, enrolled, selfOrAdmin)
 	r.registerLearnerRoutes(protected, enrolled)
 	r.registerLearnerOutcomesRoutes(protected, enrolled, instructor)
 	r.registerRCEEditorRoutes(protected)
 	r.registerCalendarRoutes(protected)
+	r.registerDesignRoutes(protected)
 }
